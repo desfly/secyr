@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HomeGuard-S3 hardware configuration",
+  "type": "object",
+  "required": [
+    "valves",
+    "ina226",
+    "mains_meter"
+  ],
+  "properties": {
+    "valves": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "required": [
+          "model",
+          "wiring",
+          "rated_voltage_v",
+          "running_current_a",
+          "stall_current_a"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "wiring": {
+            "enum": [
+              "two_wire_reverse",
+              "three_wire_open_close",
+              "relay_input"
+            ]
+          },
+          "rated_voltage_v": {
+            "type": "number",
+            "minimum": 9,
+            "maximum": 24
+          },
+          "running_current_a": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "stall_current_a": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        }
+      }
+    },
+    "ina226": {
+      "type": "object",
+      "required": [
+        "shunt_ohm",
+        "max_current_a"
+      ],
+      "properties": {
+        "shunt_ohm": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "max_current_a": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "mains_meter": {
+      "type": "object",
+      "required": [
+        "model",
+        "interface",
+        "isolated"
+      ],
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "interface": {
+          "enum": [
+            "rs485_modbus",
+            "pulse",
+            "isolated_uart"
+          ]
+        },
+        "isolated": {
+          "const": true
+        }
+      }
+    }
+  }
+}

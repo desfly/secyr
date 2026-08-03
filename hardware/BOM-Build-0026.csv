@@ -1,0 +1,22 @@
+﻿Category,Item,Quantity,Specification,Purpose
+Controller,ESP32-S3 HW-678 V0.0.0 N16R8,1,"16 MB flash, 8 MB OPI PSRAM",exact user board
+ADC,ADS1115 module,2,3.3 V logic; addresses 0x48 and 0x49,zones and pressure
+I/O expander,MCP23017,1,address 0x20,outputs/end switches
+Low-side driver,ULN2803A or MOSFET driver board,1,3.3 V input compatible,not for reversing bare motor
+RTC,DS3231 module,1,backup cell,exact time
+Ethernet,W5500 3.3 V module,1,"SPI, INT and RESET exposed",LAN
+Storage,microSD 3.3 V SPI adapter,1,no 5 V-only level shifter,journal backup
+Battery monitor,INA226 module,1,verify actual shunt value,3S2P battery
+Temperature,DS18B20 waterproof probe,2,three-wire powered mode,cold/hot water
+Pressure,PT-506 4-20 mA 0-10 bar,2,12-24 V loop,cold/hot water
+Pressure shunt,120 ohm 0.1% resistor,2,0.25 W minimum,4-20 mA conversion
+End-of-line resistor,3.0 kohm 1%,5,installed at sensor end,supervised zones
+RS-485,isolated 3.3 V RS-485 module,1,DE/RE exposed,energy meter
+12 V supply,certified isolated 12 V 5 A PSU,1,size after actuator current is known,main power
+5 V converter,12 V to 5 V buck,1,at least 2 A,peripherals
+3.3 V converter,12/5 V to 3.3 V regulator,1,at least 1.5 A peak,logic rail
+Fuse holder,replaceable fuse holders,4,main + two valves + auxiliary,protection
+TVS,12 V automotive/industrial TVS,4,select for actual rail,long cable protection
+Relay/H-bridge,interlocked reversible valve driver,2,rated above valve stall current,valves
+Terminal blocks,pluggable screw terminals,1,quantity by connector plan,field wiring
+Enclosure,DIN/metal enclosure,1,separate mains and SELV compartments,safety

@@ -1,0 +1,2 @@
+package ua.homeguard.s3.ui
+enum class Screen { PROVISIONING, DASHBOARD, DIAGNOSTICS, MAINTENANCE, JOURNAL, SETTINGS }

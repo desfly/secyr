@@ -1,0 +1,57 @@
+name: ESP-IDF Build-0021
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "firmware/**"
+      - ".github/workflows/esp-idf-build-0021.yml"
+  pull_request:
+    paths:
+      - "firmware/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.4.2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify project structure
+        run: |
+          test -f firmware/esp-idf/CMakeLists.txt
+          test -f firmware/esp-idf/sdkconfig.defaults
+          test -f firmware/esp-idf/partitions.csv
+          test -f firmware/esp-idf/main/app_main.cpp
+
+      - name: Configure ESP32-S3
+        working-directory: firmware/esp-idf
+        run: |
+          idf.py set-target esp32s3
+          idf.py reconfigure
+
+      - name: Build firmware
+        working-directory: firmware/esp-idf
+        run: idf.py build
+
+      - name: Collect release files
+        run: |
+          mkdir -p release-build0021
+          cp firmware/esp-idf/build/bootloader/bootloader.bin release-build0021/
+          cp firmware/esp-idf/build/partition_table/partition-table.bin release-build0021/
+          cp firmware/esp-idf/build/homeguard_s3.bin release-build0021/
+          cp firmware/esp-idf/build/flasher_args.json release-build0021/
+          cp firmware/esp-idf/build/flash_args release-build0021/
+          if [ -f firmware/esp-idf/build/ota_data_initial.bin ]; then
+            cp firmware/esp-idf/build/ota_data_initial.bin release-build0021/
+          fi
+          sha256sum release-build0021/* > release-build0021/SHA256SUMS.txt
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuard-S3-Build-0021-firmware
+          path: release-build0021
+          if-no-files-found: error

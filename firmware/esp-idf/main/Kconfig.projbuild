@@ -1,0 +1,146 @@
+menu "HomeGuard-S3 connectivity, hardware and provisioning"
+
+config HOMEGUARD_LOCAL_TLS
+    bool "Use TLS for local REST/WebSocket"
+    default y
+
+config HOMEGUARD_API_PORT
+    int "Local API port"
+    range 1 65535
+    default 443
+
+config HOMEGUARD_TELEMETRY_INTERVAL_MS
+    int "WSS telemetry publish interval"
+    range 250 10000
+    default 1000
+
+config HOMEGUARD_WIFI_CONNECT_TIMEOUT_SECONDS
+    int "Initial Wi-Fi STA connection timeout"
+    range 5 300
+    default 30
+
+config HOMEGUARD_WIFI_RETRY_SECONDS
+    int "Wi-Fi reconnect interval after local services started"
+    range 1 300
+    default 10
+
+
+config HOMEGUARD_TASK_WATCHDOG_SECONDS
+    int "Task watchdog timeout"
+    range 3 60
+    default 8
+
+config HOMEGUARD_SETUP_AP_ENABLED
+    bool "Enable first-run secure Setup AP"
+    default y
+
+config HOMEGUARD_SETUP_AP_TIMEOUT_SECONDS
+    int "Setup AP session timeout"
+    range 300 3600
+    default 900
+    depends on HOMEGUARD_SETUP_AP_ENABLED
+
+config HOMEGUARD_PAIRING_CODE_TTL_SECONDS
+    int "One-time pairing code lifetime"
+    range 60 900
+    default 600
+    depends on HOMEGUARD_SETUP_AP_ENABLED
+
+config HOMEGUARD_PAIRING_MAX_ATTEMPTS
+    int "Pairing attempts before lockout"
+    range 1 10
+    default 5
+    depends on HOMEGUARD_SETUP_AP_ENABLED
+
+config HOMEGUARD_SETUP_AP_CHANNEL
+    int "Setup AP Wi-Fi channel"
+    range 1 13
+    default 6
+    depends on HOMEGUARD_SETUP_AP_ENABLED
+
+config HOMEGUARD_SETUP_HTTPS_PORT
+    int "Setup HTTPS port"
+    range 1 65535
+    default 8443
+    depends on HOMEGUARD_SETUP_AP_ENABLED
+
+config HOMEGUARD_REQUIRE_NVS_ENCRYPTION
+    bool "Refuse to store secrets without NVS encryption"
+    default y
+
+config HOMEGUARD_CLOUD_ENABLED
+    bool "Enable outbound cloud connection"
+    default n
+
+menu "HW-678 GPIO map — keep -1 until electrically verified"
+
+config HOMEGUARD_I2C_SDA_GPIO
+    int "I2C SDA GPIO"
+    range -1 48
+    default -1
+
+config HOMEGUARD_I2C_SCL_GPIO
+    int "I2C SCL GPIO"
+    range -1 48
+    default -1
+
+config HOMEGUARD_W5500_MOSI_GPIO
+    int "W5500 MOSI GPIO"
+    range -1 48
+    default -1
+
+config HOMEGUARD_W5500_MISO_GPIO
+    int "W5500 MISO GPIO"
+    range -1 48
+    default -1
+
+config HOMEGUARD_W5500_SCLK_GPIO
+    int "W5500 SCLK GPIO"
+    range -1 48
+    default -1
+
+config HOMEGUARD_W5500_CS_GPIO
+    int "W5500 CS GPIO"
+    range -1 48
+    default -1
+
+config HOMEGUARD_W5500_INT_GPIO
+    int "W5500 INT GPIO"
+    range -1 48
+    default -1
+
+config HOMEGUARD_W5500_RST_GPIO
+    int "W5500 RST GPIO"
+    range -1 48
+    default -1
+
+config HOMEGUARD_SERVICE_BUTTON_GPIO
+    int "Dedicated service/factory-reset button GPIO"
+    range -1 48
+    default -1
+
+config HOMEGUARD_SERVICE_BUTTON_ACTIVE_LOW
+    bool "Service button is active low"
+    default y
+    depends on HOMEGUARD_SERVICE_BUTTON_GPIO >= 0
+
+config HOMEGUARD_SERVICE_BUTTON_DEBOUNCE_MS
+    int "Service button debounce"
+    range 10 200
+    default 40
+    depends on HOMEGUARD_SERVICE_BUTTON_GPIO >= 0
+
+config HOMEGUARD_SERVICE_HOLD_MS
+    int "Hold duration to enter maintenance mode"
+    range 1000 9000
+    default 3000
+    depends on HOMEGUARD_SERVICE_BUTTON_GPIO >= 0
+
+config HOMEGUARD_FACTORY_RESET_HOLD_MS
+    int "Hold duration to erase provisioning"
+    range 5000 30000
+    default 10000
+    depends on HOMEGUARD_SERVICE_BUTTON_GPIO >= 0
+
+endmenu
+endmenu

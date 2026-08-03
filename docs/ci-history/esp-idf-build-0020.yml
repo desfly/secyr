@@ -1,0 +1,36 @@
+name: ESP-IDF Build-0020
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  esp-idf:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.4.2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure target
+        working-directory: firmware/esp-idf
+        run: idf.py set-target esp32s3
+
+      - name: Build firmware
+        working-directory: firmware/esp-idf
+        run: idf.py build
+
+      - name: Export binaries
+        if: success()
+        run: |
+          mkdir -p release
+          cp firmware/esp-idf/build/*.bin release/ || true
+          cp firmware/esp-idf/build/bootloader/*.bin release/ || true
+          cp firmware/esp-idf/build/partition_table/*.bin release/ || true
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: HomeGuard-S3-Build-0020-firmware
+          path: release

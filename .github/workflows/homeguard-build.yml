@@ -1,0 +1,160 @@
+name: HomeGuard-S3 Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "firmware/**"
+      - "web/**"
+      - "tools/**"
+      - "tests/**"
+      - ".github/workflows/homeguard-build.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "firmware/**"
+      - "web/**"
+      - "tools/**"
+      - "tests/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homeguard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-gates:
+    name: Host validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ ninja-build
+
+      - name: Project preflight
+        run: python tools/preflight_build0022.py
+
+      - name: ESP-IDF source audit
+        run: python tools/audit_esp_idf_sources.py
+
+      - name: Component dependency audit
+        run: python tools/audit_component_dependencies.py
+
+      - name: GPIO safety audit
+        run: python tools/audit_gpio_safety.py
+
+      - name: Firmware partition budget
+        run: python tools/check_firmware_budget.py
+
+      - name: Mock syntax
+        run: python tools/syntax_check_esp_idf_mock.py
+
+      - name: Mock compile and link
+        run: python tools/mock_link_esp_idf_main.py
+
+      - name: Upload host diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuard-S3-host-diagnostics
+          path: |
+            mock-syntax-report.json
+            mock-link-report.json
+            firmware-budget.json
+            release-readiness-build0025.json
+          if-no-files-found: warn
+
+  esp-idf:
+    name: ESP-IDF 5.4.2 firmware
+    needs: host-gates
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.4.2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          idf.py --version
+          python --version
+          cmake --version
+          ninja --version
+
+      - name: Configure ESP32-S3
+        working-directory: firmware/esp-idf
+        run: |
+          idf.py set-target esp32s3
+          idf.py reconfigure
+
+      - name: Build firmware
+        working-directory: firmware/esp-idf
+        shell: bash
+        run: |
+          set -o pipefail
+          idf.py build 2>&1 | tee build-output.log
+
+      - name: Firmware size
+        if: success()
+        working-directory: firmware/esp-idf
+        run: |
+          idf.py size | tee size-summary.txt
+          idf.py size-components | tee size-components.txt
+          idf.py size-files | tee size-files.txt
+
+      - name: Collect diagnostics
+        if: always()
+        run: python tools/collect_ci_diagnostics.py
+
+      - name: Upload ESP-IDF diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuard-S3-ESP-IDF-diagnostics
+          path: |
+            ci-diagnostics
+            firmware/esp-idf/build-output.log
+            firmware/esp-idf/size-summary.txt
+            firmware/esp-idf/size-components.txt
+            firmware/esp-idf/size-files.txt
+          if-no-files-found: warn
+
+      - name: Collect firmware release
+        if: success()
+        shell: bash
+        run: |
+          set -e
+          mkdir -p release
+          cp firmware/esp-idf/build/bootloader/bootloader.bin release/
+          cp firmware/esp-idf/build/partition_table/partition-table.bin release/
+          cp firmware/esp-idf/build/homeguard_s3.bin release/
+          cp firmware/esp-idf/build/flasher_args.json release/
+          cp firmware/esp-idf/build/flash_args release/
+          cp firmware/esp-idf/build/project_description.json release/
+          if [ -f firmware/esp-idf/build/ota_data_initial.bin ]; then
+            cp firmware/esp-idf/build/ota_data_initial.bin release/
+          fi
+          sha256sum release/* > release/SHA256SUMS.txt
+          python tools/generate_firmware_manifest.py release release/manifest.json
+
+      - name: Upload firmware
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuard-S3-firmware
+          path: release
+          if-no-files-found: error

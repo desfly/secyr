@@ -1,0 +1,105 @@
+{
+  "project": "HomeGuard-S3",
+  "build": "0027",
+  "board": {
+    "name": "HW-678 V0.0.0",
+    "module": "ESP32-S3-WROOM-1-N16R8",
+    "flash_mib": 16,
+    "psram_mib": 8
+  },
+  "i2c": {
+    "sda_gpio": 4,
+    "scl_gpio": 5,
+    "devices": {
+      "mcp23017": "0x20",
+      "ina226": "0x40",
+      "ads1115_zones": "0x48",
+      "ads1115_telemetry": "0x49",
+      "ds3231": "0x68"
+    }
+  },
+  "zones": {
+    "eol_resistor_ohm": 3000,
+    "adc_reference_v": 3.3,
+    "filter_alpha": 0.25,
+    "stable_samples": 4,
+    "channels": [
+      {
+        "id": "motion",
+        "adc": "0x48:A0",
+        "always_on": false
+      },
+      {
+        "id": "door",
+        "adc": "0x48:A1",
+        "always_on": false
+      },
+      {
+        "id": "flood",
+        "adc": "0x48:A2",
+        "always_on": true
+      },
+      {
+        "id": "smoke",
+        "adc": "0x48:A3",
+        "always_on": true
+      },
+      {
+        "id": "gas",
+        "adc": "0x49:A0",
+        "always_on": true
+      }
+    ]
+  },
+  "pressure": {
+    "sensor": "PT-506",
+    "range_bar": [
+      0,
+      10
+    ],
+    "loop_ma": [
+      4,
+      20
+    ],
+    "shunt_ohm": 120.0,
+    "channels": [
+      {
+        "id": "cold_water",
+        "adc": "0x49:A1"
+      },
+      {
+        "id": "hot_water",
+        "adc": "0x49:A2"
+      }
+    ]
+  },
+  "valves": {
+    "timeout_s": 30,
+    "hardware_interlock_required": true,
+    "channels": [
+      {
+        "id": "cold",
+        "open_output": "GPA2",
+        "close_output": "GPA3",
+        "open_limit": "GPB0",
+        "closed_limit": "GPB1"
+      },
+      {
+        "id": "hot",
+        "open_output": "GPA4",
+        "close_output": "GPA5",
+        "open_limit": "GPB2",
+        "closed_limit": "GPB3"
+      }
+    ]
+  },
+  "corridor_light": {
+    "output": "GPA0",
+    "hold_after_clear_s": 60,
+    "trigger_zones": [
+      "motion",
+      "door"
+    ],
+    "independent_of_armed_state": true
+  }
+}

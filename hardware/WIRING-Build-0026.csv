@@ -1,0 +1,21 @@
+﻿Function,HW-678 pin,Destination,Notes
+I2C SDA,GPIO4,"ADS1115 x2, MCP23017, INA226, DS3231",3.3 V only
+I2C SCL,GPIO5,"ADS1115 x2, MCP23017, INA226, DS3231",3.3 V only
+1-Wire,GPIO6,DS18B20 x2,4.7 kΩ pull-up
+RTC INT,GPIO7,DS3231 INT/SQW,optional interrupt
+W5500 RESET,GPIO8,W5500 RESET,
+W5500 INT,GPIO9,W5500 INT,
+W5500 CS,GPIO10,W5500 CS,
+W5500 MOSI,GPIO11,W5500 MOSI,
+W5500 SCK,GPIO12,W5500 SCK,
+W5500 MISO,GPIO13,W5500 MISO,
+Tamper,GPIO14,cabinet tamper,protected input
+Power fail,GPIO15,isolated mains fail,never connect mains directly
+RS485 DE/RE,GPIO16,isolated transceiver,
+RS485 TX,GPIO17,isolated transceiver DI,
+RS485 RX,GPIO18,isolated transceiver RO,
+Service button,GPIO21,local service button,
+microSD CS,GPIO39,microSD,
+microSD SCK,GPIO40,microSD,
+microSD MOSI,GPIO41,microSD,
+microSD MISO,GPIO42,microSD,

@@ -1,0 +1,149 @@
+name: Build HomeGuard-S3 Build-0013
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'firmware/**'
+      - 'android/**'
+      - 'tests/**'
+      - 'tools/**'
+      - 'docs/**'
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - 'firmware/**'
+      - 'android/**'
+      - 'tests/**'
+      - 'tools/**'
+      - 'docs/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homeguard-build0013-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Host tests and policies
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install host test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cmake ninja-build openjdk-17-jdk kotlin
+      - name: Validate repository
+        run: python3 tools/validate.py
+      - name: Upload validation report
+        uses: actions/upload-artifact@v7
+        with:
+          name: homeguard-build0013-validation
+          path: VALIDATION.json
+          if-no-files-found: error
+          retention-days: 30
+
+  firmware:
+    name: ESP32-S3 firmware
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container:
+      image: espressif/idf:v5.4.4
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build ESP-IDF image
+        shell: bash
+        working-directory: firmware/esp-idf
+        run: |
+          set -euo pipefail
+          mkdir -p ../../artifacts/firmware
+          idf.py --version | tee ../../artifacts/firmware/toolchain.txt
+          idf.py set-target esp32s3 2>&1 | tee ../../artifacts/firmware/set-target.log
+          idf.py reconfigure 2>&1 | tee ../../artifacts/firmware/reconfigure.log
+          test -f dependencies.lock
+          cp dependencies.lock ../../artifacts/firmware/dependencies.lock
+          cp main/idf_component.yml ../../artifacts/firmware/idf_component.yml
+          idf.py -D SDKCONFIG_DEFAULTS=sdkconfig.defaults build 2>&1 | tee ../../artifacts/firmware/build.log
+          idf.py size 2>&1 | tee ../../artifacts/firmware/size-report.txt
+          cp build/homeguard_s3.bin ../../artifacts/firmware/
+          cp build/homeguard_s3.elf ../../artifacts/firmware/
+          cp build/homeguard_s3.map ../../artifacts/firmware/
+          cp build/bootloader/bootloader.bin ../../artifacts/firmware/
+          cp build/partition_table/partition-table.bin ../../artifacts/firmware/
+          cp build/flash_args ../../artifacts/firmware/
+          cp build/flasher_args.json ../../artifacts/firmware/
+          cp build/project_description.json ../../artifacts/firmware/
+          cp sdkconfig ../../artifacts/firmware/sdkconfig
+          (cd ../../artifacts/firmware && sha256sum * > SHA256SUMS.txt)
+      - name: Upload firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: homeguard-s3-build0013-firmware
+          path: artifacts/firmware
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload firmware diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: homeguard-s3-build0013-firmware-failure
+          path: artifacts/firmware
+          if-no-files-found: warn
+          retention-days: 14
+
+  android:
+    name: Android debug APK
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+      - name: Install Android platform
+        run: sdkmanager 'platforms;android-35' 'build-tools;34.0.0'
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.9'
+      - name: Test, lint and assemble APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/android
+          gradle --version | tee artifacts/android/toolchain.txt
+          (cd android && gradle --no-daemon --stacktrace testDebugUnitTest lintDebug assembleDebug) 2>&1 | tee artifacts/android/build.log
+      - name: Collect Android artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/android/HomeGuard-S3-Build-0013-debug.apk
+          cp android/app/build/reports/lint-results-debug.html artifacts/android/ || true
+          cp -r android/app/build/reports/tests artifacts/android/test-reports || true
+          (cd artifacts/android && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: homeguard-s3-build0013-android
+          path: artifacts/android
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Android diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: homeguard-s3-build0013-android-failure
+          path: artifacts/android
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,5 @@
+#include "homeguard/network_failover.hpp"
+namespace hg {
+Transport NetworkFailover::preferred(LinkInputs l) const { if(l.ethernet)return Transport::Ethernet;if(l.wifi_sta)return Transport::WifiSta;if(l.ap_ready)return Transport::EmergencyAp;return Transport::None; }
+Transport NetworkFailover::update(LinkInputs links,uint64_t now){const auto p=preferred(links); if(active_==Transport::None){if(p!=candidate_){candidate_=p;candidate_since_=now;}if(now-candidate_since_>=debounce_ms_){active_=candidate_;active_since_=now;}return active_;} if(p==active_){candidate_=p;candidate_since_=now;return active_;} if(p!=candidate_){candidate_=p;candidate_since_=now;return active_;} const bool active_failed=(active_==Transport::Ethernet&&!links.ethernet)||(active_==Transport::WifiSta&&!links.wifi_sta)||(active_==Transport::EmergencyAp&&!links.ap_ready); if((active_failed&&now-candidate_since_>=debounce_ms_)||(!active_failed&&now-active_since_>=hold_ms_&&now-candidate_since_>=debounce_ms_)){active_=candidate_;active_since_=now;}return active_;}
+}

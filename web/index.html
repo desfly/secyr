@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#102a43">
+  <title>HomeGuard-S3</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header>
+  <div>
+    <h1>HomeGuard-S3</h1>
+    <p id="connection">Підключення…</p>
+  </div>
+  <button id="refresh">Оновити</button>
+</header>
+
+<main>
+  <section class="card hero">
+    <div>
+      <span class="label">Охорона</span>
+      <strong id="securityMode">—</strong>
+    </div>
+    <div class="actions">
+      <button data-command="security.arm_home">Вдома</button>
+      <button data-command="security.arm_away">Поза домом</button>
+      <button data-command="security.disarm" class="secondary">Зняти</button>
+    </div>
+  </section>
+
+  <section class="grid">
+    <article class="card">
+      <h2>Зони</h2>
+      <div id="zones"></div>
+    </article>
+
+    <article class="card">
+      <h2>Вода</h2>
+      <div class="metric"><span>Холодна</span><strong id="coldPressure">—</strong></div>
+      <div class="metric"><span>Гаряча</span><strong id="hotPressure">—</strong></div>
+      <div id="valves"></div>
+    </article>
+
+    <article class="card">
+      <h2>Температура</h2>
+      <div class="metric"><span>Холодна вода</span><strong id="coldTemperature">—</strong></div>
+      <div class="metric"><span>Гаряча вода</span><strong id="hotTemperature">—</strong></div>
+    </article>
+
+    <article class="card">
+      <h2>Живлення</h2>
+      <div class="metric"><span>Мережа</span><strong id="mains">—</strong></div>
+      <div class="metric"><span>Акумулятор</span><strong id="battery">—</strong></div>
+    </article>
+
+    <article class="card">
+      <h2>Коридор</h2>
+      <div class="metric"><span>Світло</span><strong id="light">—</strong></div>
+      <div class="actions">
+        <button data-command="light.set" data-value="on">Увімкнути</button>
+        <button data-command="light.set" data-value="off" class="secondary">Вимкнути</button>
+      </div>
+    </article>
+
+    <article class="card">
+      <h2>Система</h2>
+      <pre id="buildInfo">—</pre>
+    </article>
+  </section>
+</main>
+
+<div id="toast" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>

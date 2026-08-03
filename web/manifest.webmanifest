@@ -1,0 +1,8 @@
+{
+  "name": "HomeGuard-S3",
+  "short_name": "HomeGuard",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f0f4f8",
+  "theme_color": "#102a43"
+}

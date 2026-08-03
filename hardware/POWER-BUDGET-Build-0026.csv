@@ -1,0 +1,10 @@
+﻿Load,Voltage_V,Current_A,Quantity,Power_W
+ESP32-S3 board,3.3,0.5,1,1.65
+W5500,3.3,0.18,1,0.594
+microSD peak,3.3,0.2,1,0.66
+I2C modules total,3.3,0.08,1,0.264
+Two PT-506 loops,12.0,0.04,1,0.48
+Five wired sensors allowance,12.0,0.1,1,1.2
+Valve cold estimate,12.0,1.0,1,12.0
+Valve hot estimate,12.0,1.0,1,12.0
+Siren/relay allowance,12.0,0.5,1,6.0

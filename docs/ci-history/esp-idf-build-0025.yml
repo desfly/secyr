@@ -1,0 +1,109 @@
+name: ESP-IDF Build-0025
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "firmware/**"
+      - "tests/esp-idf-mock/**"
+      - "tools/**"
+      - ".github/workflows/esp-idf-build-0025.yml"
+  pull_request:
+    paths:
+      - "firmware/**"
+      - "tests/esp-idf-mock/**"
+      - "tools/**"
+
+jobs:
+  release-readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Full release readiness gate
+        run: python tools/release_readiness_build0025.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: HomeGuard-S3-Build-0025-release-readiness
+          path: |
+            release-readiness-build0025.json
+            mock-syntax-report.json
+            mock-link-report.json
+            firmware-budget.json
+          if-no-files-found: warn
+
+  firmware:
+    needs: release-readiness
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.4.2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          idf.py --version
+          xtensa-esp32s3-elf-g++ --version
+
+      - name: Configure
+        working-directory: firmware/esp-idf
+        run: |
+          idf.py set-target esp32s3
+          idf.py reconfigure
+
+      - name: Build
+        working-directory: firmware/esp-idf
+        run: |
+          set -o pipefail
+          idf.py build 2>&1 | tee build-output.log
+
+      - name: Size report
+        if: success()
+        working-directory: firmware/esp-idf
+        run: |
+          idf.py size
+          idf.py size-components
+          idf.py size-files
+
+      - name: Collect diagnostics
+        if: always()
+        run: python tools/collect_ci_diagnostics.py
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: HomeGuard-S3-Build-0025-diagnostics
+          path: |
+            ci-diagnostics
+            firmware/esp-idf/build-output.log
+          if-no-files-found: warn
+
+      - name: Collect release
+        if: success()
+        run: |
+          mkdir -p release-build0025
+          cp firmware/esp-idf/build/bootloader/bootloader.bin release-build0025/
+          cp firmware/esp-idf/build/partition_table/partition-table.bin release-build0025/
+          cp firmware/esp-idf/build/homeguard_s3.bin release-build0025/
+          cp firmware/esp-idf/build/flasher_args.json release-build0025/
+          cp firmware/esp-idf/build/flash_args release-build0025/
+          cp firmware/esp-idf/build/project_description.json release-build0025/
+          cp firmware/esp-idf/build/compile_commands.json release-build0025/
+          if [ -f firmware/esp-idf/build/ota_data_initial.bin ]; then
+            cp firmware/esp-idf/build/ota_data_initial.bin release-build0025/
+          fi
+          sha256sum release-build0025/* > release-build0025/SHA256SUMS.txt
+          python tools/generate_firmware_manifest.py \
+            release-build0025 \
+            release-build0025/manifest.json
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: HomeGuard-S3-Build-0025-firmware
+          path: release-build0025
+          if-no-files-found: error

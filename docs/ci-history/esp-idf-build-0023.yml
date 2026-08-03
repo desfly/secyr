@@ -1,0 +1,101 @@
+name: ESP-IDF Build-0023
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "firmware/**"
+      - "tools/**"
+      - ".github/workflows/esp-idf-build-0023.yml"
+  pull_request:
+    paths:
+      - "firmware/**"
+      - "tools/**"
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Project preflight
+        run: python tools/preflight_build0022.py
+
+      - name: Source compatibility audit
+        run: python tools/audit_esp_idf_sources.py
+
+      - name: Component dependency audit
+        run: python tools/audit_component_dependencies.py
+
+  firmware:
+    needs: preflight
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.4.2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          idf.py --version
+          python --version
+          cmake --version
+          ninja --version
+
+      - name: Configure
+        working-directory: firmware/esp-idf
+        run: |
+          idf.py set-target esp32s3
+          idf.py reconfigure
+
+      - name: Build
+        working-directory: firmware/esp-idf
+        run: |
+          set -o pipefail
+          idf.py build 2>&1 | tee build-output.log
+
+      - name: Collect diagnostics
+        if: always()
+        run: python tools/collect_ci_diagnostics.py
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuard-S3-Build-0023-diagnostics
+          path: |
+            ci-diagnostics
+            firmware/esp-idf/build-output.log
+          if-no-files-found: warn
+
+      - name: Collect firmware release
+        if: success()
+        run: |
+          mkdir -p release-build0023
+          cp firmware/esp-idf/build/bootloader/bootloader.bin release-build0023/
+          cp firmware/esp-idf/build/partition_table/partition-table.bin release-build0023/
+          cp firmware/esp-idf/build/homeguard_s3.bin release-build0023/
+          cp firmware/esp-idf/build/flasher_args.json release-build0023/
+          cp firmware/esp-idf/build/flash_args release-build0023/
+          cp firmware/esp-idf/build/project_description.json release-build0023/
+          if [ -f firmware/esp-idf/build/ota_data_initial.bin ]; then
+            cp firmware/esp-idf/build/ota_data_initial.bin release-build0023/
+          fi
+          sha256sum release-build0023/* > release-build0023/SHA256SUMS.txt
+          python tools/generate_firmware_manifest.py \
+            release-build0023 \
+            release-build0023/manifest.json
+
+      - name: Upload firmware release
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuard-S3-Build-0023-firmware
+          path: release-build0023
+          if-no-files-found: error
