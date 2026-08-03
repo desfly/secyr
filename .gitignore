@@ -1,0 +1,42 @@
+# ESP-IDF
+firmware/esp-idf/build/
+firmware/esp-idf/sdkconfig
+firmware/esp-idf/sdkconfig.old
+firmware/esp-idf/release-*/
+managed_components/
+
+# Host generated files
+mock-link-build/
+mock-link-report.json
+mock-syntax-report.json
+firmware-budget.json
+release-readiness-build*.json
+ci-diagnostics/
+
+# Android / Gradle
+android/.gradle/
+android/local.properties
+android/**/build/
+*.apk
+*.aab
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Firmware outputs
+*.bin
+*.elf
+*.map
+*.o
+*.obj

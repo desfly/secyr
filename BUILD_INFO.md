@@ -1,0 +1,26 @@
+# Build information
+
+- Project: HomeGuard-S3
+- Build: 0013
+- Date: 2026-08-03
+- Controller target: ESP32-S3-WROOM-1-N16R8 / HW-678 V0.0.0
+- Hardware-map state: every unresolved GPIO defaults to `-1`
+- Firmware version source: `firmware/include/homeguard/build_info.hpp`
+- Firmware version: 0.0.13 / Build-0013
+- Android version: 0.0.13 / versionCode 13
+- ESP-IDF: pinned to v5.4.4, target `esp32s3`
+- Managed ESP-IDF components: `espressif/mdns` 1.11.3 and `espressif/mqtt` 1.0.0
+- ESP-IDF dependency evidence: `dependencies.lock`, `idf_component.yml`, `project_description.json`
+- Operational local API: authenticated HTTPS REST on port 443
+- Telemetry: authenticated WSS `/ws/telemetry`, default interval 1000 ms
+- Local authorization: bearer token hashed with SHA-256 and compared in constant time
+- Command transport: 64-bit request IDs encoded as JSON strings
+- Command timebase: ESP monotonic receive time; Android wall-clock is informational only
+- TLS identity: per-device certificate pinned by exact DER SHA-256
+- Certificate names: Setup AP IP plus operational mDNS hostname
+- Discovery: mDNS `_homeguard._tcp` and UDP/45678 advertise the certificate-covered hostname
+- Route policy: only secure local discovery with API version 1 may override last-known/cloud routes
+- Cloud foundation: outbound MQTT/TLS, disabled by default
+- CI Android toolchain: AGP 8.7.3, Kotlin 2.1.0, Gradle 8.9, JDK 17, compileSdk 35
+- Local surrogate gates: all Android main sources compile; all ESP-IDF adapter/application units mock-link with the portable core
+- Physical firmware/APK status: not linked in this sandbox; both remain real-toolchain CI gates

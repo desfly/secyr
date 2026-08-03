@@ -1,0 +1,149 @@
+[
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/app_main.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_ads1115.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_build_http.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_build_info.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_ds3231.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_hardware_bootstrap.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_i2c_bus.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_ina226.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_infrastructure_http.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_mcp23017.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_onewire_runtime.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_rs485.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_sd_storage.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_telemetry_runtime.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/esp-idf/main/hg_w5500.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/src/hardware_api.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/src/hardware_runtime.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/src/infrastructure_status.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "firmware/src/modbus_request.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "compile",
+    "file": "tests/esp-idf-mock/mock_main.cpp",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "stage": "link",
+    "file": "mock-link-build/homeguard_mock",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+]

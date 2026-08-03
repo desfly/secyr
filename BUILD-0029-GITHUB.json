@@ -1,0 +1,15 @@
+{
+  "project": "HomeGuard-S3",
+  "package": "GitHub-ready",
+  "build": "0029",
+  "base_build": "0028",
+  "generated": "2026-08-03",
+  "active_workflow": ".github/workflows/homeguard-build.yml",
+  "expected_artifacts": [
+    "HomeGuard-S3-host-diagnostics",
+    "HomeGuard-S3-ESP-IDF-diagnostics",
+    "HomeGuard-S3-firmware"
+  ],
+  "firmware_binary_included": false,
+  "android_apk_included": false
+}
