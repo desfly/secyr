@@ -1,11 +1,11 @@
 #include "hg_sd_storage.hpp"
 #include "hg_board_hw678.hpp"
 #include <cstdint>
+#include <limits>
 
 #include "driver/spi_common.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
-#include "sys/statvfs.h"
 
 namespace homeguard::idf {
 
@@ -94,19 +94,20 @@ esp_err_t SdStorage::refresh_space()
         return ESP_ERR_INVALID_STATE;
     }
 
-    struct statvfs info {};
-    if (statvfs(
-            status_.mount_point.c_str(),
-            &info) != 0) {
-        return ESP_FAIL;
+    std::size_t total_bytes = 0;
+    std::size_t free_bytes = 0;
+    const auto error = esp_vfs_fat_info(
+        status_.mount_point.c_str(),
+        &total_bytes,
+        &free_bytes);
+    if (error != ESP_OK) {
+        return error;
     }
 
     status_.total_bytes =
-        static_cast<std::uint64_t>(
-            info.f_blocks) * info.f_frsize;
+        static_cast<std::uint64_t>(total_bytes);
     status_.free_bytes =
-        static_cast<std::uint64_t>(
-            info.f_bavail) * info.f_frsize;
+        static_cast<std::uint64_t>(free_bytes);
     return ESP_OK;
 }
 
