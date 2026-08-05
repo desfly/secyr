@@ -69,9 +69,13 @@ bool NvsConfigStore::load_provisioning(hg::ProvisioningPayload& payload) const {
 }
 
 bool NvsConfigStore::save_provisioning(const hg::ProvisioningPayload& payload) {
-#if CONFIG_HOMEGUARD_REQUIRE_NVS_ENCRYPTION && !CONFIG_NVS_ENCRYPTION
-#error "HomeGuard provisioning secrets require CONFIG_NVS_ENCRYPTION"
-#endif
+#if !defined(CONFIG_NVS_ENCRYPTION) || !CONFIG_NVS_ENCRYPTION
+    // Bench-test builds must never persist Wi-Fi passwords, API tokens, or
+    // cloud credentials as plaintext. Secure provisioning remains disabled
+    // until the production HMAC/eFuse allocation is explicitly approved.
+    (void)payload;
+    return false;
+#else
     nvs_handle_t handle{};
     if (nvs_open(provision_namespace, NVS_READWRITE, &handle) != ESP_OK) return false;
     bool ok = nvs_erase_all(handle) == ESP_OK;
@@ -86,6 +90,7 @@ bool NvsConfigStore::save_provisioning(const hg::ProvisioningPayload& payload) {
     if (!ok) nvs_erase_all(handle);
     nvs_close(handle);
     return ok;
+#endif
 }
 
 bool NvsConfigStore::erase_provisioning(bool physical_presence) {
