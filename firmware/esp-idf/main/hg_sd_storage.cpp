@@ -1,7 +1,8 @@
 #include "hg_sd_storage.hpp"
 #include "hg_board_hw678.hpp"
+
+#include <cstddef>
 #include <cstdint>
-#include <limits>
 
 #include "driver/spi_common.h"
 #include "esp_vfs_fat.h"
