@@ -1,4 +1,4 @@
-#include "alarm_acknowledgement.hpp"
+#include "homeguard/alarm_acknowledgement.hpp"
 namespace homeguard {
 void AlarmAcknowledgementService::on_alarm_state(bool active, std::uint64_t sequence) {
  if (!active) { state_ = {}; return; }
