@@ -39,7 +39,7 @@ bool DeviceDiscoveryService::begin(std::string device_id, std::string hostname, 
         mdns_free();
         return false;
     }
-    const mdns_txt_item_t txt[] = {
+    mdns_txt_item_t txt[] = {
         {"id", device_id_.c_str()},
         {"api", "1"},
         {"tls", secure_ ? "1" : "0"},
