@@ -1,4 +1,4 @@
-#include "alarm_ack_command.hpp"
+#include "homeguard/alarm_ack_command.hpp"
 
 namespace homeguard {
 
