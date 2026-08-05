@@ -79,7 +79,7 @@ jobs:
           if-no-files-found: warn
 
   esp-idf-build:
-    name: ESP-IDF 5.4.2 firmware
+    name: ESP-IDF 5.4.4 firmware
     needs: host-gates
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -90,10 +90,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install ESP-IDF 5.4.2
+      - name: Install ESP-IDF 5.4.4
         uses: espressif/install-esp-idf-action@v1
         with:
-          version: "v5.4.2"
+          version: "v5.4.4"
 
       - name: Show toolchain versions
         run: |
