@@ -17,6 +17,7 @@ on:
       - "web/**"
       - "tools/**"
       - "tests/**"
+      - ".github/workflows/homeguard-build.yml"
 
 permissions:
   contents: read
@@ -32,10 +33,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -76,3 +77,79 @@ jobs:
             firmware-budget.json
             release-readiness-build0025.json
           if-no-files-found: warn
+
+  esp-idf-build:
+    name: ESP-IDF 5.4.2 firmware
+    needs: host-gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install ESP-IDF 5.4.2
+        uses: espressif/install-esp-idf-action@v1
+        with:
+          version: "v5.4.2"
+
+      - name: Show toolchain versions
+        run: |
+          idf.py --version
+          cmake --version
+          ninja --version
+          python --version
+
+      - name: Configure ESP32-S3 target
+        working-directory: firmware/esp-idf
+        run: idf.py set-target esp32s3
+
+      - name: Build firmware
+        working-directory: firmware/esp-idf
+        shell: bash
+        run: |
+          set -o pipefail
+          idf.py build 2>&1 | tee firmware-build.log
+
+      - name: Generate firmware checksums
+        if: success()
+        working-directory: firmware/esp-idf
+        shell: bash
+        run: |
+          find build -type f \( -name "*.bin" -o -name "*.elf" -o -name "*.map" \) -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > build/SHA256SUMS.txt
+
+      - name: Upload ESP-IDF diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuard-S3-ESP-IDF-diagnostics
+          path: |
+            firmware/esp-idf/firmware-build.log
+            firmware/esp-idf/sdkconfig
+            firmware/esp-idf/build/CMakeCache.txt
+            firmware/esp-idf/build/project_description.json
+            firmware/esp-idf/build/flasher_args.json
+            firmware/esp-idf/build/flash_args
+            firmware/esp-idf/build/compile_commands.json
+          if-no-files-found: warn
+
+      - name: Upload firmware
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuard-S3-firmware
+          path: |
+            firmware/esp-idf/build/*.bin
+            firmware/esp-idf/build/*.elf
+            firmware/esp-idf/build/*.map
+            firmware/esp-idf/build/bootloader/*.bin
+            firmware/esp-idf/build/partition_table/*.bin
+            firmware/esp-idf/build/ota_data_initial.bin
+            firmware/esp-idf/build/flasher_args.json
+            firmware/esp-idf/build/flash_args
+            firmware/esp-idf/build/SHA256SUMS.txt
+          if-no-files-found: error
