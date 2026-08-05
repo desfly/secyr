@@ -29,12 +29,9 @@ CONFIG_COMPILER_STACK_CHECK_MODE_ALL=y
 CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
-# Provisioning credentials must never be stored as plaintext in NVS.
-# ESP32-S3 supports HMAC-derived NVS encryption without an nvs_keys partition.
-# Key block selection must be verified against the production eFuse plan before flashing.
-CONFIG_NVS_ENCRYPTION=y
-CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC=y
-CONFIG_NVS_SEC_HMAC_EFUSE_KEY_ID=0
+# Bench-test safety profile: do not enable HMAC-backed NVS encryption until
+# the production eFuse allocation has been verified on the target module.
+# Provisioning secret writes are blocked in software while NVS encryption is off.
 
 CONFIG_LWIP_LOCAL_HOSTNAME="homeguard-s3"
 CONFIG_MDNS_MAX_INTERFACES=3
