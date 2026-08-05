@@ -35,19 +35,16 @@ std::uint16_t modbus_crc16(
 esp_err_t Rs485Runtime::initialize(
     std::uint32_t baud_rate)
 {
-    const uart_config_t config{
-        .baud_rate = static_cast<int>(baud_rate),
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .rx_flow_ctrl_thresh = 0,
-        .source_clk = UART_SCLK_DEFAULT,
-        .flags = {
-            .backup_before_sleep = false,
-            .allow_pd = false,
-        },
-    };
+    uart_config_t config{};
+    config.baud_rate = static_cast<int>(baud_rate);
+    config.data_bits = UART_DATA_8_BITS;
+    config.parity = UART_PARITY_DISABLE;
+    config.stop_bits = UART_STOP_BITS_1;
+    config.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
+    config.rx_flow_ctrl_thresh = 0;
+    config.source_clk = UART_SCLK_DEFAULT;
+    config.flags.backup_before_sleep = false;
+    config.flags.allow_pd = false;
 
     ESP_RETURN_ON_ERROR(
         uart_driver_install(
