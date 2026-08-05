@@ -1,11 +1,11 @@
 #include "hg_sd_storage.hpp"
 #include "hg_board_hw678.hpp"
 
-#include <cstddef>
 #include <cstdint>
 
 #include "driver/spi_common.h"
 #include "esp_vfs_fat.h"
+#include "ff.h"
 #include "sdmmc_cmd.h"
 
 namespace homeguard::idf {
@@ -91,24 +91,29 @@ esp_err_t SdStorage::unmount()
 
 esp_err_t SdStorage::refresh_space()
 {
-    if (!status_.mounted) {
+    if (!status_.mounted || card_ == nullptr) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    std::size_t total_bytes = 0;
-    std::size_t free_bytes = 0;
-    const auto error = esp_vfs_fat_info(
-        status_.mount_point.c_str(),
-        &total_bytes,
-        &free_bytes);
-    if (error != ESP_OK) {
-        return error;
+    DWORD free_clusters = 0;
+    FATFS* filesystem = nullptr;
+    const auto result = f_getfree("0:", &free_clusters, &filesystem);
+    if (result != FR_OK || filesystem == nullptr) {
+        return ESP_FAIL;
     }
 
+    const auto sector_size =
+        static_cast<std::uint64_t>(card_->csd.sector_size);
+    const auto sectors_per_cluster =
+        static_cast<std::uint64_t>(filesystem->csize);
+    const auto total_clusters =
+        static_cast<std::uint64_t>(filesystem->n_fatent - 2U);
+
     status_.total_bytes =
-        static_cast<std::uint64_t>(total_bytes);
+        total_clusters * sectors_per_cluster * sector_size;
     status_.free_bytes =
-        static_cast<std::uint64_t>(free_bytes);
+        static_cast<std::uint64_t>(free_clusters) *
+        sectors_per_cluster * sector_size;
     return ESP_OK;
 }
 
