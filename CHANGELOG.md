@@ -1,5 +1,12 @@
 # Changelog
 
+## Build-0030 — 2026-08-07
+
+- Synchronized firmware and Android versioning to 0.0.30 / Build-0030.
+- Confirmed the main GitHub Actions pipeline builds ESP-IDF 5.4.4 firmware, Android debug APK, host validation and four downloadable artifacts.
+- Updated Android CI from `actions/setup-java@v4` to `actions/setup-java@v5` and verified the follow-up main build succeeded.
+- Preserved fail-closed GPIO defaults and the existing secure local API, WSS telemetry, discovery and provisioning architecture.
+
 ## Build-0013 — 2026-08-03
 
 - Deferred Setup AP shutdown for 1.5 seconds after a successful `/v1/provisioning/apply`, so the HTTPS response can reach Android before Wi-Fi is stopped and the controller restarts.
