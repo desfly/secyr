@@ -17,6 +17,10 @@ std::string salt_hex(const std::array<std::uint8_t, 16>& salt) {
     }
     return out;
 }
+
+bool terminated(const auto& text) {
+    return std::find(text.begin(), text.end(), '\0') != text.end();
+}
 }
 
 void AccessControl::copy_text(char* destination, std::size_t capacity, std::string_view source) {
@@ -56,7 +60,22 @@ bool AccessControl::set_user(
     bool enabled) {
     if (id.empty() || pin.size() < 4U || pin.size() > 12U) return false;
 
+    AccessUser record{};
+    copy_text(record.id.data(), record.id.size(), id);
+    copy_text(record.name.data(), record.name.size(), name);
+    record.role = role;
+    record.enabled = enabled;
+    record.salt = salt;
+    record.pin_digest = derive_pin_digest(id, pin, salt);
+    return import_user(record);
+}
+
+bool AccessControl::import_user(const AccessUser& user) {
+    if (!terminated(user.id) || !terminated(user.name) || user.id[0] == '\0') return false;
+    if (static_cast<std::uint8_t>(user.role) > static_cast<std::uint8_t>(AccessRole::Admin)) return false;
+
     AccessUser* target = nullptr;
+    const std::string_view id{user.id.data()};
     for (std::size_t i = 0; i < user_count_; ++i) {
         if (id == users_[i].id.data()) {
             target = &users_[i];
@@ -67,15 +86,17 @@ bool AccessControl::set_user(
         if (user_count_ >= user_capacity) return false;
         target = &users_[user_count_++];
     }
-
-    *target = AccessUser{};
-    copy_text(target->id.data(), target->id.size(), id);
-    copy_text(target->name.data(), target->name.size(), name);
-    target->role = role;
-    target->enabled = enabled;
-    target->salt = salt;
-    target->pin_digest = derive_pin_digest(id, pin, salt);
+    *target = user;
     return true;
+}
+
+void AccessControl::clear_users() {
+    for (auto& user : users_) user = AccessUser{};
+    user_count_ = 0;
+}
+
+const AccessUser* AccessControl::user_at(std::size_t index) const {
+    return index < user_count_ ? &users_[index] : nullptr;
 }
 
 const AccessUser* AccessControl::find_user(std::string_view id) const {
@@ -94,9 +115,6 @@ bool AccessControl::role_allows(AccessRole role, std::string_view command) const
     if (role == AccessRole::Admin) return true;
     if (role == AccessRole::Guest) return false;
 
-    // Accept both the older dotted router vocabulary and the Android/local API
-    // command names. User role deliberately cannot open valves, reset alarms,
-    // or enter/exit maintenance; those remain admin-only.
     return command == "security.arm_home" || command == "arm_home" ||
            command == "security.arm_away" || command == "arm_away" ||
            command == "security.disarm" || command == "disarm" ||
