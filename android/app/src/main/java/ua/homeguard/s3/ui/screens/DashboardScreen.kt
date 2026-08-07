@@ -12,6 +12,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -20,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.SystemEventRecord
@@ -34,15 +36,20 @@ fun DashboardScreen(
     snapshot: SystemSnapshot,
     events: List<SystemEventRecord>,
     commandStatus: String,
+    operatorId: String,
+    operatorPin: String,
+    onOperatorIdChange: (String) -> Unit,
+    onOperatorPinChange: (String) -> Unit,
     onCommand: (CommandType) -> Unit,
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
+    val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12
 
     pendingDangerousCommand?.let { command ->
         AlertDialog(
             onDismissRequest = { pendingDangerousCommand = null },
             title = { Text("Підтвердіть команду") },
-            text = { Text("Виконати ${command.name}? Для цієї дії контролер також вимагатиме challenge.") },
+            text = { Text("Виконати ${command.name}? Контролер перевірить PIN оператора та challenge.") },
             confirmButton = {
                 TextButton(onClick = {
                     pendingDangerousCommand = null
@@ -65,6 +72,33 @@ fun DashboardScreen(
 
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Оператор", style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(
+                        value = operatorId,
+                        onValueChange = onOperatorIdChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("ID користувача") },
+                    )
+                    OutlinedTextField(
+                        value = operatorPin,
+                        onValueChange = { value ->
+                            if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("PIN") },
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                    Text(if (credentialsReady) "PIN готовий до перевірки контролером" else "Введіть ID та PIN 4–12 цифр")
+                    Text("PIN зберігається тільки в оперативній пам’яті застосунку.")
+                }
+            }
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Система", style = MaterialTheme.typography.titleMedium)
                     StatusRow("Режим", snapshot.mode.name)
@@ -80,17 +114,17 @@ fun DashboardScreen(
             Text("Керування", style = MaterialTheme.typography.titleLarge)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { onCommand(CommandType.ARM_HOME) }) { Text("Охорона дім") }
-                    Button(onClick = { onCommand(CommandType.ARM_AWAY) }) { Text("Охорона") }
+                    Button(enabled = credentialsReady, onClick = { onCommand(CommandType.ARM_HOME) }) { Text("Охорона дім") }
+                    Button(enabled = credentialsReady, onClick = { onCommand(CommandType.ARM_AWAY) }) { Text("Охорона") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { pendingDangerousCommand = CommandType.DISARM }) { Text("Зняти") }
-                    OutlinedButton(onClick = { onCommand(CommandType.SILENCE) }) { Text("Тиша") }
-                    OutlinedButton(onClick = { pendingDangerousCommand = CommandType.RESET_ALARM }) { Text("Скинути тривогу") }
+                    OutlinedButton(enabled = credentialsReady, onClick = { pendingDangerousCommand = CommandType.DISARM }) { Text("Зняти") }
+                    OutlinedButton(enabled = credentialsReady, onClick = { onCommand(CommandType.SILENCE) }) { Text("Тиша") }
+                    OutlinedButton(enabled = credentialsReady, onClick = { pendingDangerousCommand = CommandType.RESET_ALARM }) { Text("Скинути тривогу") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { pendingDangerousCommand = CommandType.OPEN_VALVES }) { Text("Відкрити клапани") }
-                    Button(onClick = { onCommand(CommandType.CLOSE_VALVES) }) { Text("Закрити клапани") }
+                    OutlinedButton(enabled = credentialsReady, onClick = { pendingDangerousCommand = CommandType.OPEN_VALVES }) { Text("Відкрити клапани") }
+                    Button(enabled = credentialsReady, onClick = { onCommand(CommandType.CLOSE_VALVES) }) { Text("Закрити клапани") }
                 }
             }
         }
