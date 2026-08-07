@@ -1,0 +1,23 @@
+{
+  "project": "HomeGuard-S3",
+  "build": "0036",
+  "version": "0.0.36",
+  "date": "2026-08-07",
+  "branch": "agent/homeguard-build-0036",
+  "feature": "event-log-and-live-android-events",
+  "firmware": {
+    "event_log_capacity": 128,
+    "route": "/api/v1/system/events",
+    "source": "SystemEventBus",
+    "websocket_live_push": true
+  },
+  "android": {
+    "event_buffer": 64,
+    "live_source": "/ws/system",
+    "dashboard_recent_events": 12
+  },
+  "android_version_code": 36,
+  "esp_idf": "v5.4.4",
+  "gpio_policy": "fail-closed-unresolved-pins-remain-unassigned",
+  "status": "candidate"
+}

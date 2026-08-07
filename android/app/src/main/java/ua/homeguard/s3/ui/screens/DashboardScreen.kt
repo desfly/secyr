@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.model.CommandType
+import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
 
 @Composable
@@ -31,6 +32,7 @@ fun DashboardScreen(
     route: String,
     deviceId: String,
     snapshot: SystemSnapshot,
+    events: List<SystemEventRecord>,
     commandStatus: String,
     onCommand: (CommandType) -> Unit,
 ) {
@@ -89,6 +91,20 @@ fun DashboardScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { pendingDangerousCommand = CommandType.OPEN_VALVES }) { Text("Відкрити клапани") }
                     Button(onClick = { onCommand(CommandType.CLOSE_VALVES) }) { Text("Закрити клапани") }
+                }
+            }
+        }
+
+        item { Text("Останні події", style = MaterialTheme.typography.titleLarge) }
+        if (events.isEmpty()) {
+            item { Text("Подій ще немає") }
+        } else {
+            items(events.take(12), key = { it.sequence }) { event ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(event.event, style = MaterialTheme.typography.titleSmall)
+                        Text("#${event.sequence} · source ${event.sourceId} · value ${event.value}")
+                    }
                 }
             }
         }

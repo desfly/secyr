@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
             val endpoint by resolver.endpoint.collectAsState()
             val provisioningState by provisioning.state.collectAsState()
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
+            val events by telemetry.events().collectAsState(initial = emptyList())
             val commandMessage by commandStatus.collectAsState()
             MaterialTheme {
                 val provisioningActive = provisioningState.phase in setOf(
@@ -88,6 +89,7 @@ class MainActivity : ComponentActivity() {
                         route = endpoint.path.name,
                         deviceId = appSettings.deviceId,
                         snapshot = snapshot,
+                        events = events,
                         commandStatus = commandMessage,
                         onCommand = ::executeCommand,
                     )

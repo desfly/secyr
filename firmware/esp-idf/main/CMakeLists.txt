@@ -18,6 +18,7 @@ idf_component_register(
         "hg_system_http.cpp"
         "../../src/system_model.cpp"
         "../../src/system_api.cpp"
+        "../../src/event_log.cpp"
         "../../src/hardware_runtime.cpp"
         "../../src/device_command_router.cpp"
         "../../src/device_api_model.cpp"
