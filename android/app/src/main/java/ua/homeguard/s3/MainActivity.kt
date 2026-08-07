@@ -7,9 +7,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
@@ -20,10 +18,11 @@ import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
-import ua.homeguard.s3.network.TelemetrySocket
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
+import ua.homeguard.s3.network.TelemetrySocket
 import ua.homeguard.s3.repository.ProvisioningCoordinator
 import ua.homeguard.s3.storage.SettingsStore
+import ua.homeguard.s3.ui.screens.DashboardScreen
 import ua.homeguard.s3.ui.screens.ProvisioningScreen
 
 class MainActivity : ComponentActivity() {
@@ -75,15 +74,13 @@ class MainActivity : ComponentActivity() {
                         onProvision = provisioning::provision
                     )
                 } else {
-                    Column {
-                        Text("HomeGuard-S3 ${BuildConfig.VERSION_NAME}")
-                        Text("Знайдено локально: ${devices.size}")
-                        Text("Канал: ${endpoint.path}")
-                        Text("Пристрій: ${appSettings.deviceId}")
-                        Text("Режим: ${snapshot.mode}")
-                        Text("Стан: ${snapshot.health}")
-                        Text("Телеметрія: #${snapshot.sequence}")
-                    }
+                    DashboardScreen(
+                        versionName = BuildConfig.VERSION_NAME,
+                        localDevices = devices.size,
+                        route = endpoint.path.name,
+                        deviceId = appSettings.deviceId,
+                        snapshot = snapshot,
+                    )
                 }
             }
         }
