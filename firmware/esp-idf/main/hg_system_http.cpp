@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <sstream>
 #include <string>
 
 namespace homeguard::idf {
@@ -10,6 +11,25 @@ namespace homeguard::idf {
 namespace {
 SystemHttp* self_from(httpd_req_t* request) {
     return static_cast<SystemHttp*>(request->user_ctx);
+}
+
+hg::Severity severity_for(hg::SystemEventType type) {
+    switch (type) {
+        case hg::SystemEventType::Alarm: return hg::Severity::Alarm;
+        case hg::SystemEventType::Tamper:
+        case hg::SystemEventType::BatteryLow:
+        case hg::SystemEventType::SensorOffline: return hg::Severity::Warning;
+        default: return hg::Severity::Info;
+    }
+}
+
+const char* severity_name(hg::Severity severity) {
+    switch (severity) {
+        case hg::Severity::Warning: return "warning";
+        case hg::Severity::Alarm: return "alarm";
+        case hg::Severity::Fault: return "fault";
+        default: return "info";
+    }
 }
 }
 
@@ -25,6 +45,7 @@ esp_err_t SystemHttp::register_handlers(httpd_handle_t server, hg::SystemModel* 
         {.uri="/api/v1/system/zones", .method=HTTP_GET, .handler=&SystemHttp::zones_get, .user_ctx=this},
         {.uri="/api/v1/system/outputs", .method=HTTP_GET, .handler=&SystemHttp::outputs_get, .user_ctx=this},
         {.uri="/api/v1/system/partitions", .method=HTTP_GET, .handler=&SystemHttp::partitions_get, .user_ctx=this},
+        {.uri="/api/v1/system/events", .method=HTTP_GET, .handler=&SystemHttp::events_get, .user_ctx=this},
         {.uri="/ws/system", .method=HTTP_GET, .handler=&SystemHttp::websocket, .user_ctx=this, .is_websocket=true},
     };
     for (const auto& route : routes) {
@@ -67,6 +88,13 @@ esp_err_t SystemHttp::partitions_get(httpd_req_t* request) {
     return self->send_json(request, body.c_str(), body.size());
 }
 
+esp_err_t SystemHttp::events_get(httpd_req_t* request) {
+    auto* self = self_from(request);
+    if (self == nullptr) return ESP_FAIL;
+    const auto body = self->events_json();
+    return self->send_json(request, body.c_str(), body.size());
+}
+
 void SystemHttp::remember_client(int socket_fd) {
     if (socket_fd < 0) return;
     for (const int client : clients_) if (client == socket_fd) return;
@@ -85,7 +113,33 @@ esp_err_t SystemHttp::websocket(httpd_req_t* request) {
 
 void SystemHttp::on_event(const hg::SystemEvent& event, void* context) {
     auto* self = static_cast<SystemHttp*>(context);
-    if (self != nullptr) self->broadcast(event);
+    if (self == nullptr) return;
+    self->record(event);
+    self->broadcast(event);
+}
+
+void SystemHttp::record(const hg::SystemEvent& event) {
+    event_log_.append(
+        event.timestamp_ms,
+        severity_for(event.type),
+        static_cast<std::uint16_t>(event.type),
+        hg::system_event_type_name(event.type));
+}
+
+std::string SystemHttp::events_json() const {
+    std::ostringstream out;
+    out << "{\"capacity\":" << hg::EventLog::capacity << ",\"events\":[";
+    for (std::size_t i = 0; i < event_log_.size(); ++i) {
+        if (i != 0U) out << ',';
+        const auto& item = event_log_.at_oldest(i);
+        out << "{\"sequence\":" << item.sequence
+            << ",\"timestampMs\":" << item.timestamp_ms
+            << ",\"severity\":\"" << severity_name(item.severity)
+            << "\",\"code\":" << item.code
+            << ",\"event\":\"" << item.text.data() << "\"}";
+    }
+    out << "]}";
+    return out.str();
 }
 
 void SystemHttp::broadcast(const hg::SystemEvent& event) {
