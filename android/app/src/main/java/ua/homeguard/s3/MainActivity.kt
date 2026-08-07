@@ -14,6 +14,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import ua.homeguard.s3.control.CommandController
+import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.network.DeviceEndpointResolver
@@ -32,6 +36,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var provisioning: ProvisioningCoordinator
     private lateinit var telemetry: TelemetrySocket
     private lateinit var session: DeviceSession
+    private lateinit var commands: CommandController
+    private val commandStatus = MutableStateFlow("Готово")
 
     private val qrScanner = registerForActivityResult(ScanContract()) { result ->
         result.contents?.let(provisioning::acceptQr)
@@ -51,6 +57,7 @@ class MainActivity : ComponentActivity() {
         provisioning = ProvisioningCoordinator(this, settings, discovery, lifecycleScope)
         telemetry = TelemetrySocket()
         session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry)
+        commands = CommandController(resolver.endpoint, settings)
         discovery.start()
         session.start()
         setContent {
@@ -59,6 +66,7 @@ class MainActivity : ComponentActivity() {
             val endpoint by resolver.endpoint.collectAsState()
             val provisioningState by provisioning.state.collectAsState()
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
+            val commandMessage by commandStatus.collectAsState()
             MaterialTheme {
                 val provisioningActive = provisioningState.phase in setOf(
                     ProvisioningPhase.CONNECTING_SETUP_AP,
@@ -80,9 +88,22 @@ class MainActivity : ComponentActivity() {
                         route = endpoint.path.name,
                         deviceId = appSettings.deviceId,
                         snapshot = snapshot,
+                        commandStatus = commandMessage,
+                        onCommand = ::executeCommand,
                     )
                 }
             }
+        }
+    }
+
+    private fun executeCommand(type: CommandType) {
+        lifecycleScope.launch {
+            commandStatus.value = "Виконується: ${type.name}…"
+            val result = runCatching { commands.execute(type) }
+            commandStatus.value = result.fold(
+                onSuccess = { reply -> if (reply.accepted || reply.duplicate) "OK: ${reply.code}" else "Відхилено: ${reply.code}" },
+                onFailure = { error -> "Помилка: ${error.message ?: "network"}" },
+            )
         }
     }
 
