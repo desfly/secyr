@@ -41,6 +41,12 @@ public:
         const std::array<std::uint8_t, 16>& salt,
         bool enabled = true);
 
+    // Persistence path: imports a record that already contains a salted PIN
+    // digest. Raw PIN material is never required during restore.
+    bool import_user(const AccessUser& user);
+    void clear_users();
+    [[nodiscard]] const AccessUser* user_at(std::size_t index) const;
+
     [[nodiscard]] const AccessUser* find_user(std::string_view id) const;
     [[nodiscard]] bool verify_pin(const AccessUser& user, std::string_view pin) const;
     [[nodiscard]] bool role_allows(AccessRole role, std::string_view command) const;
