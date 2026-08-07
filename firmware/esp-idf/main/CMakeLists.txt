@@ -19,6 +19,8 @@ idf_component_register(
         "../../src/system_model.cpp"
         "../../src/system_api.cpp"
         "../../src/event_log.cpp"
+        "../../src/access_control.cpp"
+        "../../src/sha256.cpp"
         "../../src/hardware_runtime.cpp"
         "../../src/device_command_router.cpp"
         "../../src/device_api_model.cpp"

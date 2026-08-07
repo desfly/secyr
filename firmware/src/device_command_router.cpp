@@ -1,9 +1,10 @@
 #include "homeguard/device_command_router.hpp"
+#include "homeguard/access_control.hpp"
 
 namespace homeguard {
 
-DeviceCommandRouter::DeviceCommandRouter(DeviceApiState& state)
-    : state_(state)
+DeviceCommandRouter::DeviceCommandRouter(DeviceApiState& state, AccessControl* access_control)
+    : state_(state), access_control_(access_control)
 {
 }
 
@@ -46,6 +47,21 @@ DeviceCommandResponse DeviceCommandRouter::handle(
             "request was already processed",
             state_.sequence,
         };
+    }
+
+    if (access_control_ != nullptr) {
+        const auto decision = access_control_->authorize(
+            request.actor,
+            request.credential,
+            request.command);
+        if (decision != AuditDecision::Allowed) {
+            remember(request.request_id);
+            return {
+                CommandResultCode::Unauthorized,
+                to_string(decision),
+                state_.sequence,
+            };
+        }
     }
 
     DeviceCommandResponse response{

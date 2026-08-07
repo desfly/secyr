@@ -7,9 +7,11 @@
 
 namespace homeguard {
 
+class AccessControl;
+
 class DeviceCommandRouter {
 public:
-    explicit DeviceCommandRouter(DeviceApiState& state);
+    explicit DeviceCommandRouter(DeviceApiState& state, AccessControl* access_control = nullptr);
 
     DeviceCommandResponse handle(const DeviceCommandRequest& request);
 
@@ -18,6 +20,7 @@ private:
     void remember(const std::string& request_id);
 
     DeviceApiState& state_;
+    AccessControl* access_control_{};
     std::deque<std::string> recent_request_ids_;
 };
 

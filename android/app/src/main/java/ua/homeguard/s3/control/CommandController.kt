@@ -16,7 +16,7 @@ class CommandController(
 ) {
     private val requestIds = AtomicLong(System.currentTimeMillis())
 
-    suspend fun execute(type: CommandType): CommandReply {
+    suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
         val target = endpoint.value
         val appSettings = settings.settings.value
         if (target.path == ControlPath.OFFLINE || target.apiBaseUrl.isBlank() || appSettings.apiToken.isBlank()) {
@@ -36,6 +36,8 @@ class CommandController(
             issuedAtMs = System.currentTimeMillis(),
             type = type,
             challenge = challenge,
+            actor = actor.trim(),
+            credential = credential,
         )
         return api.command(command)
     }

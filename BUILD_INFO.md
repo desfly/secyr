@@ -1,24 +1,27 @@
 # Build information
 
 - Project: HomeGuard-S3
-- Build: 0032
-- Date: 2026-08-07
+- Build: 0037
+- Date: 2026-08-08
 - Controller target: ESP32-S3-WROOM-1-N16R8 / HW-678 V0.0.0
 - Hardware-map state: every unresolved GPIO defaults to `-1`
 - Firmware version source: `firmware/include/homeguard/build_info.hpp`
-- Firmware version: 0.0.32 / Build-0032
-- Android version: 0.0.32 / versionCode 32
+- Firmware version: 0.0.37 / Build-0037
+- Android version: 0.0.37 / versionCode 37
 - ESP-IDF: pinned to v5.4.4, target `esp32s3`
 - Managed ESP-IDF components: `espressif/mdns` 1.11.3 and `espressif/mqtt` 1.0.0
 - Operational local API: authenticated HTTPS REST on port 443
 - Telemetry: authenticated WSS `/ws/telemetry`, default interval 1000 ms
-- Local authorization: bearer token hashed with SHA-256 and compared in constant time
+- Local transport authorization: bearer token hashed with SHA-256 and compared in constant time
+- Command authorization: bounded AccessControl user store, salted iterative SHA-256 PIN digest, role policy and bounded audit log
+- Android operator PIN: session-only memory; it is not written to AppSettings or persistent storage
+- Dangerous commands: UI confirmation + controller challenge + access-control authorization
 - TLS identity: per-device certificate pinned by exact DER SHA-256
 - Discovery: mDNS `_homeguard._tcp` and UDP/45678
 - System Core: fixed-capacity Zone/Sensor/Output/Partition model with no required heap allocation
 - Event Core: bounded 32-event queue, 8 subscribers, monotonic sequence numbers and overflow accounting
+- Event Log: bounded history exposed by system HTTP and consumed live by Android
 - System API v1 serializers: status, zones, outputs, partitions and event frames
-- System API data access: indexed read-only records expose bounded snapshots without mutable container access
 - CI Android toolchain: AGP 8.7.3, Kotlin 2.1.0, Gradle 8.9, JDK 17, compileSdk 35
 - CI workflow: ESP-IDF 5.4.4 firmware, Android debug APK, host validation and diagnostics
-- Last verified System Core PR build: GitHub Actions run #29, all three jobs successful
+- Last verified main baseline before Build-0037: Build-0036, GitHub Actions run #41 successful

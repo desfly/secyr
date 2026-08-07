@@ -1,5 +1,45 @@
 # Changelog
 
+## Build-0037 — 2026-08-08
+
+- Added bounded AccessControl storage for up to eight operators with Admin/User/Guest roles.
+- Added salted iterative SHA-256 PIN digests with constant-time digest comparison; raw PINs are never stored by firmware.
+- Added a bounded 64-record authorization audit log with allowed/denied decisions and no PIN material.
+- Applied role policy before protected command execution and added explicit credential-required/denied results.
+- Extended Android command requests with operator ID and session credential while retaining bearer-token authentication and TLS certificate pinning.
+- Added Android operator/PIN controls; PIN stays only in process memory and is cleared when the activity is destroyed.
+- Disabled command buttons until a valid operator ID and 4–12 digit PIN are present.
+- Preserved dangerous-command confirmation and controller challenge requirements.
+- Added host tests for users, PIN verification, roles, authorization decisions and audit behavior.
+- Updated firmware and Android versions to 0.0.37 / Build-0037.
+- Preserved fail-closed GPIO defaults; no unresolved hardware pin was assigned.
+
+## Build-0036 — 2026-08-07
+
+- Integrated a bounded firmware event log with SystemEventBus events.
+- Added `/api/v1/system/events` history and continued live WebSocket event delivery.
+- Added Android live event parsing, buffering and Dashboard event rendering.
+- Updated firmware and Android versions to 0.0.36 / Build-0036.
+
+## Build-0035 — 2026-08-07
+
+- Connected Android Dashboard controls to the existing authenticated command API.
+- Added ARM_HOME, ARM_AWAY, DISARM, SILENCE, RESET_ALARM, OPEN_VALVES and CLOSE_VALVES actions.
+- Retained controller challenge handling for dangerous commands and fail-closed behavior while offline.
+- Updated firmware and Android versions to 0.0.35 / Build-0035.
+
+## Build-0034 — 2026-08-07
+
+- Connected the real Compose Dashboard to MainActivity.
+- Added live telemetry/system snapshot rendering for system state, zones and analog channels.
+- Updated firmware and Android versions to 0.0.34 / Build-0034.
+
+## Build-0033 — 2026-08-07
+
+- Added real ESP-IDF system HTTP routes and WebSocket event transport.
+- Added `/api/v1/system/status`, zones, outputs, partitions and `/ws/system`.
+- Updated firmware and Android versions to 0.0.33 / Build-0033.
+
 ## Build-0032 — 2026-08-07
 
 - Added System API v1 JSON serializers for status, zones, outputs, partitions and event frames.

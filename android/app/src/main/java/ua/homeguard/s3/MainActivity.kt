@@ -38,6 +38,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var session: DeviceSession
     private lateinit var commands: CommandController
     private val commandStatus = MutableStateFlow("Готово")
+    private val operatorId = MutableStateFlow("admin")
+    private val operatorPin = MutableStateFlow("")
 
     private val qrScanner = registerForActivityResult(ScanContract()) { result ->
         result.contents?.let(provisioning::acceptQr)
@@ -68,6 +70,8 @@ class MainActivity : ComponentActivity() {
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
             val events by telemetry.events().collectAsState(initial = emptyList())
             val commandMessage by commandStatus.collectAsState()
+            val currentOperator by operatorId.collectAsState()
+            val currentPin by operatorPin.collectAsState()
             MaterialTheme {
                 val provisioningActive = provisioningState.phase in setOf(
                     ProvisioningPhase.CONNECTING_SETUP_AP,
@@ -91,6 +95,10 @@ class MainActivity : ComponentActivity() {
                         snapshot = snapshot,
                         events = events,
                         commandStatus = commandMessage,
+                        operatorId = currentOperator,
+                        operatorPin = currentPin,
+                        onOperatorIdChange = { operatorId.value = it.take(23) },
+                        onOperatorPinChange = { operatorPin.value = it },
                         onCommand = ::executeCommand,
                     )
                 }
@@ -99,9 +107,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun executeCommand(type: CommandType) {
+        val actor = operatorId.value.trim()
+        val credential = operatorPin.value
+        if (actor.isBlank() || credential.length !in 4..12) {
+            commandStatus.value = "Введіть ID оператора та PIN"
+            return
+        }
         lifecycleScope.launch {
             commandStatus.value = "Виконується: ${type.name}…"
-            val result = runCatching { commands.execute(type) }
+            val result = runCatching { commands.execute(type, actor, credential) }
             commandStatus.value = result.fold(
                 onSuccess = { reply -> if (reply.accepted || reply.duplicate) "OK: ${reply.code}" else "Відхилено: ${reply.code}" },
                 onFailure = { error -> "Помилка: ${error.message ?: "network"}" },
@@ -130,6 +144,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        operatorPin.value = ""
         session.stop()
         discovery.stop()
         super.onDestroy()
