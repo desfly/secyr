@@ -3,6 +3,8 @@
 
 #include "nvs.h"
 
+#include <cstddef>
+
 namespace homeguard::idf {
 namespace {
 constexpr const char* nvs_namespace = "hg_access";
