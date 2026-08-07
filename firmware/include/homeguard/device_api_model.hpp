@@ -61,6 +61,9 @@ struct DeviceCommandRequest {
     std::string command;
     std::string target;
     std::string value;
+    // Build-0037: optional credential used by an attached AccessControl policy.
+    // Kept as the final field so older aggregate initializers remain source-compatible.
+    std::string credential;
 };
 
 struct DeviceCommandResponse {
