@@ -16,6 +16,7 @@ idf_component_register(
         "hg_telemetry_runtime.cpp"
         "hg_infrastructure_http.cpp"
         "../../src/system_model.cpp"
+        "../../src/system_api.cpp"
         "../../src/hardware_runtime.cpp"
         "../../src/device_command_router.cpp"
         "../../src/device_api_model.cpp"

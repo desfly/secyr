@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(homeguard_s3_build0031 LANGUAGES CXX)
+project(homeguard_s3_build0032 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -19,6 +19,7 @@ add_library(homeguard_core
     src/cloud_link.cpp
     src/event_log.cpp
     src/system_model.cpp
+    src/system_api.cpp
     src/zone.cpp
     src/pressure.cpp
     src/challenge.cpp
@@ -45,6 +46,7 @@ add_executable(homeguard_tests
     ../tests/test_provisioning.cpp
     ../tests/test_build0009.cpp
     ../tests/test_build0013.cpp
+    ../tests/test_build0032.cpp
 )
 target_link_libraries(homeguard_tests PRIVATE homeguard_core)
 enable_testing()
