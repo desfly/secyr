@@ -31,7 +31,11 @@ class HttpDeviceApi(
             .put("requestId", LocalApiContract.requestId(command.requestId))
             .put("issuedAtMs", command.issuedAtMs.toString())
             .put("command", command.type.name.lowercase())
-            .apply { command.challenge?.let { put("challenge", it) } }
+            .apply {
+                command.challenge?.let { put("challenge", it) }
+                if (command.actor.isNotBlank()) put("actor", command.actor)
+                if (command.credential.isNotBlank()) put("credential", command.credential)
+            }
         val json = execute(LocalApiContract.COMMAND_PATH, "POST", body)
         return CommandReply(
             accepted = json.optBoolean("accepted", false),
