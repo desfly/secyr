@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <string>
 
+namespace homeguard { class AccessControl; }
+
 struct httpd_req;
 using httpd_req_t = httpd_req;
 
@@ -11,7 +13,8 @@ class RestServer {
 public:
     bool begin(hg::Controller& controller, std::string_view local_api_token,
                std::string_view certificate_pem, std::string_view private_key_pem,
-               std::string_view device_id, uint16_t port);
+               std::string_view device_id, uint16_t port,
+               homeguard::AccessControl* access_control = nullptr);
     void stop();
     [[nodiscard]] bool running() const { return server_ != nullptr; }
     [[nodiscard]] void* native_handle() const { return server_; }
@@ -27,6 +30,7 @@ private:
     bool authorize(httpd_req_t* request) const;
     void* server_{};
     hg::Controller* controller_{};
+    homeguard::AccessControl* access_control_{};
     hg::BearerTokenVerifier token_{};
     std::string certificate_pem_{};
     std::string private_key_pem_{};
