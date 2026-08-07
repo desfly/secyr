@@ -1,6 +1,8 @@
 #include "hg_system_http.hpp"
 #include "homeguard/system_api.hpp"
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace homeguard::idf {
