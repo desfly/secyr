@@ -1,13 +1,13 @@
 # Build information
 
 - Project: HomeGuard-S3
-- Build: 0030
+- Build: 0031
 - Date: 2026-08-07
 - Controller target: ESP32-S3-WROOM-1-N16R8 / HW-678 V0.0.0
 - Hardware-map state: every unresolved GPIO defaults to `-1`
 - Firmware version source: `firmware/include/homeguard/build_info.hpp`
-- Firmware version: 0.0.30 / Build-0030
-- Android version: 0.0.30 / versionCode 30
+- Firmware version: 0.0.31 / Build-0031
+- Android version: 0.0.31 / versionCode 31
 - ESP-IDF: pinned to v5.4.4, target `esp32s3`
 - Managed ESP-IDF components: `espressif/mdns` 1.11.3 and `espressif/mqtt` 1.0.0
 - ESP-IDF dependency evidence: `dependencies.lock`, `idf_component.yml`, `project_description.json`
@@ -21,6 +21,8 @@
 - Discovery: mDNS `_homeguard._tcp` and UDP/45678 advertise the certificate-covered hostname
 - Route policy: only secure local discovery with API version 1 may override last-known/cloud routes
 - Cloud foundation: outbound MQTT/TLS, disabled by default
+- System Core: fixed-capacity Zone/Sensor/Output/Partition model with no required heap allocation
+- Event Core: bounded 32-event queue, 8 subscribers, monotonic sequence numbers and overflow accounting
 - CI Android toolchain: AGP 8.7.3, Kotlin 2.1.0, Gradle 8.9, JDK 17, compileSdk 35
 - CI workflow: ESP-IDF 5.4.4 firmware, Android debug APK, host validation and diagnostics
-- Last verified main build before Build-0030: GitHub Actions run #26, successful with 4 artifacts
+- Last verified main build: GitHub Actions run #28, successful with 4 artifacts

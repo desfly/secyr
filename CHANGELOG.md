@@ -1,5 +1,14 @@
 # Changelog
 
+## Build-0031 — 2026-08-07
+
+- Added a fixed-capacity System Core model for zones, sensors, outputs and partitions.
+- Added a bounded event bus with 32 queued events, 8 subscribers, monotonic sequence numbers and overflow accounting.
+- Added state-change event generation for zones, outputs and partition arming.
+- Compiled the new core directly in the ESP-IDF component so both mock-link and real ESP-IDF CI validate it.
+- Updated firmware and Android versions to 0.0.31 / Build-0031.
+- Preserved fail-closed GPIO defaults; no unresolved hardware pin was assigned.
+
 ## Build-0030 — 2026-08-07
 
 - Synchronized firmware and Android versioning to 0.0.30 / Build-0030.

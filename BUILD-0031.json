@@ -1,0 +1,33 @@
+{
+  "project": "HomeGuard-S3",
+  "build": "0031",
+  "version": "0.0.31",
+  "date": "2026-08-07",
+  "branch": "agent/homeguard-build-0031",
+  "base_main_run": 28,
+  "base_main_status": "success",
+  "feature": "system-core",
+  "system_model": {
+    "zones": 16,
+    "sensors": 16,
+    "outputs": 16,
+    "partitions": 4
+  },
+  "event_bus": {
+    "queue_capacity": 32,
+    "subscriber_capacity": 8,
+    "overflow_accounting": true,
+    "monotonic_sequence": true
+  },
+  "expected_artifacts": [
+    "HomeGuard-S3-Android",
+    "HomeGuard-S3-ESP-IDF-diagnostics",
+    "HomeGuard-S3-firmware",
+    "HomeGuard-S3-host-diagnostics"
+  ],
+  "firmware_target": "esp32s3",
+  "esp_idf": "v5.4.4",
+  "android_version_code": 31,
+  "gpio_policy": "fail-closed-unresolved-pins-remain-unassigned",
+  "status": "candidate"
+}
