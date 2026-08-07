@@ -11,6 +11,7 @@ set(HG_CORE_SRCS
     "../../../src/discovery.cpp"
     "../../../src/cloud_link.cpp"
     "../../../src/event_log.cpp"
+    "../../../src/access_control.cpp"
     "../../../src/zone.cpp"
     "../../../src/pressure.cpp"
     "../../../src/challenge.cpp"
