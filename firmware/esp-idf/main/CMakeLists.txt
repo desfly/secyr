@@ -15,6 +15,7 @@ idf_component_register(
         "hg_hardware_bootstrap.cpp"
         "hg_telemetry_runtime.cpp"
         "hg_infrastructure_http.cpp"
+        "../../src/system_model.cpp"
         "../../src/hardware_runtime.cpp"
         "../../src/device_command_router.cpp"
         "../../src/device_api_model.cpp"
@@ -38,7 +39,6 @@ idf_component_register(
 )
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)
-
 
 if(DEFINED ENV{GITHUB_SHA})
     set(HG_GIT_REVISION "$ENV{GITHUB_SHA}")
