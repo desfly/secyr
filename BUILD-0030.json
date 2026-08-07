@@ -1,0 +1,19 @@
+{
+  "project": "HomeGuard-S3",
+  "build": "0030",
+  "version": "0.0.30",
+  "date": "2026-08-07",
+  "branch": "agent/homeguard-build-0030",
+  "base_main_run": 26,
+  "base_main_status": "success",
+  "expected_artifacts": [
+    "HomeGuard-S3-Android",
+    "HomeGuard-S3-ESP-IDF-diagnostics",
+    "HomeGuard-S3-firmware",
+    "HomeGuard-S3-host-diagnostics"
+  ],
+  "firmware_target": "esp32s3",
+  "esp_idf": "v5.4.4",
+  "android_version_code": 30,
+  "status": "candidate"
+}
