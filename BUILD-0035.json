@@ -1,0 +1,28 @@
+{
+  "project": "HomeGuard-S3",
+  "build": "0035",
+  "version": "0.0.35",
+  "date": "2026-08-07",
+  "branch": "agent/homeguard-build-0035",
+  "feature": "android-command-controls",
+  "android": {
+    "commands": [
+      "ARM_HOME",
+      "ARM_AWAY",
+      "DISARM",
+      "SILENCE",
+      "RESET_ALARM",
+      "OPEN_VALVES",
+      "CLOSE_VALVES"
+    ],
+    "dangerous_command_confirmation": true,
+    "challenge_required": ["DISARM", "RESET_ALARM", "OPEN_VALVES"],
+    "offline_policy": "fail-closed",
+    "api": "existing /api/challenge + /api/command contract"
+  },
+  "firmware_target": "esp32s3",
+  "esp_idf": "v5.4.4",
+  "android_version_code": 35,
+  "gpio_policy": "fail-closed-unresolved-pins-remain-unassigned",
+  "status": "candidate"
+}
