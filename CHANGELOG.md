@@ -1,5 +1,14 @@
 # Changelog
 
+## Build-0032 — 2026-08-07
+
+- Added System API v1 JSON serializers for status, zones, outputs, partitions and event frames.
+- Added indexed read-only System Core accessors for bounded API snapshots without exposing mutable containers.
+- Added host tests covering zone/output/partition snapshots and event JSON.
+- Compiled System API directly into the ESP-IDF component so real firmware CI validates it.
+- Updated firmware and Android versions to 0.0.32 / Build-0032.
+- Preserved fail-closed GPIO defaults; no unresolved hardware pin was assigned.
+
 ## Build-0031 — 2026-08-07
 
 - Added a fixed-capacity System Core model for zones, sensors, outputs and partitions.
