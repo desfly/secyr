@@ -1,5 +1,14 @@
 # Changelog
 
+## Build-0031 — 2026-08-07
+
+- Added a fixed-capacity System Core model for zones, sensors, outputs and partitions.
+- Added a bounded event bus with 32 queued events, 8 subscribers, monotonic sequence numbers and overflow accounting.
+- Added state-change event generation for zones, outputs and partition arming.
+- Compiled the new core directly in the ESP-IDF component so both mock-link and real ESP-IDF CI validate it.
+- Updated firmware and Android versions to 0.0.31 / Build-0031.
+- Preserved fail-closed GPIO defaults; no unresolved hardware pin was assigned.
+
 ## Build-0030 — 2026-08-07
 
 - Synchronized firmware and Android versioning to 0.0.30 / Build-0030.
@@ -15,6 +24,7 @@
 - Added owned telemetry work buffers so queued WebSocket frames remain valid until the HTTP task finishes sending them.
 - Added failed-client cleanup after queued WSS sends.
 - Reworked Wi-Fi STA state sharing to atomics and protected IPv4 state with a mutex.
+- Added complete Wi-Fi initialization rollback: handler unregister, Wi-Fi deinit, netif destruction and in-memory password clearing.
 - Added complete Wi-Fi initialization rollback: handler unregister, Wi-Fi deinit, netif destruction and in-memory password clearing.
 - Updated Android to 0.0.13 / versionCode 13.
 - Retained fail-closed GPIO defaults and pinned ESP-IDF managed dependencies.
