@@ -24,6 +24,7 @@ import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
 import ua.homeguard.s3.network.TelemetrySocket
+import ua.homeguard.s3.notifications.HomeGuardNotifications
 import ua.homeguard.s3.repository.ProvisioningCoordinator
 import ua.homeguard.s3.storage.SettingsStore
 import ua.homeguard.s3.ui.screens.DashboardScreen
@@ -37,6 +38,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var telemetry: TelemetrySocket
     private lateinit var session: DeviceSession
     private lateinit var commands: CommandController
+    private lateinit var notifications: HomeGuardNotifications
     private val commandStatus = MutableStateFlow("Готово")
     private val operatorId = MutableStateFlow("admin")
     private val operatorPin = MutableStateFlow("")
@@ -51,6 +53,9 @@ class MainActivity : ComponentActivity() {
             }) launchQrScanner()
     }
 
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = SettingsStore(this)
@@ -60,6 +65,12 @@ class MainActivity : ComponentActivity() {
         telemetry = TelemetrySocket()
         session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry)
         commands = CommandController(resolver.endpoint, settings)
+        notifications = HomeGuardNotifications(this)
+        notifications.createChannels()
+        requestNotificationPermission()
+        lifecycleScope.launch {
+            telemetry.liveEvents().collect { event -> notifications.notify(event) }
+        }
         discovery.start()
         session.start()
         setContent {
@@ -120,6 +131,14 @@ class MainActivity : ComponentActivity() {
                 onSuccess = { reply -> if (reply.accepted || reply.duplicate) "OK: ${reply.code}" else "Відхилено: ${reply.code}" },
                 onFailure = { error -> "Помилка: ${error.message ?: "network"}" },
             )
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
