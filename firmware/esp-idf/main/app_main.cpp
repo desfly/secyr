@@ -1,7 +1,9 @@
 #include "hg_hardware_bootstrap.hpp"
 #include "hg_build_http.hpp"
 #include "hg_infrastructure_http.hpp"
+#include "hg_system_http.hpp"
 #include "hg_telemetry_runtime.hpp"
+#include "homeguard/system_model.hpp"
 #include "esp_check.h"
 
 #include "esp_event.h"
@@ -18,6 +20,9 @@ homeguard::idf::HardwareBootstrap g_hardware;
 homeguard::idf::TelemetryRuntime g_telemetry;
 homeguard::idf::InfrastructureHttp g_http_api;
 homeguard::idf::BuildHttp g_build_http;
+homeguard::idf::SystemHttp g_system_http;
+hg::SystemEventBus g_system_bus;
+hg::SystemModel g_system_model{g_system_bus};
 httpd_handle_t g_http_server = nullptr;
 
 esp_err_t initialize_nvs()
@@ -29,6 +34,15 @@ esp_err_t initialize_nvs()
         error = nvs_flash_init();
     }
     return error;
+}
+
+void initialize_system_model()
+{
+    g_system_model.add_partition(1);
+    g_system_model.add_zone(1, "Zone 1", hg::ModelZoneType::Perimeter);
+    g_system_model.add_zone(2, "Zone 2", hg::ModelZoneType::Interior);
+    g_system_model.add_output(1, hg::ModelOutputType::Siren);
+    g_system_model.add_output(2, hg::ModelOutputType::Valve);
 }
 
 esp_err_t start_http_server()
@@ -44,11 +58,14 @@ esp_err_t start_http_server()
         "httpd_start");
 
     ESP_RETURN_ON_ERROR(
-        g_http_api.register_handlers(
-            g_http_server,
-            &g_hardware),
+        g_http_api.register_handlers(g_http_server, &g_hardware),
         kTag,
         "hardware routes");
+
+    ESP_RETURN_ON_ERROR(
+        g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus),
+        kTag,
+        "system routes");
 
     return g_build_http.register_handlers(g_http_server);
 }
@@ -61,36 +78,24 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+    initialize_system_model();
+
     const auto hardware_error = g_hardware.initialize();
     if (hardware_error != ESP_OK) {
-        ESP_LOGE(
-            kTag,
-            "Hardware bootstrap failed: %s",
-            esp_err_to_name(hardware_error));
+        ESP_LOGE(kTag, "Hardware bootstrap failed: %s", esp_err_to_name(hardware_error));
     } else {
-        ESP_LOGI(
-            kTag,
-            "Hardware bootstrap completed");
+        ESP_LOGI(kTag, "Hardware bootstrap completed");
     }
 
     const auto http_error = start_http_server();
     if (http_error != ESP_OK) {
-        ESP_LOGE(
-            kTag,
-            "HTTP server failed: %s",
-            esp_err_to_name(http_error));
+        ESP_LOGE(kTag, "HTTP server failed: %s", esp_err_to_name(http_error));
     }
 
-    const auto telemetry_error =
-        g_telemetry.start(&g_hardware);
+    const auto telemetry_error = g_telemetry.start(&g_hardware);
     if (telemetry_error != ESP_OK) {
-        ESP_LOGE(
-            kTag,
-            "Telemetry task failed: %s",
-            esp_err_to_name(telemetry_error));
+        ESP_LOGE(kTag, "Telemetry task failed: %s", esp_err_to_name(telemetry_error));
     }
 
-    ESP_LOGI(
-        kTag,
-        "HomeGuard-S3 Build-0022 runtime started");
+    ESP_LOGI(kTag, "HomeGuard-S3 Build-0033 runtime started");
 }
