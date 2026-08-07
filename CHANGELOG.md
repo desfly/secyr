@@ -25,7 +25,6 @@
 - Added failed-client cleanup after queued WSS sends.
 - Reworked Wi-Fi STA state sharing to atomics and protected IPv4 state with a mutex.
 - Added complete Wi-Fi initialization rollback: handler unregister, Wi-Fi deinit, netif destruction and in-memory password clearing.
-- Added complete Wi-Fi initialization rollback: handler unregister, Wi-Fi deinit, netif destruction and in-memory password clearing.
 - Updated Android to 0.0.13 / versionCode 13.
 - Retained fail-closed GPIO defaults and pinned ESP-IDF managed dependencies.
 
