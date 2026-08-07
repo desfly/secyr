@@ -38,8 +38,6 @@ hg::Sha256Digest AccessControl::derive_pin_digest(
     material.append(pin);
 
     auto digest = hg::sha256(material);
-    // PINs have low entropy. Iteration makes offline guessing materially more
-    // expensive while keeping the implementation dependency-free on ESP32-S3.
     for (std::uint32_t round = 1; round < 4096U; ++round) {
         material = hg::sha256_hex(digest);
         material.append(user_id);
@@ -96,11 +94,15 @@ bool AccessControl::role_allows(AccessRole role, std::string_view command) const
     if (role == AccessRole::Admin) return true;
     if (role == AccessRole::Guest) return false;
 
-    return command == "security.arm_home" ||
-           command == "security.arm_away" ||
-           command == "security.disarm" ||
+    // Accept both the older dotted router vocabulary and the Android/local API
+    // command names. User role deliberately cannot open valves, reset alarms,
+    // or enter/exit maintenance; those remain admin-only.
+    return command == "security.arm_home" || command == "arm_home" ||
+           command == "security.arm_away" || command == "arm_away" ||
+           command == "security.disarm" || command == "disarm" ||
+           command == "silence" ||
            command == "light.set" ||
-           command == "valve.close";
+           command == "valve.close" || command == "close_valves";
 }
 
 void AccessControl::append_audit(
