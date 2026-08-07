@@ -3,6 +3,9 @@
 #include "hg_infrastructure_http.hpp"
 #include "hg_system_http.hpp"
 #include "hg_telemetry_runtime.hpp"
+#include "hg_access_nvs.hpp"
+#include "homeguard/access_control.hpp"
+#include "homeguard/build_info.hpp"
 #include "homeguard/system_model.hpp"
 #include "esp_check.h"
 
@@ -21,6 +24,8 @@ homeguard::idf::TelemetryRuntime g_telemetry;
 homeguard::idf::InfrastructureHttp g_http_api;
 homeguard::idf::BuildHttp g_build_http;
 homeguard::idf::SystemHttp g_system_http;
+homeguard::idf::AccessNvsStore g_access_store;
+homeguard::AccessControl g_access_control;
 hg::SystemEventBus g_system_bus;
 hg::SystemModel g_system_model{g_system_bus};
 httpd_handle_t g_http_server = nullptr;
@@ -34,6 +39,22 @@ esp_err_t initialize_nvs()
         error = nvs_flash_init();
     }
     return error;
+}
+
+void restore_access_control()
+{
+    const auto error = g_access_store.load(g_access_control);
+    if (error == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(kTag, "No persisted access database; access starts fail-closed with zero users");
+        return;
+    }
+    if (error != ESP_OK) {
+        g_access_control.clear_users();
+        ESP_LOGE(kTag, "Access database rejected (%s); access starts fail-closed", esp_err_to_name(error));
+        return;
+    }
+    ESP_LOGI(kTag, "Restored %u access user(s) from NVS",
+             static_cast<unsigned>(g_access_control.user_count()));
 }
 
 void initialize_system_model()
@@ -75,6 +96,7 @@ esp_err_t start_http_server()
 extern "C" void app_main()
 {
     ESP_ERROR_CHECK(initialize_nvs());
+    restore_access_control();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
@@ -97,5 +119,6 @@ extern "C" void app_main()
         ESP_LOGE(kTag, "Telemetry task failed: %s", esp_err_to_name(telemetry_error));
     }
 
-    ESP_LOGI(kTag, "HomeGuard-S3 Build-0033 runtime started");
+    ESP_LOGI(kTag, "%.*s runtime started",
+             static_cast<int>(hg::build::label.size()), hg::build::label.data());
 }

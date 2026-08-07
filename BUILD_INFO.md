@@ -1,19 +1,22 @@
 # Build information
 
 - Project: HomeGuard-S3
-- Build: 0037
+- Build: 0038
 - Date: 2026-08-08
 - Controller target: ESP32-S3-WROOM-1-N16R8 / HW-678 V0.0.0
 - Hardware-map state: every unresolved GPIO defaults to `-1`
 - Firmware version source: `firmware/include/homeguard/build_info.hpp`
-- Firmware version: 0.0.37 / Build-0037
-- Android version: 0.0.37 / versionCode 37
+- Firmware version: 0.0.38 / Build-0038
+- Android version: 0.0.38 / versionCode 38
 - ESP-IDF: pinned to v5.4.4, target `esp32s3`
 - Managed ESP-IDF components: `espressif/mdns` 1.11.3 and `espressif/mqtt` 1.0.0
 - Operational local API: authenticated HTTPS REST on port 443
 - Telemetry: authenticated WSS `/ws/telemetry`, default interval 1000 ms
 - Local transport authorization: bearer token hashed with SHA-256 and compared in constant time
 - Command authorization: bounded AccessControl user store, salted iterative SHA-256 PIN digest, role policy and bounded audit log
+- Access persistence: CRC-protected fixed-size binary image in NVS namespace `hg_access`, key `users_v1`
+- Access restore policy: corrupted/unsupported NVS data is rejected and runtime starts fail-closed with zero restored users
+- Raw PIN storage: prohibited; only salt + iterative SHA-256 digest are persisted
 - Android operator PIN: session-only memory; it is not written to AppSettings or persistent storage
 - Dangerous commands: UI confirmation + controller challenge + access-control authorization
 - TLS identity: per-device certificate pinned by exact DER SHA-256
@@ -24,4 +27,4 @@
 - System API v1 serializers: status, zones, outputs, partitions and event frames
 - CI Android toolchain: AGP 8.7.3, Kotlin 2.1.0, Gradle 8.9, JDK 17, compileSdk 35
 - CI workflow: ESP-IDF 5.4.4 firmware, Android debug APK, host validation and diagnostics
-- Last verified main baseline before Build-0037: Build-0036, GitHub Actions run #41 successful
+- Last verified main baseline: Build-0037, GitHub Actions run #43 successful

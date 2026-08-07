@@ -6,3 +6,4 @@ void test_build0009();
 void test_build0013();
 void test_build0032();
 void test_build0037();
+void test_build0038();
