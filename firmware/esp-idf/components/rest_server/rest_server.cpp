@@ -1,4 +1,5 @@
 #include "rest_server.hpp"
+#include "homeguard/access_control.hpp"
 #include "cJSON.h"
 #include "esp_https_server.h"
 #include "esp_log.h"
@@ -69,10 +70,12 @@ bool json_u32(cJSON* root, const char* key, uint32_t& value) {
 
 bool RestServer::begin(hg::Controller& controller, std::string_view local_api_token,
                        std::string_view certificate_pem, std::string_view private_key_pem,
-                       std::string_view device_id, uint16_t port) {
+                       std::string_view device_id, uint16_t port,
+                       homeguard::AccessControl* access_control) {
     if (server_ || port == 0U || local_api_token.size() < 32U || certificate_pem.empty() ||
         private_key_pem.empty() || device_id.empty()) return false;
     controller_ = &controller;
+    access_control_ = access_control;
     token_.reset(local_api_token);
     certificate_pem_ = certificate_pem;
     private_key_pem_ = private_key_pem;
@@ -112,7 +115,8 @@ bool RestServer::begin(hg::Controller& controller, std::string_view local_api_to
         stop();
         return false;
     }
-    ESP_LOGI(tag, "authenticated HTTPS API started for %s", device_id_.c_str());
+    ESP_LOGI(tag, "authenticated HTTPS API started for %s access=%s",
+             device_id_.c_str(), access_control_ ? "enabled" : "token-only");
     return true;
 }
 
@@ -120,6 +124,7 @@ void RestServer::stop() {
     if (server_) httpd_ssl_stop(static_cast<httpd_handle_t>(server_));
     server_ = nullptr;
     controller_ = nullptr;
+    access_control_ = nullptr;
     token_.clear();
     std::fill(private_key_pem_.begin(), private_key_pem_.end(), '\0');
     certificate_pem_.clear(); private_key_pem_.clear(); device_id_.clear();
@@ -165,15 +170,39 @@ int RestServer::command(httpd_req_t* request) {
     if (!authorize(request)) return send_json(request, "401 Unauthorized", R"({"error":"unauthorized"})");
     std::array<char, max_body + 1> body{}; cJSON* root = nullptr;
     if (!read_json(request, body, root)) return send_json(request, "400 Bad Request", R"({"error":"invalid_json"})");
+
     uint64_t request_id = 0; uint32_t challenge_token = 0;
-    const auto command_type = hg::parse_command_type(json_string(root, "command"));
+    const std::string command_text = json_string(root, "command");
+    const std::string actor = json_string(root, "actor");
+    const std::string credential = json_string(root, "credential");
+    const auto command_type = hg::parse_command_type(command_text);
     const bool request_ok = json_u64(root, "requestId", request_id);
     const bool challenge_present = json_u32(root, "challenge", challenge_token);
-    cJSON_Delete(root); std::fill(body.begin(), body.end(), '\0');
-    if (!request_ok || !command_type) return send_json(request, "422 Unprocessable Entity", R"({"error":"invalid_command"})");
+
+    cJSON_Delete(root);
+    std::fill(body.begin(), body.end(), '\0');
+
+    if (!request_ok || !command_type) {
+        return send_json(request, "422 Unprocessable Entity", R"({"error":"invalid_command"})");
+    }
+
+    if (access_control_ != nullptr) {
+        if (actor.empty() || credential.empty()) {
+            return send_json(request, "403 Forbidden",
+                             R"({"accepted":false,"duplicate":false,"code":"credential_required"})");
+        }
+        const auto decision = access_control_->authorize(actor, credential, command_text);
+        if (decision != homeguard::AuditDecision::Allowed) {
+            const std::string response = std::string{"{\"accepted\":false,\"duplicate\":false,\"code\":\""} +
+                                         homeguard::to_string(decision) + "\"}";
+            return send_json(request, "403 Forbidden", response);
+        }
+    }
+
     if (hg::dangerous(*command_type) && !challenge_present) {
         return send_json(request, "409 Conflict", R"({"accepted":false,"duplicate":false,"code":"challenge_required"})");
     }
+
     const uint64_t received_at = now_ms();
     const hg::Command command_value{request_id, received_at, *command_type, challenge_token, true};
     const auto result = controller_->execute(command_value, received_at);
