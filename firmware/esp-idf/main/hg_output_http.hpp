@@ -18,7 +18,9 @@ public:
 
 private:
     static esp_err_t command_post(httpd_req_t* request);
+    static esp_err_t runtime_get(httpd_req_t* request);
     esp_err_t handle_command(httpd_req_t* request);
+    esp_err_t handle_runtime(httpd_req_t* request) const;
 
     hg::SystemModel* model_{};
     hg::BootReadinessReport* readiness_{};

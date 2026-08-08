@@ -26,6 +26,7 @@ idf_component_register(
         "../../src/output_interlock.cpp"
         "../../src/output_command.cpp"
         "../../src/physical_output_runtime.cpp"
+        "../../src/physical_output_diagnostics.cpp"
         "../../src/event_log.cpp"
         "../../src/access_control.cpp"
         "../../src/access_store.cpp"

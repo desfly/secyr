@@ -10,6 +10,7 @@ on:
       - "web/**"
       - "tools/**"
       - "tests/**"
+      - "docs/**"
       - ".github/workflows/homeguard-build.yml"
   pull_request:
     branches: [main]
@@ -19,6 +20,7 @@ on:
       - "web/**"
       - "tools/**"
       - "tests/**"
+      - "docs/**"
       - ".github/workflows/homeguard-build.yml"
 
 permissions:
@@ -204,3 +206,39 @@ jobs:
             android/.gradle/**
             android/app/build/reports/**
           if-no-files-found: warn
+
+  test-candidate:
+    name: Build-0056 ESP + Android test candidate
+    needs: [esp-idf-build, android-build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout instructions
+        uses: actions/checkout@v5
+
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: HomeGuard-S3-firmware
+          path: test-candidate/firmware
+
+      - name: Download Android artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: HomeGuard-S3-Android
+          path: test-candidate/android
+
+      - name: Add test instructions and package checksums
+        shell: bash
+        run: |
+          cp docs/BUILD-0056-TEST-CANDIDATE.txt test-candidate/README-FIRST.txt
+          find test-candidate -type f ! -name SHA256SUMS-TEST-CANDIDATE.txt -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > test-candidate/SHA256SUMS-TEST-CANDIDATE.txt
+
+      - name: Upload combined test candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuard-S3-Build-0056-TEST-CANDIDATE
+          path: test-candidate/
+          if-no-files-found: error
