@@ -1,5 +1,6 @@
 #include "hg_cloud_link.hpp"
 
+#include "esp_check.h"
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
 #include "esp_mac.h"
