@@ -16,6 +16,7 @@ private:
     static esp_err_t root_get(httpd_req_t* request);
     static esp_err_t provision_post(httpd_req_t* request);
     static esp_err_t status_get(httpd_req_t* request);
+    static esp_err_t scan_get(httpd_req_t* request);
     static WifiProvisioningHttp* self_from(httpd_req_t* request);
 
     WifiCredentialStore* store_{};
