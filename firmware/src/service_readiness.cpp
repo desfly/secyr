@@ -11,8 +11,10 @@ ServiceReadinessSnapshot make_service_readiness_snapshot(
     ServiceReadinessSnapshot result{};
     result.hardware_record_present = hardware != nullptr;
     result.commissioning_record_present = commissioning != nullptr;
-    result.hardware_record_valid = hardware != nullptr && validate_hardware_verification(*hardware).valid;
-    result.commissioning_record_valid = commissioning != nullptr && validate_commissioning_state(*commissioning).valid;
+    result.hardware_record_valid = hardware != nullptr &&
+        validate_hardware_verification(*hardware) == HardwareVerificationStatus::Valid;
+    result.commissioning_record_valid = commissioning != nullptr &&
+        validate_commissioning_state(*commissioning) == CommissioningStateValidation::Valid;
     result.boot = evaluate_boot_readiness({
         result.hardware_record_valid ? hardware : nullptr,
         result.commissioning_record_valid ? commissioning : nullptr,
