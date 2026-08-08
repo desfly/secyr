@@ -1,6 +1,7 @@
 package ua.homeguard.s3
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -17,6 +18,7 @@ import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.control.CommandController
+import ua.homeguard.s3.events.EventLogExporter
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.SystemSnapshot
@@ -44,6 +46,16 @@ class MainActivity : ComponentActivity() {
     private val commandStatus = MutableStateFlow("Готово")
     private val operatorId = MutableStateFlow("admin")
     private val operatorPin = MutableStateFlow("")
+    private var pendingExportText: String = ""
+
+    private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null && pendingExportText.isNotEmpty()) {
+            runCatching {
+                contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(pendingExportText) }
+            }
+        }
+        pendingExportText = ""
+    }
 
     private val qrScanner = registerForActivityResult(ScanContract()) { result ->
         result.contents?.let(provisioning::acceptQr)
@@ -119,24 +131,25 @@ class MainActivity : ComponentActivity() {
                         zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
                         onOperatorIdChange = { operatorId.value = it.take(23) },
                         onOperatorPinChange = { operatorPin.value = it },
-                        onCriticalNotificationsChange = { enabled ->
-                            lifecycleScope.launch {
-                                settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled))
-                            }
-                        },
-                        onStatusNotificationsChange = { enabled ->
-                            lifecycleScope.launch {
-                                settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled))
-                            }
-                        },
-                        onZoneNotificationsChange = { enabled ->
-                            lifecycleScope.launch {
-                                settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled))
-                            }
-                        },
+                        onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
+                        onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } },
+                        onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } },
                         onClearEventHistory = {
                             eventHistory.clear()
                             telemetry.clearEvents()
+                        },
+                        onExportEvents = {
+                            pendingExportText = EventLogExporter.toCsv(events)
+                            exportLauncher.launch(EventLogExporter.suggestedFileName())
+                        },
+                        onShareEvents = {
+                            val payload = EventLogExporter.toCsv(events)
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/csv"
+                                putExtra(Intent.EXTRA_SUBJECT, "HomeGuard-S3 event log")
+                                putExtra(Intent.EXTRA_TEXT, payload)
+                            }
+                            startActivity(Intent.createChooser(intent, "Поділитися журналом"))
                         },
                         onCommand = ::executeCommand,
                     )
@@ -165,9 +178,7 @@ class MainActivity : ComponentActivity() {
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
+        ) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private fun requestQrScan() {
@@ -178,10 +189,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchQrScanner() {
-        qrScanner.launch(
-            ScanOptions().setPrompt("Скануйте QR HomeGuard-S3")
-                .setBeepEnabled(false).setOrientationLocked(false)
-        )
+        qrScanner.launch(ScanOptions().setPrompt("Скануйте QR HomeGuard-S3").setBeepEnabled(false).setOrientationLocked(false))
     }
 
     private fun requiredProvisioningPermissions(): List<String> = buildList {

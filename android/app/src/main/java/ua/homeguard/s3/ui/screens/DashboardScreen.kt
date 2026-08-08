@@ -51,6 +51,8 @@ fun DashboardScreen(
     onStatusNotificationsChange: (Boolean) -> Unit,
     onZoneNotificationsChange: (Boolean) -> Unit,
     onClearEventHistory: () -> Unit,
+    onExportEvents: () -> Unit,
+    onShareEvents: () -> Unit,
     onCommand: (CommandType) -> Unit,
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
@@ -62,11 +64,7 @@ fun DashboardScreen(
     val sourceFilter = eventSourceText.trim().toIntOrNull()
     val filteredEvents = EventLogFilterEngine.apply(
         events,
-        EventLogFilter(
-            category = eventCategory,
-            query = eventQuery,
-            sourceId = sourceFilter,
-        ),
+        EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter),
     )
 
     pendingDangerousCommand?.let { command ->
@@ -74,12 +72,7 @@ fun DashboardScreen(
             onDismissRequest = { pendingDangerousCommand = null },
             title = { Text("Підтвердіть команду") },
             text = { Text("Виконати ${command.name}? Контролер перевірить PIN оператора та challenge.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    pendingDangerousCommand = null
-                    onCommand(command)
-                }) { Text("Виконати") }
-            },
+            confirmButton = { TextButton(onClick = { pendingDangerousCommand = null; onCommand(command) }) { Text("Виконати") } },
             dismissButton = { TextButton(onClick = { pendingDangerousCommand = null }) { Text("Скасувати") } },
         )
     }
@@ -89,20 +82,12 @@ fun DashboardScreen(
             onDismissRequest = { confirmClearHistory = false },
             title = { Text("Очистити журнал?") },
             text = { Text("Локально збережена історія подій буде видалена з цього телефону. Нові події продовжать записуватися.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmClearHistory = false
-                    onClearEventHistory()
-                }) { Text("Очистити") }
-            },
+            confirmButton = { TextButton(onClick = { confirmClearHistory = false; onClearEventHistory() }) { Text("Очистити") } },
             dismissButton = { TextButton(onClick = { confirmClearHistory = false }) { Text("Скасувати") } },
         )
     }
 
-    LazyColumn(
-        modifier = Modifier.padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
+    LazyColumn(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Text("HomeGuard-S3 $versionName", style = MaterialTheme.typography.headlineMedium)
             Text("Пристрій: $deviceId")
@@ -113,22 +98,11 @@ fun DashboardScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Оператор", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(
-                        value = operatorId,
-                        onValueChange = onOperatorIdChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("ID користувача") },
-                    )
+                    OutlinedTextField(value = operatorId, onValueChange = onOperatorIdChange, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("ID користувача") })
                     OutlinedTextField(
                         value = operatorPin,
-                        onValueChange = { value ->
-                            if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("PIN") },
-                        visualTransformation = PasswordVisualTransformation(),
+                        onValueChange = { value -> if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value) },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("PIN") }, visualTransformation = PasswordVisualTransformation(),
                     )
                     Text(if (credentialsReady) "PIN готовий до перевірки контролером" else "Введіть ID та PIN 4–12 цифр")
                     Text("PIN зберігається тільки в оперативній пам’яті застосунку.")
@@ -156,7 +130,6 @@ fun DashboardScreen(
                     NotificationSwitchRow("Критичні", "Тривога, tamper, батарея, offline", criticalNotificationsEnabled, onCheckedChange = onCriticalNotificationsChange)
                     NotificationSwitchRow("Статус системи", "Охорона та зняття з охорони", statusNotificationsEnabled, onCheckedChange = onStatusNotificationsChange)
                     NotificationSwitchRow("Події зон", "Відкриття та закриття зон", zoneNotificationsEnabled, enabled = statusNotificationsEnabled, onCheckedChange = onZoneNotificationsChange)
-                    Text("Критичні сповіщення увімкнені за замовчуванням. Системні налаштування Android каналу мають вищий пріоритет.")
                 }
             }
         }
@@ -194,31 +167,19 @@ fun DashboardScreen(
                         EventCategoryButton("Зони", EventLogCategory.ZONES, eventCategory) { eventCategory = it }
                         EventCategoryButton("Інші", EventLogCategory.OTHER, eventCategory) { eventCategory = it }
                     }
-                    OutlinedTextField(
-                        value = eventQuery,
-                        onValueChange = { eventQuery = it.take(32) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("Пошук: тип, значення, sequence") },
-                    )
-                    OutlinedTextField(
-                        value = eventSourceText,
-                        onValueChange = { value -> if (value.length <= 6 && value.all(Char::isDigit)) eventSourceText = value },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("Source ID / зона (порожньо = усі)") },
-                    )
+                    OutlinedTextField(value = eventQuery, onValueChange = { eventQuery = it.take(32) }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Пошук: тип, значення, sequence") })
+                    OutlinedTextField(value = eventSourceText, onValueChange = { value -> if (value.length <= 6 && value.all(Char::isDigit)) eventSourceText = value }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Source ID / зона (порожньо = усі)") })
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(enabled = events.isNotEmpty(), onClick = onExportEvents) { Text("Експорт CSV") }
+                        OutlinedButton(enabled = events.isNotEmpty(), onClick = onShareEvents) { Text("Поділитися") }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (eventCategory != EventLogCategory.ALL || eventQuery.isNotBlank() || eventSourceText.isNotBlank()) {
-                            OutlinedButton(onClick = {
-                                eventCategory = EventLogCategory.ALL
-                                eventQuery = ""
-                                eventSourceText = ""
-                            }) { Text("Скинути фільтри") }
+                            OutlinedButton(onClick = { eventCategory = EventLogCategory.ALL; eventQuery = ""; eventSourceText = "" }) { Text("Скинути фільтри") }
                         }
                         OutlinedButton(enabled = events.isNotEmpty(), onClick = { confirmClearHistory = true }) { Text("Очистити журнал") }
                     }
-                    Text("Історія зберігається локально на телефоні та відновлюється після перезапуску застосунку.", style = MaterialTheme.typography.bodySmall)
+                    Text("Експорт містить повну локальну історію, а не лише відфільтровані рядки.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -238,32 +199,23 @@ fun DashboardScreen(
         }
 
         item { Text("Зони", style = MaterialTheme.typography.titleLarge) }
-        if (snapshot.zones.isEmpty()) {
-            item { Text("Очікування живих даних зон…") }
-        } else {
-            items(snapshot.zones, key = { it.index }) { zone ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column {
-                            Text(zone.name, style = MaterialTheme.typography.titleMedium)
-                            Text(if (zone.enabled) "Активна" else "Вимкнена")
-                        }
-                        Text(zone.state.uppercase())
-                    }
+        if (snapshot.zones.isEmpty()) item { Text("Очікування живих даних зон…") }
+        else items(snapshot.zones, key = { it.index }) { zone ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column { Text(zone.name, style = MaterialTheme.typography.titleMedium); Text(if (zone.enabled) "Активна" else "Вимкнена") }
+                    Text(zone.state.uppercase())
                 }
             }
         }
 
         item { Text("Тиск / аналогові канали", style = MaterialTheme.typography.titleLarge) }
-        if (snapshot.pressures.isEmpty()) {
-            item { Text("Немає даних") }
-        } else {
-            items(snapshot.pressures, key = { it.index }) { pressure ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Канал ${pressure.index + 1}")
-                        Text("${pressure.value} · ${pressure.state}")
-                    }
+        if (snapshot.pressures.isEmpty()) item { Text("Немає даних") }
+        else items(snapshot.pressures, key = { it.index }) { pressure ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Канал ${pressure.index + 1}")
+                    Text("${pressure.value} · ${pressure.state}")
                 }
             }
         }
@@ -279,18 +231,12 @@ private fun EventCategoryButton(label: String, category: EventLogCategory, selec
 @Composable
 private fun NotificationSwitchRow(label: String, detail: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label)
-            Text(detail, style = MaterialTheme.typography.bodySmall)
-        }
+        Column(modifier = Modifier.weight(1f)) { Text(label); Text(detail, style = MaterialTheme.typography.bodySmall) }
         Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
     }
 }
 
 @Composable
 private fun StatusRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label)
-        Text(value)
-    }
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label); Text(value) }
 }
