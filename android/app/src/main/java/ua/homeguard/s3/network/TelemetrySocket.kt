@@ -12,6 +12,8 @@ import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
 
 class TelemetrySocket {
+    companion object { private const val MAX_EVENT_HISTORY = 256 }
+
     private val state = MutableStateFlow(SystemSnapshot())
     private val eventState = MutableStateFlow<List<SystemEventRecord>>(emptyList())
     private val liveEventState = MutableSharedFlow<SystemEventRecord>(extraBufferCapacity = 16)
@@ -20,6 +22,14 @@ class TelemetrySocket {
     fun snapshots(): Flow<SystemSnapshot> = state
     fun events(): Flow<List<SystemEventRecord>> = eventState
     fun liveEvents(): Flow<SystemEventRecord> = liveEventState
+
+    fun seedEvents(events: List<SystemEventRecord>) {
+        eventState.value = events.distinctBy { it.sequence }.sortedByDescending { it.sequence }.take(MAX_EVENT_HISTORY)
+    }
+
+    fun clearEvents() {
+        eventState.value = emptyList()
+    }
 
     fun connect(url: String, token: String, certificateSha256: String = "") {
         disconnect()
@@ -40,7 +50,9 @@ class TelemetrySocket {
                             sourceId = json.optInt("sourceId", 0),
                             value = json.optInt("value", 0),
                         )
-                        eventState.value = (listOf(item) + eventState.value).take(64)
+                        eventState.value = (listOf(item) + eventState.value)
+                            .distinctBy { it.sequence }
+                            .take(MAX_EVENT_HISTORY)
                         liveEventState.tryEmit(item)
                     } else {
                         state.value = JsonParsers.snapshot(json)
