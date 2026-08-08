@@ -6,6 +6,7 @@
 #include "hg_output_http.hpp"
 #include "hg_gpio_output_backend.hpp"
 #include "hg_telemetry_runtime.hpp"
+#include "hg_wifi_provisioning.hpp"
 #include "hg_access_nvs.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
@@ -33,6 +34,7 @@ homeguard::idf::SystemHttp g_system_http;
 homeguard::idf::ServiceHttp g_service_http;
 homeguard::idf::OutputHttp g_output_http;
 homeguard::idf::GpioOutputBackend g_gpio_outputs;
+homeguard::idf::WifiProvisioningRuntime g_wifi_provisioning;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
 homeguard::AccessControl g_access_control;
@@ -152,6 +154,12 @@ extern "C" void app_main()
     restore_commissioning_state();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    const bool provisioning_required = !g_boot_readiness.outputs_allowed();
+    const auto wifi_error = g_wifi_provisioning.start(provisioning_required);
+    if (wifi_error != ESP_OK) {
+        ESP_LOGE(kTag, "First-boot WiFi provisioning failed: %s", esp_err_to_name(wifi_error));
+    }
 
     initialize_system_model();
     initialize_physical_outputs();
