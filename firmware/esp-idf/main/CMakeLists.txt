@@ -24,6 +24,7 @@ idf_component_register(
         "../../src/access_store.cpp"
         "../../src/crc32.cpp"
         "../../src/sha256.cpp"
+        "../../src/hardware_profile.cpp"
         "../../src/hardware_runtime.cpp"
         "../../src/hardware_test.cpp"
         "../../src/commissioning.cpp"
