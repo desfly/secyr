@@ -13,6 +13,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import ua.homeguard.s3.MainActivity
 import ua.homeguard.s3.model.SystemEventRecord
+import ua.homeguard.s3.storage.AppSettings
 
 class HomeGuardNotifications(private val context: Context) {
     companion object {
@@ -28,7 +29,7 @@ class HomeGuardNotifications(private val context: Context) {
                 CHANNEL_CRITICAL,
                 "HomeGuard critical alerts",
                 NotificationManager.IMPORTANCE_HIGH,
-            ).apply { description = "Alarm, tamper and critical HomeGuard alerts" }
+            ).apply { description = "Alarm, tamper, battery and sensor-offline alerts" }
         )
         manager.createNotificationChannel(
             NotificationChannel(
@@ -39,13 +40,15 @@ class HomeGuardNotifications(private val context: Context) {
         )
     }
 
-    fun notify(event: SystemEventRecord) {
+    fun notify(event: SystemEventRecord, settings: AppSettings) {
         val alert = AlertPolicy.classify(event) ?: return
+        if (!isEnabled(event, alert, settings)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
 
-        val channel = if (alert.severity == AlertSeverity.CRITICAL) CHANNEL_CRITICAL else CHANNEL_STATUS
+        val critical = alert.severity != AlertSeverity.INFO
+        val channel = if (critical) CHANNEL_CRITICAL else CHANNEL_STATUS
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
@@ -60,13 +63,25 @@ class HomeGuardNotifications(private val context: Context) {
             .setContentTitle(alert.title)
             .setContentText(alert.text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(alert.text))
-            .setPriority(if (alert.severity == AlertSeverity.CRITICAL) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_DEFAULT)
-            .setCategory(if (alert.severity == AlertSeverity.CRITICAL) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_STATUS)
+            .setPriority(if (critical) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(if (critical) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_STATUS)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .build()
 
         NotificationManagerCompat.from(context).notify(notificationId(event), notification)
+    }
+
+    private fun isEnabled(event: SystemEventRecord, alert: AlertMessage, settings: AppSettings): Boolean {
+        val type = event.event.uppercase()
+        if (type == "ZONE_OPEN" || type == "ZONE_CLOSED") {
+            return settings.statusNotificationsEnabled && settings.zoneNotificationsEnabled
+        }
+        return if (alert.severity == AlertSeverity.INFO) {
+            settings.statusNotificationsEnabled
+        } else {
+            settings.criticalNotificationsEnabled
+        }
     }
 
     private fun notificationId(event: SystemEventRecord): Int {
