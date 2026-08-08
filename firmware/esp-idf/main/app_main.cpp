@@ -9,6 +9,9 @@
 #include "hg_wifi_provisioning.hpp"
 #include "hg_wifi_credentials.hpp"
 #include "hg_wifi_http.hpp"
+#include "hg_cloud_link.hpp"
+#include "hg_cloud_config.hpp"
+#include "hg_cloud_http.hpp"
 #include "hg_access_nvs.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
@@ -39,6 +42,9 @@ homeguard::idf::GpioOutputBackend g_gpio_outputs;
 homeguard::idf::WifiProvisioningRuntime g_wifi_provisioning;
 homeguard::idf::WifiCredentialStore g_wifi_credentials_store;
 homeguard::idf::WifiProvisioningHttp g_wifi_http;
+homeguard::idf::CloudLink g_cloud_link;
+homeguard::idf::CloudConfigStore g_cloud_config_store;
+homeguard::idf::CloudHttp g_cloud_http;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
 homeguard::AccessControl g_access_control;
@@ -122,6 +128,33 @@ void restore_wifi_credentials()
     }
 }
 
+void restore_cloud_config()
+{
+    const auto identity_error = g_cloud_link.prepare_identity();
+    if (identity_error != ESP_OK) {
+        ESP_LOGW(kTag, "Cloud device identity unavailable: %s", esp_err_to_name(identity_error));
+    } else {
+        ESP_LOGI(kTag, "Cloud device id: %s", g_cloud_link.device_id());
+    }
+
+    homeguard::idf::CloudConfig config{};
+    const auto error = g_cloud_config_store.load(config);
+    if (error == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(kTag, "Cloud not configured; local control remains available");
+        return;
+    }
+    if (error != ESP_OK) {
+        ESP_LOGW(kTag, "Persisted cloud config rejected: %s", esp_err_to_name(error));
+        return;
+    }
+
+    const auto start_error = g_cloud_link.start(
+        config.broker_uri.data(), config.username.data(), config.password.data());
+    if (start_error != ESP_OK) {
+        ESP_LOGW(kTag, "Cloud link start failed: %s", esp_err_to_name(start_error));
+    }
+}
+
 void initialize_system_model()
 {
     g_system_model.add_partition(1);
@@ -171,6 +204,10 @@ esp_err_t start_http_server()
         g_wifi_http.register_handlers(g_http_server, &g_wifi_credentials_store, &g_wifi_provisioning),
         kTag,
         "wifi provisioning routes");
+    ESP_RETURN_ON_ERROR(
+        g_cloud_http.register_handlers(g_http_server, &g_cloud_config_store, &g_cloud_link),
+        kTag,
+        "cloud routes");
     return g_build_http.register_handlers(g_http_server);
 }
 
@@ -192,6 +229,7 @@ extern "C" void app_main()
         restore_wifi_credentials();
     }
 
+    restore_cloud_config();
     initialize_system_model();
     initialize_physical_outputs();
 
