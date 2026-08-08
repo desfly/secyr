@@ -135,6 +135,19 @@ esp_err_t WifiProvisioningRuntime::connect_station(const char* ssid, const char*
 {
     if (ssid == nullptr || ssid[0] == '\0' || password == nullptr) return ESP_ERR_INVALID_ARG;
 
+    if (station_connected_ || station_connecting_) {
+        const auto disconnect_error = esp_wifi_disconnect();
+        if (disconnect_error != ESP_OK && disconnect_error != ESP_ERR_WIFI_NOT_CONNECT) {
+            ESP_LOGW(kTag, "STA disconnect before reprovision failed: %s",
+                     esp_err_to_name(disconnect_error));
+            return disconnect_error;
+        }
+    }
+
+    station_connecting_ = false;
+    station_connected_ = false;
+    station_ip_address_[0] = '\0';
+
     wifi_config_t config{};
     std::strncpy(reinterpret_cast<char*>(config.sta.ssid), ssid, sizeof(config.sta.ssid) - 1);
     std::strncpy(reinterpret_cast<char*>(config.sta.password), password, sizeof(config.sta.password) - 1);
@@ -142,14 +155,16 @@ esp_err_t WifiProvisioningRuntime::connect_station(const char* ssid, const char*
 
     auto error = esp_wifi_set_config(WIFI_IF_STA, &config);
     if (error != ESP_OK) return error;
+
+    station_connecting_ = true;
     error = esp_wifi_connect();
-    if (error == ESP_OK) {
-        station_connecting_ = true;
-        station_connected_ = false;
-        station_ip_address_[0] = '\0';
-        ESP_LOGI(kTag, "STA connect requested for SSID: %s", ssid);
+    if (error != ESP_OK) {
+        station_connecting_ = false;
+        return error;
     }
-    return error;
+
+    ESP_LOGI(kTag, "STA connect requested for SSID: %s", ssid);
+    return ESP_OK;
 }
 
 }  // namespace homeguard::idf
