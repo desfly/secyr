@@ -2,9 +2,10 @@
 #include "esp_err.h"
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 using ssize_t = std::ptrdiff_t;
 using httpd_handle_t = void*;
-struct httpd_req_t { void* user_ctx; };
+struct httpd_req_t { void* user_ctx{}; std::size_t content_len{}; const char* mock_body{}; };
 using httpd_uri_func_t = esp_err_t(*)(httpd_req_t*);
 enum { HTTP_GET=0, HTTP_POST=1, HTTPD_500_INTERNAL_SERVER_ERROR=500, HTTPD_WS_TYPE_TEXT=1 };
 struct httpd_uri_t { const char* uri; int method; httpd_uri_func_t handler; void* user_ctx; bool is_websocket=false; };
@@ -19,3 +20,9 @@ inline esp_err_t httpd_resp_send(httpd_req_t*,const char*,std::ptrdiff_t){return
 inline esp_err_t httpd_resp_send_err(httpd_req_t*,int,const char*){return ESP_OK;}
 inline int httpd_req_to_sockfd(httpd_req_t*){ return 1; }
 inline esp_err_t httpd_ws_send_frame_async(httpd_handle_t,int,httpd_ws_frame_t*){ return ESP_OK; }
+inline int httpd_req_recv(httpd_req_t* req, char* buffer, std::size_t length){
+    if(req==nullptr || buffer==nullptr || req->mock_body==nullptr) return -1;
+    const auto n = req->content_len < length ? req->content_len : length;
+    std::memcpy(buffer, req->mock_body, n);
+    return static_cast<int>(n);
+}
