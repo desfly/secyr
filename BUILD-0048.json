@@ -1,0 +1,17 @@
+{
+  "build": 48,
+  "name": "hardware verification package",
+  "androidVersion": "0.0.48",
+  "focus": [
+    "verified hardware profile",
+    "CRC-protected verification record",
+    "fail-closed output gate",
+    "ESP-IDF integration",
+    "host safety tests"
+  ],
+  "safety": {
+    "gpioNumbersInvented": false,
+    "activePolarityInvented": false,
+    "physicalOutputsDefault": "blocked"
+  }
+}
