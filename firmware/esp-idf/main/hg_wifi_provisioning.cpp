@@ -17,7 +17,7 @@ constexpr const char* kTag = "hg_wifi";
 
 esp_err_t WifiProvisioningRuntime::start(bool provisioning_required)
 {
-    ESP_LOGI(kTag, "=== HomeGuard-S3 Build-0057 WiFi Diagnostics ===");
+    ESP_LOGI(kTag, "=== HomeGuard-S3 Build-0058 WiFi Diagnostics ===");
     ESP_LOGI(kTag, "WiFi hardware: ESP32-S3");
     ESP_LOGI(kTag, "Provisioning required: %s", provisioning_required ? "YES" : "NO");
 
@@ -32,6 +32,7 @@ esp_err_t WifiProvisioningRuntime::start(bool provisioning_required)
         ESP_LOGE(kTag, "WiFi radio init: FAILED (netif)");
         return ESP_FAIL;
     }
+    (void)esp_netif_create_default_wifi_sta();
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     auto error = esp_wifi_init(&init);
@@ -59,7 +60,7 @@ esp_err_t WifiProvisioningRuntime::start(bool provisioning_required)
     config.ap.max_connection = 4;
     config.ap.authmode = WIFI_AUTH_OPEN;
 
-    if ((error = esp_wifi_set_mode(WIFI_MODE_AP)) != ESP_OK ||
+    if ((error = esp_wifi_set_mode(WIFI_MODE_APSTA)) != ESP_OK ||
         (error = esp_wifi_set_config(WIFI_IF_AP, &config)) != ESP_OK ||
         (error = esp_wifi_start()) != ESP_OK) {
         ESP_LOGE(kTag, "SoftAP start: FAILED (%s)", esp_err_to_name(error));
@@ -79,10 +80,29 @@ esp_err_t WifiProvisioningRuntime::start(bool provisioning_required)
     ESP_LOGI(kTag, "SoftAP SSID: %s", ssid_.data());
     ESP_LOGI(kTag, "SoftAP IP: %s", ip_address_.data());
     ESP_LOGI(kTag, "SoftAP channel: 1");
-    ESP_LOGI(kTag, "BLE provisioning: NOT_YET_ENABLED");
+    ESP_LOGI(kTag, "STA provisioning: READY");
     ESP_LOGI(kTag, "Physical outputs: FAIL-CLOSED until commissioning is verified");
     ESP_LOGI(kTag, "===============================================");
     return ESP_OK;
+}
+
+esp_err_t WifiProvisioningRuntime::connect_station(const char* ssid, const char* password)
+{
+    if (ssid == nullptr || ssid[0] == '\0' || password == nullptr) return ESP_ERR_INVALID_ARG;
+
+    wifi_config_t config{};
+    std::strncpy(reinterpret_cast<char*>(config.sta.ssid), ssid, sizeof(config.sta.ssid) - 1);
+    std::strncpy(reinterpret_cast<char*>(config.sta.password), password, sizeof(config.sta.password) - 1);
+    config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+
+    auto error = esp_wifi_set_config(WIFI_IF_STA, &config);
+    if (error != ESP_OK) return error;
+    error = esp_wifi_connect();
+    if (error == ESP_OK) {
+        station_connecting_ = true;
+        ESP_LOGI(kTag, "STA connect requested for SSID: %s", ssid);
+    }
+    return error;
 }
 
 }  // namespace homeguard::idf
