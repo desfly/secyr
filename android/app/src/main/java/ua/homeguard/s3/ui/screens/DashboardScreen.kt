@@ -24,12 +24,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import ua.homeguard.s3.diagnostics.SystemDiagnostics
 import ua.homeguard.s3.events.EventLogCategory
 import ua.homeguard.s3.events.EventLogFilter
 import ua.homeguard.s3.events.EventLogFilterEngine
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.ui.components.MaintenancePanel
 
 @Composable
 fun DashboardScreen(
@@ -39,6 +41,8 @@ fun DashboardScreen(
     deviceId: String,
     snapshot: SystemSnapshot,
     events: List<SystemEventRecord>,
+    diagnostics: SystemDiagnostics,
+    backupStatus: String,
     commandStatus: String,
     operatorId: String,
     operatorPin: String,
@@ -53,6 +57,8 @@ fun DashboardScreen(
     onClearEventHistory: () -> Unit,
     onExportEvents: () -> Unit,
     onShareEvents: () -> Unit,
+    onExportSettings: () -> Unit,
+    onImportSettings: () -> Unit,
     onCommand: (CommandType) -> Unit,
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
@@ -62,10 +68,7 @@ fun DashboardScreen(
     var eventSourceText by remember { mutableStateOf("") }
     val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12
     val sourceFilter = eventSourceText.trim().toIntOrNull()
-    val filteredEvents = EventLogFilterEngine.apply(
-        events,
-        EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter),
-    )
+    val filteredEvents = EventLogFilterEngine.apply(events, EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter))
 
     pendingDangerousCommand?.let { command ->
         AlertDialog(
@@ -92,6 +95,15 @@ fun DashboardScreen(
             Text("HomeGuard-S3 $versionName", style = MaterialTheme.typography.headlineMedium)
             Text("Пристрій: $deviceId")
             Text("Канал: $route · знайдено локально: $localDevices")
+        }
+
+        item {
+            MaintenancePanel(
+                diagnostics = diagnostics,
+                backupStatus = backupStatus,
+                onExportSettings = onExportSettings,
+                onImportSettings = onImportSettings,
+            )
         }
 
         item {
@@ -179,21 +191,17 @@ fun DashboardScreen(
                         }
                         OutlinedButton(enabled = events.isNotEmpty(), onClick = { confirmClearHistory = true }) { Text("Очистити журнал") }
                     }
-                    Text("Експорт містить повну локальну історію, а не лише відфільтровані рядки.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
 
-        if (filteredEvents.isEmpty()) {
-            item { Text(if (events.isEmpty()) "Подій ще немає" else "За вибраними фільтрами подій немає") }
-        } else {
-            items(filteredEvents.take(32), key = { it.sequence }) { event ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(event.event, style = MaterialTheme.typography.titleSmall)
-                        Text("#${event.sequence} · source ${event.sourceId} · value ${event.value}")
-                        Text("Категорія: ${EventLogFilterEngine.categoryOf(event).name}", style = MaterialTheme.typography.bodySmall)
-                    }
+        if (filteredEvents.isEmpty()) item { Text(if (events.isEmpty()) "Подій ще немає" else "За вибраними фільтрами подій немає") }
+        else items(filteredEvents.take(32), key = { it.sequence }) { event ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(event.event, style = MaterialTheme.typography.titleSmall)
+                    Text("#${event.sequence} · source ${event.sourceId} · value ${event.value}")
+                    Text("Категорія: ${EventLogFilterEngine.categoryOf(event).name}", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

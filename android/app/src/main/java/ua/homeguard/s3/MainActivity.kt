@@ -18,6 +18,7 @@ import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.control.CommandController
+import ua.homeguard.s3.diagnostics.SystemDiagnosticsEvaluator
 import ua.homeguard.s3.events.EventLogExporter
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
@@ -29,6 +30,7 @@ import ua.homeguard.s3.network.TelemetrySocket
 import ua.homeguard.s3.notifications.HomeGuardNotifications
 import ua.homeguard.s3.repository.ProvisioningCoordinator
 import ua.homeguard.s3.storage.EventHistoryStore
+import ua.homeguard.s3.storage.SettingsBackupCodec
 import ua.homeguard.s3.storage.SettingsStore
 import ua.homeguard.s3.ui.screens.DashboardScreen
 import ua.homeguard.s3.ui.screens.ProvisioningScreen
@@ -44,9 +46,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var commands: CommandController
     private lateinit var notifications: HomeGuardNotifications
     private val commandStatus = MutableStateFlow("Готово")
+    private val backupStatus = MutableStateFlow("Backup/restore готовий")
     private val operatorId = MutableStateFlow("admin")
     private val operatorPin = MutableStateFlow("")
     private var pendingExportText: String = ""
+    private var pendingSettingsBackupText: String = ""
 
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null && pendingExportText.isNotEmpty()) {
@@ -55,6 +59,36 @@ class MainActivity : ComponentActivity() {
             }
         }
         pendingExportText = ""
+    }
+
+    private val settingsBackupLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null || pendingSettingsBackupText.isEmpty()) {
+            pendingSettingsBackupText = ""
+            return@registerForActivityResult
+        }
+        val result = runCatching {
+            contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(pendingSettingsBackupText) }
+                ?: error("cannot open destination")
+        }
+        backupStatus.value = if (result.isSuccess) "Backup налаштувань збережено" else "Помилка backup: ${result.exceptionOrNull()?.message ?: "write"}"
+        pendingSettingsBackupText = ""
+    }
+
+    private val settingsRestoreLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            val result = runCatching {
+                val text = contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    ?: error("cannot read backup")
+                SettingsBackupCodec.decode(text, settings.settings.value.apiToken)
+            }
+            result.onSuccess { restored ->
+                settings.update(restored)
+                backupStatus.value = "Restore виконано; секретний API token збережено локально"
+            }.onFailure { error ->
+                backupStatus.value = "Помилка restore: ${error.message ?: "invalid backup"}"
+            }
+        }
     }
 
     private val qrScanner = registerForActivityResult(ScanContract()) { result ->
@@ -67,8 +101,7 @@ class MainActivity : ComponentActivity() {
             }) launchQrScanner()
     }
 
-    private val notificationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -99,8 +132,17 @@ class MainActivity : ComponentActivity() {
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
             val events by telemetry.events().collectAsState(initial = emptyList())
             val commandMessage by commandStatus.collectAsState()
+            val maintenanceMessage by backupStatus.collectAsState()
             val currentOperator by operatorId.collectAsState()
             val currentPin by operatorPin.collectAsState()
+            val diagnostics = SystemDiagnosticsEvaluator.evaluate(
+                deviceId = appSettings.deviceId,
+                route = endpoint.path.name,
+                localDevices = devices.size,
+                certificateSha256 = appSettings.localCertificateSha256,
+                snapshot = snapshot,
+                eventCount = events.size,
+            )
             MaterialTheme {
                 val provisioningActive = provisioningState.phase in setOf(
                     ProvisioningPhase.CONNECTING_SETUP_AP,
@@ -123,6 +165,8 @@ class MainActivity : ComponentActivity() {
                         deviceId = appSettings.deviceId,
                         snapshot = snapshot,
                         events = events,
+                        diagnostics = diagnostics,
+                        backupStatus = maintenanceMessage,
                         commandStatus = commandMessage,
                         operatorId = currentOperator,
                         operatorPin = currentPin,
@@ -151,6 +195,11 @@ class MainActivity : ComponentActivity() {
                             }
                             startActivity(Intent.createChooser(intent, "Поділитися журналом"))
                         },
+                        onExportSettings = {
+                            pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings)
+                            settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName())
+                        },
+                        onImportSettings = { settingsRestoreLauncher.launch("application/json") },
                         onCommand = ::executeCommand,
                     )
                 }
