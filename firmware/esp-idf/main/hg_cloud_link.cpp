@@ -78,8 +78,9 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
     client_ = esp_mqtt_client_init(&config);
     if (client_ == nullptr) return ESP_FAIL;
 
-    auto error = esp_mqtt_client_register_event(client_, ESP_EVENT_ANY_ID,
-                                                  &CloudLink::mqtt_event_handler, this);
+    auto error = esp_mqtt_client_register_event(
+        client_, static_cast<esp_mqtt_event_id_t>(ESP_EVENT_ANY_ID),
+        &CloudLink::mqtt_event_handler, this);
     if (error != ESP_OK) {
         esp_mqtt_client_destroy(client_);
         client_ = nullptr;
