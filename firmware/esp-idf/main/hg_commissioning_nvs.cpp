@@ -67,7 +67,14 @@ esp_err_t CommissioningNvsStore::erase_all() const {
     nvs_handle_t handle{};
     auto error = nvs_open(kNamespace, NVS_READWRITE, &handle);
     if (error != ESP_OK) return error;
-    error = nvs_erase_all(handle);
+
+    auto erase_one = [handle](const char* key) {
+        auto result = nvs_erase_key(handle, key);
+        return result == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : result;
+    };
+
+    error = erase_one(kHardwareKey);
+    if (error == ESP_OK) error = erase_one(kCommissioningKey);
     if (error == ESP_OK) error = nvs_commit(handle);
     nvs_close(handle);
     return error;
