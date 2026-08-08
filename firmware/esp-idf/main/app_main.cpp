@@ -3,6 +3,7 @@
 #include "hg_infrastructure_http.hpp"
 #include "hg_system_http.hpp"
 #include "hg_service_http.hpp"
+#include "hg_output_http.hpp"
 #include "hg_telemetry_runtime.hpp"
 #include "hg_access_nvs.hpp"
 #include "hg_commissioning_nvs.hpp"
@@ -28,6 +29,7 @@ homeguard::idf::InfrastructureHttp g_http_api;
 homeguard::idf::BuildHttp g_build_http;
 homeguard::idf::SystemHttp g_system_http;
 homeguard::idf::ServiceHttp g_service_http;
+homeguard::idf::OutputHttp g_output_http;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
 homeguard::AccessControl g_access_control;
@@ -108,6 +110,10 @@ esp_err_t start_http_server()
     ESP_RETURN_ON_ERROR(httpd_start(&g_http_server, &config), kTag, "httpd_start");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus), kTag, "system routes");
+    ESP_RETURN_ON_ERROR(
+        g_output_http.register_handlers(g_http_server, &g_system_model, &g_boot_readiness, &g_system_bus),
+        kTag,
+        "output routes");
     ESP_RETURN_ON_ERROR(
         g_service_http.register_handlers(
             g_http_server,
