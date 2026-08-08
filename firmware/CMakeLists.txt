@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(homeguard_s3_build0038 LANGUAGES CXX)
+project(homeguard_s3_build0045 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -12,6 +12,7 @@ add_library(homeguard_core
     src/provisioning_qr.cpp
     src/hardware_profile.cpp
     src/hardware_capabilities.cpp
+    src/hardware_test.cpp
     src/service_button.cpp
     src/startup_flow.cpp
     src/device_identity.cpp
@@ -53,6 +54,7 @@ add_executable(homeguard_tests
     ../tests/test_build0032.cpp
     ../tests/test_build0037.cpp
     ../tests/test_build0038.cpp
+    ../tests/test_build0045.cpp
 )
 target_link_libraries(homeguard_tests PRIVATE homeguard_core)
 enable_testing()
