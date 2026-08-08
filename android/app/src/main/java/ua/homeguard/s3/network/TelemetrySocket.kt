@@ -1,6 +1,7 @@
 package ua.homeguard.s3.network
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import okhttp3.Request
 import okhttp3.Response
@@ -13,10 +14,12 @@ import ua.homeguard.s3.model.SystemSnapshot
 class TelemetrySocket {
     private val state = MutableStateFlow(SystemSnapshot())
     private val eventState = MutableStateFlow<List<SystemEventRecord>>(emptyList())
+    private val liveEventState = MutableSharedFlow<SystemEventRecord>(extraBufferCapacity = 16)
     private var socket: WebSocket? = null
 
     fun snapshots(): Flow<SystemSnapshot> = state
     fun events(): Flow<List<SystemEventRecord>> = eventState
+    fun liveEvents(): Flow<SystemEventRecord> = liveEventState
 
     fun connect(url: String, token: String, certificateSha256: String = "") {
         disconnect()
@@ -38,6 +41,7 @@ class TelemetrySocket {
                             value = json.optInt("value", 0),
                         )
                         eventState.value = (listOf(item) + eventState.value).take(64)
+                        liveEventState.tryEmit(item)
                     } else {
                         state.value = JsonParsers.snapshot(json)
                     }

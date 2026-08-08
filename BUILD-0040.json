@@ -1,0 +1,38 @@
+{
+  "project": "HomeGuard-S3",
+  "build": "0040",
+  "version": "0.0.40",
+  "date": "2026-08-08",
+  "feature": "Android Notification Preferences",
+  "base_build": "0039",
+  "android": {
+    "versionCode": 40,
+    "versionName": "0.0.40",
+    "preferences": {
+      "critical_notifications": true,
+      "status_notifications": true,
+      "zone_notifications": true,
+      "persistent": true
+    },
+    "routing": {
+      "critical_channel": "homeguard_critical",
+      "status_channel": "homeguard_status",
+      "critical_events": ["ALARM", "TAMPER", "BATTERY_LOW", "SENSOR_OFFLINE"],
+      "status_events": ["ARMED", "DISARMED"],
+      "zone_events": ["ZONE_OPEN", "ZONE_CLOSED"],
+      "warning_routes_to_critical": true
+    },
+    "ui": "dashboard notification switches"
+  },
+  "firmware": {
+    "changed": false,
+    "system_event_contract_unchanged": true,
+    "gpio_changed": false
+  },
+  "safety": {
+    "defaults_enabled": true,
+    "android_channel_settings_take_precedence": true,
+    "dangerous_command_confirmation_unchanged": true,
+    "access_control_unchanged": true
+  }
+}

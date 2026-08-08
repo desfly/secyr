@@ -1,13 +1,13 @@
 # Build information
 
 - Project: HomeGuard-S3
-- Build: 0038
+- Build: 0039
 - Date: 2026-08-08
 - Controller target: ESP32-S3-WROOM-1-N16R8 / HW-678 V0.0.0
 - Hardware-map state: every unresolved GPIO defaults to `-1`
 - Firmware version source: `firmware/include/homeguard/build_info.hpp`
-- Firmware version: 0.0.38 / Build-0038
-- Android version: 0.0.38 / versionCode 38
+- Firmware version: 0.0.39 / Build-0039
+- Android version: 0.0.39 / versionCode 39
 - ESP-IDF: pinned to v5.4.4, target `esp32s3`
 - Managed ESP-IDF components: `espressif/mdns` 1.11.3 and `espressif/mqtt` 1.0.0
 - Operational local API: authenticated HTTPS REST on port 443
@@ -19,6 +19,10 @@
 - Raw PIN storage: prohibited; only salt + iterative SHA-256 digest are persisted
 - Android operator PIN: session-only memory; it is not written to AppSettings or persistent storage
 - Dangerous commands: UI confirmation + controller challenge + access-control authorization
+- Android notification engine: live SystemEvent frames are delivered through a non-replaying SharedFlow and classified into critical/status channels
+- Android critical notifications: ALARM, TAMPER, BATTERY_LOW and SENSOR_OFFLINE
+- Android status notifications: ARMED, DISARMED, ZONE_OPEN and ZONE_CLOSED
+- Android 13+: POST_NOTIFICATIONS runtime permission is requested; notification delivery remains permission-gated
 - TLS identity: per-device certificate pinned by exact DER SHA-256
 - Discovery: mDNS `_homeguard._tcp` and UDP/45678
 - System Core: fixed-capacity Zone/Sensor/Output/Partition model with no required heap allocation
@@ -27,4 +31,4 @@
 - System API v1 serializers: status, zones, outputs, partitions and event frames
 - CI Android toolchain: AGP 8.7.3, Kotlin 2.1.0, Gradle 8.9, JDK 17, compileSdk 35
 - CI workflow: ESP-IDF 5.4.4 firmware, Android debug APK, host validation and diagnostics
-- Last verified main baseline: Build-0037, GitHub Actions run #43 successful
+- Last verified main baseline: Build-0038, GitHub Actions run #47 successful

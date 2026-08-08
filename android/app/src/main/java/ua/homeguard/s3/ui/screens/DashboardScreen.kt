@@ -13,6 +13,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,8 +39,14 @@ fun DashboardScreen(
     commandStatus: String,
     operatorId: String,
     operatorPin: String,
+    criticalNotificationsEnabled: Boolean,
+    statusNotificationsEnabled: Boolean,
+    zoneNotificationsEnabled: Boolean,
     onOperatorIdChange: (String) -> Unit,
     onOperatorPinChange: (String) -> Unit,
+    onCriticalNotificationsChange: (Boolean) -> Unit,
+    onStatusNotificationsChange: (Boolean) -> Unit,
+    onZoneNotificationsChange: (Boolean) -> Unit,
     onCommand: (CommandType) -> Unit,
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
@@ -106,6 +113,34 @@ fun DashboardScreen(
                     StatusRow("Транспорт", snapshot.transport.name)
                     Text("Телеметрія #${snapshot.sequence} · uptime ${snapshot.uptimeMs} ms")
                     Text("Команда: $commandStatus")
+                }
+            }
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Сповіщення", style = MaterialTheme.typography.titleMedium)
+                    NotificationSwitchRow(
+                        label = "Критичні",
+                        detail = "Тривога, tamper, батарея, offline",
+                        checked = criticalNotificationsEnabled,
+                        onCheckedChange = onCriticalNotificationsChange,
+                    )
+                    NotificationSwitchRow(
+                        label = "Статус системи",
+                        detail = "Охорона та зняття з охорони",
+                        checked = statusNotificationsEnabled,
+                        onCheckedChange = onStatusNotificationsChange,
+                    )
+                    NotificationSwitchRow(
+                        label = "Події зон",
+                        detail = "Відкриття та закриття зон",
+                        checked = zoneNotificationsEnabled,
+                        enabled = statusNotificationsEnabled,
+                        onCheckedChange = onZoneNotificationsChange,
+                    )
+                    Text("Критичні сповіщення увімкнені за замовчуванням. Системні налаштування Android каналу мають вищий пріоритет.")
                 }
             }
         }
@@ -179,6 +214,26 @@ fun DashboardScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun NotificationSwitchRow(
+    label: String,
+    detail: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label)
+            Text(detail, style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
     }
 }
 
