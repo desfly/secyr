@@ -2,6 +2,7 @@
 #include "homeguard/output_command.hpp"
 
 #include <charconv>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
