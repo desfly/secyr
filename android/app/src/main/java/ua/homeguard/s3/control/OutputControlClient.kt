@@ -17,6 +17,12 @@ class OutputControlClient(
         val body: String,
     )
 
+    data class RuntimeResult(
+        val httpCode: Int,
+        val available: Boolean,
+        val body: String,
+    )
+
     suspend fun setOutput(outputId: Int, active: Boolean, alarmActive: Boolean = false): Result =
         withContext(Dispatchers.IO) {
             require(outputId in 1..65535)
@@ -31,4 +37,18 @@ class OutputControlClient(
                 Result(response.code, response.isSuccessful, body)
             }
         }
+
+    suspend fun getRuntimeStatus(): RuntimeResult = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(baseUrl.trimEnd('/') + "/api/v1/system/output-runtime")
+            .get()
+            .build()
+        client.newCall(request).execute().use { response ->
+            RuntimeResult(
+                httpCode = response.code,
+                available = response.isSuccessful,
+                body = response.body?.string().orEmpty(),
+            )
+        }
+    }
 }
