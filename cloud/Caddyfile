@@ -1,0 +1,13 @@
+{$HOMEGUARD_CLOUD_DOMAIN} {
+    encode zstd gzip
+
+    @mqtt path /mqtt*
+    reverse_proxy @mqtt mosquitto:9001
+
+    respond /health 200 {
+        body "HomeGuard Cloud OK\n"
+        close
+    }
+
+    respond 404
+}
