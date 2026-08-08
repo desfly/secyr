@@ -22,6 +22,9 @@ idf_component_register(
         "hg_wifi_provisioning.cpp"
         "hg_wifi_credentials.cpp"
         "hg_wifi_http.cpp"
+        "hg_cloud_link.cpp"
+        "hg_cloud_config.cpp"
+        "hg_cloud_http.cpp"
         "hg_access_nvs.cpp"
         "hg_commissioning_nvs.cpp"
         "../../src/system_model.cpp"
@@ -61,6 +64,8 @@ idf_component_register(
         esp_netif
         esp_wifi
         fatfs
+        mbedtls
+        mqtt
         nvs_flash
         sdmmc
 )
