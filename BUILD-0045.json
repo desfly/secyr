@@ -1,0 +1,29 @@
+{
+  "project": "HomeGuard-S3",
+  "build": "0045",
+  "version": "0.0.45",
+  "date": "2026-08-08",
+  "feature": "Fail-Closed Hardware Test Framework",
+  "base_build": "0044",
+  "package": {
+    "hardware_test_policy": true,
+    "maintenance_mode_gate": true,
+    "armed_state_gate": true,
+    "alarm_state_gate": true,
+    "physical_output_verification_gate": true,
+    "bounded_pulse_ms": 1000,
+    "dry_run_readiness": true,
+    "api_serialization": true,
+    "host_safety_tests": true
+  },
+  "safety": {
+    "unverified_gpio_remains_disabled": true,
+    "unverified_polarity_remains_disabled": true,
+    "physical_actuator_test_enabled": false,
+    "reason": "Current SafeOutputs reports physical outputs unavailable until GPIO numbers and active polarity are verified"
+  },
+  "android": {
+    "versionCode": 45,
+    "versionName": "0.0.45"
+  }
+}
