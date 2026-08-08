@@ -18,6 +18,9 @@ class SettingsStore(context: Context) {
             .putString("cloud_base_url", value.cloudBaseUrl)
             .putString("last_local_url", value.lastKnownLocalUrl)
             .putString("local_cert_sha256", value.localCertificateSha256)
+            .putBoolean("notifications_critical", value.criticalNotificationsEnabled)
+            .putBoolean("notifications_status", value.statusNotificationsEnabled)
+            .putBoolean("notifications_zones", value.zoneNotificationsEnabled)
             .apply()
         secure.put("api_token", value.apiToken)
         settings.emit(value)
@@ -34,6 +37,9 @@ class SettingsStore(context: Context) {
         remoteAccessEnabled = preferences.getBoolean("remote_access", false),
         cloudBaseUrl = preferences.getString("cloud_base_url", "").orEmpty(),
         lastKnownLocalUrl = preferences.getString("last_local_url", "").orEmpty(),
-        localCertificateSha256 = preferences.getString("local_cert_sha256", "").orEmpty()
+        localCertificateSha256 = preferences.getString("local_cert_sha256", "").orEmpty(),
+        criticalNotificationsEnabled = preferences.getBoolean("notifications_critical", true),
+        statusNotificationsEnabled = preferences.getBoolean("notifications_status", true),
+        zoneNotificationsEnabled = preferences.getBoolean("notifications_zones", true),
     )
 }
