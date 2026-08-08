@@ -1,6 +1,7 @@
 #pragma once
 
 #include "homeguard/boot_readiness.hpp"
+#include "homeguard/physical_output_runtime.hpp"
 #include "homeguard/system_model.hpp"
 #include "esp_http_server.h"
 
@@ -12,6 +13,7 @@ public:
         httpd_handle_t server,
         hg::SystemModel* model,
         hg::BootReadinessReport* readiness,
+        hg::PhysicalOutputRuntime* physical,
         hg::SystemEventBus* bus);
 
 private:
@@ -20,6 +22,7 @@ private:
 
     hg::SystemModel* model_{};
     hg::BootReadinessReport* readiness_{};
+    hg::PhysicalOutputRuntime* physical_{};
     hg::SystemEventBus* bus_{};
 };
 
