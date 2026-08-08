@@ -20,6 +20,8 @@ idf_component_register(
         "hg_output_http.cpp"
         "hg_gpio_output_backend.cpp"
         "hg_wifi_provisioning.cpp"
+        "hg_wifi_credentials.cpp"
+        "hg_wifi_http.cpp"
         "hg_access_nvs.cpp"
         "hg_commissioning_nvs.cpp"
         "../../src/system_model.cpp"
