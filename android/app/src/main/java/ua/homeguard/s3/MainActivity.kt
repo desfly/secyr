@@ -69,7 +69,7 @@ class MainActivity : ComponentActivity() {
         notifications.createChannels()
         requestNotificationPermission()
         lifecycleScope.launch {
-            telemetry.liveEvents().collect { event -> notifications.notify(event) }
+            telemetry.liveEvents().collect { event -> notifications.notify(event, settings.settings.value) }
         }
         discovery.start()
         session.start()
@@ -108,8 +108,26 @@ class MainActivity : ComponentActivity() {
                         commandStatus = commandMessage,
                         operatorId = currentOperator,
                         operatorPin = currentPin,
+                        criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled,
+                        statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
+                        zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
                         onOperatorIdChange = { operatorId.value = it.take(23) },
                         onOperatorPinChange = { operatorPin.value = it },
+                        onCriticalNotificationsChange = { enabled ->
+                            lifecycleScope.launch {
+                                settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled))
+                            }
+                        },
+                        onStatusNotificationsChange = { enabled ->
+                            lifecycleScope.launch {
+                                settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled))
+                            }
+                        },
+                        onZoneNotificationsChange = { enabled ->
+                            lifecycleScope.launch {
+                                settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled))
+                            }
+                        },
                         onCommand = ::executeCommand,
                     )
                 }
