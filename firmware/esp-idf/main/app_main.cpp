@@ -7,6 +7,8 @@
 #include "hg_gpio_output_backend.hpp"
 #include "hg_telemetry_runtime.hpp"
 #include "hg_wifi_provisioning.hpp"
+#include "hg_wifi_credentials.hpp"
+#include "hg_wifi_http.hpp"
 #include "hg_access_nvs.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
@@ -35,6 +37,8 @@ homeguard::idf::ServiceHttp g_service_http;
 homeguard::idf::OutputHttp g_output_http;
 homeguard::idf::GpioOutputBackend g_gpio_outputs;
 homeguard::idf::WifiProvisioningRuntime g_wifi_provisioning;
+homeguard::idf::WifiCredentialStore g_wifi_credentials_store;
+homeguard::idf::WifiProvisioningHttp g_wifi_http;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
 homeguard::AccessControl g_access_control;
@@ -97,6 +101,27 @@ void restore_commissioning_state()
     }
 }
 
+void restore_wifi_credentials()
+{
+    homeguard::idf::WifiCredentials credentials{};
+    const auto error = g_wifi_credentials_store.load(credentials);
+    if (error == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(kTag, "No persisted WiFi credentials; SoftAP provisioning remains active");
+        return;
+    }
+    if (error != ESP_OK) {
+        ESP_LOGW(kTag, "Persisted WiFi credentials rejected (%s); SoftAP fallback remains active",
+                 esp_err_to_name(error));
+        return;
+    }
+    const auto connect_error = g_wifi_provisioning.connect_station(
+        credentials.ssid.data(), credentials.password.data());
+    if (connect_error != ESP_OK) {
+        ESP_LOGW(kTag, "Persisted WiFi STA connect start failed (%s); SoftAP fallback remains active",
+                 esp_err_to_name(connect_error));
+    }
+}
+
 void initialize_system_model()
 {
     g_system_model.add_partition(1);
@@ -142,6 +167,10 @@ esp_err_t start_http_server()
             &g_system_bus),
         kTag,
         "service routes");
+    ESP_RETURN_ON_ERROR(
+        g_wifi_http.register_handlers(g_http_server, &g_wifi_credentials_store, &g_wifi_provisioning),
+        kTag,
+        "wifi provisioning routes");
     return g_build_http.register_handlers(g_http_server);
 }
 
@@ -159,6 +188,8 @@ extern "C" void app_main()
     const auto wifi_error = g_wifi_provisioning.start(provisioning_required);
     if (wifi_error != ESP_OK) {
         ESP_LOGE(kTag, "First-boot WiFi provisioning failed: %s", esp_err_to_name(wifi_error));
+    } else {
+        restore_wifi_credentials();
     }
 
     initialize_system_model();
