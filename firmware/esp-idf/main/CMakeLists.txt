@@ -21,6 +21,7 @@ idf_component_register(
         "hg_commissioning_nvs.cpp"
         "../../src/system_model.cpp"
         "../../src/system_api.cpp"
+        "../../src/output_interlock.cpp"
         "../../src/event_log.cpp"
         "../../src/access_control.cpp"
         "../../src/access_store.cpp"
