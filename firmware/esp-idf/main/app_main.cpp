@@ -4,7 +4,9 @@
 #include "hg_system_http.hpp"
 #include "hg_telemetry_runtime.hpp"
 #include "hg_access_nvs.hpp"
+#include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
+#include "homeguard/boot_readiness.hpp"
 #include "homeguard/build_info.hpp"
 #include "homeguard/system_model.hpp"
 #include "esp_check.h"
@@ -25,7 +27,11 @@ homeguard::idf::InfrastructureHttp g_http_api;
 homeguard::idf::BuildHttp g_build_http;
 homeguard::idf::SystemHttp g_system_http;
 homeguard::idf::AccessNvsStore g_access_store;
+homeguard::idf::CommissioningNvsStore g_commissioning_store;
 homeguard::AccessControl g_access_control;
+hg::HardwareVerificationRecord g_hardware_verification;
+hg::CommissioningPersistentState g_commissioning_state;
+hg::BootReadinessReport g_boot_readiness;
 hg::SystemEventBus g_system_bus;
 hg::SystemModel g_system_model{g_system_bus};
 httpd_handle_t g_http_server = nullptr;
@@ -55,6 +61,30 @@ void restore_access_control()
     }
     ESP_LOGI(kTag, "Restored %u access user(s) from NVS",
              static_cast<unsigned>(g_access_control.user_count()));
+}
+
+void restore_commissioning_state()
+{
+    const auto hardware_error = g_commissioning_store.load_hardware(g_hardware_verification);
+    const auto commissioning_error = g_commissioning_store.load_commissioning(g_commissioning_state);
+
+    const auto* hardware = hardware_error == ESP_OK ? &g_hardware_verification : nullptr;
+    const auto* commissioning = commissioning_error == ESP_OK ? &g_commissioning_state : nullptr;
+    g_boot_readiness = hg::evaluate_boot_readiness({hardware, commissioning});
+
+    if (hardware_error != ESP_OK) {
+        ESP_LOGW(kTag, "Hardware verification unavailable/rejected (%s)", esp_err_to_name(hardware_error));
+    }
+    if (commissioning_error != ESP_OK) {
+        ESP_LOGW(kTag, "Commissioning state unavailable/rejected (%s)", esp_err_to_name(commissioning_error));
+    }
+
+    if (!g_boot_readiness.outputs_allowed()) {
+        ESP_LOGW(kTag, "Physical outputs remain FAIL-CLOSED after boot: %s",
+                 hg::to_string(g_boot_readiness.status));
+    } else {
+        ESP_LOGI(kTag, "Verified commissioning state restored; physical output gate is ready");
+    }
 }
 
 void initialize_system_model()
@@ -97,6 +127,7 @@ extern "C" void app_main()
 {
     ESP_ERROR_CHECK(initialize_nvs());
     restore_access_control();
+    restore_commissioning_state();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
