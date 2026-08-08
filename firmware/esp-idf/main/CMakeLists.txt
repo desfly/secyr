@@ -25,6 +25,7 @@ idf_component_register(
         "../../src/crc32.cpp"
         "../../src/sha256.cpp"
         "../../src/hardware_runtime.cpp"
+        "../../src/hardware_test.cpp"
         "../../src/device_command_router.cpp"
         "../../src/device_api_model.cpp"
         "../../src/hardware_calibration.cpp"
