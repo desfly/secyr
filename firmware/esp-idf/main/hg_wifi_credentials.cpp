@@ -2,6 +2,7 @@
 
 #include "nvs.h"
 
+#include <cstddef>
 #include <cstring>
 
 namespace homeguard::idf {
