@@ -6,6 +6,7 @@
 #include "esp_netif_ip_addr.h"
 #include "esp_wifi.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
