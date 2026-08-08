@@ -33,13 +33,18 @@ void CloudLink::make_topics()
     std::snprintf(command_topic_.data(), command_topic_.size(), "%s/%s/commands", kPrefix, device_id_.data());
 }
 
+esp_err_t CloudLink::prepare_identity()
+{
+    make_device_id();
+    make_topics();
+    return device_id_[0] == '\0' ? ESP_FAIL : ESP_OK;
+}
+
 esp_err_t CloudLink::start(const char* broker_uri, const char* username, const char* password)
 {
     if (client_ != nullptr) return ESP_ERR_INVALID_STATE;
     if (broker_uri == nullptr || broker_uri[0] == '\0') return ESP_ERR_INVALID_ARG;
-
-    make_device_id();
-    make_topics();
+    if (device_id_[0] == '\0') ESP_RETURN_ON_ERROR(prepare_identity(), kTag, "cloud identity");
 
     const esp_mqtt_client_config_t config = {
         .broker = {
@@ -144,8 +149,6 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             const std::string topic(event->topic, static_cast<std::size_t>(event->topic_len));
             const std::string data(event->data, static_cast<std::size_t>(event->data_len));
             if (topic == command_topic_.data()) {
-                // Remote commands are intentionally not applied directly to physical outputs.
-                // They must pass through authenticated command routing and commissioning gates.
                 ESP_LOGI(kTag, "Cloud command received (%u bytes), deferred to safe command router",
                          static_cast<unsigned>(data.size()));
             }
