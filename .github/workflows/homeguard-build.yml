@@ -34,42 +34,31 @@ jobs:
   host-gates:
     name: Host validation
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-
       - name: Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-
       - name: Install compiler
         run: |
           sudo apt-get update
           sudo apt-get install -y g++ ninja-build
-
       - name: Project preflight
         run: python tools/preflight_build0022.py
-
       - name: ESP-IDF source audit
         run: python tools/audit_esp_idf_sources.py
-
       - name: Component dependency audit
         run: python tools/audit_component_dependencies.py
-
       - name: GPIO safety audit
         run: python tools/audit_gpio_safety.py
-
       - name: Firmware partition budget
         run: python tools/check_firmware_budget.py
-
       - name: Mock syntax
         run: python tools/syntax_check_esp_idf_mock.py
-
       - name: Mock compile and link
         run: python tools/mock_link_esp_idf_main.py
-
       - name: Upload host diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -87,36 +76,30 @@ jobs:
     needs: host-gates
     runs-on: ubuntu-latest
     timeout-minutes: 45
-
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-
       - name: Install ESP-IDF 5.4.4
         uses: espressif/install-esp-idf-action@v1
         with:
           version: "v5.4.4"
-
       - name: Show toolchain versions
         run: |
           idf.py --version
           cmake --version
           ninja --version
           python --version
-
       - name: Configure ESP32-S3 target
         working-directory: firmware/esp-idf
         run: idf.py set-target esp32s3
-
       - name: Build firmware
         working-directory: firmware/esp-idf
         shell: bash
         run: |
           set -o pipefail
           idf.py build 2>&1 | tee firmware-build.log
-
       - name: Generate firmware checksums
         if: success()
         working-directory: firmware/esp-idf
@@ -125,7 +108,6 @@ jobs:
           find build -type f \( -name "*.bin" -o -name "*.elf" -o -name "*.map" \) -print0 \
             | sort -z \
             | xargs -0 sha256sum > build/SHA256SUMS.txt
-
       - name: Upload ESP-IDF diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -140,7 +122,6 @@ jobs:
             firmware/esp-idf/build/flash_args
             firmware/esp-idf/build/compile_commands.json
           if-no-files-found: warn
-
       - name: Upload firmware
         if: success()
         uses: actions/upload-artifact@v4
@@ -162,31 +143,25 @@ jobs:
     name: Android debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
-
       - name: Build Android debug APK
         working-directory: android
         run: gradle --no-daemon --stacktrace assembleDebug
-
       - name: Generate APK checksum
         if: success()
         shell: bash
         run: sha256sum android/app/build/outputs/apk/debug/*.apk > android/app/build/outputs/apk/debug/SHA256SUMS.txt
-
       - name: Upload Android APK
         if: success()
         uses: actions/upload-artifact@v4
@@ -196,7 +171,6 @@ jobs:
             android/app/build/outputs/apk/debug/*.apk
             android/app/build/outputs/apk/debug/SHA256SUMS.txt
           if-no-files-found: error
-
       - name: Upload Android diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -208,37 +182,32 @@ jobs:
           if-no-files-found: warn
 
   test-candidate:
-    name: Build-0057 ESP + Android provisioning test candidate
+    name: Build-0058 ESP + Android WiFi provisioning test candidate
     needs: [esp-idf-build, android-build]
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout instructions
         uses: actions/checkout@v5
-
       - name: Download firmware artifact
         uses: actions/download-artifact@v4
         with:
           name: HomeGuard-S3-firmware
           path: test-candidate/firmware
-
       - name: Download Android artifact
         uses: actions/download-artifact@v4
         with:
           name: HomeGuard-S3-Android
           path: test-candidate/android
-
       - name: Add test instructions and package checksums
         shell: bash
         run: |
-          cp docs/BUILD-0057-TEST-CANDIDATE.txt test-candidate/README-FIRST.txt
+          cp docs/BUILD-0058-TEST-CANDIDATE.txt test-candidate/README-FIRST.txt
           find test-candidate -type f ! -name SHA256SUMS-TEST-CANDIDATE.txt -print0 \
             | sort -z \
             | xargs -0 sha256sum > test-candidate/SHA256SUMS-TEST-CANDIDATE.txt
-
       - name: Upload combined test candidate
         uses: actions/upload-artifact@v4
         with:
-          name: HomeGuard-S3-Build-0057-TEST-CANDIDATE
+          name: HomeGuard-S3-Build-0058-TEST-CANDIDATE
           path: test-candidate/
           if-no-files-found: error
