@@ -50,9 +50,11 @@ fun DashboardScreen(
     onCriticalNotificationsChange: (Boolean) -> Unit,
     onStatusNotificationsChange: (Boolean) -> Unit,
     onZoneNotificationsChange: (Boolean) -> Unit,
+    onClearEventHistory: () -> Unit,
     onCommand: (CommandType) -> Unit,
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
+    var confirmClearHistory by remember { mutableStateOf(false) }
     var eventCategory by remember { mutableStateOf(EventLogCategory.ALL) }
     var eventQuery by remember { mutableStateOf("") }
     var eventSourceText by remember { mutableStateOf("") }
@@ -79,6 +81,21 @@ fun DashboardScreen(
                 }) { Text("Виконати") }
             },
             dismissButton = { TextButton(onClick = { pendingDangerousCommand = null }) { Text("Скасувати") } },
+        )
+    }
+
+    if (confirmClearHistory) {
+        AlertDialog(
+            onDismissRequest = { confirmClearHistory = false },
+            title = { Text("Очистити журнал?") },
+            text = { Text("Локально збережена історія подій буде видалена з цього телефону. Нові події продовжать записуватися.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClearHistory = false
+                    onClearEventHistory()
+                }) { Text("Очистити") }
+            },
+            dismissButton = { TextButton(onClick = { confirmClearHistory = false }) { Text("Скасувати") } },
         )
     }
 
@@ -136,25 +153,9 @@ fun DashboardScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Сповіщення", style = MaterialTheme.typography.titleMedium)
-                    NotificationSwitchRow(
-                        label = "Критичні",
-                        detail = "Тривога, tamper, батарея, offline",
-                        checked = criticalNotificationsEnabled,
-                        onCheckedChange = onCriticalNotificationsChange,
-                    )
-                    NotificationSwitchRow(
-                        label = "Статус системи",
-                        detail = "Охорона та зняття з охорони",
-                        checked = statusNotificationsEnabled,
-                        onCheckedChange = onStatusNotificationsChange,
-                    )
-                    NotificationSwitchRow(
-                        label = "Події зон",
-                        detail = "Відкриття та закриття зон",
-                        checked = zoneNotificationsEnabled,
-                        enabled = statusNotificationsEnabled,
-                        onCheckedChange = onZoneNotificationsChange,
-                    )
+                    NotificationSwitchRow("Критичні", "Тривога, tamper, батарея, offline", criticalNotificationsEnabled, onCheckedChange = onCriticalNotificationsChange)
+                    NotificationSwitchRow("Статус системи", "Охорона та зняття з охорони", statusNotificationsEnabled, onCheckedChange = onStatusNotificationsChange)
+                    NotificationSwitchRow("Події зон", "Відкриття та закриття зон", zoneNotificationsEnabled, enabled = statusNotificationsEnabled, onCheckedChange = onZoneNotificationsChange)
                     Text("Критичні сповіщення увімкнені за замовчуванням. Системні налаштування Android каналу мають вищий пріоритет.")
                 }
             }
@@ -183,7 +184,7 @@ fun DashboardScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Журнал подій", style = MaterialTheme.typography.titleLarge)
-                    Text("Показано ${filteredEvents.size} з ${events.size}")
+                    Text("Збережено ${events.size} / 256 · показано ${filteredEvents.size}")
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         EventCategoryButton("Усі", EventLogCategory.ALL, eventCategory) { eventCategory = it }
                         EventCategoryButton("Критичні", EventLogCategory.CRITICAL, eventCategory) { eventCategory = it }
@@ -202,20 +203,22 @@ fun DashboardScreen(
                     )
                     OutlinedTextField(
                         value = eventSourceText,
-                        onValueChange = { value ->
-                            if (value.length <= 6 && value.all(Char::isDigit)) eventSourceText = value
-                        },
+                        onValueChange = { value -> if (value.length <= 6 && value.all(Char::isDigit)) eventSourceText = value },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         label = { Text("Source ID / зона (порожньо = усі)") },
                     )
-                    if (eventCategory != EventLogCategory.ALL || eventQuery.isNotBlank() || eventSourceText.isNotBlank()) {
-                        OutlinedButton(onClick = {
-                            eventCategory = EventLogCategory.ALL
-                            eventQuery = ""
-                            eventSourceText = ""
-                        }) { Text("Скинути фільтри") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (eventCategory != EventLogCategory.ALL || eventQuery.isNotBlank() || eventSourceText.isNotBlank()) {
+                            OutlinedButton(onClick = {
+                                eventCategory = EventLogCategory.ALL
+                                eventQuery = ""
+                                eventSourceText = ""
+                            }) { Text("Скинути фільтри") }
+                        }
+                        OutlinedButton(enabled = events.isNotEmpty(), onClick = { confirmClearHistory = true }) { Text("Очистити журнал") }
                     }
+                    Text("Історія зберігається локально на телефоні та відновлюється після перезапуску застосунку.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -240,10 +243,7 @@ fun DashboardScreen(
         } else {
             items(snapshot.zones, key = { it.index }) { zone ->
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                         Column {
                             Text(zone.name, style = MaterialTheme.typography.titleMedium)
                             Text(if (zone.enabled) "Активна" else "Вимкнена")
@@ -260,10 +260,7 @@ fun DashboardScreen(
         } else {
             items(snapshot.pressures, key = { it.index }) { pressure ->
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Канал ${pressure.index + 1}")
                         Text("${pressure.value} · ${pressure.state}")
                     }
@@ -274,31 +271,14 @@ fun DashboardScreen(
 }
 
 @Composable
-private fun EventCategoryButton(
-    label: String,
-    category: EventLogCategory,
-    selected: EventLogCategory,
-    onSelect: (EventLogCategory) -> Unit,
-) {
-    if (category == selected) {
-        Button(onClick = { onSelect(category) }) { Text(label) }
-    } else {
-        OutlinedButton(onClick = { onSelect(category) }) { Text(label) }
-    }
+private fun EventCategoryButton(label: String, category: EventLogCategory, selected: EventLogCategory, onSelect: (EventLogCategory) -> Unit) {
+    if (category == selected) Button(onClick = { onSelect(category) }) { Text(label) }
+    else OutlinedButton(onClick = { onSelect(category) }) { Text(label) }
 }
 
 @Composable
-private fun NotificationSwitchRow(
-    label: String,
-    detail: String,
-    checked: Boolean,
-    enabled: Boolean = true,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
+private fun NotificationSwitchRow(label: String, detail: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Column(modifier = Modifier.weight(1f)) {
             Text(label)
             Text(detail, style = MaterialTheme.typography.bodySmall)
