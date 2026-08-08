@@ -10,6 +10,7 @@ namespace homeguard::idf {
 
 class CloudLink {
 public:
+    esp_err_t prepare_identity();
     esp_err_t start(const char* broker_uri, const char* username, const char* password);
     void stop();
 
