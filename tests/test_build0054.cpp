@@ -49,7 +49,7 @@ void test_build0054() {
     TEST_CHECK(!backend.levels[11]);
 
     hg::BootReadinessReport ready{};
-    ready.status = hg::BootReadinessStatus::Ready;
+    ready.status = hg::BootReadinessStatus::ReadyForPhysicalOutputs;
     TEST_CHECK(model.set_output_active(1, true, 10));
     TEST_CHECK(runtime.synchronize(model, ready));
     TEST_CHECK(runtime.state().outputs_enabled);
