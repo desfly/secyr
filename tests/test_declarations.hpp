@@ -10,3 +10,4 @@ void test_build0038();
 void test_build0045();
 void test_build0046();
 void test_build0047();
+void test_build0048();
