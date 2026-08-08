@@ -7,5 +7,8 @@ data class AppSettings(
     val remoteAccessEnabled: Boolean = false,
     val cloudBaseUrl: String = "",
     val lastKnownLocalUrl: String = "",
-    val localCertificateSha256: String = ""
+    val localCertificateSha256: String = "",
+    val criticalNotificationsEnabled: Boolean = true,
+    val statusNotificationsEnabled: Boolean = true,
+    val zoneNotificationsEnabled: Boolean = true,
 )
