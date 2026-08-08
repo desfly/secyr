@@ -26,6 +26,7 @@ import ua.homeguard.s3.network.LocalDiscoveryCoordinator
 import ua.homeguard.s3.network.TelemetrySocket
 import ua.homeguard.s3.notifications.HomeGuardNotifications
 import ua.homeguard.s3.repository.ProvisioningCoordinator
+import ua.homeguard.s3.storage.EventHistoryStore
 import ua.homeguard.s3.storage.SettingsStore
 import ua.homeguard.s3.ui.screens.DashboardScreen
 import ua.homeguard.s3.ui.screens.ProvisioningScreen
@@ -33,6 +34,7 @@ import ua.homeguard.s3.ui.screens.ProvisioningScreen
 class MainActivity : ComponentActivity() {
     private lateinit var discovery: LocalDiscoveryCoordinator
     private lateinit var settings: SettingsStore
+    private lateinit var eventHistory: EventHistoryStore
     private lateinit var resolver: DeviceEndpointResolver
     private lateinit var provisioning: ProvisioningCoordinator
     private lateinit var telemetry: TelemetrySocket
@@ -59,17 +61,21 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = SettingsStore(this)
+        eventHistory = EventHistoryStore(this)
         discovery = LocalDiscoveryCoordinator(this, lifecycleScope)
         resolver = DeviceEndpointResolver(settings, discovery, lifecycleScope)
         provisioning = ProvisioningCoordinator(this, settings, discovery, lifecycleScope)
-        telemetry = TelemetrySocket()
+        telemetry = TelemetrySocket().apply { seedEvents(eventHistory.load()) }
         session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry)
         commands = CommandController(resolver.endpoint, settings)
         notifications = HomeGuardNotifications(this)
         notifications.createChannels()
         requestNotificationPermission()
         lifecycleScope.launch {
-            telemetry.liveEvents().collect { event -> notifications.notify(event, settings.settings.value) }
+            telemetry.liveEvents().collect { event ->
+                eventHistory.append(event)
+                notifications.notify(event, settings.settings.value)
+            }
         }
         discovery.start()
         session.start()
@@ -127,6 +133,10 @@ class MainActivity : ComponentActivity() {
                             lifecycleScope.launch {
                                 settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled))
                             }
+                        },
+                        onClearEventHistory = {
+                            eventHistory.clear()
+                            telemetry.clearEvents()
                         },
                         onCommand = ::executeCommand,
                     )
