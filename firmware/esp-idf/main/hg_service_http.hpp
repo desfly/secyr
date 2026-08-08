@@ -7,6 +7,8 @@
 #include "homeguard/system_model.hpp"
 #include "esp_http_server.h"
 
+#include <string>
+
 namespace homeguard::idf {
 
 class ServiceHttp {
