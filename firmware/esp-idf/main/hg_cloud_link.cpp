@@ -5,6 +5,8 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
