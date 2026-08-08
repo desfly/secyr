@@ -28,6 +28,7 @@ idf_component_register(
         "../../src/hardware_test.cpp"
         "../../src/commissioning.cpp"
         "../../src/commissioning_state.cpp"
+        "../../src/hardware_verification.cpp"
         "../../src/device_command_router.cpp"
         "../../src/device_api_model.cpp"
         "../../src/hardware_calibration.cpp"
