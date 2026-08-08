@@ -62,18 +62,20 @@ esp_err_t WifiProvisioningHttp::provision_post(httpd_req_t* request)
 {
     auto* self = self_from(request);
     if (self == nullptr || request->content_len == 0 || request->content_len > 512) {
-        return httpd_resp_send_err(request, 400, "invalid provisioning request");
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "invalid provisioning request");
     }
 
     std::array<char, 513> buffer{};
     const auto received = httpd_req_recv(request, buffer.data(), request->content_len);
-    if (received <= 0) return httpd_resp_send_err(request, 400, "request body read failed");
+    if (received <= 0) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "request body read failed");
+    }
     std::string body(buffer.data(), static_cast<std::size_t>(received));
     std::string ssid;
     std::string password;
     if (!extract_json_string(body, "ssid", ssid) || ssid.empty() || ssid.size() > 32 ||
         !extract_json_string(body, "password", password) || password.size() > 64) {
-        return httpd_resp_send_err(request, 400, "ssid/password invalid");
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "ssid/password invalid");
     }
 
     WifiCredentials credentials{};
