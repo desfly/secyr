@@ -15,6 +15,34 @@ namespace {
 constexpr const char* kTag = "hg_wifi";
 }
 
+void WifiProvisioningRuntime::network_event_handler(void* arg,
+                                                    esp_event_base_t event_base,
+                                                    std::int32_t event_id,
+                                                    void* event_data)
+{
+    auto* self = static_cast<WifiProvisioningRuntime*>(arg);
+    if (self == nullptr) return;
+
+    if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP && event_data != nullptr) {
+        const auto* event = static_cast<const ip_event_got_ip_t*>(event_data);
+        std::snprintf(self->station_ip_address_.data(),
+                      self->station_ip_address_.size(),
+                      IPSTR,
+                      IP2STR(&event->ip_info.ip));
+        self->station_connecting_ = false;
+        self->station_connected_ = true;
+        ESP_LOGI(kTag, "STA connected; IP: %s", self->station_ip_address_.data());
+        return;
+    }
+
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        self->station_connecting_ = false;
+        self->station_connected_ = false;
+        self->station_ip_address_[0] = '\0';
+        ESP_LOGW(kTag, "STA disconnected");
+    }
+}
+
 esp_err_t WifiProvisioningRuntime::start(bool provisioning_required)
 {
     ESP_LOGI(kTag, "=== HomeGuard-S3 Build-0058 WiFi Diagnostics ===");
@@ -41,6 +69,23 @@ esp_err_t WifiProvisioningRuntime::start(bool provisioning_required)
         return error;
     }
     ESP_LOGI(kTag, "WiFi radio init: OK");
+
+    error = esp_event_handler_register(IP_EVENT,
+                                       IP_EVENT_STA_GOT_IP,
+                                       &WifiProvisioningRuntime::network_event_handler,
+                                       this);
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag, "STA GOT_IP handler registration failed: %s", esp_err_to_name(error));
+        return error;
+    }
+    error = esp_event_handler_register(WIFI_EVENT,
+                                       WIFI_EVENT_STA_DISCONNECTED,
+                                       &WifiProvisioningRuntime::network_event_handler,
+                                       this);
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag, "STA disconnect handler registration failed: %s", esp_err_to_name(error));
+        return error;
+    }
 
     std::uint8_t mac[6]{};
     error = esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
@@ -100,6 +145,8 @@ esp_err_t WifiProvisioningRuntime::connect_station(const char* ssid, const char*
     error = esp_wifi_connect();
     if (error == ESP_OK) {
         station_connecting_ = true;
+        station_connected_ = false;
+        station_ip_address_[0] = '\0';
         ESP_LOGI(kTag, "STA connect requested for SSID: %s", ssid);
     }
     return error;
