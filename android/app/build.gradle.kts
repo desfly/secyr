@@ -12,8 +12,8 @@ android {
         applicationId = "ua.homeguard.s3"
         minSdk = 26
         targetSdk = 35
-        versionCode = 45
-        versionName = "0.0.45"
+        versionCode = 46
+        versionName = "0.0.46"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
