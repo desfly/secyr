@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(homeguard_s3_build0051 LANGUAGES CXX)
+project(homeguard_s3_build0052 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -27,6 +27,7 @@ add_library(homeguard_core
     src/system_model.cpp
     src/system_api.cpp
     src/output_interlock.cpp
+    src/output_command.cpp
     src/access_control.cpp
     src/access_store.cpp
     src/device_api_model.cpp
@@ -67,6 +68,7 @@ add_executable(homeguard_tests
     ../tests/test_build0049.cpp
     ../tests/test_build0050.cpp
     ../tests/test_build0051.cpp
+    ../tests/test_build0052.cpp
 )
 target_link_libraries(homeguard_tests PRIVATE homeguard_core)
 enable_testing()
