@@ -24,6 +24,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import ua.homeguard.s3.events.EventLogCategory
+import ua.homeguard.s3.events.EventLogFilter
+import ua.homeguard.s3.events.EventLogFilterEngine
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
@@ -50,7 +53,19 @@ fun DashboardScreen(
     onCommand: (CommandType) -> Unit,
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
+    var eventCategory by remember { mutableStateOf(EventLogCategory.ALL) }
+    var eventQuery by remember { mutableStateOf("") }
+    var eventSourceText by remember { mutableStateOf("") }
     val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12
+    val sourceFilter = eventSourceText.trim().toIntOrNull()
+    val filteredEvents = EventLogFilterEngine.apply(
+        events,
+        EventLogFilter(
+            category = eventCategory,
+            query = eventQuery,
+            sourceId = sourceFilter,
+        ),
+    )
 
     pendingDangerousCommand?.let { command ->
         AlertDialog(
@@ -164,15 +179,56 @@ fun DashboardScreen(
             }
         }
 
-        item { Text("Останні події", style = MaterialTheme.typography.titleLarge) }
-        if (events.isEmpty()) {
-            item { Text("Подій ще немає") }
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Журнал подій", style = MaterialTheme.typography.titleLarge)
+                    Text("Показано ${filteredEvents.size} з ${events.size}")
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        EventCategoryButton("Усі", EventLogCategory.ALL, eventCategory) { eventCategory = it }
+                        EventCategoryButton("Критичні", EventLogCategory.CRITICAL, eventCategory) { eventCategory = it }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        EventCategoryButton("Статус", EventLogCategory.STATUS, eventCategory) { eventCategory = it }
+                        EventCategoryButton("Зони", EventLogCategory.ZONES, eventCategory) { eventCategory = it }
+                        EventCategoryButton("Інші", EventLogCategory.OTHER, eventCategory) { eventCategory = it }
+                    }
+                    OutlinedTextField(
+                        value = eventQuery,
+                        onValueChange = { eventQuery = it.take(32) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Пошук: тип, значення, sequence") },
+                    )
+                    OutlinedTextField(
+                        value = eventSourceText,
+                        onValueChange = { value ->
+                            if (value.length <= 6 && value.all(Char::isDigit)) eventSourceText = value
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Source ID / зона (порожньо = усі)") },
+                    )
+                    if (eventCategory != EventLogCategory.ALL || eventQuery.isNotBlank() || eventSourceText.isNotBlank()) {
+                        OutlinedButton(onClick = {
+                            eventCategory = EventLogCategory.ALL
+                            eventQuery = ""
+                            eventSourceText = ""
+                        }) { Text("Скинути фільтри") }
+                    }
+                }
+            }
+        }
+
+        if (filteredEvents.isEmpty()) {
+            item { Text(if (events.isEmpty()) "Подій ще немає" else "За вибраними фільтрами подій немає") }
         } else {
-            items(events.take(12), key = { it.sequence }) { event ->
+            items(filteredEvents.take(32), key = { it.sequence }) { event ->
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(event.event, style = MaterialTheme.typography.titleSmall)
                         Text("#${event.sequence} · source ${event.sourceId} · value ${event.value}")
+                        Text("Категорія: ${EventLogFilterEngine.categoryOf(event).name}", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -214,6 +270,20 @@ fun DashboardScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun EventCategoryButton(
+    label: String,
+    category: EventLogCategory,
+    selected: EventLogCategory,
+    onSelect: (EventLogCategory) -> Unit,
+) {
+    if (category == selected) {
+        Button(onClick = { onSelect(category) }) { Text(label) }
+    } else {
+        OutlinedButton(onClick = { onSelect(category) }) { Text(label) }
     }
 }
 
