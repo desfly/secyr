@@ -163,12 +163,14 @@ bool AccessControl::role_allows(AccessRole role, std::string_view command) const
     if (role == AccessRole::Admin) return true;
 
     if (role == AccessRole::Guest) {
-        return command == "system.status" || command == "status" ||
+        return command == "profile.self" ||
+               command == "system.status" || command == "status" ||
                command == "sensors.status" || command == "sensors.list" ||
                command == "zones.status" || command == "zones.list";
     }
 
-    return command == "system.status" || command == "status" ||
+    return command == "profile.self" ||
+           command == "system.status" || command == "status" ||
            command == "sensors.status" || command == "sensors.list" ||
            command == "zones.status" || command == "zones.list" ||
            command == "security.arm_home" || command == "arm_home" ||
