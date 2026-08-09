@@ -31,7 +31,9 @@ void WifiProvisioningRuntime::network_event_handler(void* arg,
                       IP2STR(&event->ip_info.ip));
         self->station_connecting_ = false;
         self->station_connected_ = true;
-        ESP_LOGI(kTag, "STA connected; IP: %s", self->station_ip_address_.data());
+        ESP_LOGI(kTag, "STA connected to %s; IP: %s",
+                 self->station_ssid_.data(),
+                 self->station_ip_address_.data());
         return;
     }
 
@@ -39,13 +41,13 @@ void WifiProvisioningRuntime::network_event_handler(void* arg,
         self->station_connecting_ = false;
         self->station_connected_ = false;
         self->station_ip_address_[0] = '\0';
-        ESP_LOGW(kTag, "STA disconnected");
+        ESP_LOGW(kTag, "STA disconnected from %s", self->station_ssid_.data());
     }
 }
 
 esp_err_t WifiProvisioningRuntime::start(bool provisioning_required)
 {
-    ESP_LOGI(kTag, "=== HomeGuard-S3 Build-0058 WiFi Diagnostics ===");
+    ESP_LOGI(kTag, "=== HomeGuard-S3 WiFi Diagnostics ===");
     ESP_LOGI(kTag, "WiFi hardware: ESP32-S3");
     ESP_LOGI(kTag, "Provisioning required: %s", provisioning_required ? "YES" : "NO");
 
@@ -147,6 +149,8 @@ esp_err_t WifiProvisioningRuntime::connect_station(const char* ssid, const char*
     station_connecting_ = false;
     station_connected_ = false;
     station_ip_address_[0] = '\0';
+    std::strncpy(station_ssid_.data(), ssid, station_ssid_.size() - 1);
+    station_ssid_[station_ssid_.size() - 1] = '\0';
 
     wifi_config_t config{};
     std::strncpy(reinterpret_cast<char*>(config.sta.ssid), ssid, sizeof(config.sta.ssid) - 1);
@@ -163,7 +167,7 @@ esp_err_t WifiProvisioningRuntime::connect_station(const char* ssid, const char*
         return error;
     }
 
-    ESP_LOGI(kTag, "STA connect requested for SSID: %s", ssid);
+    ESP_LOGI(kTag, "STA connect requested for SSID: %s", station_ssid_.data());
     return ESP_OK;
 }
 
