@@ -48,6 +48,10 @@ struct wifi_ap_record_t {
 inline esp_err_t esp_wifi_init(const wifi_init_config_t*) { return ESP_OK; }
 inline esp_err_t esp_wifi_set_mode(wifi_mode_t) { return ESP_OK; }
 inline esp_err_t esp_wifi_set_config(wifi_interface_t, const wifi_config_t*) { return ESP_OK; }
+inline esp_err_t esp_wifi_get_config(wifi_interface_t, wifi_config_t* config) {
+    if (config != nullptr) *config = wifi_config_t{};
+    return ESP_OK;
+}
 inline esp_err_t esp_wifi_start() { return ESP_OK; }
 inline esp_err_t esp_wifi_stop() { return ESP_OK; }
 inline esp_err_t esp_wifi_connect() { return ESP_OK; }
