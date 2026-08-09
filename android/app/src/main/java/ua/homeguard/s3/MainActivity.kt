@@ -115,7 +115,7 @@ class MainActivity : ComponentActivity() {
         telemetry = TelemetrySocket().apply { seedEvents(eventHistory.load()) }
         cloudState = CloudStateMqttClient(telemetry)
         session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry, cloudState)
-        commands = CommandController(resolver.endpoint, settings)
+        commands = CommandController(resolver.endpoint, settings, cloudState)
         notifications = HomeGuardNotifications(this)
         notifications.createChannels()
         requestNotificationPermission()
