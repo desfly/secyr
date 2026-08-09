@@ -5,8 +5,8 @@
 namespace hg {
 
 ServiceButton::ServiceButton(ServiceButtonConfig config) : config_(config) {
-    config_.debounce_ms = std::max(config_.debounce_ms, 10U);
-    config_.factory_reset_hold_ms = std::max(config_.factory_reset_hold_ms, 1000U);
+    config_.debounce_ms = std::max(config_.debounce_ms, uint32_t{10});
+    config_.factory_reset_hold_ms = std::max(config_.factory_reset_hold_ms, uint32_t{1000});
 }
 
 ServiceButtonEvent ServiceButton::update(const bool raw_pressed, const uint64_t now_ms) {
