@@ -112,15 +112,21 @@ bool AccessControl::verify_pin(const AccessUser& user, std::string_view pin) con
 }
 
 bool AccessControl::role_allows(AccessRole role, std::string_view command) const {
+    // Admin is the only unrestricted role.
     if (role == AccessRole::Admin) return true;
+
+    // Guest is strictly read-only. Read access is handled by telemetry/state APIs,
+    // therefore no control command is authorized for this role.
     if (role == AccessRole::Guest) return false;
 
+    // Operator/User policy agreed for HomeGuard-S3:
+    // monitor state + arm/disarm + operate water valves. Monitoring itself is
+    // read-only and does not pass through the command router.
     return command == "security.arm_home" || command == "arm_home" ||
            command == "security.arm_away" || command == "arm_away" ||
            command == "security.disarm" || command == "disarm" ||
-           command == "silence" ||
-           command == "light.set" ||
-           command == "valve.close" || command == "close_valves";
+           command == "valve.close" || command == "close_valves" ||
+           command == "valve.open" || command == "open_valves";
 }
 
 void AccessControl::append_audit(
