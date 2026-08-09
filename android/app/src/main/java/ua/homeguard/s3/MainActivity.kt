@@ -129,6 +129,7 @@ class MainActivity : ComponentActivity() {
             val devices by discovery.devices.collectAsState()
             val endpoint by resolver.endpoint.collectAsState()
             val provisioningState by provisioning.state.collectAsState()
+            val wifiNetworks by provisioning.wifiNetworks.collectAsState()
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
             val events by telemetry.events().collectAsState(initial = emptyList())
             val commandMessage by commandStatus.collectAsState()
@@ -154,7 +155,9 @@ class MainActivity : ComponentActivity() {
                 if (appSettings.deviceId.isBlank() || provisioningActive) {
                     ProvisioningScreen(
                         state = provisioningState,
+                        wifiNetworks = wifiNetworks,
                         onScan = ::requestQrScan,
+                        onScanWifi = provisioning::scanWifi,
                         onProvision = provisioning::provision
                     )
                 } else {
