@@ -16,6 +16,10 @@ void test_access_privacy() {
     CHECK(!access.role_allows(homeguard::AccessRole::Guest, "access.users.manage"));
     CHECK(!access.role_allows(homeguard::AccessRole::Guest, "access.config.export"));
 
+    CHECK(access.role_allows(homeguard::AccessRole::Admin, "profile.self"));
+    CHECK(access.role_allows(homeguard::AccessRole::User, "profile.self"));
+    CHECK(access.role_allows(homeguard::AccessRole::Guest, "profile.self"));
+
     CHECK(access.role_allows(homeguard::AccessRole::User, "security.arm_home"));
     CHECK(access.role_allows(homeguard::AccessRole::User, "valve.open"));
     CHECK(access.role_allows(homeguard::AccessRole::Guest, "system.status"));
