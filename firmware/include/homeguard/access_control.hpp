@@ -44,6 +44,9 @@ public:
     // Persistence path: imports a record that already contains a salted PIN
     // digest. Raw PIN material is never required during restore.
     bool import_user(const AccessUser& user);
+    bool set_user_enabled(std::string_view id, bool enabled);
+    bool remove_user(std::string_view id);
+    [[nodiscard]] bool has_enabled_admin() const;
     void clear_users();
     [[nodiscard]] const AccessUser* user_at(std::size_t index) const;
 
