@@ -149,7 +149,7 @@ class CloudStateMqttClient(
         }
         if (!result.optBoolean("ok") || result.optString("code") != "self_profile") {
             mutableProfile.value = CloudSessionProfile.locked()
-            mutableStatus.value = "cloud login rejected: ${result.optString("code", "profile")}" 
+            mutableStatus.value = "cloud login rejected: ${result.optString("code", "profile")}"
             return mutableProfile.value
         }
         val profile = CloudSessionProfile.fromController(
@@ -165,7 +165,19 @@ class CloudStateMqttClient(
         mutableProfile.value = profile
         mutableStatus.value = if (profile.sensorOnly) "cloud connected · guest sensor-only" else "cloud authenticated · ${profile.role.name.lowercase()}"
         subscribeFullStateIfAllowed(profile)
+        if (profile.sensorOnly) refreshGuestSensors(actor, pin)
         return profile
+    }
+
+    suspend fun refreshGuestSensors(actor: String, pin: String): Boolean {
+        val profile = mutableProfile.value
+        if (!profile.sensorOnly || profile.id != actor.trim()) return false
+        return runCatching {
+            val result = authenticatedJson("sensors.status", actor.trim(), pin)
+            val accepted = telemetry.acceptCloudSensorStatus(result.toString())
+            if (accepted) mutableStatus.value = "cloud connected · guest sensor-only"
+            accepted
+        }.getOrDefault(false)
     }
 
     suspend fun executeCommand(command: String, actor: String, pin: String): CommandReply {
