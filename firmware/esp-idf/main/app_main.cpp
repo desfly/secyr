@@ -136,6 +136,18 @@ const char* arm_state_name(hg::PartitionArmState state)
     return "unknown";
 }
 
+const char* sensor_type_name(hg::ModelSensorType type)
+{
+    switch (type) {
+        case hg::ModelSensorType::Digital: return "digital";
+        case hg::ModelSensorType::Temperature: return "temperature";
+        case hg::ModelSensorType::Pressure: return "pressure";
+        case hg::ModelSensorType::Current: return "current";
+        case hg::ModelSensorType::Voltage: return "voltage";
+    }
+    return "unknown";
+}
+
 void publish_cloud_result(const std::string& request_id,
                           bool ok,
                           const char* code,
@@ -161,7 +173,6 @@ void publish_self_profile(const std::string& request_id, const std::string& acto
         publish_cloud_result(request_id, false, "profile_unavailable");
         return;
     }
-
     std::string extra = "\"id\":\"" + json_escape(profile.id.data()) + "\",\"name\":\"";
     extra += json_escape(profile.name.data());
     extra += "\",\"role\":\"";
@@ -179,6 +190,27 @@ void publish_self_profile(const std::string& request_id, const std::string& acto
     publish_cloud_result(request_id, true, "self_profile", extra.c_str());
 }
 
+void publish_sensor_status(const std::string& request_id)
+{
+    std::string extra = "\"sensors\":[";
+    for (std::size_t i = 0; i < g_system_model.sensor_count(); ++i) {
+        const auto* sensor = g_system_model.sensor_at(i);
+        if (sensor == nullptr) continue;
+        if (i != 0U) extra += ',';
+        extra += "{\"id\":" + std::to_string(sensor->id);
+        extra += ",\"type\":\"";
+        extra += sensor_type_name(sensor->type);
+        extra += "\",\"online\":";
+        extra += sensor->online ? "true" : "false";
+        extra += ",\"battery_percent\":" + std::to_string(sensor->battery_percent);
+        extra += ",\"rssi_dbm\":" + std::to_string(sensor->rssi_dbm);
+        extra += ",\"last_seen_ms\":" + std::to_string(sensor->last_seen_ms);
+        extra += '}';
+    }
+    extra += ']';
+    publish_cloud_result(request_id, true, "sensors", extra.c_str());
+}
+
 void publish_admin_directory(const std::string& request_id,
                              const homeguard::AdminUserCommandResult& result)
 {
@@ -186,7 +218,6 @@ void publish_admin_directory(const std::string& request_id,
         publish_cloud_result(request_id, false, homeguard::to_string(result.status));
         return;
     }
-
     std::string extra = "\"users\":[";
     for (std::size_t i = 0; i < result.directory.count; ++i) {
         if (i != 0U) extra += ',';
@@ -216,7 +247,6 @@ void issue_cloud_challenge(const std::string& request_id,
         publish_cloud_result(request_id, false, "denied_role");
         return;
     }
-
     std::array<std::uint8_t, 16> random_bytes{};
     esp_fill_random(random_bytes.data(), random_bytes.size());
     g_cloud_challenge.active = true;
@@ -225,7 +255,6 @@ void issue_cloud_challenge(const std::string& request_id,
     g_cloud_challenge.request_id = request_id;
     g_cloud_challenge.nonce = bytes_hex(random_bytes);
     g_cloud_challenge.expires_at_ms = now_ms() + kCloudChallengeLifetimeMs;
-
     std::string extra = "\"nonce\":\"" + g_cloud_challenge.nonce + "\",\"salt\":\"";
     extra += bytes_hex(user->salt);
     extra += "\",\"expires_in_ms\":" + std::to_string(kCloudChallengeLifetimeMs);
@@ -242,7 +271,6 @@ bool authorize_cloud_command(const std::string& body,
         publish_cloud_result(request_id, false, "auth_proof_required");
         return false;
     }
-
     const auto timestamp = now_ms();
     if (!g_cloud_challenge.active || timestamp > g_cloud_challenge.expires_at_ms) {
         g_cloud_challenge.active = false;
@@ -256,11 +284,9 @@ bool authorize_cloud_command(const std::string& body,
         publish_cloud_result(request_id, false, "challenge_mismatch");
         return false;
     }
-
     const std::string nonce = g_cloud_challenge.nonce;
     g_cloud_challenge.active = false;
-    const auto decision = g_access_control.authorize_cloud_proof(
-        actor, command, nonce, request_id, proof);
+    const auto decision = g_access_control.authorize_cloud_proof(actor, command, nonce, request_id, proof);
     if (decision != homeguard::AuditDecision::Allowed) {
         publish_cloud_result(request_id, false, homeguard::to_string(decision));
         return false;
@@ -306,7 +332,6 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
         publish_cloud_result("", false, "invalid_payload");
         return;
     }
-
     const std::string body(payload, length);
     std::string request_id;
     std::string command;
@@ -316,7 +341,6 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
         publish_cloud_result(request_id, false, "invalid_command");
         return;
     }
-
     if (command == "auth.challenge") {
         std::string target_command;
         if (!extract_json_string(body, "actor", actor) || actor.empty() || actor.size() > 23U ||
@@ -327,7 +351,6 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
         issue_cloud_challenge(request_id, actor, target_command);
         return;
     }
-
     if (!extract_json_string(body, "actor", actor) || actor.empty() || actor.size() > 23U) {
         publish_cloud_result(request_id, false, "actor_required");
         return;
@@ -336,6 +359,10 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
 
     if (command == "profile.self") {
         publish_self_profile(request_id, actor);
+        return;
+    }
+    if (command == "sensors.status") {
+        publish_sensor_status(request_id);
         return;
     }
     if (command == "system.status") {
@@ -355,9 +382,7 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
         publish_admin_directory(request_id, homeguard::admin_users_list(g_access_control, actor));
         return;
     }
-    if (command == "access.users.enable" ||
-        command == "access.users.disable" ||
-        command == "access.users.delete") {
+    if (command == "access.users.enable" || command == "access.users.disable" || command == "access.users.delete") {
         std::string target_id;
         if (!extract_json_string(body, "target_id", target_id) || target_id.empty() || target_id.size() > 23U) {
             publish_cloud_result(request_id, false, "target_id_required");
@@ -365,16 +390,12 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
         }
         const homeguard::AccessControl backup = g_access_control;
         if (command == "access.users.delete") {
-            (void)persist_admin_change(
-                backup,
-                request_id,
-                homeguard::admin_user_delete(g_access_control, actor, target_id));
+            (void)persist_admin_change(backup, request_id, homeguard::admin_user_delete(g_access_control, actor, target_id));
         } else {
             (void)persist_admin_change(
                 backup,
                 request_id,
-                homeguard::admin_user_set_enabled(
-                    g_access_control, actor, target_id, command == "access.users.enable"));
+                homeguard::admin_user_set_enabled(g_access_control, actor, target_id, command == "access.users.enable"));
         }
         return;
     }
@@ -406,15 +427,13 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
                              changed ? (opening ? "valve_open" : "valve_closed") : "valve_write_failed");
         return;
     }
-
     publish_cloud_result(request_id, false, "unsupported_command");
 }
 
 esp_err_t initialize_nvs()
 {
     auto error = nvs_flash_init();
-    if (error == ESP_ERR_NVS_NO_FREE_PAGES ||
-        error == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (error == ESP_ERR_NVS_NO_FREE_PAGES || error == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         error = nvs_flash_init();
     }
@@ -433,29 +452,20 @@ void restore_access_control()
         ESP_LOGE(kTag, "Access database rejected (%s); access starts fail-closed", esp_err_to_name(error));
         return;
     }
-    ESP_LOGI(kTag, "Restored %u access user(s) from NVS",
-             static_cast<unsigned>(g_access_control.user_count()));
+    ESP_LOGI(kTag, "Restored %u access user(s) from NVS", static_cast<unsigned>(g_access_control.user_count()));
 }
 
 void restore_commissioning_state()
 {
     const auto hardware_error = g_commissioning_store.load_hardware(g_hardware_verification);
     const auto commissioning_error = g_commissioning_store.load_commissioning(g_commissioning_state);
-
     const auto* hardware = hardware_error == ESP_OK ? &g_hardware_verification : nullptr;
     const auto* commissioning = commissioning_error == ESP_OK ? &g_commissioning_state : nullptr;
     g_boot_readiness = hg::evaluate_boot_readiness({hardware, commissioning});
-
-    if (hardware_error != ESP_OK) {
-        ESP_LOGW(kTag, "Hardware verification unavailable/rejected (%s)", esp_err_to_name(hardware_error));
-    }
-    if (commissioning_error != ESP_OK) {
-        ESP_LOGW(kTag, "Commissioning state unavailable/rejected (%s)", esp_err_to_name(commissioning_error));
-    }
-
+    if (hardware_error != ESP_OK) ESP_LOGW(kTag, "Hardware verification unavailable/rejected (%s)", esp_err_to_name(hardware_error));
+    if (commissioning_error != ESP_OK) ESP_LOGW(kTag, "Commissioning state unavailable/rejected (%s)", esp_err_to_name(commissioning_error));
     if (!g_boot_readiness.outputs_allowed()) {
-        ESP_LOGW(kTag, "Physical outputs remain FAIL-CLOSED after boot: %s",
-                 hg::to_string(g_boot_readiness.status));
+        ESP_LOGW(kTag, "Physical outputs remain FAIL-CLOSED after boot: %s", hg::to_string(g_boot_readiness.status));
     } else {
         ESP_LOGI(kTag, "Verified commissioning state restored; physical output gate is ready");
     }
@@ -470,15 +480,12 @@ void restore_wifi_credentials()
         return;
     }
     if (error != ESP_OK) {
-        ESP_LOGW(kTag, "Persisted WiFi credentials rejected (%s); SoftAP fallback remains active",
-                 esp_err_to_name(error));
+        ESP_LOGW(kTag, "Persisted WiFi credentials rejected (%s); SoftAP fallback remains active", esp_err_to_name(error));
         return;
     }
-    const auto connect_error = g_wifi_provisioning.connect_station(
-        credentials.ssid.data(), credentials.password.data());
+    const auto connect_error = g_wifi_provisioning.connect_station(credentials.ssid.data(), credentials.password.data());
     if (connect_error != ESP_OK) {
-        ESP_LOGW(kTag, "Persisted WiFi STA connect start failed (%s); SoftAP fallback remains active",
-                 esp_err_to_name(connect_error));
+        ESP_LOGW(kTag, "Persisted WiFi STA connect start failed (%s); SoftAP fallback remains active", esp_err_to_name(connect_error));
     }
 }
 
@@ -491,7 +498,6 @@ void restore_cloud_config()
     } else {
         ESP_LOGI(kTag, "Cloud device id: %s", g_cloud_link.device_id());
     }
-
     homeguard::idf::CloudConfig config{};
     const auto error = g_cloud_config_store.load(config);
     if (error == ESP_ERR_NVS_NOT_FOUND) {
@@ -502,12 +508,8 @@ void restore_cloud_config()
         ESP_LOGW(kTag, "Persisted cloud config rejected: %s", esp_err_to_name(error));
         return;
     }
-
-    const auto start_error = g_cloud_link.start(
-        config.broker_uri.data(), config.username.data(), config.password.data());
-    if (start_error != ESP_OK) {
-        ESP_LOGW(kTag, "Cloud link start failed: %s", esp_err_to_name(start_error));
-    }
+    const auto start_error = g_cloud_link.start(config.broker_uri.data(), config.username.data(), config.password.data());
+    if (start_error != ESP_OK) ESP_LOGW(kTag, "Cloud link start failed: %s", esp_err_to_name(start_error));
 }
 
 void initialize_system_model()
@@ -522,12 +524,10 @@ void initialize_system_model()
 void initialize_physical_outputs()
 {
     if (!g_physical_outputs.initialize(g_gpio_outputs, g_hardware_verification, g_boot_readiness)) {
-        ESP_LOGW(kTag, "Physical outputs unavailable; runtime remains fail-closed (%s)",
-                 hg::to_string(g_physical_outputs.state().status));
+        ESP_LOGW(kTag, "Physical outputs unavailable; runtime remains fail-closed (%s)", hg::to_string(g_physical_outputs.state().status));
         return;
     }
-    ESP_LOGI(kTag, "Physical output runtime initialized: %s",
-             hg::to_string(g_physical_outputs.state().status));
+    ESP_LOGI(kTag, "Physical output runtime initialized: %s", hg::to_string(g_physical_outputs.state().status));
 }
 
 esp_err_t start_http_server()
@@ -536,41 +536,15 @@ esp_err_t start_http_server()
     config.max_uri_handlers = 32;
     config.stack_size = 8192;
     config.lru_purge_enable = true;
-
     ESP_RETURN_ON_ERROR(httpd_start(&g_http_server, &config), kTag, "httpd_start");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus), kTag, "system routes");
-    ESP_RETURN_ON_ERROR(
-        g_output_http.register_handlers(
-            g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus),
-        kTag,
-        "output routes");
-    ESP_RETURN_ON_ERROR(
-        g_service_http.register_handlers(
-            g_http_server,
-            &g_commissioning_store,
-            &g_hardware_verification,
-            &g_commissioning_state,
-            &g_boot_readiness,
-            &g_system_bus),
-        kTag,
-        "service routes");
-    ESP_RETURN_ON_ERROR(
-        g_wifi_http.register_handlers(g_http_server, &g_wifi_credentials_store, &g_wifi_provisioning),
-        kTag,
-        "wifi provisioning routes");
-    ESP_RETURN_ON_ERROR(
-        g_cloud_http.register_handlers(g_http_server, &g_cloud_config_store, &g_cloud_link),
-        kTag,
-        "cloud routes");
-    ESP_RETURN_ON_ERROR(
-        g_access_bootstrap_http.register_handlers(g_http_server, &g_access_control, &g_access_store),
-        kTag,
-        "access bootstrap routes");
-    ESP_RETURN_ON_ERROR(
-        g_access_admin_http.register_handlers(g_http_server, &g_access_control, &g_access_store),
-        kTag,
-        "access admin routes");
+    ESP_RETURN_ON_ERROR(g_output_http.register_handlers(g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus), kTag, "output routes");
+    ESP_RETURN_ON_ERROR(g_service_http.register_handlers(g_http_server, &g_commissioning_store, &g_hardware_verification, &g_commissioning_state, &g_boot_readiness, &g_system_bus), kTag, "service routes");
+    ESP_RETURN_ON_ERROR(g_wifi_http.register_handlers(g_http_server, &g_wifi_credentials_store, &g_wifi_provisioning), kTag, "wifi provisioning routes");
+    ESP_RETURN_ON_ERROR(g_cloud_http.register_handlers(g_http_server, &g_cloud_config_store, &g_cloud_link), kTag, "cloud routes");
+    ESP_RETURN_ON_ERROR(g_access_bootstrap_http.register_handlers(g_http_server, &g_access_control, &g_access_store), kTag, "access bootstrap routes");
+    ESP_RETURN_ON_ERROR(g_access_admin_http.register_handlers(g_http_server, &g_access_control, &g_access_store), kTag, "access admin routes");
     return g_build_http.register_handlers(g_http_server);
 }
 
@@ -583,9 +557,7 @@ extern "C" void app_main()
     restore_commissioning_state();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-
     initialize_system_model();
-
     const bool provisioning_required = !g_boot_readiness.outputs_allowed();
     const auto wifi_error = g_wifi_provisioning.start(provisioning_required);
     if (wifi_error != ESP_OK) {
@@ -593,27 +565,17 @@ extern "C" void app_main()
     } else {
         restore_wifi_credentials();
     }
-
     restore_cloud_config();
     initialize_physical_outputs();
-
     const auto hardware_error = g_hardware.initialize();
     if (hardware_error != ESP_OK) {
         ESP_LOGE(kTag, "Hardware bootstrap failed: %s", esp_err_to_name(hardware_error));
     } else {
         ESP_LOGI(kTag, "Hardware bootstrap completed");
     }
-
     const auto http_error = start_http_server();
-    if (http_error != ESP_OK) {
-        ESP_LOGE(kTag, "HTTP server failed: %s", esp_err_to_name(http_error));
-    }
-
+    if (http_error != ESP_OK) ESP_LOGE(kTag, "HTTP server failed: %s", esp_err_to_name(http_error));
     const auto telemetry_error = g_telemetry.start(&g_hardware, &g_system_model, &g_cloud_link);
-    if (telemetry_error != ESP_OK) {
-        ESP_LOGE(kTag, "Telemetry task failed: %s", esp_err_to_name(telemetry_error));
-    }
-
-    ESP_LOGI(kTag, "%.*s runtime started",
-             static_cast<int>(hg::build::label.size()), hg::build::label.data());
+    if (telemetry_error != ESP_OK) ESP_LOGE(kTag, "Telemetry task failed: %s", esp_err_to_name(telemetry_error));
+    ESP_LOGI(kTag, "%.*s runtime started", static_cast<int>(hg::build::label.size()), hg::build::label.data());
 }
