@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.model.ProvisioningForm
 import ua.homeguard.s3.model.ProvisioningPhase
@@ -40,6 +42,9 @@ fun ProvisioningScreen(
     var existingDeviceId by remember { mutableStateOf("") }
     var existingActor by remember { mutableStateOf("admin") }
     var existingPin by remember { mutableStateOf("") }
+    var showExistingPin by remember { mutableStateOf(false) }
+    var showWifiPassword by remember { mutableStateOf(false) }
+    var showClaimToken by remember { mutableStateOf(false) }
     val busy = state.phase in setOf(
         ProvisioningPhase.CONNECTING_SETUP_AP,
         ProvisioningPhase.AUTHORIZING,
@@ -60,7 +65,16 @@ fun ProvisioningScreen(
 
         OutlinedTextField(existingDeviceId, { existingDeviceId = it.trim().uppercase().take(40) }, label = { Text("Device ID") }, placeholder = { Text("HG-XXXXXXXXXXXX") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         OutlinedTextField(existingActor, { existingActor = it.trim().take(23) }, label = { Text("Користувач") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        OutlinedTextField(existingPin, { existingPin = it.take(12) }, label = { Text("PIN") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), singleLine = true)
+        OutlinedTextField(
+            existingPin,
+            { existingPin = it.take(12) },
+            label = { Text("PIN") },
+            modifier = Modifier.fillMaxWidth(),
+            visualTransformation = if (showExistingPin) VisualTransformation.None else PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            trailingIcon = { IconButton(onClick = { showExistingPin = !showExistingPin }) { Text(if (showExistingPin) "◉" else "👁") } },
+            singleLine = true
+        )
         Button(onClick = { onCloudAttach(normalizedDeviceId, existingActor.trim(), existingPin) }, enabled = !busy && normalizedDeviceId.startsWith("HG-") && existingActor.isNotBlank() && existingPin.length in 4..12, modifier = Modifier.fillMaxWidth()) { Text("Підключити через хмару") }
 
         HorizontalDivider()
@@ -81,10 +95,27 @@ fun ProvisioningScreen(
             }
         }
         OutlinedTextField(form.wifiSsid, { form = form.copy(wifiSsid = it) }, label = { Text("Домашня Wi-Fi мережа") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        OutlinedTextField(form.wifiPassword, { form = form.copy(wifiPassword = it) }, label = { Text("Пароль домашнього Wi-Fi") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true)
+        OutlinedTextField(
+            form.wifiPassword,
+            { form = form.copy(wifiPassword = it) },
+            label = { Text("Пароль домашнього Wi-Fi") },
+            modifier = Modifier.fillMaxWidth(),
+            visualTransformation = if (showWifiPassword) VisualTransformation.None else PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            trailingIcon = { IconButton(onClick = { showWifiPassword = !showWifiPassword }) { Text(if (showWifiPassword) "◉" else "👁") } },
+            singleLine = true
+        )
         OutlinedTextField(form.ownerLabel, { form = form.copy(ownerLabel = it) }, label = { Text("Назва об’єкта") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         OutlinedTextField(form.cloudEndpoint, { form = form.copy(cloudEndpoint = it) }, label = { Text("MQTTS адреса хмари — необов’язково") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        OutlinedTextField(form.cloudClaimToken, { form = form.copy(cloudClaimToken = it) }, label = { Text("Одноразовий cloud claim token") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), singleLine = true)
+        OutlinedTextField(
+            form.cloudClaimToken,
+            { form = form.copy(cloudClaimToken = it) },
+            label = { Text("Одноразовий cloud claim token") },
+            modifier = Modifier.fillMaxWidth(),
+            visualTransformation = if (showClaimToken) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = { IconButton(onClick = { showClaimToken = !showClaimToken }) { Text(if (showClaimToken) "◉" else "👁") } },
+            singleLine = true
+        )
         Button(onClick = { onProvision(form) }, enabled = state.qr != null && !busy, modifier = Modifier.fillMaxWidth()) { Text("Прив’язати новий HomeGuard-S3") }
         if (busy) CircularProgressIndicator()
     }
