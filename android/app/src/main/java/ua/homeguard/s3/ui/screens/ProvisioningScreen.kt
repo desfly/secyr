@@ -1,5 +1,6 @@
 package ua.homeguard.s3.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -67,6 +69,7 @@ fun ProvisioningScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color.White.copy(alpha = 0.07f))
             .statusBarsPadding()
             .navigationBarsPadding()
             .verticalScroll(rememberScrollState())
