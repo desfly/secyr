@@ -36,6 +36,37 @@ class TelemetrySocket {
         eventState.value = emptyList()
     }
 
+    fun acceptCloudSensorStatus(text: String): Boolean = runCatching {
+        val json = JSONObject(text)
+        if (!json.optBoolean("ok") || json.optString("code") != "sensors") return false
+        val sensorsJson = json.optJSONArray("sensors") ?: return false
+        val sensors = buildList {
+            for (i in 0 until sensorsJson.length()) {
+                val item = sensorsJson.optJSONObject(i) ?: continue
+                val online = item.optBoolean("online", false)
+                val battery = item.optInt("battery_percent", -1)
+                val rssi = item.optInt("rssi_dbm", 0)
+                add(
+                    SensorStatus(
+                        index = item.optInt("id", i + 1),
+                        name = "Sensor ${item.optInt("id", i + 1)} · ${item.optString("type", "sensor")}",
+                        state = if (online) "online" else "offline",
+                        value = buildString {
+                            if (battery >= 0) append("$battery%")
+                            if (rssi != 0) {
+                                if (isNotEmpty()) append(" · ")
+                                append("$rssi dBm")
+                            }
+                        },
+                    )
+                )
+            }
+        }
+        // Privacy boundary: sensor-only updates never alter arm mode, zones, outputs or events.
+        state.value = state.value.copy(sensors = sensors)
+        true
+    }.getOrDefault(false)
+
     /** Accepts the retained MQTT state schema published by Build-0060 firmware. */
     fun acceptCloudState(text: String): Boolean = runCatching {
         val json = JSONObject(text)
