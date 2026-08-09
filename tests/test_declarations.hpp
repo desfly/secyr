@@ -22,3 +22,4 @@ void test_access_privacy();
 void test_self_profile();
 void test_user_lifecycle();
 void test_admin_user_directory();
+void test_admin_user_commands();
