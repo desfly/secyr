@@ -6,14 +6,13 @@ namespace hg {
 
 enum class ServiceButtonEvent : uint8_t {
     None,
-    ServiceModeRequested,
+    RebootRequested,
     FactoryResetRequested,
 };
 
 struct ServiceButtonConfig {
     uint32_t debounce_ms{40};
-    uint32_t service_hold_ms{3000};
-    uint32_t factory_reset_hold_ms{10000};
+    uint32_t factory_reset_hold_ms{5000};
 };
 
 class ServiceButton {
@@ -27,7 +26,6 @@ private:
     ServiceButtonConfig config_{};
     bool raw_pressed_{};
     bool stable_pressed_{};
-    bool service_emitted_{};
     bool reset_emitted_{};
     uint64_t raw_changed_at_{};
     uint64_t pressed_at_{};
