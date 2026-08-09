@@ -69,6 +69,7 @@ idf_component_register(
         mbedtls
         mqtt
         nvs_flash
+        physical_button
         sdmmc
 )
 
