@@ -62,7 +62,7 @@ void align_softap_channel_to_target(const char* target_ssid)
 
     ESP_LOGW(kTag, "Target SSID %s not found during channel alignment scan", target_ssid);
 }
-}
+}  // namespace
 
 void WifiProvisioningRuntime::network_event_handler(void* arg,
                                                     esp_event_base_t event_base,
@@ -83,6 +83,21 @@ void WifiProvisioningRuntime::network_event_handler(void* arg,
         ESP_LOGI(kTag, "STA connected to %s; IP: %s",
                  self->station_ssid_.data(),
                  self->station_ip_address_.data());
+
+        // Setup/Recovery AP is needed only until the controller has a working
+        // home-network address. After GOT_IP, keep the radio in STA-only mode.
+        // Failed association leaves the AP untouched so provisioning remains
+        // reachable at 192.168.4.1.
+        if (self->started_) {
+            const auto mode_error = esp_wifi_set_mode(WIFI_MODE_STA);
+            if (mode_error == ESP_OK) {
+                self->started_ = false;
+                self->ip_address_[0] = '\0';
+                ESP_LOGI(kTag, "Setup SoftAP disabled after successful STA connection");
+            } else {
+                ESP_LOGW(kTag, "Setup SoftAP disable failed: %s", esp_err_to_name(mode_error));
+            }
+        }
         return;
     }
 
@@ -100,18 +115,21 @@ esp_err_t WifiProvisioningRuntime::start(bool provisioning_required)
     ESP_LOGI(kTag, "WiFi hardware: ESP32-S3");
     ESP_LOGI(kTag, "Provisioning required: %s", provisioning_required ? "YES" : "NO");
 
-    if (!provisioning_required) {
-        ESP_LOGI(kTag, "SoftAP start: SKIPPED");
-        ESP_LOGI(kTag, "===============================================");
-        return ESP_OK;
-    }
-
-    auto* ap_netif = esp_netif_create_default_wifi_ap();
-    if (ap_netif == nullptr) {
-        ESP_LOGE(kTag, "WiFi radio init: FAILED (netif)");
+    auto* sta_netif = esp_netif_create_default_wifi_sta();
+    if (sta_netif == nullptr) {
+        ESP_LOGE(kTag, "WiFi radio init: FAILED (STA netif)");
         return ESP_FAIL;
     }
-    (void)esp_netif_create_default_wifi_sta();
+    (void)sta_netif;
+
+    esp_netif_t* ap_netif = nullptr;
+    if (provisioning_required) {
+        ap_netif = esp_netif_create_default_wifi_ap();
+        if (ap_netif == nullptr) {
+            ESP_LOGE(kTag, "WiFi radio init: FAILED (AP netif)");
+            return ESP_FAIL;
+        }
+    }
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     auto error = esp_wifi_init(&init);
@@ -144,8 +162,22 @@ esp_err_t WifiProvisioningRuntime::start(bool provisioning_required)
         ESP_LOGE(kTag, "WiFi MAC read: FAILED (%s)", esp_err_to_name(error));
         return error;
     }
-
     std::snprintf(ssid_.data(), ssid_.size(), "HomeGuard-S3-%02X%02X", mac[4], mac[5]);
+
+    if (!provisioning_required) {
+        error = esp_wifi_set_mode(WIFI_MODE_STA);
+        if (error == ESP_OK) error = esp_wifi_start();
+        if (error != ESP_OK) {
+            ESP_LOGE(kTag, "STA-only WiFi start failed: %s", esp_err_to_name(error));
+            return error;
+        }
+        started_ = false;
+        ip_address_[0] = '\0';
+        ESP_LOGI(kTag, "SoftAP start: SKIPPED; STA radio ready for persisted WiFi credentials");
+        ESP_LOGI(kTag, "===============================================");
+        return ESP_OK;
+    }
+
     ESP_LOGI(kTag, "WiFi MAC: %02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
@@ -201,13 +233,7 @@ esp_err_t WifiProvisioningRuntime::connect_station(const char* ssid, const char*
     std::strncpy(station_ssid_.data(), ssid, station_ssid_.size() - 1);
     station_ssid_[station_ssid_.size() - 1] = '\0';
 
-    // ESP32-S3 AP+STA share one 2.4 GHz radio. If the Recovery AP starts on
-    // channel 1 and STA immediately associates to (for example) channel 7,
-    // the driver's automatic AP channel hop can make clients lose 192.168.4.1
-    // for a long time. Discover the target channel first and move the SoftAP
-    // before association, so clients see one deliberate transition instead of
-    // a mid-handshake channel jump.
-    align_softap_channel_to_target(ssid);
+    if (started_) align_softap_channel_to_target(ssid);
 
     wifi_config_t config{};
     std::strncpy(reinterpret_cast<char*>(config.sta.ssid), ssid, sizeof(config.sta.ssid) - 1);
