@@ -124,10 +124,11 @@ void CloudLink::publish_online(bool online)
     (void)esp_mqtt_client_publish(client_, availability_topic_.data(), value, 0, 1, 1);
 }
 
-void CloudLink::publish_command_response(const char* json)
+esp_err_t CloudLink::publish_command_response(const char* json)
 {
-    if (client_ == nullptr || !connected_ || json == nullptr) return;
-    (void)esp_mqtt_client_publish(client_, response_topic_.data(), json, 0, 1, 0);
+    if (client_ == nullptr || !connected_ || json == nullptr) return ESP_ERR_INVALID_STATE;
+    const int id = esp_mqtt_client_publish(client_, response_topic_.data(), json, 0, 1, 0);
+    return id >= 0 ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t CloudLink::publish_state(const char* json, int qos, bool retain)
@@ -155,7 +156,7 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             ++connect_count_;
             publish_online(true);
             (void)esp_mqtt_client_subscribe(client_, command_topic_.data(), 1);
-            publish_command_response("{\"event\":\"cloud_connected\",\"ok\":true}");
+            (void)publish_command_response("{\"event\":\"cloud_connected\",\"ok\":true}");
             ESP_LOGI(kTag, "Cloud connected; commands=%s responses=%s",
                      command_topic_.data(), response_topic_.data());
             break;
@@ -174,11 +175,13 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
                     std::snprintf(response, sizeof(response),
                                   "{\"ok\":true,\"type\":\"pong\",\"device_id\":\"%s\",\"command_count\":%lu}",
                                   device_id_.data(), static_cast<unsigned long>(command_count_));
-                    publish_command_response(response);
+                    (void)publish_command_response(response);
                     ESP_LOGI(kTag, "Cloud ping handled");
+                } else if (command_handler_ != nullptr) {
+                    command_handler_(data.data(), data.size(), command_context_);
                 } else {
-                    publish_command_response("{\"ok\":false,\"error\":\"unsupported_command\"}");
-                    ESP_LOGW(kTag, "Unsupported cloud command received (%u bytes)",
+                    (void)publish_command_response("{\"ok\":false,\"error\":\"command_router_unavailable\"}");
+                    ESP_LOGW(kTag, "Cloud command router unavailable (%u bytes)",
                              static_cast<unsigned>(data.size()));
                 }
             }
