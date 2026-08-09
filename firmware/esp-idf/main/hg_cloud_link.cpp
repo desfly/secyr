@@ -15,6 +15,12 @@ namespace homeguard::idf {
 namespace {
 constexpr const char* kTag = "hg_cloud";
 constexpr const char* kPrefix = "homeguard/v1/devices";
+
+bool is_ping_command(const std::string& data)
+{
+    return data == "ping" || data.find("\"type\":\"ping\"") != std::string::npos ||
+           data.find("\"command\":\"ping\"") != std::string::npos;
+}
 }
 
 void CloudLink::make_device_id()
@@ -34,6 +40,7 @@ void CloudLink::make_topics()
     std::snprintf(state_topic_.data(), state_topic_.size(), "%s/%s/state", kPrefix, device_id_.data());
     std::snprintf(availability_topic_.data(), availability_topic_.size(), "%s/%s/availability", kPrefix, device_id_.data());
     std::snprintf(command_topic_.data(), command_topic_.size(), "%s/%s/commands", kPrefix, device_id_.data());
+    std::snprintf(response_topic_.data(), response_topic_.size(), "%s/%s/responses", kPrefix, device_id_.data());
 }
 
 esp_err_t CloudLink::prepare_identity()
@@ -117,6 +124,12 @@ void CloudLink::publish_online(bool online)
     (void)esp_mqtt_client_publish(client_, availability_topic_.data(), value, 0, 1, 1);
 }
 
+void CloudLink::publish_command_response(const char* json)
+{
+    if (client_ == nullptr || !connected_ || json == nullptr) return;
+    (void)esp_mqtt_client_publish(client_, response_topic_.data(), json, 0, 1, 0);
+}
+
 esp_err_t CloudLink::publish_state(const char* json, int qos, bool retain)
 {
     if (client_ == nullptr || !connected_ || json == nullptr) return ESP_ERR_INVALID_STATE;
@@ -142,7 +155,9 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             ++connect_count_;
             publish_online(true);
             (void)esp_mqtt_client_subscribe(client_, command_topic_.data(), 1);
-            ESP_LOGI(kTag, "Cloud connected; commands=%s", command_topic_.data());
+            publish_command_response("{\"event\":\"cloud_connected\",\"ok\":true}");
+            ESP_LOGI(kTag, "Cloud connected; commands=%s responses=%s",
+                     command_topic_.data(), response_topic_.data());
             break;
         case MQTT_EVENT_DISCONNECTED:
             connected_ = false;
@@ -153,8 +168,19 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             const std::string topic(event->topic, static_cast<std::size_t>(event->topic_len));
             const std::string data(event->data, static_cast<std::size_t>(event->data_len));
             if (topic == command_topic_.data()) {
-                ESP_LOGI(kTag, "Cloud command received (%u bytes), deferred to safe command router",
-                         static_cast<unsigned>(data.size()));
+                ++command_count_;
+                if (is_ping_command(data)) {
+                    char response[192]{};
+                    std::snprintf(response, sizeof(response),
+                                  "{\"ok\":true,\"type\":\"pong\",\"device_id\":\"%s\",\"command_count\":%lu}",
+                                  device_id_.data(), static_cast<unsigned long>(command_count_));
+                    publish_command_response(response);
+                    ESP_LOGI(kTag, "Cloud ping handled");
+                } else {
+                    publish_command_response("{\"ok\":false,\"error\":\"unsupported_command\"}");
+                    ESP_LOGW(kTag, "Unsupported cloud command received (%u bytes)",
+                             static_cast<unsigned>(data.size()));
+                }
             }
             break;
         }
