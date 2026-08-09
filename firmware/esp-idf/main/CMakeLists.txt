@@ -39,6 +39,7 @@ idf_component_register(
         "../../src/access_control.cpp"
         "../../src/access_store.cpp"
         "../../src/self_profile.cpp"
+        "../../src/admin_user_directory.cpp"
         "../../src/crc32.cpp"
         "../../src/sha256.cpp"
         "../../src/hardware_profile.cpp"
