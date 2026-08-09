@@ -16,6 +16,7 @@
 #include "hg_access_bootstrap_http.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
+#include "homeguard/self_profile.hpp"
 #include "homeguard/boot_readiness.hpp"
 #include "homeguard/build_info.hpp"
 #include "homeguard/physical_output_runtime.hpp"
@@ -150,6 +151,31 @@ void publish_cloud_result(const std::string& request_id,
     (void)g_cloud_link.publish_command_response(response.c_str());
 }
 
+void publish_self_profile(const std::string& request_id, const std::string& actor)
+{
+    homeguard::SelfProfile profile{};
+    if (!homeguard::build_self_profile(g_access_control, actor, profile)) {
+        publish_cloud_result(request_id, false, "profile_unavailable");
+        return;
+    }
+
+    std::string extra = "\"id\":\"" + json_escape(profile.id.data()) + "\",\"name\":\"";
+    extra += json_escape(profile.name.data());
+    extra += "\",\"role\":\"";
+    extra += homeguard::to_string(profile.role);
+    extra += "\",\"enabled\":";
+    extra += profile.enabled ? "true" : "false";
+    extra += ",\"can_arm\":";
+    extra += profile.can_arm ? "true" : "false";
+    extra += ",\"can_disarm\":";
+    extra += profile.can_disarm ? "true" : "false";
+    extra += ",\"can_control_valves\":";
+    extra += profile.can_control_valves ? "true" : "false";
+    extra += ",\"can_manage_users\":";
+    extra += profile.can_manage_users ? "true" : "false";
+    publish_cloud_result(request_id, true, "self_profile", extra.c_str());
+}
+
 void issue_cloud_challenge(const std::string& request_id,
                            const std::string& actor,
                            const std::string& target_command)
@@ -275,6 +301,11 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
         return;
     }
     if (!authorize_cloud_command(body, request_id, command, actor)) return;
+
+    if (command == "profile.self") {
+        publish_self_profile(request_id, actor);
+        return;
+    }
 
     const auto timestamp = now_ms();
     if (command == "security.arm_home") {
