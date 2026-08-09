@@ -13,6 +13,7 @@
 #include "hg_cloud_config.hpp"
 #include "hg_cloud_http.hpp"
 #include "hg_access_nvs.hpp"
+#include "hg_access_bootstrap_http.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
 #include "homeguard/boot_readiness.hpp"
@@ -54,6 +55,7 @@ homeguard::idf::CloudLink g_cloud_link;
 homeguard::idf::CloudConfigStore g_cloud_config_store;
 homeguard::idf::CloudHttp g_cloud_http;
 homeguard::idf::AccessNvsStore g_access_store;
+homeguard::idf::AccessBootstrapHttp g_access_bootstrap_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
 homeguard::AccessControl g_access_control;
 hg::HardwareVerificationRecord g_hardware_verification;
@@ -203,7 +205,7 @@ bool authorize_cloud_command(const std::string& body,
     }
 
     const std::string nonce = g_cloud_challenge.nonce;
-    g_cloud_challenge.active = false; // one attempt only, including failed proofs
+    g_cloud_challenge.active = false;
     const auto decision = g_access_control.authorize_cloud_proof(
         actor, command, nonce, request_id, proof);
     if (decision != homeguard::AuditDecision::Allowed) {
@@ -434,6 +436,10 @@ esp_err_t start_http_server()
         g_cloud_http.register_handlers(g_http_server, &g_cloud_config_store, &g_cloud_link),
         kTag,
         "cloud routes");
+    ESP_RETURN_ON_ERROR(
+        g_access_bootstrap_http.register_handlers(g_http_server, &g_access_control, &g_access_store),
+        kTag,
+        "access bootstrap routes");
     return g_build_http.register_handlers(g_http_server);
 }
 
