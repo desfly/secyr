@@ -6,6 +6,7 @@
 #include "esp_netif_ip_addr.h"
 #include "esp_wifi.h"
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -13,6 +14,54 @@
 namespace homeguard::idf {
 namespace {
 constexpr const char* kTag = "hg_wifi";
+
+void align_softap_channel_to_target(const char* target_ssid)
+{
+    if (target_ssid == nullptr || target_ssid[0] == '\0') return;
+
+    wifi_scan_config_t scan{};
+    const auto scan_error = esp_wifi_scan_start(&scan, true);
+    if (scan_error != ESP_OK) {
+        ESP_LOGW(kTag, "Pre-connect scan skipped: %s", esp_err_to_name(scan_error));
+        return;
+    }
+
+    std::array<wifi_ap_record_t, 16> records{};
+    std::uint16_t count = static_cast<std::uint16_t>(records.size());
+    const auto records_error = esp_wifi_scan_get_ap_records(&count, records.data());
+    if (records_error != ESP_OK) {
+        ESP_LOGW(kTag, "Pre-connect scan records unavailable: %s", esp_err_to_name(records_error));
+        return;
+    }
+
+    for (std::uint16_t i = 0; i < count; ++i) {
+        const auto* scanned_ssid = reinterpret_cast<const char*>(records[i].ssid);
+        if (std::strncmp(scanned_ssid, target_ssid, sizeof(records[i].ssid)) != 0) continue;
+
+        wifi_config_t ap_config{};
+        const auto get_error = esp_wifi_get_config(WIFI_IF_AP, &ap_config);
+        if (get_error != ESP_OK) {
+            ESP_LOGW(kTag, "SoftAP config read failed: %s", esp_err_to_name(get_error));
+            return;
+        }
+
+        if (ap_config.ap.channel == records[i].primary) return;
+        ap_config.ap.channel = records[i].primary;
+        const auto set_error = esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+        if (set_error != ESP_OK) {
+            ESP_LOGW(kTag, "SoftAP channel alignment failed: %s", esp_err_to_name(set_error));
+            return;
+        }
+
+        ESP_LOGI(kTag,
+                 "SoftAP channel aligned to STA target %s: channel %u",
+                 target_ssid,
+                 static_cast<unsigned>(records[i].primary));
+        return;
+    }
+
+    ESP_LOGW(kTag, "Target SSID %s not found during channel alignment scan", target_ssid);
+}
 }
 
 void WifiProvisioningRuntime::network_event_handler(void* arg,
@@ -151,6 +200,14 @@ esp_err_t WifiProvisioningRuntime::connect_station(const char* ssid, const char*
     station_ip_address_[0] = '\0';
     std::strncpy(station_ssid_.data(), ssid, station_ssid_.size() - 1);
     station_ssid_[station_ssid_.size() - 1] = '\0';
+
+    // ESP32-S3 AP+STA share one 2.4 GHz radio. If the Recovery AP starts on
+    // channel 1 and STA immediately associates to (for example) channel 7,
+    // the driver's automatic AP channel hop can make clients lose 192.168.4.1
+    // for a long time. Discover the target channel first and move the SoftAP
+    // before association, so clients see one deliberate transition instead of
+    // a mid-handshake channel jump.
+    align_softap_channel_to_target(ssid);
 
     wifi_config_t config{};
     std::strncpy(reinterpret_cast<char*>(config.sta.ssid), ssid, sizeof(config.sta.ssid) - 1);
