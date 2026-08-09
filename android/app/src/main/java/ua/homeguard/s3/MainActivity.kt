@@ -8,7 +8,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
@@ -35,6 +34,8 @@ import ua.homeguard.s3.storage.SettingsBackupCodec
 import ua.homeguard.s3.storage.SettingsStore
 import ua.homeguard.s3.ui.screens.DashboardScreen
 import ua.homeguard.s3.ui.screens.ProvisioningScreen
+import ua.homeguard.s3.ui.theme.MyfistBackground
+import ua.homeguard.s3.ui.theme.MyfistTheme
 
 class MainActivity : ComponentActivity() {
     private lateinit var discovery: LocalDiscoveryCoordinator
@@ -109,33 +110,35 @@ class MainActivity : ComponentActivity() {
             val currentOperator by operatorId.collectAsState()
             val currentPin by operatorPin.collectAsState()
             val diagnostics = SystemDiagnosticsEvaluator.evaluate(appSettings.deviceId, endpoint.path.name, devices.size, appSettings.localCertificateSha256, snapshot, events.size)
-            MaterialTheme {
-                val provisioningActive = provisioningState.phase in setOf(ProvisioningPhase.CONNECTING_SETUP_AP, ProvisioningPhase.AUTHORIZING, ProvisioningPhase.APPLYING, ProvisioningPhase.WAITING_FOR_RESTART, ProvisioningPhase.DISCOVERING_LOCAL)
-                if (appSettings.deviceId.isBlank() || provisioningActive) {
-                    ProvisioningScreen(
-                        state = provisioningState,
-                        wifiNetworks = wifiNetworks,
-                        onScan = ::requestQrScan,
-                        onScanWifi = provisioning::scanWifi,
-                        onProvision = provisioning::provision,
-                        onCloudAttach = ::attachExistingCloudDevice,
-                    )
-                } else {
-                    DashboardScreen(
-                        versionName = BuildConfig.VERSION_NAME, localDevices = devices.size, route = endpoint.path.name, cloudStatus = cloudStatus,
-                        deviceId = appSettings.deviceId, snapshot = snapshot, events = events, diagnostics = diagnostics,
-                        backupStatus = maintenanceMessage, commandStatus = commandMessage, operatorId = currentOperator, operatorPin = currentPin,
-                        criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled, statusNotificationsEnabled = appSettings.statusNotificationsEnabled, zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
-                        onOperatorIdChange = { operatorId.value = it.take(23) }, onOperatorPinChange = { operatorPin.value = it },
-                        onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
-                        onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } },
-                        onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } },
-                        onClearEventHistory = { eventHistory.clear(); telemetry.clearEvents() },
-                        onExportEvents = { pendingExportText = EventLogExporter.toCsv(events); exportLauncher.launch(EventLogExporter.suggestedFileName()) },
-                        onShareEvents = { val payload = EventLogExporter.toCsv(events); startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/csv"; putExtra(Intent.EXTRA_SUBJECT, "HomeGuard-S3 event log"); putExtra(Intent.EXTRA_TEXT, payload) }, "Поділитися журналом")) },
-                        onExportSettings = { pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings); settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName()) },
-                        onImportSettings = { settingsRestoreLauncher.launch("application/json") }, onCommand = ::executeCommand,
-                    )
+            MyfistTheme {
+                MyfistBackground {
+                    val provisioningActive = provisioningState.phase in setOf(ProvisioningPhase.CONNECTING_SETUP_AP, ProvisioningPhase.AUTHORIZING, ProvisioningPhase.APPLYING, ProvisioningPhase.WAITING_FOR_RESTART, ProvisioningPhase.DISCOVERING_LOCAL)
+                    if (appSettings.deviceId.isBlank() || provisioningActive) {
+                        ProvisioningScreen(
+                            state = provisioningState,
+                            wifiNetworks = wifiNetworks,
+                            onScan = ::requestQrScan,
+                            onScanWifi = provisioning::scanWifi,
+                            onProvision = provisioning::provision,
+                            onCloudAttach = ::attachExistingCloudDevice,
+                        )
+                    } else {
+                        DashboardScreen(
+                            versionName = BuildConfig.VERSION_NAME, localDevices = devices.size, route = endpoint.path.name, cloudStatus = cloudStatus,
+                            deviceId = appSettings.deviceId, snapshot = snapshot, events = events, diagnostics = diagnostics,
+                            backupStatus = maintenanceMessage, commandStatus = commandMessage, operatorId = currentOperator, operatorPin = currentPin,
+                            criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled, statusNotificationsEnabled = appSettings.statusNotificationsEnabled, zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
+                            onOperatorIdChange = { operatorId.value = it.take(23) }, onOperatorPinChange = { operatorPin.value = it },
+                            onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
+                            onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } },
+                            onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } },
+                            onClearEventHistory = { eventHistory.clear(); telemetry.clearEvents() },
+                            onExportEvents = { pendingExportText = EventLogExporter.toCsv(events); exportLauncher.launch(EventLogExporter.suggestedFileName()) },
+                            onShareEvents = { val payload = EventLogExporter.toCsv(events); startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/csv"; putExtra(Intent.EXTRA_SUBJECT, "Myfist event log"); putExtra(Intent.EXTRA_TEXT, payload) }, "Поділитися журналом")) },
+                            onExportSettings = { pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings); settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName()) },
+                            onImportSettings = { settingsRestoreLauncher.launch("application/json") }, onCommand = ::executeCommand,
+                        )
+                    }
                 }
             }
         }
