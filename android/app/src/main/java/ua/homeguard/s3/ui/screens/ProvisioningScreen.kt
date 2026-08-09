@@ -13,6 +13,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -59,13 +61,13 @@ fun ProvisioningScreen(
     val normalizedDeviceId = existingDeviceId.trim().uppercase()
 
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(1.dp)
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Text("HomeGuard-S3")
-        Text("Підключення системи")
-        Text("Вже налаштований HomeGuard")
-        Text("Підключення через хмару без повторного налаштування Wi-Fi.")
+        Text("Myfist", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+        Text("HomeGuard-S3 · локальна та хмарна безпека", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Вже налаштований HomeGuard", style = MaterialTheme.typography.titleSmall)
+        Text("Підключення через хмару без повторного налаштування Wi-Fi.", style = MaterialTheme.typography.bodySmall)
 
         OutlinedTextField(existingDeviceId, { existingDeviceId = it.trim().uppercase().take(40) }, label = { Text("Device ID") }, placeholder = { Text("HG-XXXXXXXXXXXX") }, modifier = compactField, singleLine = true)
         OutlinedTextField(existingActor, { existingActor = it.trim().take(23) }, label = { Text("Користувач") }, modifier = compactField, singleLine = true)
@@ -82,18 +84,18 @@ fun ProvisioningScreen(
         Button(onClick = { onCloudAttach(normalizedDeviceId, existingActor.trim(), existingPin) }, enabled = !busy && normalizedDeviceId.startsWith("HG-") && existingActor.isNotBlank() && existingPin.length in 4..12, modifier = compactButton) { Text("Підключити через хмару") }
 
         HorizontalDivider()
-        Text("Новий HomeGuard — перше налаштування")
-        Text(state.message)
-        if (state.error.isNotBlank()) Text("Помилка: ${state.error}")
-        if (state.localUrl.isNotBlank()) Text("Локальна адреса: ${state.localUrl}")
+        Text("Новий HomeGuard — перше налаштування", style = MaterialTheme.typography.titleSmall)
+        Text(state.message, style = MaterialTheme.typography.bodySmall)
+        if (state.error.isNotBlank()) Text("Помилка: ${state.error}", color = MaterialTheme.colorScheme.error)
+        if (state.localUrl.isNotBlank()) Text("Локальна адреса: ${state.localUrl}", style = MaterialTheme.typography.bodySmall)
         Button(onClick = onScan, enabled = !busy, modifier = compactButton) { Text("Сканувати QR на пристрої") }
         state.qr?.let {
-            Text("Пристрій: ${it.deviceId}")
-            Text("Setup AP: ${it.setupSsid}")
+            Text("Пристрій: ${it.deviceId}", style = MaterialTheme.typography.bodySmall)
+            Text("Setup AP: ${it.setupSsid}", style = MaterialTheme.typography.bodySmall)
             Button(onClick = onScanWifi, enabled = !busy, modifier = compactButton) { Text("Сканувати Wi-Fi") }
         }
         if (wifiNetworks.isNotEmpty()) {
-            Text("Доступні Wi-Fi мережі")
+            Text("Доступні Wi-Fi мережі", style = MaterialTheme.typography.titleSmall)
             wifiNetworks.take(12).forEach { network ->
                 Button(onClick = { form = form.copy(wifiSsid = network.ssid) }, enabled = !busy, modifier = compactButton) { Text("${network.ssid}  ${network.rssi} dBm  ch ${network.channel}") }
             }
@@ -120,7 +122,7 @@ fun ProvisioningScreen(
             trailingIcon = { IconButton(onClick = { showClaimToken = !showClaimToken }) { Text(if (showClaimToken) "◉" else "👁") } },
             singleLine = true
         )
-        Button(onClick = { onProvision(form) }, enabled = state.qr != null && !busy, modifier = compactButton) { Text("Прив’язати новий HomeGuard-S3") }
+        Button(onClick = { onProvision(form) }, enabled = state.qr != null && !busy, modifier = compactButton) { Text("Прив’язати HomeGuard-S3") }
         if (busy) CircularProgressIndicator()
     }
 }
