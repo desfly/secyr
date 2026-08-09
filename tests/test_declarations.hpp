@@ -23,3 +23,4 @@ void test_self_profile();
 void test_user_lifecycle();
 void test_admin_user_directory();
 void test_admin_user_commands();
+void test_admin_pin_transport();
