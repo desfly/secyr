@@ -1,5 +1,7 @@
 #include "homeguard/admin_payload_auth.hpp"
 
+#include <cstddef>
+
 namespace homeguard {
 namespace {
 
