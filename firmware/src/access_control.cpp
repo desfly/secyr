@@ -124,12 +124,15 @@ bool AccessControl::role_allows(AccessRole role, std::string_view command) const
     if (role == AccessRole::Admin) return true;
     if (role == AccessRole::Guest) return false;
 
-    return command == "security.arm_home" || command == "arm_home" ||
+    // Standard User role is intentionally narrow:
+    // - monitoring/status reads;
+    // - arm home / arm away;
+    // - disarm.
+    // No service/configuration/output/user-management commands are allowed.
+    return command == "system.status" || command == "status" ||
+           command == "security.arm_home" || command == "arm_home" ||
            command == "security.arm_away" || command == "arm_away" ||
-           command == "security.disarm" || command == "disarm" ||
-           command == "silence" ||
-           command == "light.set" ||
-           command == "valve.close" || command == "close_valves";
+           command == "security.disarm" || command == "disarm";
 }
 
 void AccessControl::append_audit(
