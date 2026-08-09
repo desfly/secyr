@@ -3,74 +3,151 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#102a43">
-  <title>HomeGuard-S3</title>
+  <meta name="theme-color" content="#0b1320">
+  <title>Myfist · HomeGuard-S3</title>
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-<header>
-  <div>
-    <h1>HomeGuard-S3</h1>
-    <p id="connection">Підключення…</p>
-  </div>
-  <button id="refresh">Оновити</button>
-</header>
-
-<main>
-  <section class="card hero">
-    <div>
-      <span class="label">Охорона</span>
-      <strong id="securityMode">—</strong>
-    </div>
-    <div class="actions">
-      <button data-command="security.arm_home">Вдома</button>
-      <button data-command="security.arm_away">Поза домом</button>
-      <button data-command="security.disarm" class="secondary">Зняти</button>
-    </div>
-  </section>
-
-  <section class="grid">
-    <article class="card">
-      <h2>Зони</h2>
-      <div id="zones"></div>
-    </article>
-
-    <article class="card">
-      <h2>Вода</h2>
-      <div class="metric"><span>Холодна</span><strong id="coldPressure">—</strong></div>
-      <div class="metric"><span>Гаряча</span><strong id="hotPressure">—</strong></div>
-      <div id="valves"></div>
-    </article>
-
-    <article class="card">
-      <h2>Температура</h2>
-      <div class="metric"><span>Холодна вода</span><strong id="coldTemperature">—</strong></div>
-      <div class="metric"><span>Гаряча вода</span><strong id="hotTemperature">—</strong></div>
-    </article>
-
-    <article class="card">
-      <h2>Живлення</h2>
-      <div class="metric"><span>Мережа</span><strong id="mains">—</strong></div>
-      <div class="metric"><span>Акумулятор</span><strong id="battery">—</strong></div>
-    </article>
-
-    <article class="card">
-      <h2>Коридор</h2>
-      <div class="metric"><span>Світло</span><strong id="light">—</strong></div>
-      <div class="actions">
-        <button data-command="light.set" data-value="on">Увімкнути</button>
-        <button data-command="light.set" data-value="off" class="secondary">Вимкнути</button>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand-block">
+        <div class="brand-mark">M</div>
+        <div>
+          <h1>Myfist</h1>
+          <p>Local security console</p>
+        </div>
       </div>
-    </article>
 
-    <article class="card">
-      <h2>Система</h2>
-      <pre id="buildInfo">—</pre>
-    </article>
-  </section>
-</main>
+      <div class="portrait-panel" aria-hidden="true">
+        <div class="portrait-glow"></div>
+        <div class="portrait-caption">
+          <span>CONTROL</span>
+          <strong>FOCUS · SPEED · SECURITY</strong>
+        </div>
+      </div>
 
-<div id="toast" hidden></div>
-<script src="/app.js"></script>
+      <nav class="side-nav" aria-label="Навігація">
+        <a href="#overview" class="active"><span>01</span>Огляд</a>
+        <a href="#zones"><span>02</span>Зони</a>
+        <a href="#water"><span>03</span>Вода</a>
+        <a href="#system"><span>04</span>Система</a>
+      </nav>
+
+      <div class="sidebar-foot">
+        <span class="status-dot"></span>
+        <div>
+          <strong>Контролер онлайн</strong>
+          <small>Локальне з’єднання</small>
+        </div>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div>
+          <span class="eyebrow">LOCAL PANEL</span>
+          <h2>HomeGuard-S3</h2>
+          <p id="connection">Підключення…</p>
+        </div>
+        <button id="refresh" class="refresh-btn" type="button">
+          <span>↻</span> Оновити
+        </button>
+      </header>
+
+      <main id="overview">
+        <section class="hero card">
+          <div class="hero-copy">
+            <span class="label">Режим охорони</span>
+            <strong id="securityMode">—</strong>
+            <p>Швидке керування режимом системи</p>
+          </div>
+          <div class="actions hero-actions">
+            <button data-command="security.arm_home">Вдома</button>
+            <button data-command="security.arm_away">Поза домом</button>
+            <button data-command="security.disarm" class="secondary">Зняти</button>
+          </div>
+        </section>
+
+        <section class="stats-row" aria-label="Швидкий стан">
+          <article class="mini-card">
+            <span>Мережа</span>
+            <strong id="mains">—</strong>
+          </article>
+          <article class="mini-card">
+            <span>Акумулятор</span>
+            <strong id="battery">—</strong>
+          </article>
+          <article class="mini-card">
+            <span>Світло</span>
+            <strong id="light">—</strong>
+          </article>
+        </section>
+
+        <section class="grid">
+          <article class="card" id="zones">
+            <div class="card-head">
+              <div>
+                <span class="card-kicker">SECURITY</span>
+                <h3>Зони</h3>
+              </div>
+              <span class="pill">LIVE</span>
+            </div>
+            <div id="zones" class="data-list"></div>
+          </article>
+
+          <article class="card" id="water">
+            <div class="card-head">
+              <div>
+                <span class="card-kicker">ENGINEERING</span>
+                <h3>Вода</h3>
+              </div>
+              <span class="pill neutral">AI</span>
+            </div>
+            <div class="metric"><span>Холодна</span><strong id="coldPressure">—</strong></div>
+            <div class="metric"><span>Гаряча</span><strong id="hotPressure">—</strong></div>
+            <div id="valves"></div>
+          </article>
+
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <span class="card-kicker">SENSORS</span>
+                <h3>Температура</h3>
+              </div>
+            </div>
+            <div class="metric"><span>Холодна вода</span><strong id="coldTemperature">—</strong></div>
+            <div class="metric"><span>Гаряча вода</span><strong id="hotTemperature">—</strong></div>
+          </article>
+
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <span class="card-kicker">LIGHTING</span>
+                <h3>Коридор</h3>
+              </div>
+            </div>
+            <div class="metric"><span>Стан світла</span><strong id="lightMirror">Див. вище</strong></div>
+            <div class="actions compact-actions">
+              <button data-command="light.set" data-value="on">Увімкнути</button>
+              <button data-command="light.set" data-value="off" class="secondary">Вимкнути</button>
+            </div>
+          </article>
+
+          <article class="card system-card" id="system">
+            <div class="card-head">
+              <div>
+                <span class="card-kicker">DIAGNOSTICS</span>
+                <h3>Система</h3>
+              </div>
+            </div>
+            <pre id="buildInfo">—</pre>
+          </article>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" hidden></div>
+  <script src="/app.js"></script>
 </body>
 </html>
