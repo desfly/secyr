@@ -50,88 +50,41 @@ fun ProvisioningScreen(
     val normalizedDeviceId = existingDeviceId.trim().uppercase()
 
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
         Text("HomeGuard-S3")
         Text("Підключення системи")
         Text("Вже налаштований HomeGuard")
         Text("Підключення через хмару без повторного налаштування Wi-Fi.")
 
-        OutlinedTextField(
-            existingDeviceId,
-            { existingDeviceId = it.trim().uppercase().take(40) },
-            label = { Text("Device ID") },
-            placeholder = { Text("HG-XXXXXXXXXXXX") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        OutlinedTextField(
-            existingActor,
-            { existingActor = it.trim().take(23) },
-            label = { Text("Користувач") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        OutlinedTextField(
-            existingPin,
-            { existingPin = it.take(12) },
-            label = { Text("PIN") },
-            modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            singleLine = true,
-        )
-        Button(
-            onClick = { onCloudAttach(normalizedDeviceId, existingActor.trim(), existingPin) },
-            enabled = !busy && normalizedDeviceId.startsWith("HG-") && existingActor.isNotBlank() && existingPin.length in 4..12,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Підключити через хмару") }
+        OutlinedTextField(existingDeviceId, { existingDeviceId = it.trim().uppercase().take(40) }, label = { Text("Device ID") }, placeholder = { Text("HG-XXXXXXXXXXXX") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+        OutlinedTextField(existingActor, { existingActor = it.trim().take(23) }, label = { Text("Користувач") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+        OutlinedTextField(existingPin, { existingPin = it.take(12) }, label = { Text("PIN") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), singleLine = true)
+        Button(onClick = { onCloudAttach(normalizedDeviceId, existingActor.trim(), existingPin) }, enabled = !busy && normalizedDeviceId.startsWith("HG-") && existingActor.isNotBlank() && existingPin.length in 4..12, modifier = Modifier.fillMaxWidth()) { Text("Підключити через хмару") }
 
         HorizontalDivider()
         Text("Новий HomeGuard — перше налаштування")
         Text(state.message)
         if (state.error.isNotBlank()) Text("Помилка: ${state.error}")
         if (state.localUrl.isNotBlank()) Text("Локальна адреса: ${state.localUrl}")
-
         Button(onClick = onScan, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Сканувати QR на пристрої") }
         state.qr?.let {
             Text("Пристрій: ${it.deviceId}")
             Text("Setup AP: ${it.setupSsid}")
             Button(onClick = onScanWifi, enabled = !busy) { Text("Сканувати Wi-Fi") }
         }
-
         if (wifiNetworks.isNotEmpty()) {
             Text("Доступні Wi-Fi мережі")
             wifiNetworks.take(12).forEach { network ->
-                Button(
-                    onClick = { form = form.copy(wifiSsid = network.ssid) },
-                    enabled = !busy,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("${network.ssid}  ${network.rssi} dBm  ch ${network.channel}") }
+                Button(onClick = { form = form.copy(wifiSsid = network.ssid) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("${network.ssid}  ${network.rssi} dBm  ch ${network.channel}") }
             }
         }
-
         OutlinedTextField(form.wifiSsid, { form = form.copy(wifiSsid = it) }, label = { Text("Домашня Wi-Fi мережа") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        OutlinedTextField(
-            form.wifiPassword,
-            { form = form.copy(wifiPassword = it) },
-            label = { Text("Пароль домашнього Wi-Fi") },
-            modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            singleLine = true,
-        )
+        OutlinedTextField(form.wifiPassword, { form = form.copy(wifiPassword = it) }, label = { Text("Пароль домашнього Wi-Fi") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true)
         OutlinedTextField(form.ownerLabel, { form = form.copy(ownerLabel = it) }, label = { Text("Назва об’єкта") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         OutlinedTextField(form.cloudEndpoint, { form = form.copy(cloudEndpoint = it) }, label = { Text("MQTTS адреса хмари — необов’язково") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        OutlinedTextField(
-            form.cloudClaimToken,
-            { form = form.copy(cloudClaimToken = it) },
-            label = { Text("Одноразовий cloud claim token") },
-            modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
-            singleLine = true,
-        )
+        OutlinedTextField(form.cloudClaimToken, { form = form.copy(cloudClaimToken = it) }, label = { Text("Одноразовий cloud claim token") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), singleLine = true)
         Button(onClick = { onProvision(form) }, enabled = state.qr != null && !busy, modifier = Modifier.fillMaxWidth()) { Text("Прив’язати новий HomeGuard-S3") }
         if (busy) CircularProgressIndicator()
     }
