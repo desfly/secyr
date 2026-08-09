@@ -61,6 +61,7 @@ idf_component_register(
         esp_eth
         esp_event
         esp_http_server
+        esp_hw_support
         esp_netif
         esp_wifi
         fatfs
