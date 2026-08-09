@@ -155,9 +155,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
-      - name: Build Android debug APK
+      - name: Test and build Android debug APK
         working-directory: android
-        run: gradle --no-daemon --stacktrace assembleDebug
+        run: gradle --no-daemon --stacktrace testDebugUnitTest assembleDebug
       - name: Generate APK checksum
         if: success()
         shell: bash
@@ -170,6 +170,7 @@ jobs:
           path: |
             android/app/build/outputs/apk/debug/*.apk
             android/app/build/outputs/apk/debug/SHA256SUMS.txt
+            android/app/build/reports/tests/testDebugUnitTest/**
           if-no-files-found: error
       - name: Upload Android diagnostics
         if: failure()
@@ -182,7 +183,7 @@ jobs:
           if-no-files-found: warn
 
   test-candidate:
-    name: Build-0058 ESP + Android WiFi provisioning test candidate
+    name: Build-0060 ESP + Android cloud auth test candidate
     needs: [esp-idf-build, android-build]
     runs-on: ubuntu-latest
     steps:
@@ -201,13 +202,13 @@ jobs:
       - name: Add test instructions and package checksums
         shell: bash
         run: |
-          cp docs/BUILD-0058-TEST-CANDIDATE.txt test-candidate/README-FIRST.txt
+          cp docs/BUILD-0060-TEST-CANDIDATE.txt test-candidate/README-FIRST.txt
           find test-candidate -type f ! -name SHA256SUMS-TEST-CANDIDATE.txt -print0 \
             | sort -z \
             | xargs -0 sha256sum > test-candidate/SHA256SUMS-TEST-CANDIDATE.txt
       - name: Upload combined test candidate
         uses: actions/upload-artifact@v4
         with:
-          name: HomeGuard-S3-Build-0058-TEST-CANDIDATE
+          name: HomeGuard-S3-Build-0060-TEST-CANDIDATE
           path: test-candidate/
           if-no-files-found: error
