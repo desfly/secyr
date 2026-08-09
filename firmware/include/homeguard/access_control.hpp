@@ -55,6 +55,17 @@ public:
         std::string_view pin,
         std::string_view command);
 
+    // Build-0060 cloud challenge/response authorization. The caller supplies
+    // only a proof derived from the persisted PIN digest; the raw PIN never
+    // crosses MQTT. Proof = SHA256("HomeGuard-S3|CLOUD|" + pin_digest_hex +
+    // "|" + nonce + "|" + request_id + "|" + command).
+    [[nodiscard]] AuditDecision authorize_cloud_proof(
+        std::string_view actor,
+        std::string_view command,
+        std::string_view nonce,
+        std::string_view request_id,
+        std::string_view proof_hex);
+
     [[nodiscard]] std::size_t user_count() const { return user_count_; }
     [[nodiscard]] std::size_t audit_size() const { return audit_size_; }
     [[nodiscard]] const AccessAuditRecord* audit_at_oldest(std::size_t index) const;
