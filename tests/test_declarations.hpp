@@ -19,3 +19,4 @@ void test_build0053();
 void test_build0054();
 void test_build0055();
 void test_access_privacy();
+void test_self_profile();
