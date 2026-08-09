@@ -1,0 +1,14 @@
+{
+  "build": "0058",
+  "version": "0.0.58",
+  "focus": "WiFi provisioning to home STA",
+  "softap": "HomeGuard-S3-XXXX",
+  "softap_ip": "192.168.4.1",
+  "endpoints": [
+    "GET /api/v1/wifi/status",
+    "POST /api/v1/provisioning/wifi"
+  ],
+  "nvs_wifi_credentials": true,
+  "softap_fallback": true,
+  "physical_outputs": "fail-closed"
+}

@@ -6,6 +6,12 @@
 #include "hg_output_http.hpp"
 #include "hg_gpio_output_backend.hpp"
 #include "hg_telemetry_runtime.hpp"
+#include "hg_wifi_provisioning.hpp"
+#include "hg_wifi_credentials.hpp"
+#include "hg_wifi_http.hpp"
+#include "hg_cloud_link.hpp"
+#include "hg_cloud_config.hpp"
+#include "hg_cloud_http.hpp"
 #include "hg_access_nvs.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
@@ -19,7 +25,12 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
 
 namespace {
 
@@ -33,6 +44,12 @@ homeguard::idf::SystemHttp g_system_http;
 homeguard::idf::ServiceHttp g_service_http;
 homeguard::idf::OutputHttp g_output_http;
 homeguard::idf::GpioOutputBackend g_gpio_outputs;
+homeguard::idf::WifiProvisioningRuntime g_wifi_provisioning;
+homeguard::idf::WifiCredentialStore g_wifi_credentials_store;
+homeguard::idf::WifiProvisioningHttp g_wifi_http;
+homeguard::idf::CloudLink g_cloud_link;
+homeguard::idf::CloudConfigStore g_cloud_config_store;
+homeguard::idf::CloudHttp g_cloud_http;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
 homeguard::AccessControl g_access_control;
@@ -43,6 +60,124 @@ hg::PhysicalOutputRuntime g_physical_outputs;
 hg::SystemEventBus g_system_bus;
 hg::SystemModel g_system_model{g_system_bus};
 httpd_handle_t g_http_server = nullptr;
+
+bool extract_json_string(const std::string& body, const char* key, std::string& value)
+{
+    const std::string token = std::string{"\""} + key + "\"";
+    const auto key_pos = body.find(token);
+    if (key_pos == std::string::npos) return false;
+    const auto colon = body.find(':', key_pos + token.size());
+    if (colon == std::string::npos) return false;
+    const auto first_quote = body.find('"', colon + 1);
+    if (first_quote == std::string::npos) return false;
+    const auto second_quote = body.find('"', first_quote + 1);
+    if (second_quote == std::string::npos) return false;
+    value = body.substr(first_quote + 1, second_quote - first_quote - 1);
+    return true;
+}
+
+std::string json_escape(const std::string& value)
+{
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (const char ch : value) {
+        if (ch == '"' || ch == '\\') escaped.push_back('\\');
+        escaped.push_back(ch);
+    }
+    return escaped;
+}
+
+const char* arm_state_name(hg::PartitionArmState state)
+{
+    switch (state) {
+        case hg::PartitionArmState::Disarmed: return "disarmed";
+        case hg::PartitionArmState::Stay: return "armed_home";
+        case hg::PartitionArmState::Away: return "armed_away";
+        case hg::PartitionArmState::Alarm: return "alarm";
+    }
+    return "unknown";
+}
+
+void publish_cloud_result(const std::string& request_id,
+                          bool ok,
+                          const char* code,
+                          const char* extra = nullptr)
+{
+    std::string response = "{\"request_id\":\"" + json_escape(request_id) + "\",\"ok\":";
+    response += ok ? "true" : "false";
+    response += ",\"code\":\"";
+    response += code;
+    response += '"';
+    if (extra != nullptr && extra[0] != '\0') {
+        response += ',';
+        response += extra;
+    }
+    response += '}';
+    (void)g_cloud_link.publish_command_response(response.c_str());
+}
+
+void handle_cloud_command(const char* payload, std::size_t length, void*)
+{
+    if (payload == nullptr || length == 0 || length > 1024) {
+        publish_cloud_result("", false, "invalid_payload");
+        return;
+    }
+
+    const std::string body(payload, length);
+    std::string request_id;
+    std::string command;
+    std::string actor;
+    std::string credential;
+    if (!extract_json_string(body, "request_id", request_id) || request_id.empty() || request_id.size() > 64 ||
+        !extract_json_string(body, "command", command) || command.empty() || command.size() > 48) {
+        publish_cloud_result(request_id, false, "invalid_command");
+        return;
+    }
+
+    if (command == "system.status") {
+        const auto* partition = g_system_model.partition(1);
+        if (partition == nullptr) {
+            publish_cloud_result(request_id, false, "partition_unavailable");
+            return;
+        }
+        std::string extra = "\"arm_state\":\"";
+        extra += arm_state_name(partition->arm_state);
+        extra += "\",\"outputs_allowed\":";
+        extra += g_boot_readiness.outputs_allowed() ? "true" : "false";
+        publish_cloud_result(request_id, true, "status", extra.c_str());
+        return;
+    }
+
+    if (!extract_json_string(body, "actor", actor) || actor.empty() || actor.size() > 32 ||
+        !extract_json_string(body, "credential", credential) || credential.empty() || credential.size() > 32) {
+        publish_cloud_result(request_id, false, "credentials_required");
+        return;
+    }
+
+    const auto decision = g_access_control.authorize(actor, credential, command);
+    if (decision != homeguard::AuditDecision::Allowed) {
+        publish_cloud_result(request_id, false, homeguard::to_string(decision));
+        return;
+    }
+
+    const auto now_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+    if (command == "security.arm_home") {
+        const bool changed = g_system_model.set_partition_arm(1, hg::PartitionArmState::Stay, now_ms);
+        publish_cloud_result(request_id, changed, changed ? "armed_home" : "arm_failed");
+        return;
+    }
+    if (command == "security.arm_away") {
+        const bool changed = g_system_model.set_partition_arm(1, hg::PartitionArmState::Away, now_ms);
+        publish_cloud_result(request_id, changed, changed ? "armed_away" : "arm_failed");
+        return;
+    }
+    if (command == "security.disarm") {
+        publish_cloud_result(request_id, false, "challenge_required");
+        return;
+    }
+
+    publish_cloud_result(request_id, false, "unsupported_command");
+}
 
 esp_err_t initialize_nvs()
 {
@@ -95,6 +230,55 @@ void restore_commissioning_state()
     }
 }
 
+void restore_wifi_credentials()
+{
+    homeguard::idf::WifiCredentials credentials{};
+    const auto error = g_wifi_credentials_store.load(credentials);
+    if (error == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(kTag, "No persisted WiFi credentials; SoftAP provisioning remains active");
+        return;
+    }
+    if (error != ESP_OK) {
+        ESP_LOGW(kTag, "Persisted WiFi credentials rejected (%s); SoftAP fallback remains active",
+                 esp_err_to_name(error));
+        return;
+    }
+    const auto connect_error = g_wifi_provisioning.connect_station(
+        credentials.ssid.data(), credentials.password.data());
+    if (connect_error != ESP_OK) {
+        ESP_LOGW(kTag, "Persisted WiFi STA connect start failed (%s); SoftAP fallback remains active",
+                 esp_err_to_name(connect_error));
+    }
+}
+
+void restore_cloud_config()
+{
+    g_cloud_link.set_command_handler(&handle_cloud_command);
+    const auto identity_error = g_cloud_link.prepare_identity();
+    if (identity_error != ESP_OK) {
+        ESP_LOGW(kTag, "Cloud device identity unavailable: %s", esp_err_to_name(identity_error));
+    } else {
+        ESP_LOGI(kTag, "Cloud device id: %s", g_cloud_link.device_id());
+    }
+
+    homeguard::idf::CloudConfig config{};
+    const auto error = g_cloud_config_store.load(config);
+    if (error == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(kTag, "Cloud not configured; local control remains available");
+        return;
+    }
+    if (error != ESP_OK) {
+        ESP_LOGW(kTag, "Persisted cloud config rejected: %s", esp_err_to_name(error));
+        return;
+    }
+
+    const auto start_error = g_cloud_link.start(
+        config.broker_uri.data(), config.username.data(), config.password.data());
+    if (start_error != ESP_OK) {
+        ESP_LOGW(kTag, "Cloud link start failed: %s", esp_err_to_name(start_error));
+    }
+}
+
 void initialize_system_model()
 {
     g_system_model.add_partition(1);
@@ -140,6 +324,14 @@ esp_err_t start_http_server()
             &g_system_bus),
         kTag,
         "service routes");
+    ESP_RETURN_ON_ERROR(
+        g_wifi_http.register_handlers(g_http_server, &g_wifi_credentials_store, &g_wifi_provisioning),
+        kTag,
+        "wifi provisioning routes");
+    ESP_RETURN_ON_ERROR(
+        g_cloud_http.register_handlers(g_http_server, &g_cloud_config_store, &g_cloud_link),
+        kTag,
+        "cloud routes");
     return g_build_http.register_handlers(g_http_server);
 }
 
@@ -154,6 +346,16 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     initialize_system_model();
+
+    const bool provisioning_required = !g_boot_readiness.outputs_allowed();
+    const auto wifi_error = g_wifi_provisioning.start(provisioning_required);
+    if (wifi_error != ESP_OK) {
+        ESP_LOGE(kTag, "First-boot WiFi provisioning failed: %s", esp_err_to_name(wifi_error));
+    } else {
+        restore_wifi_credentials();
+    }
+
+    restore_cloud_config();
     initialize_physical_outputs();
 
     const auto hardware_error = g_hardware.initialize();

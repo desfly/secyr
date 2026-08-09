@@ -22,11 +22,24 @@ import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.model.ProvisioningForm
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.ProvisioningUiState
+import ua.homeguard.s3.provisioning.ScannedWifiNetwork
 
 @Composable
-fun ProvisioningScreen(state: ProvisioningUiState, onScan: () -> Unit, onProvision: (ProvisioningForm) -> Unit) {
+fun ProvisioningScreen(
+    state: ProvisioningUiState,
+    wifiNetworks: List<ScannedWifiNetwork>,
+    onScan: () -> Unit,
+    onScanWifi: () -> Unit,
+    onProvision: (ProvisioningForm) -> Unit,
+) {
     var form by remember { mutableStateOf(ProvisioningForm()) }
-    val busy = state.phase in setOf(ProvisioningPhase.CONNECTING_SETUP_AP, ProvisioningPhase.AUTHORIZING, ProvisioningPhase.APPLYING, ProvisioningPhase.WAITING_FOR_RESTART, ProvisioningPhase.DISCOVERING_LOCAL)
+    val busy = state.phase in setOf(
+        ProvisioningPhase.CONNECTING_SETUP_AP,
+        ProvisioningPhase.AUTHORIZING,
+        ProvisioningPhase.APPLYING,
+        ProvisioningPhase.WAITING_FOR_RESTART,
+        ProvisioningPhase.DISCOVERING_LOCAL,
+    )
     Column(
         modifier = Modifier.fillMaxSize().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -35,12 +48,37 @@ fun ProvisioningScreen(state: ProvisioningUiState, onScan: () -> Unit, onProvisi
         Text(state.message)
         if (state.error.isNotBlank()) Text("Помилка: ${state.error}")
         if (state.localUrl.isNotBlank()) Text("Локальна адреса: ${state.localUrl}")
-        Button(onClick = onScan, enabled = !busy) { Text("Сканувати QR на пристрої") }
+
+        Button(onClick = onScan, enabled = !busy) {
+            Text("Сканувати QR на пристрої")
+        }
         state.qr?.let {
             Text("Пристрій: ${it.deviceId}")
             Text("Setup AP: ${it.setupSsid}")
+            Button(onClick = onScanWifi, enabled = !busy) {
+                Text("Сканувати Wi-Fi")
+            }
         }
-        OutlinedTextField(form.wifiSsid, { form = form.copy(wifiSsid = it) }, label = { Text("Домашня Wi-Fi мережа") }, modifier = Modifier.fillMaxWidth())
+
+        if (wifiNetworks.isNotEmpty()) {
+            Text("Доступні Wi-Fi мережі")
+            wifiNetworks.take(12).forEach { network ->
+                Button(
+                    onClick = { form = form.copy(wifiSsid = network.ssid) },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("${network.ssid}  ${network.rssi} dBm  ch ${network.channel}")
+                }
+            }
+        }
+
+        OutlinedTextField(
+            form.wifiSsid,
+            { form = form.copy(wifiSsid = it) },
+            label = { Text("Домашня Wi-Fi мережа") },
+            modifier = Modifier.fillMaxWidth(),
+        )
         OutlinedTextField(
             form.wifiPassword,
             { form = form.copy(wifiPassword = it) },
@@ -49,8 +87,18 @@ fun ProvisioningScreen(state: ProvisioningUiState, onScan: () -> Unit, onProvisi
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
         )
-        OutlinedTextField(form.ownerLabel, { form = form.copy(ownerLabel = it) }, label = { Text("Назва об’єкта") }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(form.cloudEndpoint, { form = form.copy(cloudEndpoint = it) }, label = { Text("MQTTS адреса хмари — необов’язково") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+            form.ownerLabel,
+            { form = form.copy(ownerLabel = it) },
+            label = { Text("Назва об’єкта") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            form.cloudEndpoint,
+            { form = form.copy(cloudEndpoint = it) },
+            label = { Text("MQTTS адреса хмари — необов’язково") },
+            modifier = Modifier.fillMaxWidth(),
+        )
         OutlinedTextField(
             form.cloudClaimToken,
             { form = form.copy(cloudClaimToken = it) },
@@ -58,7 +106,9 @@ fun ProvisioningScreen(state: ProvisioningUiState, onScan: () -> Unit, onProvisi
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation()
         )
-        Button(onClick = { onProvision(form) }, enabled = state.qr != null && !busy) { Text("Прив’язати HomeGuard-S3") }
+        Button(onClick = { onProvision(form) }, enabled = state.qr != null && !busy) {
+            Text("Прив’язати HomeGuard-S3")
+        }
         if (busy) CircularProgressIndicator()
     }
 }

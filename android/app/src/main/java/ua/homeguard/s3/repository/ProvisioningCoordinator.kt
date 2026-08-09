@@ -19,7 +19,9 @@ import ua.homeguard.s3.network.LocalDiscoveryCoordinator
 import ua.homeguard.s3.provisioning.PinnedProvisioningApi
 import ua.homeguard.s3.provisioning.ProvisioningHandoff
 import ua.homeguard.s3.provisioning.ProvisioningQrParser
+import ua.homeguard.s3.provisioning.ScannedWifiNetwork
 import ua.homeguard.s3.provisioning.SetupNetworkConnector
+import ua.homeguard.s3.provisioning.SoftApProvisioningApi
 import ua.homeguard.s3.storage.AppSettings
 import ua.homeguard.s3.storage.SettingsStore
 import java.security.SecureRandom
@@ -33,10 +35,13 @@ class ProvisioningCoordinator(
     private val connector = SetupNetworkConnector(context)
     private val mutableState = MutableStateFlow(ProvisioningUiState())
     val state: StateFlow<ProvisioningUiState> = mutableState
+    private val mutableWifiNetworks = MutableStateFlow<List<ScannedWifiNetwork>>(emptyList())
+    val wifiNetworks: StateFlow<List<ScannedWifiNetwork>> = mutableWifiNetworks
 
     fun acceptQr(raw: String) {
         runCatching { ProvisioningQrParser.parse(raw) }
             .onSuccess {
+                mutableWifiNetworks.value = emptyList()
                 mutableState.value = ProvisioningUiState(
                     ProvisioningPhase.QR_READY,
                     it,
@@ -50,6 +55,39 @@ class ProvisioningCoordinator(
                     message = "QR відхилено"
                 )
             }
+    }
+
+    fun scanWifi() {
+        val qr = mutableState.value.qr ?: run {
+            mutableState.value = mutableState.value.copy(
+                message = "Спочатку скануйте QR HomeGuard-S3",
+                error = "QR потрібен для підключення до Setup AP"
+            )
+            return
+        }
+        scope.launch {
+            mutableState.value = mutableState.value.copy(
+                message = "Підключення до ${qr.setupSsid} і сканування Wi-Fi…",
+                error = ""
+            )
+            runCatching {
+                connector.connect(qr.setupSsid, qr.setupPassword).use {
+                    SoftApProvisioningApi().scanNetworks()
+                }
+            }.onSuccess { networks ->
+                mutableWifiNetworks.value = networks
+                mutableState.value = mutableState.value.copy(
+                    message = if (networks.isEmpty()) "Wi-Fi мереж не знайдено" else "Знайдено Wi-Fi мереж: ${networks.size}",
+                    error = ""
+                )
+            }.onFailure { error ->
+                mutableWifiNetworks.value = emptyList()
+                mutableState.value = mutableState.value.copy(
+                    message = "Сканування Wi-Fi не завершено",
+                    error = error.message.orEmpty()
+                )
+            }
+        }
     }
 
     fun provision(form: ProvisioningForm) {

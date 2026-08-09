@@ -1,0 +1,51 @@
+HomeGuard-S3 Build-0056 TEST CANDIDATE
+
+Purpose
+=======
+This package is for the first real ESP32-S3 + Android field test.
+Do not connect safety-critical loads until GPIO mapping and polarity are physically verified.
+Firmware remains fail-closed when commissioning/hardware verification is missing or invalid.
+
+Package contents
+================
+firmware/  - ESP-IDF binaries, flash_args, flasher_args.json, SHA256SUMS.txt
+android/   - debug APK and SHA256SUMS.txt
+SHA256SUMS-TEST-CANDIDATE.txt - checksums for the combined package
+
+ESP32-S3 flash
+==============
+1. Connect the ESP32-S3 board by USB.
+2. Put the board into download/BOOT mode if automatic reset does not work.
+3. Install Python and esptool/ESP-IDF tools on the Windows PC if not already installed.
+4. Use firmware/flash_args as the source of truth for offsets and binary names.
+5. Do NOT invent offsets manually.
+6. After flashing, reset the board and capture the serial boot log.
+
+First boot acceptance checks
+============================
+- Board boots without reset loop or panic.
+- HTTP server starts.
+- GET /api/v1/system/output-runtime responds.
+- Until hardware verification/commissioning is valid, outputsEnabled must remain false.
+- Physical outputs must remain in safe state after reboot and after an invalid command.
+
+Android test
+============
+1. Install the APK from android/ on the Android phone.
+2. Allow local-network access when Android asks.
+3. Configure/connect to the HomeGuard-S3 device address used on the test network.
+4. Confirm that runtime status can be read before sending output commands.
+5. Do not activate real siren/valve loads until GPIO and polarity are verified.
+
+Minimum evidence to save from the test
+======================================
+- Full serial boot log from power-on.
+- Screenshot of Android connection/status page.
+- Result of GET /api/v1/system/output-runtime.
+- Result of one blocked output command before commissioning.
+- Result after one power cycle.
+- Any panic/backtrace/error text exactly as shown.
+
+Build: 0056 test candidate
+Target: ESP32-S3
+Android: 0.0.56-debug

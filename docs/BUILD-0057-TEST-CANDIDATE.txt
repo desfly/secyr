@@ -1,0 +1,55 @@
+HomeGuard-S3 Build-0057 — FIRST-BOOT PROVISIONING TEST CANDIDATE
+Date: 2026-08-08
+
+Goal:
+- Verify ESP32-S3 Wi-Fi radio initialization on real hardware.
+- Verify first-boot SoftAP provisioning network is visible.
+- Verify UART diagnostics report actual Wi-Fi/SoftAP state.
+- Keep physical outputs FAIL-CLOSED until commissioning is verified.
+- Verify Android debug APK 0.0.57 launches for provisioning tests.
+
+Expected UART diagnostics after clean NVS / uncommissioned boot:
+=== HomeGuard-S3 Build-0057 WiFi Diagnostics ===
+WiFi hardware: ESP32-S3
+Provisioning required: YES
+WiFi radio init: OK
+WiFi MAC: <device MAC>
+SoftAP start: OK
+SoftAP SSID: HomeGuard-S3-XXXX
+SoftAP IP: 192.168.4.1
+SoftAP channel: 1
+BLE provisioning: NOT_YET_ENABLED
+Physical outputs: FAIL-CLOSED until commissioning is verified
+===============================================
+
+Expected device under test:
+- ESP32-S3 on COM port selected by the user.
+- Existing board reports 8 MB PSRAM and 16 MB flash.
+
+Flash using the generated firmware/flash_args or firmware/flasher_args.json.
+Do not invent offsets manually if generated flash arguments differ.
+
+First field test sequence:
+1. Flash Build-0057.
+2. Open serial monitor at 115200 baud.
+3. Reset board and capture complete boot log.
+4. Confirm there is no panic/Guru Meditation/reset loop.
+5. Confirm WiFi radio init: OK.
+6. Confirm SoftAP start: OK.
+7. Confirm a phone can see the SSID printed in UART.
+8. Connect phone to the SoftAP only for provisioning/API tests.
+9. Install android/app-debug.apk (0.0.57-debug).
+10. Keep siren/valve/power outputs disconnected during first provisioning test.
+
+Known field hardware may be absent during this test:
+- SD card
+- W5500
+- INA226
+Their absence must not prevent Wi-Fi provisioning from starting.
+
+PASS criteria:
+- Firmware boots stably.
+- SoftAP is visible on phone.
+- UART prints real Wi-Fi diagnostics.
+- Physical outputs remain fail-closed.
+- Android APK launches.
