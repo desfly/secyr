@@ -99,6 +99,45 @@ bool AccessControl::import_user(const AccessUser& user) {
     return true;
 }
 
+bool AccessControl::set_user_enabled(std::string_view id, bool enabled) {
+    for (std::size_t i = 0; i < user_count_; ++i) {
+        if (id != users_[i].id.data()) continue;
+        const bool previous = users_[i].enabled;
+        users_[i].enabled = enabled;
+        if (!has_enabled_admin()) {
+            users_[i].enabled = previous;
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+bool AccessControl::remove_user(std::string_view id) {
+    for (std::size_t i = 0; i < user_count_; ++i) {
+        if (id != users_[i].id.data()) continue;
+        const AccessUser removed = users_[i];
+        for (std::size_t j = i + 1U; j < user_count_; ++j) users_[j - 1U] = users_[j];
+        users_[user_count_ - 1U] = AccessUser{};
+        --user_count_;
+        if (!has_enabled_admin()) {
+            for (std::size_t j = user_count_; j > i; --j) users_[j] = users_[j - 1U];
+            users_[i] = removed;
+            ++user_count_;
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+bool AccessControl::has_enabled_admin() const {
+    for (std::size_t i = 0; i < user_count_; ++i) {
+        if (users_[i].enabled && users_[i].role == AccessRole::Admin) return true;
+    }
+    return false;
+}
+
 void AccessControl::clear_users() {
     for (auto& user : users_) user = AccessUser{};
     user_count_ = 0;
@@ -124,18 +163,11 @@ bool AccessControl::role_allows(AccessRole role, std::string_view command) const
     if (role == AccessRole::Admin) return true;
 
     if (role == AccessRole::Guest) {
-        // Guest is strictly read-only: system state plus all sensor/zone states.
         return command == "system.status" || command == "status" ||
                command == "sensors.status" || command == "sensors.list" ||
                command == "zones.status" || command == "zones.list";
     }
 
-    // Standard User role:
-    // - monitoring/status reads;
-    // - arm home / arm away;
-    // - disarm;
-    // - valve control.
-    // No service/configuration/user-management or unrelated output commands are allowed.
     return command == "system.status" || command == "status" ||
            command == "sensors.status" || command == "sensors.list" ||
            command == "zones.status" || command == "zones.list" ||
@@ -146,10 +178,7 @@ bool AccessControl::role_allows(AccessRole role, std::string_view command) const
            command == "valve.close" || command == "close_valves";
 }
 
-void AccessControl::append_audit(
-    std::string_view actor,
-    std::string_view command,
-    AuditDecision decision) {
+void AccessControl::append_audit(std::string_view actor, std::string_view command, AuditDecision decision) {
     AccessAuditRecord record{};
     record.sequence = next_audit_sequence_++;
     copy_text(record.actor.data(), record.actor.size(), actor);
@@ -160,10 +189,7 @@ void AccessControl::append_audit(
     if (audit_size_ < audit_capacity) ++audit_size_;
 }
 
-AuditDecision AccessControl::authorize(
-    std::string_view actor,
-    std::string_view pin,
-    std::string_view command) {
+AuditDecision AccessControl::authorize(std::string_view actor, std::string_view pin, std::string_view command) {
     const auto* user = find_user(actor);
     if (user == nullptr || !user->enabled) {
         append_audit(actor, command, AuditDecision::DeniedUnknownUser);
