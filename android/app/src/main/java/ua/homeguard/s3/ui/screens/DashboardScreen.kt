@@ -27,12 +27,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.diagnostics.SystemDiagnostics
-import ua.homeguard.s3.events.EventLogCategory
-import ua.homeguard.s3.events.EventLogFilter
-import ua.homeguard.s3.events.EventLogFilterEngine
+import ua.homeguard.s3.events.EventLogExporter
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.security.CloudAccessRole
+import ua.homeguard.s3.security.CloudSessionProfile
 import ua.homeguard.s3.ui.components.MaintenancePanel
 
 @Composable
@@ -41,6 +41,7 @@ fun DashboardScreen(
     localDevices: Int,
     route: String,
     cloudStatus: String,
+    cloudProfile: CloudSessionProfile,
     deviceId: String,
     snapshot: SystemSnapshot,
     events: List<SystemEventRecord>,
@@ -54,6 +55,7 @@ fun DashboardScreen(
     zoneNotificationsEnabled: Boolean,
     onOperatorIdChange: (String) -> Unit,
     onOperatorPinChange: (String) -> Unit,
+    onLogin: () -> Unit,
     onCriticalNotificationsChange: (Boolean) -> Unit,
     onStatusNotificationsChange: (Boolean) -> Unit,
     onZoneNotificationsChange: (Boolean) -> Unit,
@@ -66,19 +68,22 @@ fun DashboardScreen(
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
     var confirmClearHistory by remember { mutableStateOf(false) }
-    var eventCategory by rememberSaveable { mutableStateOf(EventLogCategory.ALL) }
-    var eventQuery by rememberSaveable { mutableStateOf("") }
-    var eventSourceText by rememberSaveable { mutableStateOf("") }
     val listState = rememberSaveable(deviceId, saver = LazyListState.Saver) { LazyListState() }
     val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12
-    val sourceFilter = eventSourceText.trim().toIntOrNull()
-    val filteredEvents = EventLogFilterEngine.apply(events, EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter))
+    val cloudMode = route == "CLOUD"
+    val authenticated = !cloudMode || cloudProfile.authenticated
+    val guest = cloudMode && cloudProfile.role == CloudAccessRole.GUEST
+    val admin = !cloudMode || cloudProfile.role == CloudAccessRole.ADMIN
+    val showFullState = !cloudMode || cloudProfile.canSubscribeFullState
+    val canArm = !cloudMode || cloudProfile.canArm
+    val canDisarm = !cloudMode || cloudProfile.canDisarm
+    val canValves = !cloudMode || cloudProfile.canControlValves
 
     pendingDangerousCommand?.let { command ->
         AlertDialog(
             onDismissRequest = { pendingDangerousCommand = null },
             title = { Text("Підтвердіть команду") },
-            text = { Text("Виконати ${command.name}? Контролер перевірить PIN оператора та challenge.") },
+            text = { Text("Виконати ${command.name}? Контролер повторно перевірить PIN і challenge.") },
             confirmButton = { TextButton(onClick = { pendingDangerousCommand = null; onCommand(command) }) { Text("Виконати") } },
             dismissButton = { TextButton(onClick = { pendingDangerousCommand = null }) { Text("Скасувати") } },
         )
@@ -88,7 +93,7 @@ fun DashboardScreen(
         AlertDialog(
             onDismissRequest = { confirmClearHistory = false },
             title = { Text("Очистити журнал?") },
-            text = { Text("Локально збережена історія подій буде видалена з цього телефону. Нові події продовжать записуватися.") },
+            text = { Text("Локальна історія цього телефона буде видалена.") },
             confirmButton = { TextButton(onClick = { confirmClearHistory = false; onClearEventHistory() }) { Text("Очистити") } },
             dismissButton = { TextButton(onClick = { confirmClearHistory = false }) { Text("Скасувати") } },
         )
@@ -103,17 +108,13 @@ fun DashboardScreen(
             Text("HomeGuard-S3 $versionName", style = MaterialTheme.typography.titleLarge)
             Text("Пристрій: $deviceId", style = MaterialTheme.typography.bodyMedium)
             Text("Канал: $route · локально: $localDevices", style = MaterialTheme.typography.bodyMedium)
-            if (route == "CLOUD") Text("Хмара: $cloudStatus", style = MaterialTheme.typography.bodyMedium)
-        }
-
-        item(key = "maintenance") {
-            MaintenancePanel(diagnostics, backupStatus, onExportSettings, onImportSettings)
+            if (cloudMode) Text("Хмара: $cloudStatus", style = MaterialTheme.typography.bodyMedium)
         }
 
         item(key = "operator") {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Оператор", style = MaterialTheme.typography.titleSmall)
+                    Text("Мій профіль", style = MaterialTheme.typography.titleSmall)
                     OutlinedTextField(operatorId, onOperatorIdChange, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("ID користувача") })
                     OutlinedTextField(
                         operatorPin,
@@ -123,151 +124,130 @@ fun DashboardScreen(
                         label = { Text("PIN") },
                         visualTransformation = PasswordVisualTransformation(),
                     )
-                    Text(if (credentialsReady) "PIN готовий" else "Введіть ID та PIN 4–12 цифр", style = MaterialTheme.typography.bodySmall)
-                    Text("PIN лише в оперативній пам’яті.", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-
-        item(key = "system") {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("Система", style = MaterialTheme.typography.titleSmall)
-                    StatusRow("Режим", snapshot.mode.name)
-                    StatusRow("Стан", snapshot.health.name)
-                    StatusRow("Транспорт", snapshot.transport.name)
-                    Text("Телеметрія #${snapshot.sequence} · uptime ${snapshot.uptimeMs} ms", style = MaterialTheme.typography.bodySmall)
+                    if (cloudMode) {
+                        Button(enabled = credentialsReady, onClick = onLogin) { Text("Увійти") }
+                        Text(
+                            if (cloudProfile.authenticated) "${cloudProfile.name.ifBlank { cloudProfile.id }} · ${cloudProfile.role.name}"
+                            else "LOCKED · роль визначає контролер",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Text("PIN зберігається тільки в оперативній пам’яті.", style = MaterialTheme.typography.bodySmall)
                     Text("Команда: $commandStatus", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
 
-        item(key = "notifications") {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Сповіщення", style = MaterialTheme.typography.titleSmall)
-                    NotificationSwitchRow("Критичні", "Тривога, tamper, батарея, offline", criticalNotificationsEnabled, onCriticalNotificationsChange)
-                    NotificationSwitchRow("Статус", "Охорона / зняття", statusNotificationsEnabled, onStatusNotificationsChange)
-                    NotificationSwitchRow("Зони", "Відкриття / закриття", zoneNotificationsEnabled, onZoneNotificationsChange, enabled = statusNotificationsEnabled)
-                }
-            }
-        }
-
-        item(key = "controls") {
-            Text("Керування", style = MaterialTheme.typography.titleMedium)
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Button(enabled = credentialsReady, onClick = { onCommand(CommandType.ARM_HOME) }) { Text("Охорона дім") }
-                    Button(enabled = credentialsReady, onClick = { onCommand(CommandType.ARM_AWAY) }) { Text("Охорона") }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedButton(enabled = credentialsReady, onClick = { pendingDangerousCommand = CommandType.DISARM }) { Text("Зняти") }
-                    OutlinedButton(enabled = credentialsReady, onClick = { onCommand(CommandType.SILENCE) }) { Text("Тиша") }
-                    OutlinedButton(enabled = credentialsReady, onClick = { pendingDangerousCommand = CommandType.RESET_ALARM }) { Text("Скинути") }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedButton(enabled = credentialsReady, onClick = { pendingDangerousCommand = CommandType.OPEN_VALVES }) { Text("Відкрити клапани") }
-                    Button(enabled = credentialsReady, onClick = { onCommand(CommandType.CLOSE_VALVES) }) { Text("Закрити клапани") }
-                }
-            }
-        }
-
-        item(key = "event-log-controls") {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Журнал подій", style = MaterialTheme.typography.titleMedium)
-                    Text("${events.size}/256 · показано ${filteredEvents.size}", style = MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                        EventCategoryButton("Усі", EventLogCategory.ALL, eventCategory) { eventCategory = it }
-                        EventCategoryButton("Критичні", EventLogCategory.CRITICAL, eventCategory) { eventCategory = it }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                        EventCategoryButton("Статус", EventLogCategory.STATUS, eventCategory) { eventCategory = it }
-                        EventCategoryButton("Зони", EventLogCategory.ZONES, eventCategory) { eventCategory = it }
-                        EventCategoryButton("Інші", EventLogCategory.OTHER, eventCategory) { eventCategory = it }
-                    }
-                    OutlinedTextField(eventQuery, { eventQuery = it.take(32) }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Пошук") })
-                    OutlinedTextField(eventSourceText, { value -> if (value.length <= 6 && value.all(Char::isDigit)) eventSourceText = value }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Source ID / зона") })
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        OutlinedButton(enabled = events.isNotEmpty(), onClick = onExportEvents) { Text("CSV") }
-                        OutlinedButton(enabled = events.isNotEmpty(), onClick = onShareEvents) { Text("Поділитися") }
-                        OutlinedButton(enabled = events.isNotEmpty(), onClick = { confirmClearHistory = true }) { Text("Очистити") }
-                    }
-                    if (eventCategory != EventLogCategory.ALL || eventQuery.isNotBlank() || eventSourceText.isNotBlank()) {
-                        OutlinedButton(onClick = { eventCategory = EventLogCategory.ALL; eventQuery = ""; eventSourceText = "" }) { Text("Скинути фільтри") }
+        if (guest) {
+            item(key = "guest-policy") {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        Text("Guest · тільки датчики", style = MaterialTheme.typography.titleSmall)
+                        Text("Інформація про охорону, зони, виходи та інших користувачів не завантажується.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
         }
 
-        if (filteredEvents.isEmpty()) item(key = "event-log-empty") {
-            Text(if (events.isEmpty()) "Подій ще немає" else "За фільтрами подій немає", style = MaterialTheme.typography.bodySmall)
-        } else items(filteredEvents.take(32), key = { "event-${it.sequence}" }) { event ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(event.event, style = MaterialTheme.typography.titleSmall)
-                    Text("#${event.sequence} · source ${event.sourceId} · value ${event.value}", style = MaterialTheme.typography.bodySmall)
-                    Text(EventLogFilterEngine.categoryOf(event).name, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-
-        item(key = "zones-title") { Text("Зони", style = MaterialTheme.typography.titleMedium) }
-        if (snapshot.zones.isEmpty()) item(key = "zones-empty") { Text("Очікування даних зон…", style = MaterialTheme.typography.bodySmall) }
-        else items(snapshot.zones, key = { "zone-${it.index}" }) { zone ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column {
-                        Text(zone.name, style = MaterialTheme.typography.titleSmall)
-                        Text(if (zone.enabled) "Активна" else "Вимкнена", style = MaterialTheme.typography.bodySmall)
+        if (showFullState) {
+            item(key = "system") {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Система", style = MaterialTheme.typography.titleSmall)
+                        StatusRow("Режим", snapshot.mode.name)
+                        StatusRow("Стан", snapshot.health.name)
+                        StatusRow("Транспорт", snapshot.transport.name)
+                        Text("Телеметрія #${snapshot.sequence} · uptime ${snapshot.uptimeMs} ms", style = MaterialTheme.typography.bodySmall)
                     }
-                    Text(zone.state.uppercase(), style = MaterialTheme.typography.bodyMedium)
                 }
             }
-        }
 
-        item(key = "sensors-title") { Text("Датчики", style = MaterialTheme.typography.titleMedium) }
-        if (snapshot.sensors.isEmpty()) item(key = "sensors-empty") { Text("Дані датчиків ще не опубліковані", style = MaterialTheme.typography.bodySmall) }
-        else items(snapshot.sensors, key = { "sensor-${it.index}" }) { sensor ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column {
-                        Text(sensor.name, style = MaterialTheme.typography.titleSmall)
-                        if (sensor.value.isNotBlank()) Text(sensor.value, style = MaterialTheme.typography.bodySmall)
+            item(key = "controls") {
+                Text("Керування", style = MaterialTheme.typography.titleMedium)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (canArm) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Button(enabled = credentialsReady && authenticated, onClick = { onCommand(CommandType.ARM_HOME) }) { Text("Охорона дім") }
+                        Button(enabled = credentialsReady && authenticated, onClick = { onCommand(CommandType.ARM_AWAY) }) { Text("Охорона") }
                     }
-                    Text(sensor.state.uppercase(), style = MaterialTheme.typography.bodyMedium)
+                    if (canDisarm) OutlinedButton(enabled = credentialsReady && authenticated, onClick = { pendingDangerousCommand = CommandType.DISARM }) { Text("Зняти з охорони") }
+                    if (canValves) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        OutlinedButton(enabled = credentialsReady && authenticated, onClick = { pendingDangerousCommand = CommandType.OPEN_VALVES }) { Text("Відкрити клапани") }
+                        Button(enabled = credentialsReady && authenticated, onClick = { onCommand(CommandType.CLOSE_VALVES) }) { Text("Закрити клапани") }
+                    }
+                }
+            }
+
+            item(key = "zones-title") { Text("Зони", style = MaterialTheme.typography.titleMedium) }
+            if (snapshot.zones.isEmpty()) item(key = "zones-empty") { Text("Очікування даних зон…", style = MaterialTheme.typography.bodySmall) }
+            else items(snapshot.zones, key = { "zone-${it.index}" }) { zone ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text(zone.name, style = MaterialTheme.typography.titleSmall)
+                            Text(if (zone.enabled) "Активна" else "Вимкнена", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(zone.state.uppercase(), style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
         }
 
-        item(key = "outputs-title") { Text("Виходи / клапани", style = MaterialTheme.typography.titleMedium) }
-        if (snapshot.outputs.isEmpty()) item(key = "outputs-empty") { Text("Немає даних виходів", style = MaterialTheme.typography.bodySmall) }
-        else items(snapshot.outputs, key = { "output-${it.index}" }) { output ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Вихід ${output.index}")
-                    Text(if (output.active) "ON" else "OFF")
+        if (authenticated) {
+            item(key = "sensors-title") { Text("Датчики", style = MaterialTheme.typography.titleMedium) }
+            if (snapshot.sensors.isEmpty()) item(key = "sensors-empty") { Text(if (guest) "Очікування sensor-only статусу…" else "Дані датчиків ще не опубліковані", style = MaterialTheme.typography.bodySmall) }
+            else items(snapshot.sensors, key = { "sensor-${it.index}" }) { sensor ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text(sensor.name, style = MaterialTheme.typography.titleSmall)
+                            if (sensor.value.isNotBlank()) Text(sensor.value, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(sensor.state.uppercase(), style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
         }
 
-        item(key = "pressures-title") { Text("Тиск / аналогові канали", style = MaterialTheme.typography.titleMedium) }
-        if (snapshot.pressures.isEmpty()) item(key = "pressures-empty") { Text("Немає даних", style = MaterialTheme.typography.bodySmall) }
-        else items(snapshot.pressures, key = { "pressure-${it.index}" }) { pressure ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Канал ${pressure.index + 1}")
-                    Text("${pressure.value} · ${pressure.state}")
+        if (showFullState) {
+            item(key = "outputs-title") { Text("Виходи / клапани", style = MaterialTheme.typography.titleMedium) }
+            if (snapshot.outputs.isEmpty()) item(key = "outputs-empty") { Text("Немає даних виходів", style = MaterialTheme.typography.bodySmall) }
+            else items(snapshot.outputs, key = { "output-${it.index}" }) { output ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Вихід ${output.index}")
+                        Text(if (output.active) "ON" else "OFF")
+                    }
+                }
+            }
+        }
+
+        if (admin) {
+            item(key = "maintenance") { MaintenancePanel(diagnostics, backupStatus, onExportSettings, onImportSettings) }
+            item(key = "notifications") {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Сповіщення", style = MaterialTheme.typography.titleSmall)
+                        NotificationSwitchRow("Критичні", "Тривога, tamper, батарея, offline", criticalNotificationsEnabled, onCriticalNotificationsChange)
+                        NotificationSwitchRow("Статус", "Охорона / зняття", statusNotificationsEnabled, onStatusNotificationsChange)
+                        NotificationSwitchRow("Зони", "Відкриття / закриття", zoneNotificationsEnabled, onZoneNotificationsChange, enabled = statusNotificationsEnabled)
+                    }
+                }
+            }
+            item(key = "event-log") {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Журнал подій", style = MaterialTheme.typography.titleMedium)
+                        Text("${events.size}/256", style = MaterialTheme.typography.bodySmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            OutlinedButton(enabled = events.isNotEmpty(), onClick = onExportEvents) { Text("CSV") }
+                            OutlinedButton(enabled = events.isNotEmpty(), onClick = onShareEvents) { Text("Поділитися") }
+                            OutlinedButton(enabled = events.isNotEmpty(), onClick = { confirmClearHistory = true }) { Text("Очистити") }
+                        }
+                    }
                 }
             }
         }
     }
-}
-
-@Composable
-private fun EventCategoryButton(label: String, category: EventLogCategory, selected: EventLogCategory, onSelect: (EventLogCategory) -> Unit) {
-    if (category == selected) Button(onClick = { onSelect(category) }) { Text(label) }
-    else OutlinedButton(onClick = { onSelect(category) }) { Text(label) }
 }
 
 @Composable
