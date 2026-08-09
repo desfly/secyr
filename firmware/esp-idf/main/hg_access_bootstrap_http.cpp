@@ -273,7 +273,8 @@ esp_err_t AccessBootstrapHttp::users_upsert_post(httpd_req_t* request)
     }
     if (!has_enabled_admin(*self->access_)) {
         *self->access_ = backup;
-        return httpd_resp_send_err(request, HTTPD_409_CONFLICT, "at least one admin required");
+        httpd_resp_set_status(request, "409 Conflict");
+        return httpd_resp_send(request, "at least one admin required", -1);
     }
     const auto save_error = self->store_->save(*self->access_);
     if (save_error != ESP_OK) {
