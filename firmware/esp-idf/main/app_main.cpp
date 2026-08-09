@@ -25,9 +25,11 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -35,6 +37,7 @@
 namespace {
 
 constexpr const char* kTag = "homeguard_main";
+constexpr std::uint64_t kCloudChallengeLifetimeMs = 30000U;
 
 homeguard::idf::HardwareBootstrap g_hardware;
 homeguard::idf::TelemetryRuntime g_telemetry;
@@ -61,6 +64,22 @@ hg::SystemEventBus g_system_bus;
 hg::SystemModel g_system_model{g_system_bus};
 httpd_handle_t g_http_server = nullptr;
 
+struct CloudAuthChallenge {
+    bool active{false};
+    std::string actor;
+    std::string command;
+    std::string request_id;
+    std::string nonce;
+    std::uint64_t expires_at_ms{0};
+};
+
+CloudAuthChallenge g_cloud_challenge;
+
+std::uint64_t now_ms()
+{
+    return static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+}
+
 bool extract_json_string(const std::string& body, const char* key, std::string& value)
 {
     const std::string token = std::string{"\""} + key + "\"";
@@ -85,6 +104,19 @@ std::string json_escape(const std::string& value)
         escaped.push_back(ch);
     }
     return escaped;
+}
+
+template <std::size_t N>
+std::string bytes_hex(const std::array<std::uint8_t, N>& bytes)
+{
+    static constexpr char digits[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(N * 2U);
+    for (const auto byte : bytes) {
+        out.push_back(digits[(byte >> 4U) & 0x0fU]);
+        out.push_back(digits[byte & 0x0fU]);
+    }
+    return out;
 }
 
 const char* arm_state_name(hg::PartitionArmState state)
@@ -116,6 +148,71 @@ void publish_cloud_result(const std::string& request_id,
     (void)g_cloud_link.publish_command_response(response.c_str());
 }
 
+void issue_cloud_challenge(const std::string& request_id,
+                           const std::string& actor,
+                           const std::string& target_command)
+{
+    const auto* user = g_access_control.find_user(actor);
+    if (user == nullptr || !user->enabled) {
+        publish_cloud_result(request_id, false, "denied_unknown_user");
+        return;
+    }
+    if (!g_access_control.role_allows(user->role, target_command)) {
+        publish_cloud_result(request_id, false, "denied_role");
+        return;
+    }
+
+    std::array<std::uint8_t, 16> random_bytes{};
+    esp_fill_random(random_bytes.data(), random_bytes.size());
+    g_cloud_challenge.active = true;
+    g_cloud_challenge.actor = actor;
+    g_cloud_challenge.command = target_command;
+    g_cloud_challenge.request_id = request_id;
+    g_cloud_challenge.nonce = bytes_hex(random_bytes);
+    g_cloud_challenge.expires_at_ms = now_ms() + kCloudChallengeLifetimeMs;
+
+    std::string extra = "\"nonce\":\"" + g_cloud_challenge.nonce + "\",\"salt\":\"";
+    extra += bytes_hex(user->salt);
+    extra += "\",\"expires_in_ms\":" + std::to_string(kCloudChallengeLifetimeMs);
+    publish_cloud_result(request_id, true, "auth_challenge", extra.c_str());
+}
+
+bool authorize_cloud_command(const std::string& body,
+                             const std::string& request_id,
+                             const std::string& command,
+                             const std::string& actor)
+{
+    std::string proof;
+    if (!extract_json_string(body, "auth_proof", proof) || proof.size() != 64U) {
+        publish_cloud_result(request_id, false, "auth_proof_required");
+        return false;
+    }
+
+    const auto timestamp = now_ms();
+    if (!g_cloud_challenge.active || timestamp > g_cloud_challenge.expires_at_ms) {
+        g_cloud_challenge.active = false;
+        publish_cloud_result(request_id, false, "challenge_expired");
+        return false;
+    }
+    if (g_cloud_challenge.actor != actor ||
+        g_cloud_challenge.command != command ||
+        g_cloud_challenge.request_id != request_id) {
+        g_cloud_challenge.active = false;
+        publish_cloud_result(request_id, false, "challenge_mismatch");
+        return false;
+    }
+
+    const std::string nonce = g_cloud_challenge.nonce;
+    g_cloud_challenge.active = false; // one attempt only, including failed proofs
+    const auto decision = g_access_control.authorize_cloud_proof(
+        actor, command, nonce, request_id, proof);
+    if (decision != homeguard::AuditDecision::Allowed) {
+        publish_cloud_result(request_id, false, homeguard::to_string(decision));
+        return false;
+    }
+    return true;
+}
+
 void handle_cloud_command(const char* payload, std::size_t length, void*)
 {
     if (payload == nullptr || length == 0 || length > 1024) {
@@ -127,7 +224,6 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
     std::string request_id;
     std::string command;
     std::string actor;
-    std::string credential;
     if (!extract_json_string(body, "request_id", request_id) || request_id.empty() || request_id.size() > 64 ||
         !extract_json_string(body, "command", command) || command.empty() || command.size() > 48) {
         publish_cloud_result(request_id, false, "invalid_command");
@@ -148,31 +244,37 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
         return;
     }
 
-    if (!extract_json_string(body, "actor", actor) || actor.empty() || actor.size() > 32 ||
-        !extract_json_string(body, "credential", credential) || credential.empty() || credential.size() > 32) {
-        publish_cloud_result(request_id, false, "credentials_required");
+    if (command == "auth.challenge") {
+        std::string target_command;
+        if (!extract_json_string(body, "actor", actor) || actor.empty() || actor.size() > 23U ||
+            !extract_json_string(body, "target_command", target_command) || target_command.empty() || target_command.size() > 48U) {
+            publish_cloud_result(request_id, false, "challenge_fields_required");
+            return;
+        }
+        issue_cloud_challenge(request_id, actor, target_command);
         return;
     }
 
-    const auto decision = g_access_control.authorize(actor, credential, command);
-    if (decision != homeguard::AuditDecision::Allowed) {
-        publish_cloud_result(request_id, false, homeguard::to_string(decision));
+    if (!extract_json_string(body, "actor", actor) || actor.empty() || actor.size() > 23U) {
+        publish_cloud_result(request_id, false, "actor_required");
         return;
     }
+    if (!authorize_cloud_command(body, request_id, command, actor)) return;
 
-    const auto now_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+    const auto timestamp = now_ms();
     if (command == "security.arm_home") {
-        const bool changed = g_system_model.set_partition_arm(1, hg::PartitionArmState::Stay, now_ms);
+        const bool changed = g_system_model.set_partition_arm(1, hg::PartitionArmState::Stay, timestamp);
         publish_cloud_result(request_id, changed, changed ? "armed_home" : "arm_failed");
         return;
     }
     if (command == "security.arm_away") {
-        const bool changed = g_system_model.set_partition_arm(1, hg::PartitionArmState::Away, now_ms);
+        const bool changed = g_system_model.set_partition_arm(1, hg::PartitionArmState::Away, timestamp);
         publish_cloud_result(request_id, changed, changed ? "armed_away" : "arm_failed");
         return;
     }
     if (command == "security.disarm") {
-        publish_cloud_result(request_id, false, "challenge_required");
+        const bool changed = g_system_model.set_partition_arm(1, hg::PartitionArmState::Disarmed, timestamp);
+        publish_cloud_result(request_id, changed, changed ? "disarmed" : "disarm_failed");
         return;
     }
 
