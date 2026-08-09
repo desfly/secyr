@@ -26,6 +26,7 @@ idf_component_register(
         "hg_cloud_config.cpp"
         "hg_cloud_http.cpp"
         "hg_access_nvs.cpp"
+        "hg_access_bootstrap_http.cpp"
         "hg_commissioning_nvs.cpp"
         "../../src/system_model.cpp"
         "../../src/system_api.cpp"
