@@ -25,3 +25,4 @@ void test_admin_user_directory();
 void test_admin_user_commands();
 void test_admin_pin_transport();
 void test_admin_payload_auth();
+void test_admin_payload_canonical();
