@@ -17,6 +17,7 @@
 #include "hg_access_admin_http.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
+#include "homeguard/admin_payload_auth.hpp"
 #include "homeguard/admin_pin_transport.hpp"
 #include "homeguard/admin_user_commands.hpp"
 #include "homeguard/self_profile.hpp"
@@ -173,6 +174,24 @@ void publish_cloud_result(const std::string& request_id,
     }
     response += '}';
     (void)g_cloud_link.publish_command_response(response.c_str());
+}
+
+bool verify_admin_payload(const std::string& body,
+                          const std::string& actor,
+                          const std::string& request_id,
+                          const std::string& command,
+                          const std::string& canonical_payload)
+{
+    std::string payload_proof;
+    const auto* admin = g_access_control.find_user(actor);
+    if (admin == nullptr || !admin->enabled || admin->role != homeguard::AccessRole::Admin ||
+        !extract_json_string(body, "payload_proof", payload_proof) ||
+        !homeguard::verify_admin_payload_proof(
+            admin->pin_digest, request_id, command, canonical_payload, payload_proof)) {
+        publish_cloud_result(request_id, false, "payload_proof_invalid");
+        return false;
+    }
+    return true;
 }
 
 void publish_self_profile(const std::string& request_id, const std::string& actor)
@@ -368,20 +387,11 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
     }
     if (!authorize_cloud_command(body, request_id, command, actor)) return;
 
-    if (command == "profile.self") {
-        publish_self_profile(request_id, actor);
-        return;
-    }
-    if (command == "sensors.status") {
-        publish_sensor_status(request_id);
-        return;
-    }
+    if (command == "profile.self") { publish_self_profile(request_id, actor); return; }
+    if (command == "sensors.status") { publish_sensor_status(request_id); return; }
     if (command == "system.status") {
         const auto* partition = g_system_model.partition(1);
-        if (partition == nullptr) {
-            publish_cloud_result(request_id, false, "partition_unavailable");
-            return;
-        }
+        if (partition == nullptr) { publish_cloud_result(request_id, false, "partition_unavailable"); return; }
         std::string extra = "\"arm_state\":\"";
         extra += arm_state_name(partition->arm_state);
         extra += "\",\"outputs_allowed\":";
@@ -394,11 +404,7 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
         return;
     }
     if (command == "access.users.upsert") {
-        std::string target_id;
-        std::string name;
-        std::string role_text;
-        std::string enabled_text;
-        std::string encrypted_pin;
+        std::string target_id, name, role_text, enabled_text, encrypted_pin;
         if (!extract_json_string(body, "target_id", target_id) || target_id.empty() || target_id.size() > 23U ||
             !extract_json_string(body, "name", name) || name.size() > 31U ||
             !extract_json_string(body, "role", role_text) ||
@@ -412,15 +418,13 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
             publish_cloud_result(request_id, false, "invalid_user_fields");
             return;
         }
+        const std::string canonical = target_id + "\n" + name + "\n" + role_text + "\n" + enabled_text + "\n" + encrypted_pin;
+        if (!verify_admin_payload(body, actor, request_id, command, canonical)) return;
         const auto* admin = g_access_control.find_user(actor);
-        if (admin == nullptr || admin->role != homeguard::AccessRole::Admin || !admin->enabled) {
-            publish_cloud_result(request_id, false, "denied_role");
-            return;
-        }
+        if (admin == nullptr) { publish_cloud_result(request_id, false, "denied_role"); return; }
         const auto key = homeguard::admin_pin_transport_key_hex(admin->pin_digest, request_id, command);
         std::string new_pin;
-        if (!homeguard::admin_pin_decrypt_hex(encrypted_pin, key, new_pin) ||
-            new_pin.size() < 4U || new_pin.size() > 12U) {
+        if (!homeguard::admin_pin_decrypt_hex(encrypted_pin, key, new_pin) || new_pin.size() < 4U || new_pin.size() > 12U) {
             publish_cloud_result(request_id, false, "invalid_encrypted_pin");
             return;
         }
@@ -428,17 +432,9 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
         esp_fill_random(salt.data(), salt.size());
         const homeguard::AccessControl backup = g_access_control;
         (void)persist_admin_change(
-            backup,
-            request_id,
+            backup, request_id,
             homeguard::admin_user_upsert(
-                g_access_control,
-                actor,
-                target_id,
-                name,
-                role,
-                new_pin,
-                salt,
-                enabled_text == "true"));
+                g_access_control, actor, target_id, name, role, new_pin, salt, enabled_text == "true"));
         return;
     }
     if (command == "access.users.enable" || command == "access.users.disable" || command == "access.users.delete") {
@@ -447,13 +443,13 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
             publish_cloud_result(request_id, false, "target_id_required");
             return;
         }
+        if (!verify_admin_payload(body, actor, request_id, command, target_id)) return;
         const homeguard::AccessControl backup = g_access_control;
         if (command == "access.users.delete") {
             (void)persist_admin_change(backup, request_id, homeguard::admin_user_delete(g_access_control, actor, target_id));
         } else {
             (void)persist_admin_change(
-                backup,
-                request_id,
+                backup, request_id,
                 homeguard::admin_user_set_enabled(g_access_control, actor, target_id, command == "access.users.enable"));
         }
         return;
@@ -476,10 +472,7 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
         return;
     }
     if (command == "valve.open" || command == "valve.close") {
-        if (!g_boot_readiness.outputs_allowed()) {
-            publish_cloud_result(request_id, false, "outputs_fail_closed");
-            return;
-        }
+        if (!g_boot_readiness.outputs_allowed()) { publish_cloud_result(request_id, false, "outputs_fail_closed"); return; }
         const bool opening = command == "valve.open";
         const bool changed = set_cloud_valve(opening, timestamp);
         publish_cloud_result(request_id, changed,
