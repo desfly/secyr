@@ -20,9 +20,22 @@ void test_access_privacy() {
     CHECK(access.role_allows(homeguard::AccessRole::User, "profile.self"));
     CHECK(access.role_allows(homeguard::AccessRole::Guest, "profile.self"));
 
+    CHECK(access.role_allows(homeguard::AccessRole::User, "system.status"));
+    CHECK(access.role_allows(homeguard::AccessRole::User, "zones.list"));
+    CHECK(access.role_allows(homeguard::AccessRole::User, "sensors.list"));
     CHECK(access.role_allows(homeguard::AccessRole::User, "security.arm_home"));
+    CHECK(access.role_allows(homeguard::AccessRole::User, "security.disarm"));
     CHECK(access.role_allows(homeguard::AccessRole::User, "valve.open"));
-    CHECK(access.role_allows(homeguard::AccessRole::Guest, "system.status"));
+    CHECK(access.role_allows(homeguard::AccessRole::User, "valve.close"));
+
+    CHECK(access.role_allows(homeguard::AccessRole::Guest, "sensors.status"));
+    CHECK(access.role_allows(homeguard::AccessRole::Guest, "sensors.list"));
+    CHECK(!access.role_allows(homeguard::AccessRole::Guest, "system.status"));
+    CHECK(!access.role_allows(homeguard::AccessRole::Guest, "status"));
+    CHECK(!access.role_allows(homeguard::AccessRole::Guest, "zones.status"));
+    CHECK(!access.role_allows(homeguard::AccessRole::Guest, "zones.list"));
     CHECK(!access.role_allows(homeguard::AccessRole::Guest, "security.arm_home"));
+    CHECK(!access.role_allows(homeguard::AccessRole::Guest, "security.disarm"));
     CHECK(!access.role_allows(homeguard::AccessRole::Guest, "valve.open"));
+    CHECK(!access.role_allows(homeguard::AccessRole::Guest, "valve.close"));
 }
