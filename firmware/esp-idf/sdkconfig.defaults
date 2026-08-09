@@ -13,6 +13,12 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
+# app_main performs NVS restore + Wi-Fi/cloud/bootstrap initialization before
+# handing work to service tasks. ESP-IDF's small default main-task stack was
+# overflowing during commissioning restore on the real ESP32-S3. Keep enough
+# internal stack headroom for this boot path and retain stack canary checks.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0x8000
