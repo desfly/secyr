@@ -18,6 +18,7 @@ public:
     [[nodiscard]] bool station_connected() const { return station_connected_; }
     [[nodiscard]] const char* ssid() const { return ssid_.data(); }
     [[nodiscard]] const char* ip_address() const { return ip_address_.data(); }
+    [[nodiscard]] const char* station_ssid() const { return station_ssid_.data(); }
     [[nodiscard]] const char* station_ip_address() const { return station_ip_address_.data(); }
 
 private:
@@ -28,6 +29,7 @@ private:
 
     std::array<char, 33> ssid_{};
     std::array<char, 16> ip_address_{};
+    std::array<char, 33> station_ssid_{};
     std::array<char, 16> station_ip_address_{};
     bool started_{};
     bool station_connecting_{};
