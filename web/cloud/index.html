@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HomeGuard-S3 Cloud</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#172033;background:#eef2f7}*{box-sizing:border-box}body{margin:0}header{background:#111827;color:#fff;padding:18px 22px}header h1{margin:0;font-size:21px}header small{opacity:.75}.wrap{max-width:1050px;margin:auto;padding:20px}.status{display:flex;gap:10px;align-items:center;margin-bottom:16px}.dot{width:11px;height:11px;border-radius:50%;background:#94a3b8}.dot.ok{background:#16a34a}.dot.bad{background:#dc2626}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}.card{background:#fff;border:1px solid #dbe3ee;border-radius:14px;padding:16px;box-shadow:0 2px 8px #0f172a0a}.card h2{font-size:15px;margin:0 0 12px;color:#475569}.kv{display:grid;grid-template-columns:110px 1fr;gap:8px;font-size:14px}.v{font-weight:650;word-break:break-word}.wide{grid-column:1/-1}.item{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #eef2f7}.item:last-child{border:0}.muted{color:#64748b}.good{color:#15803d}.bad{color:#b91c1c}input,button{font:inherit}input{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:9px;margin-top:6px}button{margin-top:10px;border:0;border-radius:9px;background:#2563eb;color:#fff;padding:10px 14px;font-weight:650;cursor:pointer}footer{text-align:center;color:#64748b;font-size:12px;padding:18px}
+</style>
+<script src="https://unpkg.com/mqtt@5.10.4/dist/mqtt.min.js"></script>
+</head>
+<body>
+<header><h1>HomeGuard-S3</h1><small>Хмарний моніторинг • Build-0060 test</small></header>
+<main class="wrap">
+<div class="status"><span id="dot" class="dot"></span><strong id="status">Не підключено</strong></div>
+<div class="grid">
+<section class="card wide"><h2>Пристрій</h2><label>Device ID</label><input id="device" value="HG-ACA7041DA710" autocomplete="off"><button onclick="connectCloud()">Підключити хмару</button><div id="topic" class="muted" style="margin-top:8px"></div></section>
+<section class="card"><h2>Система</h2><div class="kv"><span>Режим</span><span id="arm" class="v">—</span><span>Sequence</span><span id="seq" class="v">—</span><span>Час</span><span id="ts" class="v">—</span></div></section>
+<section class="card"><h2>Виходи / клапани</h2><div id="outputs" class="muted">Немає даних</div></section>
+<section class="card wide"><h2>Зони</h2><div id="zones" class="muted">Немає даних</div></section>
+<section class="card wide"><h2>Датчики</h2><div id="sensors" class="muted">Немає даних</div></section>
+</div>
+</main>
+<footer>Тестовий cloud-view. Не вводьте PIN або інші секрети на публічному broker.</footer>
+<script>
+const $=id=>document.getElementById(id);let client=null;
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function rows(list,kind){if(!Array.isArray(list)||!list.length)return '<span class="muted">Немає даних</span>';return list.map(x=>{let left=kind==='output'?'Вихід '+esc(x.id):esc(x.name||('ID '+x.id));let right=kind==='output'?(x.active?'ON':'OFF'):esc(x.state||'unknown');if(kind==='sensor'&&x.value!==undefined)right+=' · '+esc(x.value);return '<div class="item"><strong>'+left+'</strong><span>'+right+'</span></div>'}).join('')}
+function render(s){$('arm').textContent=s.arm_state||'—';$('seq').textContent=s.sequence??'—';$('ts').textContent=s.timestamp_ms??'—';$('zones').innerHTML=rows(s.zones,'zone');$('sensors').innerHTML=rows(s.sensors,'sensor');$('outputs').innerHTML=rows(s.outputs,'output')}
+function setStatus(text,ok=false,bad=false){$('status').textContent=text;$('dot').className='dot '+(ok?'ok':bad?'bad':'')}
+function connectCloud(){const id=$('device').value.trim();if(!/^HG-[A-Z0-9]+$/.test(id)){setStatus('Некоректний Device ID',false,true);return}if(client){try{client.end(true)}catch(e){}}const topic='homeguard/v1/devices/'+id+'/state';$('topic').textContent=topic;setStatus('Підключення…');client=mqtt.connect('wss://test.mosquitto.org:8081/mqtt',{clientId:'hg-web-'+Math.random().toString(16).slice(2),clean:true,connectTimeout:10000,reconnectPeriod:3000});client.on('connect',()=>{setStatus('Хмара підключена',true);client.subscribe(topic,{qos:1})});client.on('message',(t,p)=>{if(t!==topic)return;try{const s=JSON.parse(p.toString());if(s.schema!==1)return;render(s);setStatus('Хмара підключена · state #'+(s.sequence??'?'),true)}catch(e){setStatus('Помилка JSON state',false,true)}});client.on('error',e=>setStatus('MQTT: '+e.message,false,true));client.on('offline',()=>setStatus('Хмара offline',false,true))}
+connectCloud();
+</script>
+</body>
+</html>
