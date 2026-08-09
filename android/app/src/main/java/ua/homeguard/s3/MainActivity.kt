@@ -23,6 +23,7 @@ import ua.homeguard.s3.events.EventLogExporter
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.network.CloudStateMqttClient
 import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
@@ -42,6 +43,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var resolver: DeviceEndpointResolver
     private lateinit var provisioning: ProvisioningCoordinator
     private lateinit var telemetry: TelemetrySocket
+    private lateinit var cloudState: CloudStateMqttClient
     private lateinit var session: DeviceSession
     private lateinit var commands: CommandController
     private lateinit var notifications: HomeGuardNotifications
@@ -111,7 +113,8 @@ class MainActivity : ComponentActivity() {
         resolver = DeviceEndpointResolver(settings, discovery, lifecycleScope)
         provisioning = ProvisioningCoordinator(this, settings, discovery, lifecycleScope)
         telemetry = TelemetrySocket().apply { seedEvents(eventHistory.load()) }
-        session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry)
+        cloudState = CloudStateMqttClient(telemetry)
+        session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry, cloudState)
         commands = CommandController(resolver.endpoint, settings)
         notifications = HomeGuardNotifications(this)
         notifications.createChannels()
@@ -132,6 +135,7 @@ class MainActivity : ComponentActivity() {
             val wifiNetworks by provisioning.wifiNetworks.collectAsState()
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
             val events by telemetry.events().collectAsState(initial = emptyList())
+            val cloudStatus by cloudState.status.collectAsState()
             val commandMessage by commandStatus.collectAsState()
             val maintenanceMessage by backupStatus.collectAsState()
             val currentOperator by operatorId.collectAsState()
@@ -165,6 +169,7 @@ class MainActivity : ComponentActivity() {
                         versionName = BuildConfig.VERSION_NAME,
                         localDevices = devices.size,
                         route = endpoint.path.name,
+                        cloudStatus = cloudStatus,
                         deviceId = appSettings.deviceId,
                         snapshot = snapshot,
                         events = events,
