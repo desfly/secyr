@@ -1,0 +1,30 @@
+HomeGuard-S3 Build-0060 TEST CANDIDATE
+
+Purpose
+- Validate one-time cloud challenge/response authorization on real ESP32-S3 hardware.
+- Preserve verified Build-0059 Wi-Fi scan and MQTT/TLS connectivity.
+
+Expected device
+- ESP32-S3
+- Existing Wi-Fi credentials may be preserved in NVS.
+- Physical outputs MUST remain FAIL-CLOSED until hardware verification/commissioning is valid.
+
+Cloud auth protocol
+1. Send auth.challenge with request_id, actor and target command.
+2. Device returns nonce, salt and expires_ms.
+3. Client derives PIN digest locally from actor + salt + PIN using the HomeGuard-S3 4096-round SHA-256 derivation.
+4. Client computes auth_proof bound to actor + request_id + command + nonce.
+5. Send target command with actor + auth_proof. Raw PIN must NOT be present in MQTT payload.
+6. Challenge is single-use and expires after 30 seconds.
+
+Minimum field tests
+- Wi-Fi scan button still returns nearby SSIDs.
+- MQTT/TLS ping -> pong still works.
+- system.status still works.
+- security.arm_home without auth_proof is rejected.
+- auth.challenge returns challenge data only for a known enabled actor.
+- invalid proof is rejected.
+- reused proof/challenge is rejected.
+- physical outputs remain fail-closed.
+
+Do not use a real PIN on a public anonymous MQTT broker. Public broker testing is transport-only.
