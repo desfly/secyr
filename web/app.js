@@ -26,10 +26,16 @@ function stateClass(value) {
   return "warning";
 }
 
+function resolveWifiSsid(state) {
+  return state.wifi_ssid || state.ssid || state.network?.ssid || state.wifi?.ssid || "—";
+}
+
 function render(state) {
   document.querySelector("#connection").textContent =
     `Оновлено · sequence ${state.sequence}`;
+  document.querySelector("#wifiName").textContent = resolveWifiSsid(state);
   document.querySelector("#securityMode").textContent = state.security_mode;
+  document.querySelector("#zoneCount").textContent = Array.isArray(state.zones) ? state.zones.length : "—";
   document.querySelector("#coldPressure").textContent =
     `${state.cold_pressure_bar.toFixed(2)} бар`;
   document.querySelector("#hotPressure").textContent =
