@@ -37,6 +37,7 @@ add_library(homeguard_core
     src/admin_user_commands.cpp
     src/admin_pin_transport.cpp
     src/admin_payload_auth.cpp
+    src/admin_payload_canonical.cpp
     src/device_api_model.cpp
     src/device_command_router.cpp
     src/zone.cpp
@@ -86,6 +87,7 @@ add_executable(homeguard_tests
     ../tests/test_admin_user_commands.cpp
     ../tests/test_admin_pin_transport.cpp
     ../tests/test_admin_payload_auth.cpp
+    ../tests/test_admin_payload_canonical.cpp
 )
 target_link_libraries(homeguard_tests PRIVATE homeguard_core)
 enable_testing()
