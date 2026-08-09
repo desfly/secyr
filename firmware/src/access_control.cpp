@@ -122,7 +122,13 @@ bool AccessControl::verify_pin(const AccessUser& user, std::string_view pin) con
 
 bool AccessControl::role_allows(AccessRole role, std::string_view command) const {
     if (role == AccessRole::Admin) return true;
-    if (role == AccessRole::Guest) return false;
+
+    if (role == AccessRole::Guest) {
+        // Guest is strictly read-only: system state plus all sensor/zone states.
+        return command == "system.status" || command == "status" ||
+               command == "sensors.status" || command == "sensors.list" ||
+               command == "zones.status" || command == "zones.list";
+    }
 
     // Standard User role:
     // - monitoring/status reads;
@@ -131,6 +137,8 @@ bool AccessControl::role_allows(AccessRole role, std::string_view command) const
     // - valve control.
     // No service/configuration/user-management or unrelated output commands are allowed.
     return command == "system.status" || command == "status" ||
+           command == "sensors.status" || command == "sensors.list" ||
+           command == "zones.status" || command == "zones.list" ||
            command == "security.arm_home" || command == "arm_home" ||
            command == "security.arm_away" || command == "arm_away" ||
            command == "security.disarm" || command == "disarm" ||
