@@ -60,6 +60,7 @@ esp_err_t CloudHttp::status_get(httpd_req_t* request)
     body += self->link_->connected() ? "true" : "false";
     body += ",\"connect_count\":" + std::to_string(self->link_->connect_count());
     body += ",\"disconnect_count\":" + std::to_string(self->link_->disconnect_count());
+    body += ",\"command_count\":" + std::to_string(self->link_->command_count());
     body += "}";
     httpd_resp_set_type(request, "application/json");
     return httpd_resp_send(request, body.c_str(), static_cast<ssize_t>(body.size()));
