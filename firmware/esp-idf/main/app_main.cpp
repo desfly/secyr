@@ -17,6 +17,7 @@
 #include "hg_access_admin_http.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
+#include "homeguard/admin_user_commands.hpp"
 #include "homeguard/self_profile.hpp"
 #include "homeguard/boot_readiness.hpp"
 #include "homeguard/build_info.hpp"
@@ -178,6 +179,30 @@ void publish_self_profile(const std::string& request_id, const std::string& acto
     publish_cloud_result(request_id, true, "self_profile", extra.c_str());
 }
 
+void publish_admin_directory(const std::string& request_id,
+                             const homeguard::AdminUserCommandResult& result)
+{
+    if (result.status != homeguard::AdminUserCommandStatus::Ok) {
+        publish_cloud_result(request_id, false, homeguard::to_string(result.status));
+        return;
+    }
+
+    std::string extra = "\"users\":[";
+    for (std::size_t i = 0; i < result.directory.count; ++i) {
+        if (i != 0U) extra += ',';
+        const auto& user = result.directory.users[i];
+        extra += "{\"id\":\"" + json_escape(user.id.data()) + "\",\"name\":\"";
+        extra += json_escape(user.name.data());
+        extra += "\",\"role\":\"";
+        extra += homeguard::to_string(user.role);
+        extra += "\",\"enabled\":";
+        extra += user.enabled ? "true" : "false";
+        extra += '}';
+    }
+    extra += ']';
+    publish_cloud_result(request_id, true, "users", extra.c_str());
+}
+
 void issue_cloud_challenge(const std::string& request_id,
                            const std::string& actor,
                            const std::string& target_command)
@@ -243,6 +268,25 @@ bool authorize_cloud_command(const std::string& body,
     return true;
 }
 
+bool persist_admin_change(const homeguard::AccessControl& backup,
+                          const std::string& request_id,
+                          const homeguard::AdminUserCommandResult& result)
+{
+    if (result.status != homeguard::AdminUserCommandStatus::Ok) {
+        publish_admin_directory(request_id, result);
+        return false;
+    }
+    const auto save_error = g_access_store.save(g_access_control);
+    if (save_error != ESP_OK) {
+        g_access_control = backup;
+        ESP_LOGE(kTag, "Cloud access mutation NVS save failed: %s", esp_err_to_name(save_error));
+        publish_cloud_result(request_id, false, "nvs_save_failed");
+        return false;
+    }
+    publish_admin_directory(request_id, result);
+    return true;
+}
+
 bool set_cloud_valve(bool active, std::uint64_t timestamp)
 {
     if (!g_boot_readiness.outputs_allowed()) return false;
@@ -305,6 +349,33 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
         extra += "\",\"outputs_allowed\":";
         extra += g_boot_readiness.outputs_allowed() ? "true" : "false";
         publish_cloud_result(request_id, true, "status", extra.c_str());
+        return;
+    }
+    if (command == "access.users.list") {
+        publish_admin_directory(request_id, homeguard::admin_users_list(g_access_control, actor));
+        return;
+    }
+    if (command == "access.users.enable" ||
+        command == "access.users.disable" ||
+        command == "access.users.delete") {
+        std::string target_id;
+        if (!extract_json_string(body, "target_id", target_id) || target_id.empty() || target_id.size() > 23U) {
+            publish_cloud_result(request_id, false, "target_id_required");
+            return;
+        }
+        const homeguard::AccessControl backup = g_access_control;
+        if (command == "access.users.delete") {
+            (void)persist_admin_change(
+                backup,
+                request_id,
+                homeguard::admin_user_delete(g_access_control, actor, target_id));
+        } else {
+            (void)persist_admin_change(
+                backup,
+                request_id,
+                homeguard::admin_user_set_enabled(
+                    g_access_control, actor, target_id, command == "access.users.enable"));
+        }
         return;
     }
 
