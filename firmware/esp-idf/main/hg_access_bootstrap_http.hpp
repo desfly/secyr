@@ -16,6 +16,10 @@ public:
 private:
     static esp_err_t status_get(httpd_req_t* request);
     static esp_err_t bootstrap_post(httpd_req_t* request);
+    static esp_err_t users_list_post(httpd_req_t* request);
+    static esp_err_t users_upsert_post(httpd_req_t* request);
+    static esp_err_t config_export_post(httpd_req_t* request);
+    static esp_err_t config_import_post(httpd_req_t* request);
     static AccessBootstrapHttp* self_from(httpd_req_t* request);
     void generate_token();
 
