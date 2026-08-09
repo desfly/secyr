@@ -16,18 +16,16 @@ object CloudAuthProof {
     }
 
     fun proof(
-        userId: String,
         requestId: String,
         command: String,
         nonceHex: String,
         pinDigestHex: String,
     ): String {
-        require(userId.isNotBlank())
         require(requestId.isNotBlank())
         require(command.isNotBlank())
         require(nonceHex.isNotBlank())
         require(pinDigestHex.length == 64)
-        val material = "HomeGuard-S3|CLOUD|$userId|$requestId|$command|${nonceHex.lowercase()}|${pinDigestHex.lowercase()}"
+        val material = "HomeGuard-S3|CLOUD|${pinDigestHex.lowercase()}|${nonceHex.lowercase()}|$requestId|$command"
         return hex(sha256(material))
     }
 
