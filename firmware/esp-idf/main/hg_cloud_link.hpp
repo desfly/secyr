@@ -19,6 +19,7 @@ public:
     [[nodiscard]] bool connected() const { return connected_; }
     [[nodiscard]] std::uint32_t connect_count() const { return connect_count_; }
     [[nodiscard]] std::uint32_t disconnect_count() const { return disconnect_count_; }
+    [[nodiscard]] std::uint32_t command_count() const { return command_count_; }
 
     esp_err_t publish_state(const char* json, int qos = 1, bool retain = true);
 
@@ -31,16 +32,19 @@ private:
     void make_device_id();
     void make_topics();
     void publish_online(bool online);
+    void publish_command_response(const char* json);
 
     esp_mqtt_client_handle_t client_{};
     std::array<char, 32> device_id_{};
     std::array<char, 96> state_topic_{};
     std::array<char, 96> availability_topic_{};
     std::array<char, 96> command_topic_{};
+    std::array<char, 96> response_topic_{};
     bool configured_{};
     bool connected_{};
     std::uint32_t connect_count_{};
     std::uint32_t disconnect_count_{};
+    std::uint32_t command_count_{};
 };
 
 }  // namespace homeguard::idf
