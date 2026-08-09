@@ -34,15 +34,15 @@ constexpr const char kWebUi[] = R"HTML(<!doctype html>
 <header><div><h1>HomeGuard-S3</h1><small>Локальна панель контролера</small></div><span id="buildPill" class="pill">...</span></header>
 <main class="wrap"><div class="status"><span id="healthDot" class="dot"></span><strong id="healthText">Завантаження стану...</strong></div><div class="grid">
 <section class="card"><h2>Система</h2><div class="kv"><span>Проєкт</span><span class="v" id="project">—</span><span>Build</span><span class="v" id="build">—</span><span>Версія</span><span class="v" id="version">—</span><span>Модуль</span><span class="v" id="module">—</span></div></section>
-<section class="card"><h2>Wi‑Fi</h2><div class="kv"><span>STA</span><span class="v" id="sta">—</span><span>STA IP</span><span class="v" id="staIp">—</span><span>Recovery AP</span><span class="v" id="apSsid">—</span><span>AP IP</span><span class="v" id="apIp">—</span></div></section>
+<section class="card"><h2>Wi‑Fi</h2><div class="kv"><span>STA</span><span class="v" id="sta">—</span><span>Мережа</span><span class="v" id="staSsid">—</span><span>STA IP</span><span class="v" id="staIp">—</span><span>Recovery AP</span><span class="v" id="apSsid">—</span><span>AP IP</span><span class="v" id="apIp">—</span></div></section>
 <section class="card"><h2>Фізичні виходи</h2><div class="kv"><span>Runtime</span><span class="v" id="outRuntime">—</span><span>Дозволені</span><span class="v" id="outAllowed">—</span><span>Увімкнені</span><span class="v" id="outEnabled">—</span><span>Помилки</span><span class="v" id="outFailures">—</span></div></section>
 <section class="card wide"><h2>Домашня Wi‑Fi мережа</h2><div class="grid"><div><label>SSID</label><input id="ssid" autocomplete="off" placeholder="Назва Wi‑Fi"></div><div><label>Пароль</label><input id="password" type="password" autocomplete="new-password" placeholder="Пароль Wi‑Fi"></div></div><div class="row"><button type="button" onclick="scanWifi()">Пошук мереж Wi‑Fi</button><button type="button" onclick="saveWifi()">Зберегти та підключити</button><button type="button" class="secondary" onclick="refreshAll()">Оновити стан</button></div><div id="wifiMsg" class="msg muted"></div><div id="networks" class="nets"></div></section>
 </div></main><footer>HomeGuard-S3 • локальний Web UI • дані оновлюються автоматично</footer>
 <script>
 const $=id=>document.getElementById(id);async function json(url,opt){const r=await fetch(url,opt);const t=await r.text();if(!r.ok)throw new Error('HTTP '+r.status+' '+t);return t?JSON.parse(t):{};}function yes(v){return v?'ТАК':'НІ'}
-async function refreshAll(){let ok=true;try{const b=await json('/api/v1/build');$('project').textContent=b.project||'—';$('build').textContent=b.build||'—';$('version').textContent=b.version||'—';$('module').textContent=b.module||'—';$('buildPill').textContent='Build '+(b.build||'?')}catch(e){ok=false}try{const w=await json('/api/v1/wifi/status');$('sta').textContent=w.station||'—';$('sta').className='v '+(w.station==='connected'?'good':w.station==='connecting'?'':'bad');$('staIp').textContent=w.station_ip||'—';$('apSsid').textContent=w.ssid||'—';$('apIp').textContent=w.ip||'—'}catch(e){ok=false}try{const o=await json('/api/v1/system/output-runtime');$('outRuntime').textContent=o.runtimeStatus||'—';$('outAllowed').textContent=yes(!!o.outputsAllowed);$('outEnabled').textContent=yes(!!o.outputsEnabled);$('outFailures').textContent=o.failures??'—';$('outAllowed').className='v '+(o.outputsAllowed?'good':'bad')}catch(e){ok=false}$('healthDot').className='dot '+(ok?'ok':'warn');$('healthText').textContent=ok?'Контролер доступний':'Частина сервісів недоступна'}
+async function refreshAll(){let ok=true;try{const b=await json('/api/v1/build');$('project').textContent=b.project||'—';$('build').textContent=b.build||'—';$('version').textContent=b.version||'—';$('module').textContent=b.module||'—';$('buildPill').textContent='Build '+(b.build||'?')}catch(e){ok=false}try{const w=await json('/api/v1/wifi/status');$('sta').textContent=w.station||'—';$('sta').className='v '+(w.station==='connected'?'good':w.station==='connecting'?'':'bad');$('staSsid').textContent=w.station_ssid||'—';$('staIp').textContent=w.station_ip||'—';$('apSsid').textContent=w.ssid||'—';$('apIp').textContent=w.ip||'—'}catch(e){ok=false}try{const o=await json('/api/v1/system/output-runtime');$('outRuntime').textContent=o.runtimeStatus||'—';$('outAllowed').textContent=yes(!!o.outputsAllowed);$('outEnabled').textContent=yes(!!o.outputsEnabled);$('outFailures').textContent=o.failures??'—';$('outAllowed').className='v '+(o.outputsAllowed?'good':'bad')}catch(e){ok=false}$('healthDot').className='dot '+(ok?'ok':'warn');$('healthText').textContent=ok?'Контролер доступний':'Частина сервісів недоступна'}
 async function scanWifi(){$('wifiMsg').textContent='Пошук мереж Wi‑Fi...';$('networks').innerHTML='';try{const r=await json('/api/v1/wifi/scan');const a=r.networks||[];$('wifiMsg').textContent=a.length?'Знайдено мереж: '+a.length:'Мереж Wi‑Fi не знайдено';for(const n of a){const d=document.createElement('div');d.className='net';const s=document.createElement('strong');s.textContent=n.ssid||'(прихована мережа)';const q=document.createElement('span');q.className='signal';q.textContent=(n.rssi??'?')+' dBm • ch '+(n.channel??'?');d.append(s,q);if(n.ssid){d.onclick=()=>{$('ssid').value=n.ssid;$('password').focus()}}$('networks').appendChild(d)}}catch(e){$('wifiMsg').textContent='Помилка пошуку: '+e.message}}
-async function saveWifi(){const ssid=$('ssid').value.trim(),password=$('password').value;if(!ssid){$('wifiMsg').textContent='Вкажіть SSID';return}$('wifiMsg').textContent='Передача налаштувань...';try{const r=await json('/api/v1/provisioning/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid,password})});$('wifiMsg').textContent='Прийнято: '+(r.state||'connecting');setTimeout(refreshAll,2000)}catch(e){$('wifiMsg').textContent='Помилка: '+e.message}}
+async function saveWifi(){const ssid=$('ssid').value.trim(),password=$('password').value;if(!ssid){$('wifiMsg').textContent='Вкажіть SSID';return}$('wifiMsg').textContent='Збереження налаштувань...';try{const r=await json('/api/v1/provisioning/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid,password})});$('wifiMsg').textContent='Налаштування прийнято. Підключення до '+ssid+'...';setTimeout(refreshAll,2500)}catch(e){$('wifiMsg').textContent='Зв’язок з Recovery AP змінюється. Перевіряю підключення...';setTimeout(refreshAll,3000)}}
 refreshAll();setInterval(refreshAll,3000);
 </script></body></html>)HTML";
 
@@ -82,14 +82,42 @@ esp_err_t WifiProvisioningHttp::provision_post(httpd_req_t* request)
     if(!extract_json_string(body,"ssid",ssid)||ssid.empty()||ssid.size()>32||!extract_json_string(body,"password",password)||password.size()>64)return httpd_resp_send_err(request,HTTPD_400_BAD_REQUEST,"ssid/password invalid");
     WifiCredentials credentials{}; std::memcpy(credentials.ssid.data(),ssid.data(),ssid.size()); std::memcpy(credentials.password.data(),password.data(),password.size());
     auto error=self->store_->save(credentials); if(error!=ESP_OK){ESP_LOGE(kTag,"WiFi credentials NVS save failed: %s",esp_err_to_name(error));return httpd_resp_send_err(request,HTTPD_500_INTERNAL_SERVER_ERROR,"NVS save failed");}
-    error=self->runtime_->connect_station(credentials.ssid.data(),credentials.password.data()); if(error!=ESP_OK){ESP_LOGE(kTag,"STA connect start failed: %s",esp_err_to_name(error));return httpd_resp_send_err(request,HTTPD_500_INTERNAL_SERVER_ERROR,"STA start failed");}
-    httpd_resp_set_type(request,"application/json"); return httpd_resp_send(request,"{\"accepted\":true,\"state\":\"connecting\"}",-1);
+
+    // Acknowledge the browser before the STA reconnect can move the shared AP/STA radio
+    // to another channel. Otherwise the Recovery-AP client can lose the POST response
+    // and the Web UI reports a misleading "Failed to fetch" even though NVS was saved.
+    httpd_resp_set_type(request,"application/json");
+    const auto response_error=httpd_resp_send(request,"{\"accepted\":true,\"state\":\"connecting\"}",-1);
+    if(response_error!=ESP_OK)return response_error;
+
+    error=self->runtime_->connect_station(credentials.ssid.data(),credentials.password.data());
+    if(error!=ESP_OK){
+        ESP_LOGE(kTag,"STA connect start failed after provisioning response: %s",esp_err_to_name(error));
+    }
+    return ESP_OK;
 }
 
 esp_err_t WifiProvisioningHttp::status_get(httpd_req_t* request)
 {
-    auto* self=self_from(request); if(self==nullptr)return ESP_ERR_INVALID_ARG; const char* station_state="idle"; if(self->runtime_->station_connected())station_state="connected";else if(self->runtime_->station_connecting())station_state="connecting";
-    std::string body="{\"softap\":"; body+=self->runtime_->started()?"true":"false"; body+=",\"ssid\":\""; body+=self->runtime_->ssid(); body+="\",\"ip\":\""; body+=self->runtime_->ip_address(); body+="\",\"station\":\""; body+=station_state; body+="\",\"station_ip\":\""; body+=self->runtime_->station_ip_address(); body+="\"}";
+    auto* self=self_from(request); if(self==nullptr)return ESP_ERR_INVALID_ARG;
+    const char* station_state="idle";
+    if(self->runtime_->station_connected())station_state="connected";
+    else if(self->runtime_->station_connecting())station_state="connecting";
+
+    std::string station_ssid;
+    wifi_ap_record_t ap_info{};
+    if(self->runtime_->station_connected()&&esp_wifi_sta_get_ap_info(&ap_info)==ESP_OK){
+        station_ssid=json_escape(reinterpret_cast<const char*>(ap_info.ssid));
+    }
+
+    std::string body="{\"softap\":";
+    body+=self->runtime_->started()?"true":"false";
+    body+=",\"ssid\":\""; body+=json_escape(self->runtime_->ssid());
+    body+="\",\"ip\":\""; body+=json_escape(self->runtime_->ip_address());
+    body+="\",\"station\":\""; body+=station_state;
+    body+="\",\"station_ssid\":\""; body+=station_ssid;
+    body+="\",\"station_ip\":\""; body+=json_escape(self->runtime_->station_ip_address());
+    body+="\"}";
     httpd_resp_set_type(request,"application/json"); return httpd_resp_send(request,body.c_str(),static_cast<ssize_t>(body.size()));
 }
 
