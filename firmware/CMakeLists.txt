@@ -32,6 +32,7 @@ add_library(homeguard_core
     src/physical_output_diagnostics.cpp
     src/access_control.cpp
     src/access_store.cpp
+    src/self_profile.cpp
     src/device_api_model.cpp
     src/device_command_router.cpp
     src/zone.cpp
