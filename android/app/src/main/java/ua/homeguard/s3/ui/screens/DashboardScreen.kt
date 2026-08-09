@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -67,6 +68,7 @@ fun DashboardScreen(
     var eventCategory by remember { mutableStateOf(EventLogCategory.ALL) }
     var eventQuery by remember { mutableStateOf("") }
     var eventSourceText by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
     val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12
     val sourceFilter = eventSourceText.trim().toIntOrNull()
     val filteredEvents = EventLogFilterEngine.apply(events, EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter))
@@ -91,15 +93,19 @@ fun DashboardScreen(
         )
     }
 
-    LazyColumn(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(key = "header") {
             Text("HomeGuard-S3 $versionName", style = MaterialTheme.typography.headlineMedium)
             Text("Пристрій: $deviceId")
             Text("Канал: $route · знайдено локально: $localDevices")
             if (route == "CLOUD") Text("Хмара: $cloudStatus")
         }
 
-        item {
+        item(key = "maintenance") {
             MaintenancePanel(
                 diagnostics = diagnostics,
                 backupStatus = backupStatus,
@@ -108,7 +114,7 @@ fun DashboardScreen(
             )
         }
 
-        item {
+        item(key = "operator") {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Оператор", style = MaterialTheme.typography.titleMedium)
@@ -124,7 +130,7 @@ fun DashboardScreen(
             }
         }
 
-        item {
+        item(key = "system") {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Система", style = MaterialTheme.typography.titleMedium)
@@ -137,7 +143,7 @@ fun DashboardScreen(
             }
         }
 
-        item {
+        item(key = "notifications") {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Сповіщення", style = MaterialTheme.typography.titleMedium)
@@ -148,7 +154,7 @@ fun DashboardScreen(
             }
         }
 
-        item {
+        item(key = "controls") {
             Text("Керування", style = MaterialTheme.typography.titleLarge)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -167,7 +173,7 @@ fun DashboardScreen(
             }
         }
 
-        item {
+        item(key = "event-log-controls") {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Журнал подій", style = MaterialTheme.typography.titleLarge)
@@ -197,8 +203,8 @@ fun DashboardScreen(
             }
         }
 
-        if (filteredEvents.isEmpty()) item { Text(if (events.isEmpty()) "Подій ще немає" else "За вибраними фільтрами подій немає") }
-        else items(filteredEvents.take(32), key = { it.sequence }) { event ->
+        if (filteredEvents.isEmpty()) item(key = "event-log-empty") { Text(if (events.isEmpty()) "Подій ще немає" else "За вибраними фільтрами подій немає") }
+        else items(filteredEvents.take(32), key = { "event-${it.sequence}" }) { event ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(event.event, style = MaterialTheme.typography.titleSmall)
@@ -208,9 +214,9 @@ fun DashboardScreen(
             }
         }
 
-        item { Text("Зони", style = MaterialTheme.typography.titleLarge) }
-        if (snapshot.zones.isEmpty()) item { Text("Очікування живих даних зон…") }
-        else items(snapshot.zones, key = { it.index }) { zone ->
+        item(key = "zones-title") { Text("Зони", style = MaterialTheme.typography.titleLarge) }
+        if (snapshot.zones.isEmpty()) item(key = "zones-empty") { Text("Очікування живих даних зон…") }
+        else items(snapshot.zones, key = { "zone-${it.index}" }) { zone ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column { Text(zone.name, style = MaterialTheme.typography.titleMedium); Text(if (zone.enabled) "Активна" else "Вимкнена") }
@@ -219,9 +225,9 @@ fun DashboardScreen(
             }
         }
 
-        item { Text("Датчики", style = MaterialTheme.typography.titleLarge) }
-        if (snapshot.sensors.isEmpty()) item { Text("Дані окремих датчиків ще не опубліковані") }
-        else items(snapshot.sensors, key = { it.index }) { sensor ->
+        item(key = "sensors-title") { Text("Датчики", style = MaterialTheme.typography.titleLarge) }
+        if (snapshot.sensors.isEmpty()) item(key = "sensors-empty") { Text("Дані окремих датчиків ще не опубліковані") }
+        else items(snapshot.sensors, key = { "sensor-${it.index}" }) { sensor ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column { Text(sensor.name, style = MaterialTheme.typography.titleMedium); if (sensor.value.isNotBlank()) Text(sensor.value) }
@@ -230,9 +236,9 @@ fun DashboardScreen(
             }
         }
 
-        item { Text("Виходи / клапани", style = MaterialTheme.typography.titleLarge) }
-        if (snapshot.outputs.isEmpty()) item { Text("Немає даних виходів") }
-        else items(snapshot.outputs, key = { it.index }) { output ->
+        item(key = "outputs-title") { Text("Виходи / клапани", style = MaterialTheme.typography.titleLarge) }
+        if (snapshot.outputs.isEmpty()) item(key = "outputs-empty") { Text("Немає даних виходів") }
+        else items(snapshot.outputs, key = { "output-${it.index}" }) { output ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Вихід ${output.index}")
@@ -241,9 +247,9 @@ fun DashboardScreen(
             }
         }
 
-        item { Text("Тиск / аналогові канали", style = MaterialTheme.typography.titleLarge) }
-        if (snapshot.pressures.isEmpty()) item { Text("Немає даних") }
-        else items(snapshot.pressures, key = { it.index }) { pressure ->
+        item(key = "pressures-title") { Text("Тиск / аналогові канали", style = MaterialTheme.typography.titleLarge) }
+        if (snapshot.pressures.isEmpty()) item(key = "pressures-empty") { Text("Немає даних") }
+        else items(snapshot.pressures, key = { "pressure-${it.index}" }) { pressure ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Канал ${pressure.index + 1}")
