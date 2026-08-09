@@ -105,6 +105,7 @@ class MainActivity : ComponentActivity() {
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
             val events by telemetry.events().collectAsState(initial = emptyList())
             val cloudStatus by cloudState.status.collectAsState()
+            val cloudProfile by cloudState.profile.collectAsState()
             val commandMessage by commandStatus.collectAsState()
             val maintenanceMessage by backupStatus.collectAsState()
             val currentOperator by operatorId.collectAsState()
@@ -124,11 +125,25 @@ class MainActivity : ComponentActivity() {
                         )
                     } else {
                         DashboardScreen(
-                            versionName = BuildConfig.VERSION_NAME, localDevices = devices.size, route = endpoint.path.name, cloudStatus = cloudStatus,
-                            deviceId = appSettings.deviceId, snapshot = snapshot, events = events, diagnostics = diagnostics,
-                            backupStatus = maintenanceMessage, commandStatus = commandMessage, operatorId = currentOperator, operatorPin = currentPin,
-                            criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled, statusNotificationsEnabled = appSettings.statusNotificationsEnabled, zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
-                            onOperatorIdChange = { operatorId.value = it.take(23) }, onOperatorPinChange = { operatorPin.value = it },
+                            versionName = BuildConfig.VERSION_NAME,
+                            localDevices = devices.size,
+                            route = endpoint.path.name,
+                            cloudStatus = cloudStatus,
+                            cloudProfile = cloudProfile,
+                            deviceId = appSettings.deviceId,
+                            snapshot = snapshot,
+                            events = events,
+                            diagnostics = diagnostics,
+                            backupStatus = maintenanceMessage,
+                            commandStatus = commandMessage,
+                            operatorId = currentOperator,
+                            operatorPin = currentPin,
+                            criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled,
+                            statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
+                            zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
+                            onOperatorIdChange = { operatorId.value = it.take(23) },
+                            onOperatorPinChange = { operatorPin.value = it },
+                            onLogin = ::loginCloudProfile,
                             onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
                             onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } },
                             onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } },
@@ -136,7 +151,8 @@ class MainActivity : ComponentActivity() {
                             onExportEvents = { pendingExportText = EventLogExporter.toCsv(events); exportLauncher.launch(EventLogExporter.suggestedFileName()) },
                             onShareEvents = { val payload = EventLogExporter.toCsv(events); startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/csv"; putExtra(Intent.EXTRA_SUBJECT, "Myfist event log"); putExtra(Intent.EXTRA_TEXT, payload) }, "Поділитися журналом")) },
                             onExportSettings = { pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings); settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName()) },
-                            onImportSettings = { settingsRestoreLauncher.launch("application/json") }, onCommand = ::executeCommand,
+                            onImportSettings = { settingsRestoreLauncher.launch("application/json") },
+                            onCommand = ::executeCommand,
                         )
                     }
                 }
@@ -156,6 +172,24 @@ class MainActivity : ComponentActivity() {
                 lastKnownLocalUrl = "",
             ))
             commandStatus.value = "Хмарний пристрій підключається…"
+        }
+    }
+
+    private fun loginCloudProfile() {
+        val actor = operatorId.value.trim()
+        val pin = operatorPin.value
+        if (actor.isBlank() || pin.length !in 4..12) {
+            commandStatus.value = "Введіть ID користувача та PIN 4–12 цифр"
+            return
+        }
+        lifecycleScope.launch {
+            commandStatus.value = "Перевірка профілю…"
+            val profile = cloudState.loginProfile(actor, pin)
+            commandStatus.value = if (profile.authenticated) {
+                "Вхід: ${profile.name.ifBlank { profile.id }} · ${profile.role.name}"
+            } else {
+                "Вхід відхилено"
+            }
         }
     }
 
