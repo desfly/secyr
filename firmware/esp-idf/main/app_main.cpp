@@ -25,7 +25,12 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
 
 namespace {
 
@@ -55,6 +60,124 @@ hg::PhysicalOutputRuntime g_physical_outputs;
 hg::SystemEventBus g_system_bus;
 hg::SystemModel g_system_model{g_system_bus};
 httpd_handle_t g_http_server = nullptr;
+
+bool extract_json_string(const std::string& body, const char* key, std::string& value)
+{
+    const std::string token = std::string{"\""} + key + "\"";
+    const auto key_pos = body.find(token);
+    if (key_pos == std::string::npos) return false;
+    const auto colon = body.find(':', key_pos + token.size());
+    if (colon == std::string::npos) return false;
+    const auto first_quote = body.find('"', colon + 1);
+    if (first_quote == std::string::npos) return false;
+    const auto second_quote = body.find('"', first_quote + 1);
+    if (second_quote == std::string::npos) return false;
+    value = body.substr(first_quote + 1, second_quote - first_quote - 1);
+    return true;
+}
+
+std::string json_escape(const std::string& value)
+{
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (const char ch : value) {
+        if (ch == '"' || ch == '\\') escaped.push_back('\\');
+        escaped.push_back(ch);
+    }
+    return escaped;
+}
+
+const char* arm_state_name(hg::PartitionArmState state)
+{
+    switch (state) {
+        case hg::PartitionArmState::Disarmed: return "disarmed";
+        case hg::PartitionArmState::Stay: return "armed_home";
+        case hg::PartitionArmState::Away: return "armed_away";
+        case hg::PartitionArmState::Alarm: return "alarm";
+    }
+    return "unknown";
+}
+
+void publish_cloud_result(const std::string& request_id,
+                          bool ok,
+                          const char* code,
+                          const char* extra = nullptr)
+{
+    std::string response = "{\"request_id\":\"" + json_escape(request_id) + "\",\"ok\":";
+    response += ok ? "true" : "false";
+    response += ",\"code\":\"";
+    response += code;
+    response += '"';
+    if (extra != nullptr && extra[0] != '\0') {
+        response += ',';
+        response += extra;
+    }
+    response += '}';
+    (void)g_cloud_link.publish_command_response(response.c_str());
+}
+
+void handle_cloud_command(const char* payload, std::size_t length, void*)
+{
+    if (payload == nullptr || length == 0 || length > 1024) {
+        publish_cloud_result("", false, "invalid_payload");
+        return;
+    }
+
+    const std::string body(payload, length);
+    std::string request_id;
+    std::string command;
+    std::string actor;
+    std::string credential;
+    if (!extract_json_string(body, "request_id", request_id) || request_id.empty() || request_id.size() > 64 ||
+        !extract_json_string(body, "command", command) || command.empty() || command.size() > 48) {
+        publish_cloud_result(request_id, false, "invalid_command");
+        return;
+    }
+
+    if (command == "system.status") {
+        const auto* partition = g_system_model.partition(1);
+        if (partition == nullptr) {
+            publish_cloud_result(request_id, false, "partition_unavailable");
+            return;
+        }
+        std::string extra = "\"arm_state\":\"";
+        extra += arm_state_name(partition->arm_state);
+        extra += "\",\"outputs_allowed\":";
+        extra += g_boot_readiness.outputs_allowed() ? "true" : "false";
+        publish_cloud_result(request_id, true, "status", extra.c_str());
+        return;
+    }
+
+    if (!extract_json_string(body, "actor", actor) || actor.empty() || actor.size() > 32 ||
+        !extract_json_string(body, "credential", credential) || credential.empty() || credential.size() > 32) {
+        publish_cloud_result(request_id, false, "credentials_required");
+        return;
+    }
+
+    const auto decision = g_access_control.authorize(actor, credential, command);
+    if (decision != homeguard::AuditDecision::Allowed) {
+        publish_cloud_result(request_id, false, homeguard::to_string(decision));
+        return;
+    }
+
+    const auto now_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+    if (command == "security.arm_home") {
+        const bool changed = g_system_model.set_partition_arm(1, hg::PartitionArmState::Stay, now_ms);
+        publish_cloud_result(request_id, changed, changed ? "armed_home" : "arm_failed");
+        return;
+    }
+    if (command == "security.arm_away") {
+        const bool changed = g_system_model.set_partition_arm(1, hg::PartitionArmState::Away, now_ms);
+        publish_cloud_result(request_id, changed, changed ? "armed_away" : "arm_failed");
+        return;
+    }
+    if (command == "security.disarm") {
+        publish_cloud_result(request_id, false, "challenge_required");
+        return;
+    }
+
+    publish_cloud_result(request_id, false, "unsupported_command");
+}
 
 esp_err_t initialize_nvs()
 {
@@ -130,6 +253,7 @@ void restore_wifi_credentials()
 
 void restore_cloud_config()
 {
+    g_cloud_link.set_command_handler(&handle_cloud_command);
     const auto identity_error = g_cloud_link.prepare_identity();
     if (identity_error != ESP_OK) {
         ESP_LOGW(kTag, "Cloud device identity unavailable: %s", esp_err_to_name(identity_error));
@@ -221,6 +345,8 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+    initialize_system_model();
+
     const bool provisioning_required = !g_boot_readiness.outputs_allowed();
     const auto wifi_error = g_wifi_provisioning.start(provisioning_required);
     if (wifi_error != ESP_OK) {
@@ -230,7 +356,6 @@ extern "C" void app_main()
     }
 
     restore_cloud_config();
-    initialize_system_model();
     initialize_physical_outputs();
 
     const auto hardware_error = g_hardware.initialize();
