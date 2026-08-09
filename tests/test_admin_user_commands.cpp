@@ -24,6 +24,17 @@ void test_admin_user_commands() {
     CHECK(result.status == homeguard::AdminUserCommandStatus::Denied);
     CHECK(result.directory.count == 0U);
 
+    result = homeguard::admin_user_upsert(
+        access, "admin", "user2", "User Two", homeguard::AccessRole::User, "5555", salt, true);
+    CHECK(result.status == homeguard::AdminUserCommandStatus::Ok);
+    CHECK(access.find_user("user2") != nullptr);
+
+    result = homeguard::admin_user_upsert(
+        access, "admin", "user2", "Guest Two", homeguard::AccessRole::Guest, "6666", salt, true);
+    CHECK(result.status == homeguard::AdminUserCommandStatus::Ok);
+    CHECK(access.find_user("user2") != nullptr);
+    CHECK(access.find_user("user2")->role == homeguard::AccessRole::Guest);
+
     result = homeguard::admin_user_set_enabled(access, "admin", "user1", false);
     CHECK(result.status == homeguard::AdminUserCommandStatus::Ok);
     CHECK(!access.find_user("user1")->enabled);
@@ -31,6 +42,12 @@ void test_admin_user_commands() {
     result = homeguard::admin_user_delete(access, "admin", "guest1");
     CHECK(result.status == homeguard::AdminUserCommandStatus::Ok);
     CHECK(access.find_user("guest1") == nullptr);
+
+    result = homeguard::admin_user_upsert(
+        access, "admin", "admin", "Former Admin", homeguard::AccessRole::User, "7777", salt, true);
+    CHECK(result.status == homeguard::AdminUserCommandStatus::LastAdminProtected);
+    CHECK(access.find_user("admin") != nullptr);
+    CHECK(access.find_user("admin")->role == homeguard::AccessRole::Admin);
 
     result = homeguard::admin_user_set_enabled(access, "admin", "admin", false);
     CHECK(result.status == homeguard::AdminUserCommandStatus::LastAdminProtected);
