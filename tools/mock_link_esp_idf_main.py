@@ -9,6 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "firmware" / "esp-idf" / "main"
 MOCK = ROOT / "tests" / "esp-idf-mock" / "include"
 INCLUDE = ROOT / "firmware" / "include"
+PHYSICAL_BUTTON = ROOT / "firmware" / "esp-idf" / "components" / "physical_button"
+PHYSICAL_BUTTON_INCLUDE = PHYSICAL_BUTTON / "include"
+PHYSICAL_BUTTON_SOURCE = PHYSICAL_BUTTON / "physical_button.cpp"
 HARNESS = ROOT / "tests" / "esp-idf-mock" / "mock_main.cpp"
 BUILD = ROOT / "mock-link-build"
 REPORT = ROOT / "mock-link-report.json"
@@ -28,13 +31,24 @@ for ref in source_refs:
     path = (MAIN / ref).resolve()
     if path.exists():
         sources.append(path)
+
+# The ESP-IDF main component depends on the separate physical_button
+# component. The real IDF build resolves that dependency via REQUIRES, while
+# this lightweight host linker compiles sources directly. Include the
+# component source explicitly so the host check matches the real component
+# graph instead of failing on a missing header or unresolved symbols.
+if PHYSICAL_BUTTON_SOURCE.exists():
+    sources.append(PHYSICAL_BUTTON_SOURCE.resolve())
+
 sources = sorted(dict.fromkeys(sources))
 objects = []
 results = []
 failed = False
 
-for source in sources + [HARNESS]:
-    obj = BUILD / f"{source.stem}.o"
+for index, source in enumerate(sources + [HARNESS]):
+    # Prefix the object with a stable index so identically named sources from
+    # different components cannot overwrite each other in the mock build dir.
+    obj = BUILD / f"{index:03d}_{source.stem}.o"
     command = [
         compiler,
         "-std=c++20",
@@ -43,6 +57,7 @@ for source in sources + [HARNESS]:
         "-I", str(MOCK),
         "-I", str(MAIN),
         "-I", str(INCLUDE),
+        "-I", str(PHYSICAL_BUTTON_INCLUDE),
         "-c", str(source),
         "-o", str(obj),
     ]
