@@ -6,8 +6,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -65,10 +66,10 @@ fun DashboardScreen(
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
     var confirmClearHistory by remember { mutableStateOf(false) }
-    var eventCategory by remember { mutableStateOf(EventLogCategory.ALL) }
-    var eventQuery by remember { mutableStateOf("") }
-    var eventSourceText by remember { mutableStateOf("") }
-    val listState = rememberLazyListState()
+    var eventCategory by rememberSaveable { mutableStateOf(EventLogCategory.ALL) }
+    var eventQuery by rememberSaveable { mutableStateOf("") }
+    var eventSourceText by rememberSaveable { mutableStateOf("") }
+    val listState = rememberSaveable(deviceId, saver = LazyListState.Saver) { LazyListState() }
     val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12
     val sourceFilter = eventSourceText.trim().toIntOrNull()
     val filteredEvents = EventLogFilterEngine.apply(events, EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter))
@@ -106,23 +107,21 @@ fun DashboardScreen(
         }
 
         item(key = "maintenance") {
-            MaintenancePanel(
-                diagnostics = diagnostics,
-                backupStatus = backupStatus,
-                onExportSettings = onExportSettings,
-                onImportSettings = onImportSettings,
-            )
+            MaintenancePanel(diagnostics, backupStatus, onExportSettings, onImportSettings)
         }
 
         item(key = "operator") {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Оператор", style = MaterialTheme.typography.titleSmall)
-                    OutlinedTextField(value = operatorId, onValueChange = onOperatorIdChange, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("ID користувача") })
+                    OutlinedTextField(operatorId, onOperatorIdChange, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("ID користувача") })
                     OutlinedTextField(
-                        value = operatorPin,
-                        onValueChange = { value -> if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value) },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("PIN") }, visualTransformation = PasswordVisualTransformation(),
+                        operatorPin,
+                        { value -> if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("PIN") },
+                        visualTransformation = PasswordVisualTransformation(),
                     )
                     Text(if (credentialsReady) "PIN готовий" else "Введіть ID та PIN 4–12 цифр", style = MaterialTheme.typography.bodySmall)
                     Text("PIN лише в оперативній пам’яті.", style = MaterialTheme.typography.bodySmall)
@@ -147,9 +146,9 @@ fun DashboardScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Сповіщення", style = MaterialTheme.typography.titleSmall)
-                    NotificationSwitchRow("Критичні", "Тривога, tamper, батарея, offline", criticalNotificationsEnabled, onCheckedChange = onCriticalNotificationsChange)
-                    NotificationSwitchRow("Статус", "Охорона / зняття", statusNotificationsEnabled, onCheckedChange = onStatusNotificationsChange)
-                    NotificationSwitchRow("Зони", "Відкриття / закриття", zoneNotificationsEnabled, enabled = statusNotificationsEnabled, onCheckedChange = onZoneNotificationsChange)
+                    NotificationSwitchRow("Критичні", "Тривога, tamper, батарея, offline", criticalNotificationsEnabled, onCriticalNotificationsChange)
+                    NotificationSwitchRow("Статус", "Охорона / зняття", statusNotificationsEnabled, onStatusNotificationsChange)
+                    NotificationSwitchRow("Зони", "Відкриття / закриття", zoneNotificationsEnabled, onZoneNotificationsChange, enabled = statusNotificationsEnabled)
                 }
             }
         }
@@ -187,8 +186,8 @@ fun DashboardScreen(
                         EventCategoryButton("Зони", EventLogCategory.ZONES, eventCategory) { eventCategory = it }
                         EventCategoryButton("Інші", EventLogCategory.OTHER, eventCategory) { eventCategory = it }
                     }
-                    OutlinedTextField(value = eventQuery, onValueChange = { eventQuery = it.take(32) }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Пошук") })
-                    OutlinedTextField(value = eventSourceText, onValueChange = { value -> if (value.length <= 6 && value.all(Char::isDigit)) eventSourceText = value }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Source ID / зона") })
+                    OutlinedTextField(eventQuery, { eventQuery = it.take(32) }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Пошук") })
+                    OutlinedTextField(eventSourceText, { value -> if (value.length <= 6 && value.all(Char::isDigit)) eventSourceText = value }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Source ID / зона") })
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         OutlinedButton(enabled = events.isNotEmpty(), onClick = onExportEvents) { Text("CSV") }
                         OutlinedButton(enabled = events.isNotEmpty(), onClick = onShareEvents) { Text("Поділитися") }
@@ -201,13 +200,14 @@ fun DashboardScreen(
             }
         }
 
-        if (filteredEvents.isEmpty()) item(key = "event-log-empty") { Text(if (events.isEmpty()) "Подій ще немає" else "За фільтрами подій немає", style = MaterialTheme.typography.bodySmall) }
-        else items(filteredEvents.take(32), key = { "event-${it.sequence}" }) { event ->
+        if (filteredEvents.isEmpty()) item(key = "event-log-empty") {
+            Text(if (events.isEmpty()) "Подій ще немає" else "За фільтрами подій немає", style = MaterialTheme.typography.bodySmall)
+        } else items(filteredEvents.take(32), key = { "event-${it.sequence}" }) { event ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(event.event, style = MaterialTheme.typography.titleSmall)
                     Text("#${event.sequence} · source ${event.sourceId} · value ${event.value}", style = MaterialTheme.typography.bodySmall)
-                    Text("${EventLogFilterEngine.categoryOf(event).name}", style = MaterialTheme.typography.bodySmall)
+                    Text(EventLogFilterEngine.categoryOf(event).name, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -217,7 +217,10 @@ fun DashboardScreen(
         else items(snapshot.zones, key = { "zone-${it.index}" }) { zone ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth().padding(7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column { Text(zone.name, style = MaterialTheme.typography.titleSmall); Text(if (zone.enabled) "Активна" else "Вимкнена", style = MaterialTheme.typography.bodySmall) }
+                    Column {
+                        Text(zone.name, style = MaterialTheme.typography.titleSmall)
+                        Text(if (zone.enabled) "Активна" else "Вимкнена", style = MaterialTheme.typography.bodySmall)
+                    }
                     Text(zone.state.uppercase(), style = MaterialTheme.typography.bodyMedium)
                 }
             }
@@ -228,7 +231,10 @@ fun DashboardScreen(
         else items(snapshot.sensors, key = { "sensor-${it.index}" }) { sensor ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth().padding(7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column { Text(sensor.name, style = MaterialTheme.typography.titleSmall); if (sensor.value.isNotBlank()) Text(sensor.value, style = MaterialTheme.typography.bodySmall) }
+                    Column {
+                        Text(sensor.name, style = MaterialTheme.typography.titleSmall)
+                        if (sensor.value.isNotBlank()) Text(sensor.value, style = MaterialTheme.typography.bodySmall)
+                    }
                     Text(sensor.state.uppercase(), style = MaterialTheme.typography.bodyMedium)
                 }
             }
@@ -265,7 +271,13 @@ private fun EventCategoryButton(label: String, category: EventLogCategory, selec
 }
 
 @Composable
-private fun NotificationSwitchRow(label: String, detail: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
+private fun NotificationSwitchRow(
+    label: String,
+    detail: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text(label, style = MaterialTheme.typography.bodyMedium)
