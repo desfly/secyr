@@ -215,6 +215,19 @@ bool authorize_cloud_command(const std::string& body,
     return true;
 }
 
+bool set_cloud_valve(bool active, std::uint64_t timestamp)
+{
+    if (!g_boot_readiness.outputs_allowed()) return false;
+    const auto* output = g_system_model.output(2);
+    if (output == nullptr || output->type != hg::ModelOutputType::Valve) return false;
+    const bool previous = output->active;
+    if (!g_system_model.set_output_active(2, active, timestamp)) return false;
+    if (g_physical_outputs.synchronize(g_system_model, g_boot_readiness)) return true;
+    (void)g_system_model.set_output_active(2, previous, timestamp);
+    (void)g_physical_outputs.synchronize(g_system_model, g_boot_readiness);
+    return false;
+}
+
 void handle_cloud_command(const char* payload, std::size_t length, void*)
 {
     if (payload == nullptr || length == 0 || length > 1024) {
@@ -277,6 +290,17 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
     if (command == "security.disarm") {
         const bool changed = g_system_model.set_partition_arm(1, hg::PartitionArmState::Disarmed, timestamp);
         publish_cloud_result(request_id, changed, changed ? "disarmed" : "disarm_failed");
+        return;
+    }
+    if (command == "valve.open" || command == "valve.close") {
+        if (!g_boot_readiness.outputs_allowed()) {
+            publish_cloud_result(request_id, false, "outputs_fail_closed");
+            return;
+        }
+        const bool opening = command == "valve.open";
+        const bool changed = set_cloud_valve(opening, timestamp);
+        publish_cloud_result(request_id, changed,
+                             changed ? (opening ? "valve_open" : "valve_closed") : "valve_write_failed");
         return;
     }
 
