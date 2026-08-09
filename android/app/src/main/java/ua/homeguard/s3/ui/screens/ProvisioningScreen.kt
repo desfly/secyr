@@ -4,8 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -32,8 +34,8 @@ import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.ProvisioningUiState
 import ua.homeguard.s3.provisioning.ScannedWifiNetwork
 
-private val compactField = Modifier.fillMaxWidth().height(42.dp)
-private val compactButton = Modifier.fillMaxWidth().height(40.dp)
+private val compactField = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+private val compactButton = Modifier.fillMaxWidth().heightIn(min = 48.dp)
 
 @Composable
 fun ProvisioningScreen(
@@ -59,15 +61,23 @@ fun ProvisioningScreen(
         ProvisioningPhase.DISCOVERING_LOCAL,
     )
     val normalizedDeviceId = existingDeviceId.trim().uppercase()
+    val primaryText = MaterialTheme.colorScheme.onBackground
+    val secondaryText = MaterialTheme.colorScheme.onSurfaceVariant
 
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text("Myfist", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-        Text("HomeGuard-S3 · локальна та хмарна безпека", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("Вже налаштований HomeGuard", style = MaterialTheme.typography.titleSmall)
-        Text("Підключення через хмару без повторного налаштування Wi-Fi.", style = MaterialTheme.typography.bodySmall)
+        Text("Myfist", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+        Text("HomeGuard-S3 · локальна та хмарна безпека", style = MaterialTheme.typography.bodyMedium, color = secondaryText)
+
+        Text("Вже налаштований HomeGuard", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = primaryText)
+        Text("Підключення через хмару без повторного налаштування Wi-Fi.", style = MaterialTheme.typography.bodyMedium, color = secondaryText)
 
         OutlinedTextField(existingDeviceId, { existingDeviceId = it.trim().uppercase().take(40) }, label = { Text("Device ID") }, placeholder = { Text("HG-XXXXXXXXXXXX") }, modifier = compactField, singleLine = true)
         OutlinedTextField(existingActor, { existingActor = it.trim().take(23) }, label = { Text("Користувач") }, modifier = compactField, singleLine = true)
@@ -83,19 +93,19 @@ fun ProvisioningScreen(
         )
         Button(onClick = { onCloudAttach(normalizedDeviceId, existingActor.trim(), existingPin) }, enabled = !busy && normalizedDeviceId.startsWith("HG-") && existingActor.isNotBlank() && existingPin.length in 4..12, modifier = compactButton) { Text("Підключити через хмару") }
 
-        HorizontalDivider()
-        Text("Новий HomeGuard — перше налаштування", style = MaterialTheme.typography.titleSmall)
-        Text(state.message, style = MaterialTheme.typography.bodySmall)
+        HorizontalDivider(modifier = Modifier.padding(vertical = 3.dp))
+        Text("Новий HomeGuard — перше налаштування", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.secondary)
+        Text(state.message, style = MaterialTheme.typography.bodyMedium, color = secondaryText)
         if (state.error.isNotBlank()) Text("Помилка: ${state.error}", color = MaterialTheme.colorScheme.error)
-        if (state.localUrl.isNotBlank()) Text("Локальна адреса: ${state.localUrl}", style = MaterialTheme.typography.bodySmall)
+        if (state.localUrl.isNotBlank()) Text("Локальна адреса: ${state.localUrl}", style = MaterialTheme.typography.bodySmall, color = secondaryText)
         Button(onClick = onScan, enabled = !busy, modifier = compactButton) { Text("Сканувати QR на пристрої") }
         state.qr?.let {
-            Text("Пристрій: ${it.deviceId}", style = MaterialTheme.typography.bodySmall)
-            Text("Setup AP: ${it.setupSsid}", style = MaterialTheme.typography.bodySmall)
+            Text("Пристрій: ${it.deviceId}", style = MaterialTheme.typography.bodySmall, color = primaryText)
+            Text("Setup AP: ${it.setupSsid}", style = MaterialTheme.typography.bodySmall, color = secondaryText)
             Button(onClick = onScanWifi, enabled = !busy, modifier = compactButton) { Text("Сканувати Wi-Fi") }
         }
         if (wifiNetworks.isNotEmpty()) {
-            Text("Доступні Wi-Fi мережі", style = MaterialTheme.typography.titleSmall)
+            Text("Доступні Wi-Fi мережі", style = MaterialTheme.typography.titleSmall, color = primaryText)
             wifiNetworks.take(12).forEach { network ->
                 Button(onClick = { form = form.copy(wifiSsid = network.ssid) }, enabled = !busy, modifier = compactButton) { Text("${network.ssid}  ${network.rssi} dBm  ch ${network.channel}") }
             }
