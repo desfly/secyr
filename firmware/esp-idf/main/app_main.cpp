@@ -478,7 +478,7 @@ extern "C" void app_main()
         ESP_LOGE(kTag, "HTTP server failed: %s", esp_err_to_name(http_error));
     }
 
-    const auto telemetry_error = g_telemetry.start(&g_hardware);
+    const auto telemetry_error = g_telemetry.start(&g_hardware, &g_system_model, &g_cloud_link);
     if (telemetry_error != ESP_OK) {
         ESP_LOGE(kTag, "Telemetry task failed: %s", esp_err_to_name(telemetry_error));
     }
