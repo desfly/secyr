@@ -38,6 +38,7 @@ fun DashboardScreen(
     versionName: String,
     localDevices: Int,
     route: String,
+    cloudStatus: String,
     deviceId: String,
     snapshot: SystemSnapshot,
     events: List<SystemEventRecord>,
@@ -95,6 +96,7 @@ fun DashboardScreen(
             Text("HomeGuard-S3 $versionName", style = MaterialTheme.typography.headlineMedium)
             Text("Пристрій: $deviceId")
             Text("Канал: $route · знайдено локально: $localDevices")
+            if (route == "CLOUD") Text("Хмара: $cloudStatus")
         }
 
         item {
@@ -213,6 +215,28 @@ fun DashboardScreen(
                 Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column { Text(zone.name, style = MaterialTheme.typography.titleMedium); Text(if (zone.enabled) "Активна" else "Вимкнена") }
                     Text(zone.state.uppercase())
+                }
+            }
+        }
+
+        item { Text("Датчики", style = MaterialTheme.typography.titleLarge) }
+        if (snapshot.sensors.isEmpty()) item { Text("Дані окремих датчиків ще не опубліковані") }
+        else items(snapshot.sensors, key = { it.index }) { sensor ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column { Text(sensor.name, style = MaterialTheme.typography.titleMedium); if (sensor.value.isNotBlank()) Text(sensor.value) }
+                    Text(sensor.state.uppercase())
+                }
+            }
+        }
+
+        item { Text("Виходи / клапани", style = MaterialTheme.typography.titleLarge) }
+        if (snapshot.outputs.isEmpty()) item { Text("Немає даних виходів") }
+        else items(snapshot.outputs, key = { it.index }) { output ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Вихід ${output.index}")
+                    Text(if (output.active) "ON" else "OFF")
                 }
             }
         }
