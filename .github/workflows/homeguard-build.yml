@@ -47,6 +47,8 @@ jobs:
           sudo apt-get install -y g++ ninja-build
       - name: Project preflight
         run: python tools/preflight_build0022.py
+      - name: Cloud dashboard syntax and security gate
+        run: python tools/check_cloud_web.py
       - name: ESP-IDF source audit
         run: python tools/audit_esp_idf_sources.py
       - name: Component dependency audit
