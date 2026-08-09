@@ -4,6 +4,8 @@
 #include "esp_random.h"
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <string>
 
