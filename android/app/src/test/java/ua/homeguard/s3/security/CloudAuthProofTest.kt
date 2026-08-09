@@ -17,14 +17,13 @@ class CloudAuthProofTest {
         )
 
         val proof = CloudAuthProof.proof(
-            userId = "admin",
             requestId = "req-1",
             command = "security.arm_home",
             nonceHex = "00112233445566778899aabbccddeeff",
             pinDigestHex = digest,
         )
         assertEquals(
-            "5826e45b0a173e095f2601ff2de8b873ec7a52e59b73bbbff15b53d07ed5f700",
+            "023f81ed3781bc47b6dd4ad47ece4e97613065c427be92d2b13cf074afe6b35b",
             proof,
         )
     }
