@@ -1,0 +1,28 @@
+HomeGuard-S3 Build-0058 TEST CANDIDATE
+
+Purpose
+- provision home Wi-Fi credentials through ESP32-S3 SoftAP
+- persist SSID/password in NVS
+- start STA connection while keeping SoftAP fallback available
+- expose GET /api/v1/wifi/status
+- expose POST /api/v1/provisioning/wifi
+- keep physical outputs FAIL-CLOSED until commissioning/hardware verification succeeds
+
+Expected first boot
+- SoftAP SSID: HomeGuard-S3-XXXX
+- SoftAP IP: 192.168.4.1
+- UART: HomeGuard-S3 Build-0058 WiFi Diagnostics
+
+Manual API test while connected to SoftAP
+GET http://192.168.4.1/api/v1/wifi/status
+POST http://192.168.4.1/api/v1/provisioning/wifi
+Content-Type: application/json
+Body: {"ssid":"YOUR_HOME_WIFI","password":"YOUR_WIFI_PASSWORD"}
+
+Expected POST response
+{"accepted":true,"state":"connecting"}
+
+Safety
+- do not connect siren/valve/power outputs for this provisioning test
+- Wi-Fi provisioning must never unlock physical outputs
+- if STA connection fails, SoftAP remains available for recovery

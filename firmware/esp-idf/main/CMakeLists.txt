@@ -19,6 +19,12 @@ idf_component_register(
         "hg_service_http.cpp"
         "hg_output_http.cpp"
         "hg_gpio_output_backend.cpp"
+        "hg_wifi_provisioning.cpp"
+        "hg_wifi_credentials.cpp"
+        "hg_wifi_http.cpp"
+        "hg_cloud_link.cpp"
+        "hg_cloud_config.cpp"
+        "hg_cloud_http.cpp"
         "hg_access_nvs.cpp"
         "hg_commissioning_nvs.cpp"
         "../../src/system_model.cpp"
@@ -26,6 +32,7 @@ idf_component_register(
         "../../src/output_interlock.cpp"
         "../../src/output_command.cpp"
         "../../src/physical_output_runtime.cpp"
+        "../../src/physical_output_diagnostics.cpp"
         "../../src/event_log.cpp"
         "../../src/access_control.cpp"
         "../../src/access_store.cpp"
@@ -55,7 +62,10 @@ idf_component_register(
         esp_event
         esp_http_server
         esp_netif
+        esp_wifi
         fatfs
+        mbedtls
+        mqtt
         nvs_flash
         sdmmc
 )

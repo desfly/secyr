@@ -1,8 +1,8 @@
 #pragma once
 
 #define HG_PROJECT_NAME "HomeGuard-S3"
-#define HG_BUILD_NUMBER "0022"
-#define HG_FIRMWARE_VERSION "0.22.0"
+#define HG_BUILD_NUMBER "0058"
+#define HG_FIRMWARE_VERSION "0.0.58"
 #define HG_BOARD_NAME "HW-678 V0.0.0"
 #define HG_MODULE_NAME "ESP32-S3-WROOM-1-N16R8"
-#define HG_ESP_IDF_REQUIRED "5.4.2"
+#define HG_ESP_IDF_REQUIRED "5.4.4"
