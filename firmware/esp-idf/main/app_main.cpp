@@ -14,6 +14,7 @@
 #include "hg_cloud_http.hpp"
 #include "hg_access_nvs.hpp"
 #include "hg_access_bootstrap_http.hpp"
+#include "hg_access_admin_http.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
 #include "homeguard/self_profile.hpp"
@@ -57,6 +58,7 @@ homeguard::idf::CloudConfigStore g_cloud_config_store;
 homeguard::idf::CloudHttp g_cloud_http;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::AccessBootstrapHttp g_access_bootstrap_http;
+homeguard::idf::AccessAdminHttp g_access_admin_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
 homeguard::AccessControl g_access_control;
 hg::HardwareVerificationRecord g_hardware_verification;
@@ -271,20 +273,6 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
         return;
     }
 
-    if (command == "system.status") {
-        const auto* partition = g_system_model.partition(1);
-        if (partition == nullptr) {
-            publish_cloud_result(request_id, false, "partition_unavailable");
-            return;
-        }
-        std::string extra = "\"arm_state\":\"";
-        extra += arm_state_name(partition->arm_state);
-        extra += "\",\"outputs_allowed\":";
-        extra += g_boot_readiness.outputs_allowed() ? "true" : "false";
-        publish_cloud_result(request_id, true, "status", extra.c_str());
-        return;
-    }
-
     if (command == "auth.challenge") {
         std::string target_command;
         if (!extract_json_string(body, "actor", actor) || actor.empty() || actor.size() > 23U ||
@@ -304,6 +292,19 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
 
     if (command == "profile.self") {
         publish_self_profile(request_id, actor);
+        return;
+    }
+    if (command == "system.status") {
+        const auto* partition = g_system_model.partition(1);
+        if (partition == nullptr) {
+            publish_cloud_result(request_id, false, "partition_unavailable");
+            return;
+        }
+        std::string extra = "\"arm_state\":\"";
+        extra += arm_state_name(partition->arm_state);
+        extra += "\",\"outputs_allowed\":";
+        extra += g_boot_readiness.outputs_allowed() ? "true" : "false";
+        publish_cloud_result(request_id, true, "status", extra.c_str());
         return;
     }
 
@@ -495,6 +496,10 @@ esp_err_t start_http_server()
         g_access_bootstrap_http.register_handlers(g_http_server, &g_access_control, &g_access_store),
         kTag,
         "access bootstrap routes");
+    ESP_RETURN_ON_ERROR(
+        g_access_admin_http.register_handlers(g_http_server, &g_access_control, &g_access_store),
+        kTag,
+        "access admin routes");
     return g_build_http.register_handlers(g_http_server);
 }
 
