@@ -1,0 +1,28 @@
+{
+  "build": "0055",
+  "project": "HomeGuard-S3",
+  "date": "2026-08-09",
+  "focus": "8-user access control and operator valve permissions",
+  "user_capacity": 8,
+  "roles": {
+    "admin": "all commands",
+    "user": [
+      "monitor",
+      "security.arm_home",
+      "security.arm_away",
+      "security.disarm",
+      "valve.open",
+      "valve.close"
+    ],
+    "guest": [
+      "monitor sensor state only"
+    ]
+  },
+  "security_notes": [
+    "Guest has no command authorization.",
+    "User cannot control lights, clear emergency valve latches, reboot, configure, or perform maintenance operations.",
+    "Admin remains unrestricted at the role policy layer.",
+    "Access decisions are audited by the existing AccessControl audit ring."
+  ],
+  "tests": "tests/test_build0055.cpp"
+}
