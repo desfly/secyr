@@ -77,6 +77,7 @@ add_executable(homeguard_tests
     ../tests/test_build0055.cpp
     ../tests/test_access_privacy.cpp
     ../tests/test_self_profile.cpp
+    ../tests/test_user_lifecycle.cpp
 )
 target_link_libraries(homeguard_tests PRIVATE homeguard_core)
 enable_testing()
