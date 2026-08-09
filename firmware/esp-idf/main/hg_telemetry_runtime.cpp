@@ -9,11 +9,16 @@
 #include "freertos/task.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace homeguard::idf {
 namespace {
 constexpr const char* kTag = "hg_telemetry";
+constexpr std::uint64_t kHeartbeatMs = 15000U;
+constexpr TickType_t kChangePollTicks = pdMS_TO_TICKS(250);
+constexpr std::uint64_t kFnvOffset = 1469598103934665603ULL;
+constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
 
 const char* arm_state_name(hg::PartitionArmState state)
 {
@@ -48,6 +53,62 @@ std::string json_escape(const char* value)
         out.push_back(*p);
     }
     return out;
+}
+
+void hash_byte(std::uint64_t& hash, std::uint8_t value)
+{
+    hash ^= value;
+    hash *= kFnvPrime;
+}
+
+template <typename T>
+void hash_scalar(std::uint64_t& hash, T value)
+{
+    const auto* bytes = reinterpret_cast<const std::uint8_t*>(&value);
+    for (std::size_t i = 0; i < sizeof(T); ++i) hash_byte(hash, bytes[i]);
+}
+
+std::uint64_t model_fingerprint(const hg::SystemModel& model)
+{
+    std::uint64_t hash = kFnvOffset;
+
+    if (const auto* partition = model.partition(1); partition != nullptr) {
+        hash_scalar(hash, static_cast<std::uint8_t>(partition->arm_state));
+    } else {
+        hash_byte(hash, 0xffU);
+    }
+
+    hash_scalar(hash, model.zone_count());
+    for (std::size_t i = 0; i < model.zone_count(); ++i) {
+        const auto* zone = model.zone_at(i);
+        if (zone == nullptr) continue;
+        hash_scalar(hash, zone->id);
+        hash_scalar(hash, static_cast<std::uint8_t>(zone->state));
+        hash_scalar(hash, zone->enabled);
+        hash_scalar(hash, zone->bypassed);
+        hash_scalar(hash, zone->always_on);
+    }
+
+    hash_scalar(hash, model.sensor_count());
+    for (std::size_t i = 0; i < model.sensor_count(); ++i) {
+        const auto* sensor = model.sensor_at(i);
+        if (sensor == nullptr) continue;
+        hash_scalar(hash, sensor->id);
+        hash_scalar(hash, sensor->online);
+        hash_scalar(hash, sensor->battery_percent);
+        hash_scalar(hash, sensor->rssi_dbm);
+        hash_scalar(hash, sensor->last_seen_ms);
+    }
+
+    hash_scalar(hash, model.output_count());
+    for (std::size_t i = 0; i < model.output_count(); ++i) {
+        const auto* output = model.output_at(i);
+        if (output == nullptr) continue;
+        hash_scalar(hash, output->id);
+        hash_scalar(hash, output->active);
+    }
+
+    return hash;
 }
 }  // namespace
 
@@ -90,10 +151,12 @@ esp_err_t TelemetryRuntime::publish_now()
     body += '"';
 
     body += ",\"zones\":[";
+    bool first = true;
     for (std::size_t i = 0; i < model_->zone_count(); ++i) {
         const auto* zone = model_->zone_at(i);
         if (zone == nullptr) continue;
-        if (i != 0U) body += ',';
+        if (!first) body += ',';
+        first = false;
         body += "{\"id\":" + std::to_string(zone->id);
         body += ",\"name\":\"" + json_escape(zone->name.data()) + "\"";
         body += ",\"state\":\"";
@@ -109,10 +172,12 @@ esp_err_t TelemetryRuntime::publish_now()
     body += ']';
 
     body += ",\"sensors\":[";
+    first = true;
     for (std::size_t i = 0; i < model_->sensor_count(); ++i) {
         const auto* sensor = model_->sensor_at(i);
         if (sensor == nullptr) continue;
-        if (i != 0U) body += ',';
+        if (!first) body += ',';
+        first = false;
         body += "{\"id\":" + std::to_string(sensor->id);
         body += ",\"online\":";
         body += sensor->online ? "true" : "false";
@@ -125,10 +190,12 @@ esp_err_t TelemetryRuntime::publish_now()
     body += ']';
 
     body += ",\"outputs\":[";
+    first = true;
     for (std::size_t i = 0; i < model_->output_count(); ++i) {
         const auto* output = model_->output_at(i);
         if (output == nullptr) continue;
-        if (i != 0U) body += ',';
+        if (!first) body += ',';
+        first = false;
         body += "{\"id\":" + std::to_string(output->id);
         body += ",\"active\":";
         body += output->active ? "true" : "false";
@@ -150,27 +217,47 @@ void TelemetryRuntime::task_entry(void* context)
 
 void TelemetryRuntime::run()
 {
+    std::uint64_t last_published_fingerprint = 0U;
+    std::uint64_t last_publish_ms = 0U;
+    std::uint64_t last_hardware_sample_ms = 0U;
+    bool have_published_fingerprint = false;
+
     while (true) {
-        Ina226Reading battery{};
-        const auto battery_error = hardware_->battery_monitor().read(&battery);
-        if (battery_error == ESP_OK) {
-            ESP_LOGI(kTag,
-                     "battery voltage=%.3f current=%.3f power=%.3f",
-                     static_cast<double>(battery.bus_voltage_v),
-                     static_cast<double>(battery.current_a),
-                     static_cast<double>(battery.power_w));
+        const auto now = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+
+        if (last_hardware_sample_ms == 0U || now - last_hardware_sample_ms >= kHeartbeatMs) {
+            Ina226Reading battery{};
+            const auto battery_error = hardware_->battery_monitor().read(&battery);
+            if (battery_error == ESP_OK) {
+                ESP_LOGI(kTag,
+                         "battery voltage=%.3f current=%.3f power=%.3f",
+                         static_cast<double>(battery.bus_voltage_v),
+                         static_cast<double>(battery.current_a),
+                         static_cast<double>(battery.power_w));
+            }
+
+            float rtc_temperature = 0.0F;
+            (void)hardware_->rtc().read_temperature(&rtc_temperature);
+            (void)hardware_->storage().refresh_space();
+            last_hardware_sample_ms = now;
         }
 
-        float rtc_temperature = 0.0F;
-        (void)hardware_->rtc().read_temperature(&rtc_temperature);
-        (void)hardware_->storage().refresh_space();
+        const auto fingerprint = model_fingerprint(*model_);
+        const bool state_changed = !have_published_fingerprint || fingerprint != last_published_fingerprint;
+        const bool heartbeat_due = last_publish_ms == 0U || now - last_publish_ms >= kHeartbeatMs;
 
-        const auto cloud_error = publish_now();
-        if (cloud_error != ESP_OK && cloud_error != ESP_ERR_INVALID_STATE) {
-            ESP_LOGW(kTag, "Cloud state publish failed: %s", esp_err_to_name(cloud_error));
+        if (state_changed || heartbeat_due) {
+            const auto cloud_error = publish_now();
+            if (cloud_error == ESP_OK) {
+                last_published_fingerprint = fingerprint;
+                have_published_fingerprint = true;
+                last_publish_ms = now;
+            } else if (cloud_error != ESP_ERR_INVALID_STATE) {
+                ESP_LOGW(kTag, "Cloud state publish failed: %s", esp_err_to_name(cloud_error));
+            }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(15000));
+        vTaskDelay(kChangePollTicks);
     }
 }
 
