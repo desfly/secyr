@@ -12,6 +12,7 @@ INCLUDE = ROOT / "firmware" / "include"
 PHYSICAL_BUTTON = ROOT / "firmware" / "esp-idf" / "components" / "physical_button"
 PHYSICAL_BUTTON_INCLUDE = PHYSICAL_BUTTON / "include"
 PHYSICAL_BUTTON_SOURCE = PHYSICAL_BUTTON / "physical_button.cpp"
+SERVICE_BUTTON_SOURCE = ROOT / "firmware" / "src" / "service_button.cpp"
 HARNESS = ROOT / "tests" / "esp-idf-mock" / "mock_main.cpp"
 BUILD = ROOT / "mock-link-build"
 REPORT = ROOT / "mock-link-report.json"
@@ -36,9 +37,16 @@ for ref in source_refs:
 # component. The real IDF build resolves that dependency via REQUIRES, while
 # this lightweight host linker compiles sources directly. Include the
 # component source explicitly so the host check matches the real component
-# graph instead of failing on a missing header or unresolved symbols.
+# graph instead of failing on missing component symbols.
 if PHYSICAL_BUTTON_SOURCE.exists():
     sources.append(PHYSICAL_BUTTON_SOURCE.resolve())
+
+# physical_button.cpp wraps the platform-independent hg::ServiceButton state
+# machine implemented in firmware/src/service_button.cpp. The real firmware
+# links that core implementation through the project component graph, so the
+# host mock linker must include it as well.
+if SERVICE_BUTTON_SOURCE.exists():
+    sources.append(SERVICE_BUTTON_SOURCE.resolve())
 
 sources = sorted(dict.fromkeys(sources))
 objects = []
