@@ -17,6 +17,7 @@
 #include "hg_access_admin_http.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
+#include "homeguard/admin_pin_transport.hpp"
 #include "homeguard/admin_user_commands.hpp"
 #include "homeguard/self_profile.hpp"
 #include "homeguard/boot_readiness.hpp"
@@ -125,6 +126,14 @@ std::string bytes_hex(const std::array<std::uint8_t, N>& bytes)
     return out;
 }
 
+bool parse_role(const std::string& text, homeguard::AccessRole& role)
+{
+    if (text == "admin") { role = homeguard::AccessRole::Admin; return true; }
+    if (text == "user") { role = homeguard::AccessRole::User; return true; }
+    if (text == "guest") { role = homeguard::AccessRole::Guest; return true; }
+    return false;
+}
+
 const char* arm_state_name(hg::PartitionArmState state)
 {
     switch (state) {
@@ -193,10 +202,12 @@ void publish_self_profile(const std::string& request_id, const std::string& acto
 void publish_sensor_status(const std::string& request_id)
 {
     std::string extra = "\"sensors\":[";
+    bool first = true;
     for (std::size_t i = 0; i < g_system_model.sensor_count(); ++i) {
         const auto* sensor = g_system_model.sensor_at(i);
         if (sensor == nullptr) continue;
-        if (i != 0U) extra += ',';
+        if (!first) extra += ',';
+        first = false;
         extra += "{\"id\":" + std::to_string(sensor->id);
         extra += ",\"type\":\"";
         extra += sensor_type_name(sensor->type);
@@ -380,6 +391,54 @@ void handle_cloud_command(const char* payload, std::size_t length, void*)
     }
     if (command == "access.users.list") {
         publish_admin_directory(request_id, homeguard::admin_users_list(g_access_control, actor));
+        return;
+    }
+    if (command == "access.users.upsert") {
+        std::string target_id;
+        std::string name;
+        std::string role_text;
+        std::string enabled_text;
+        std::string encrypted_pin;
+        if (!extract_json_string(body, "target_id", target_id) || target_id.empty() || target_id.size() > 23U ||
+            !extract_json_string(body, "name", name) || name.size() > 31U ||
+            !extract_json_string(body, "role", role_text) ||
+            !extract_json_string(body, "enabled", enabled_text) ||
+            !extract_json_string(body, "pin_enc", encrypted_pin)) {
+            publish_cloud_result(request_id, false, "upsert_fields_required");
+            return;
+        }
+        homeguard::AccessRole role{};
+        if (!parse_role(role_text, role) || (enabled_text != "true" && enabled_text != "false")) {
+            publish_cloud_result(request_id, false, "invalid_user_fields");
+            return;
+        }
+        const auto* admin = g_access_control.find_user(actor);
+        if (admin == nullptr || admin->role != homeguard::AccessRole::Admin || !admin->enabled) {
+            publish_cloud_result(request_id, false, "denied_role");
+            return;
+        }
+        const auto key = homeguard::admin_pin_transport_key_hex(admin->pin_digest, request_id, command);
+        std::string new_pin;
+        if (!homeguard::admin_pin_decrypt_hex(encrypted_pin, key, new_pin) ||
+            new_pin.size() < 4U || new_pin.size() > 12U) {
+            publish_cloud_result(request_id, false, "invalid_encrypted_pin");
+            return;
+        }
+        std::array<std::uint8_t, 16> salt{};
+        esp_fill_random(salt.data(), salt.size());
+        const homeguard::AccessControl backup = g_access_control;
+        (void)persist_admin_change(
+            backup,
+            request_id,
+            homeguard::admin_user_upsert(
+                g_access_control,
+                actor,
+                target_id,
+                name,
+                role,
+                new_pin,
+                salt,
+                enabled_text == "true"));
         return;
     }
     if (command == "access.users.enable" || command == "access.users.disable" || command == "access.users.delete") {
