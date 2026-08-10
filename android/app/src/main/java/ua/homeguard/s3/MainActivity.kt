@@ -108,6 +108,8 @@ class MainActivity : ComponentActivity() {
             val events by telemetry.events().collectAsState(initial = emptyList())
             val cloudStatus by cloudState.status.collectAsState()
             val cloudProfile by cloudState.profile.collectAsState()
+            val adminUsers by cloudState.adminUsers.collectAsState()
+            val adminStatus by cloudState.adminStatus.collectAsState()
             val commandMessage by commandStatus.collectAsState()
             val maintenanceMessage by backupStatus.collectAsState()
             val currentOperator by operatorId.collectAsState()
@@ -143,6 +145,8 @@ class MainActivity : ComponentActivity() {
                             route = endpoint.path.name,
                             cloudStatus = cloudStatus,
                             cloudProfile = cloudProfile,
+                            adminUsers = adminUsers,
+                            adminStatus = adminStatus,
                             deviceId = appSettings.deviceId,
                             snapshot = snapshot,
                             events = events,
@@ -157,6 +161,10 @@ class MainActivity : ComponentActivity() {
                             onOperatorIdChange = { operatorId.value = it.take(23) },
                             onOperatorPinChange = { operatorPin.value = it },
                             onLogin = ::loginCloudProfile,
+                            onLogout = ::logoutCloudProfile,
+                            onRefreshAdminUsers = ::refreshAdminUsers,
+                            onUpsertAdminUser = ::upsertAdminUser,
+                            onAdminUserAction = ::adminUserAction,
                             onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
                             onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } },
                             onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } },
@@ -206,6 +214,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun logoutCloudProfile() {
+        cloudState.logoutProfile()
+        operatorPin.value = ""
+        commandStatus.value = "Вихід виконано"
+    }
+
+    private fun refreshAdminUsers() {
+        val actor = operatorId.value.trim()
+        val pin = operatorPin.value
+        lifecycleScope.launch { cloudState.refreshAdminUsers(actor, pin) }
+    }
+
+    private fun upsertAdminUser(targetId: String, name: String, role: String, enabled: Boolean, newPin: String) {
+        val actor = operatorId.value.trim()
+        val pin = operatorPin.value
+        lifecycleScope.launch { cloudState.upsertAdminUser(actor, pin, targetId.trim(), name.trim(), role.lowercase(), enabled, newPin) }
+    }
+
+    private fun adminUserAction(command: String, targetId: String) {
+        val actor = operatorId.value.trim()
+        val pin = operatorPin.value
+        lifecycleScope.launch { cloudState.adminUserAction(actor, pin, command, targetId) }
+    }
+
     private fun executeCommand(type: CommandType) {
         val actor = operatorId.value.trim(); val credential = operatorPin.value
         if (actor.isBlank() || credential.length !in 4..12) { commandStatus.value = "Введіть ID оператора та PIN"; return }
@@ -215,9 +247,31 @@ class MainActivity : ComponentActivity() {
             commandStatus.value = result.fold(onSuccess = { reply -> if (reply.accepted || reply.duplicate) "OK: ${reply.code}" else "Відхилено: ${reply.code}" }, onFailure = { error -> "Помилка: ${error.message ?: "network"}" })
         }
     }
-    private fun requestNotificationPermission() { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
-    private fun requestQrScan() { val missing = requiredProvisioningPermissions().filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }; if (missing.isEmpty()) launchQrScanner() else permissionLauncher.launch(missing.toTypedArray()) }
-    private fun launchQrScanner() { qrScanner.launch(ScanOptions().setPrompt("Скануйте QR HomeGuard-S3").setBeepEnabled(false).setOrientationLocked(false)) }
-    private fun requiredProvisioningPermissions(): List<String> = buildList { add(Manifest.permission.CAMERA); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.NEARBY_WIFI_DEVICES) else add(Manifest.permission.ACCESS_FINE_LOCATION) }
-    override fun onDestroy() { operatorPin.value = ""; session.stop(); discovery.stop(); super.onDestroy() }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    private fun requestQrScan() {
+        val missing = requiredProvisioningPermissions().filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isEmpty()) launchQrScanner() else permissionLauncher.launch(missing.toTypedArray())
+    }
+
+    private fun launchQrScanner() {
+        qrScanner.launch(ScanOptions().setPrompt("Скануйте QR HomeGuard-S3").setBeepEnabled(false).setOrientationLocked(false))
+    }
+
+    private fun requiredProvisioningPermissions(): List<String> = buildList {
+        add(Manifest.permission.CAMERA)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.NEARBY_WIFI_DEVICES) else add(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
+    override fun onDestroy() {
+        operatorPin.value = ""
+        session.stop()
+        discovery.stop()
+        super.onDestroy()
+    }
 }
