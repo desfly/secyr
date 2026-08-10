@@ -77,9 +77,7 @@ fun DashboardScreen(
     val canArm = !cloudMode || cloudProfile.canArm
     val canDisarm = !cloudMode || cloudProfile.canDisarm
     val canValves = !cloudMode || cloudProfile.canControlValves
-    val wifiStatus = snapshot.wifiStatus.ifBlank {
-        if (snapshot.transport.name == "WIFI_STA") "ONLINE" else "—"
-    }
+    val wifiStatus = snapshot.wifiStatus.ifBlank { if (snapshot.transport.name == "WIFI_STA") "ONLINE" else "—" }
     val wifiSsid = snapshot.wifiSsid.ifBlank { "—" }
 
     pendingDangerousCommand?.let { command ->
@@ -139,6 +137,7 @@ fun DashboardScreen(
                                 CloudAccessRole.ADMIN -> "Повний доступ · користувачі · охорона · клапани"
                                 CloudAccessRole.USER -> "Моніторинг · охорона/зняття · клапани"
                                 CloudAccessRole.GUEST -> "Тільки стан датчиків"
+                                CloudAccessRole.LOCKED -> "Немає доступу"
                             }
                             Text("Права: $rights", style = MaterialTheme.typography.bodySmall)
                         }
