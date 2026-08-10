@@ -8,12 +8,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.control.CommandController
@@ -110,6 +112,17 @@ class MainActivity : ComponentActivity() {
             val maintenanceMessage by backupStatus.collectAsState()
             val currentOperator by operatorId.collectAsState()
             val currentPin by operatorPin.collectAsState()
+
+            LaunchedEffect(endpoint.path.name, cloudProfile.authenticated, cloudProfile.sensorOnly, cloudProfile.id, currentOperator, currentPin) {
+                val actor = currentOperator.trim()
+                if (endpoint.path.name == "CLOUD" && cloudProfile.authenticated && cloudProfile.sensorOnly && cloudProfile.id == actor && currentPin.length in 4..12) {
+                    while (true) {
+                        cloudState.refreshGuestSensors(actor, currentPin)
+                        delay(5_000L)
+                    }
+                }
+            }
+
             val diagnostics = SystemDiagnosticsEvaluator.evaluate(appSettings.deviceId, endpoint.path.name, devices.size, appSettings.localCertificateSha256, snapshot, events.size)
             MyfistTheme {
                 MyfistBackground {
