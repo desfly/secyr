@@ -15,12 +15,14 @@ namespace homeguard::idf {
 namespace {
 constexpr const char* kTag = "hg_wifi_http";
 
+#if defined(ESP_PLATFORM)
 extern const unsigned char web_index_html_start[] asm("_binary_web_index_html_start");
 extern const unsigned char web_index_html_end[] asm("_binary_web_index_html_end");
 extern const unsigned char web_app_css_start[] asm("_binary_web_app_css_start");
 extern const unsigned char web_app_css_end[] asm("_binary_web_app_css_end");
 extern const unsigned char web_app_js_start[] asm("_binary_web_app_js_start");
 extern const unsigned char web_app_js_end[] asm("_binary_web_app_js_end");
+#endif
 
 std::string json_escape(const char* text)
 {
@@ -33,6 +35,7 @@ std::string json_escape(const char* text)
     return out;
 }
 
+#if defined(ESP_PLATFORM)
 esp_err_t send_embedded(httpd_req_t* request, const char* type, const unsigned char* start, const unsigned char* end)
 {
     if (request == nullptr || start == nullptr || end == nullptr || end <= start) return ESP_ERR_INVALID_ARG;
@@ -50,6 +53,19 @@ esp_err_t app_js_get(httpd_req_t* request)
 {
     return send_embedded(request, "application/javascript; charset=utf-8", web_app_js_start, web_app_js_end);
 }
+#else
+esp_err_t app_css_get(httpd_req_t* request)
+{
+    httpd_resp_set_type(request, "text/css; charset=utf-8");
+    return httpd_resp_send(request, "", 0);
+}
+
+esp_err_t app_js_get(httpd_req_t* request)
+{
+    httpd_resp_set_type(request, "application/javascript; charset=utf-8");
+    return httpd_resp_send(request, "", 0);
+}
+#endif
 
 bool extract_json_string(const std::string& body, const char* key, std::string& value)
 {
@@ -79,7 +95,15 @@ esp_err_t WifiProvisioningHttp::register_handlers(httpd_handle_t server, WifiCre
 }
 
 WifiProvisioningHttp* WifiProvisioningHttp::self_from(httpd_req_t* request){return request == nullptr ? nullptr : static_cast<WifiProvisioningHttp*>(request->user_ctx);}
-esp_err_t WifiProvisioningHttp::root_get(httpd_req_t* request){return send_embedded(request,"text/html; charset=utf-8",web_index_html_start,web_index_html_end);}
+esp_err_t WifiProvisioningHttp::root_get(httpd_req_t* request)
+{
+#if defined(ESP_PLATFORM)
+    return send_embedded(request,"text/html; charset=utf-8",web_index_html_start,web_index_html_end);
+#else
+    httpd_resp_set_type(request, "text/html; charset=utf-8");
+    return httpd_resp_send(request, "<!doctype html><html><body>HomeGuard-S3 Web UI host mock</body></html>", -1);
+#endif
+}
 
 esp_err_t WifiProvisioningHttp::provision_post(httpd_req_t* request)
 {
