@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -31,6 +32,7 @@ import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.security.CloudAccessRole
+import ua.homeguard.s3.security.CloudAdminUser
 import ua.homeguard.s3.security.CloudSessionProfile
 import ua.homeguard.s3.ui.components.MaintenancePanel
 
@@ -41,6 +43,8 @@ fun DashboardScreen(
     route: String,
     cloudStatus: String,
     cloudProfile: CloudSessionProfile,
+    adminUsers: List<CloudAdminUser>,
+    adminStatus: String,
     deviceId: String,
     snapshot: SystemSnapshot,
     events: List<SystemEventRecord>,
@@ -55,6 +59,10 @@ fun DashboardScreen(
     onOperatorIdChange: (String) -> Unit,
     onOperatorPinChange: (String) -> Unit,
     onLogin: () -> Unit,
+    onLogout: () -> Unit,
+    onRefreshAdminUsers: () -> Unit,
+    onUpsertAdminUser: (String, String, String, Boolean, String) -> Unit,
+    onAdminUserAction: (String, String) -> Unit,
     onCriticalNotificationsChange: (Boolean) -> Unit,
     onStatusNotificationsChange: (Boolean) -> Unit,
     onZoneNotificationsChange: (Boolean) -> Unit,
@@ -67,18 +75,36 @@ fun DashboardScreen(
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
     var confirmClearHistory by remember { mutableStateOf(false) }
+    var deleteUserId by remember { mutableStateOf<String?>(null) }
+    var editId by rememberSaveable { mutableStateOf("") }
+    var editName by rememberSaveable { mutableStateOf("") }
+    var editRole by rememberSaveable { mutableStateOf("user") }
+    var editEnabled by rememberSaveable { mutableStateOf(true) }
+    var editPin by rememberSaveable { mutableStateOf("") }
+
     val listState = rememberSaveable(deviceId, saver = LazyListState.Saver) { LazyListState() }
     val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12
     val cloudMode = route == "CLOUD"
     val authenticated = !cloudMode || cloudProfile.authenticated
     val guest = cloudMode && cloudProfile.role == CloudAccessRole.GUEST
     val admin = !cloudMode || cloudProfile.role == CloudAccessRole.ADMIN
+    val canManageCloudUsers = cloudMode && cloudProfile.canManageUsers
     val showFullState = !cloudMode || cloudProfile.canSubscribeFullState
     val canArm = !cloudMode || cloudProfile.canArm
     val canDisarm = !cloudMode || cloudProfile.canDisarm
     val canValves = !cloudMode || cloudProfile.canControlValves
     val wifiStatus = snapshot.wifiStatus.ifBlank { if (snapshot.transport.name == "WIFI_STA") "ONLINE" else "—" }
     val wifiSsid = snapshot.wifiSsid.ifBlank { "—" }
+    val editorValid = editId.isNotBlank() && editId.length <= 23 && editName.length <= 31 &&
+        editRole in setOf("admin", "user", "guest") && editPin.length in 4..12
+
+    fun clearAdminEditor() {
+        editId = ""
+        editName = ""
+        editRole = "user"
+        editEnabled = true
+        editPin = ""
+    }
 
     pendingDangerousCommand?.let { command ->
         AlertDialog(
@@ -87,6 +113,18 @@ fun DashboardScreen(
             text = { Text("Виконати ${command.name}? Контролер повторно перевірить PIN і challenge.") },
             confirmButton = { TextButton(onClick = { pendingDangerousCommand = null; onCommand(command) }) { Text("Виконати") } },
             dismissButton = { TextButton(onClick = { pendingDangerousCommand = null }) { Text("Скасувати") } },
+        )
+    }
+
+    deleteUserId?.let { targetId ->
+        AlertDialog(
+            onDismissRequest = { deleteUserId = null },
+            title = { Text("Видалити користувача?") },
+            text = { Text("Користувач $targetId буде видалений з контролера.") },
+            confirmButton = {
+                TextButton(onClick = { deleteUserId = null; onAdminUserAction("access.users.delete", targetId) }) { Text("Видалити") }
+            },
+            dismissButton = { TextButton(onClick = { deleteUserId = null }) { Text("Скасувати") } },
         )
     }
 
@@ -126,7 +164,10 @@ fun DashboardScreen(
                         visualTransformation = PasswordVisualTransformation(),
                     )
                     if (cloudMode) {
-                        Button(enabled = credentialsReady, onClick = onLogin) { Text("Увійти") }
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Button(enabled = credentialsReady, onClick = onLogin) { Text("Увійти") }
+                            OutlinedButton(enabled = cloudProfile.authenticated, onClick = onLogout) { Text("Вийти") }
+                        }
                         Text(
                             if (cloudProfile.authenticated) "${cloudProfile.name.ifBlank { cloudProfile.id }} · ${cloudProfile.role.name}"
                             else "LOCKED · роль визначає контролер",
@@ -228,6 +269,70 @@ fun DashboardScreen(
                     Row(modifier = Modifier.fillMaxWidth().padding(7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Вихід ${output.index}")
                         Text(if (output.active) "ON" else "OFF")
+                    }
+                }
+            }
+        }
+
+        if (canManageCloudUsers) {
+            item(key = "admin-users-editor") {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text("Admin → Користувачі", style = MaterialTheme.typography.titleMedium)
+                        Text("До 8 акаунтів. User і Guest не бачать каталог користувачів.", style = MaterialTheme.typography.bodySmall)
+                        Text(adminStatus, style = MaterialTheme.typography.bodySmall)
+                        OutlinedTextField(editId, { editId = it.take(23) }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("ID") })
+                        OutlinedTextField(editName, { editName = it.take(31) }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Ім’я") })
+                        OutlinedTextField(editRole, { editRole = it.lowercase().take(5) }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Роль: admin / user / guest") })
+                        OutlinedTextField(
+                            editPin,
+                            { value -> if (value.length <= 12 && value.all(Char::isDigit)) editPin = value },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("Новий PIN") },
+                            visualTransformation = PasswordVisualTransformation(),
+                        )
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(if (editEnabled) "Активний" else "Вимкнений")
+                            Switch(checked = editEnabled, onCheckedChange = { editEnabled = it })
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Button(
+                                enabled = editorValid,
+                                onClick = {
+                                    onUpsertAdminUser(editId, editName, editRole, editEnabled, editPin)
+                                    clearAdminEditor()
+                                },
+                            ) { Text("Зберегти") }
+                            OutlinedButton(onClick = ::clearAdminEditor) { Text("Очистити") }
+                            OutlinedButton(onClick = onRefreshAdminUsers) { Text("Оновити") }
+                        }
+                    }
+                }
+            }
+
+            if (adminUsers.isEmpty()) {
+                item(key = "admin-users-empty") { Text("Каталог користувачів порожній або ще не завантажений.", style = MaterialTheme.typography.bodySmall) }
+            } else {
+                items(adminUsers, key = { "admin-user-${it.id}" }) { user ->
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(user.name.ifBlank { user.id }, style = MaterialTheme.typography.titleSmall)
+                            Text("${user.id} · ${user.role.name} · ${if (user.enabled) "ACTIVE" else "DISABLED"}", style = MaterialTheme.typography.bodySmall)
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                OutlinedButton(onClick = {
+                                    editId = user.id
+                                    editName = user.name
+                                    editRole = user.role.name.lowercase()
+                                    editEnabled = user.enabled
+                                    editPin = ""
+                                }) { Text("Редагувати") }
+                                OutlinedButton(onClick = {
+                                    onAdminUserAction(if (user.enabled) "access.users.disable" else "access.users.enable", user.id)
+                                }) { Text(if (user.enabled) "Вимкнути" else "Увімкнути") }
+                                OutlinedButton(onClick = { deleteUserId = user.id }) { Text("Видалити") }
+                            }
+                        }
                     }
                 }
             }
