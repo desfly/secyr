@@ -62,12 +62,10 @@ class TelemetrySocket {
                 )
             }
         }
-        // Privacy boundary: sensor-only updates never alter arm mode, zones, outputs or events.
         state.value = state.value.copy(sensors = sensors)
         true
     }.getOrDefault(false)
 
-    /** Accepts the retained MQTT state schema published by Build-0060 firmware. */
     fun acceptCloudState(text: String): Boolean = runCatching {
         val json = JSONObject(text)
         if (json.optInt("schema", 0) != 1) return false
@@ -110,6 +108,7 @@ class TelemetrySocket {
             }
         }
 
+        val wifi = json.optJSONObject("wifi")
         state.value = state.value.copy(
             sequence = json.optLong("sequence", state.value.sequence),
             uptimeMs = json.optLong("timestamp_ms", state.value.uptimeMs),
@@ -118,6 +117,8 @@ class TelemetrySocket {
             zones = zones,
             sensors = sensors,
             outputs = outputs,
+            wifiStatus = json.optString("wifi_status", wifi?.optString("status", state.value.wifiStatus).orEmpty()),
+            wifiSsid = json.optString("wifi_ssid", json.optString("ssid", wifi?.optString("ssid", state.value.wifiSsid).orEmpty())),
         )
         true
     }.getOrDefault(false)
