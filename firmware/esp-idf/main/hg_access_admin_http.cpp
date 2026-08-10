@@ -1,6 +1,7 @@
 #include "hg_access_admin_http.hpp"
 
 #include <cstddef>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -54,7 +55,7 @@ bool authorize_admin(AccessControl& access, const std::string& body)
 esp_err_t send_json(httpd_req_t* request, const char* body)
 {
     httpd_resp_set_type(request, "application/json");
-    return httpd_resp_send(request, body, HTTPD_RESP_USE_STRLEN);
+    return httpd_resp_send(request, body, static_cast<ssize_t>(std::strlen(body)));
 }
 }
 
