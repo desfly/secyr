@@ -39,4 +39,6 @@ data class SystemSnapshot(
     val pressures: List<PressureStatus> = emptyList(),
     val sensors: List<SensorStatus> = emptyList(),
     val outputs: List<OutputStatus> = emptyList(),
+    val wifiStatus: String = "",
+    val wifiSsid: String = "",
 )
