@@ -78,6 +78,10 @@ idf_component_register(
         nvs_flash
         physical_button
         sdmmc
+    EMBED_TXTFILES
+        "web/index.html"
+        "web/app.css"
+        "web/app.js"
 )
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)
