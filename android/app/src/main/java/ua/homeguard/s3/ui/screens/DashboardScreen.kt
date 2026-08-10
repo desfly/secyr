@@ -27,7 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.diagnostics.SystemDiagnostics
-import ua.homeguard.s3.events.EventLogExporter
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
@@ -78,6 +77,10 @@ fun DashboardScreen(
     val canArm = !cloudMode || cloudProfile.canArm
     val canDisarm = !cloudMode || cloudProfile.canDisarm
     val canValves = !cloudMode || cloudProfile.canControlValves
+    val wifiStatus = snapshot.wifiStatus.ifBlank {
+        if (snapshot.transport.name == "WIFI_STA") "ONLINE" else "—"
+    }
+    val wifiSsid = snapshot.wifiSsid.ifBlank { "—" }
 
     pendingDangerousCommand?.let { command ->
         AlertDialog(
@@ -131,6 +134,14 @@ fun DashboardScreen(
                             else "LOCKED · роль визначає контролер",
                             style = MaterialTheme.typography.bodySmall,
                         )
+                        if (cloudProfile.authenticated) {
+                            val rights = when (cloudProfile.role) {
+                                CloudAccessRole.ADMIN -> "Повний доступ · користувачі · охорона · клапани"
+                                CloudAccessRole.USER -> "Моніторинг · охорона/зняття · клапани"
+                                CloudAccessRole.GUEST -> "Тільки стан датчиків"
+                            }
+                            Text("Права: $rights", style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                     Text("PIN зберігається тільки в оперативній пам’яті.", style = MaterialTheme.typography.bodySmall)
                     Text("Команда: $commandStatus", style = MaterialTheme.typography.bodySmall)
@@ -143,7 +154,7 @@ fun DashboardScreen(
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(8.dp)) {
                         Text("Guest · тільки датчики", style = MaterialTheme.typography.titleSmall)
-                        Text("Інформація про охорону, зони, виходи та інших користувачів не завантажується.", style = MaterialTheme.typography.bodySmall)
+                        Text("Sensor-only статус оновлюється автоматично кожні 5 секунд. Інформація про охорону, зони, виходи та інших користувачів не завантажується.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -157,6 +168,8 @@ fun DashboardScreen(
                         StatusRow("Режим", snapshot.mode.name)
                         StatusRow("Стан", snapshot.health.name)
                         StatusRow("Транспорт", snapshot.transport.name)
+                        StatusRow("Wi‑Fi", wifiStatus)
+                        StatusRow("Мережа", wifiSsid)
                         Text("Телеметрія #${snapshot.sequence} · uptime ${snapshot.uptimeMs} ms", style = MaterialTheme.typography.bodySmall)
                     }
                 }
@@ -222,6 +235,14 @@ fun DashboardScreen(
         }
 
         if (admin) {
+            item(key = "admin-policy") {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Admin", style = MaterialTheme.typography.titleSmall)
+                        Text("Повний системний доступ. Каталог користувачів доступний тільки ролі Admin; User і Guest бачать тільки власний профіль.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
             item(key = "maintenance") { MaintenancePanel(diagnostics, backupStatus, onExportSettings, onImportSettings) }
             item(key = "notifications") {
                 Card(modifier = Modifier.fillMaxWidth()) {
