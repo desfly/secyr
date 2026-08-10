@@ -21,8 +21,10 @@ void test_build0037() {
     CHECK(access.verify_pin(*resident, "1357"));
     CHECK(!access.verify_pin(*resident, "0000"));
     CHECK(access.role_allows(homeguard::AccessRole::User, "security.disarm"));
-    CHECK(!access.role_allows(homeguard::AccessRole::User, "valve.open"));
+    CHECK(access.role_allows(homeguard::AccessRole::User, "valve.open"));
+    CHECK(access.role_allows(homeguard::AccessRole::User, "valve.close"));
     CHECK(!access.role_allows(homeguard::AccessRole::Guest, "security.arm_home"));
+    CHECK(!access.role_allows(homeguard::AccessRole::Guest, "valve.open"));
 
     homeguard::DeviceApiState state;
     homeguard::DeviceCommandRouter router(state, &access);
@@ -35,8 +37,8 @@ void test_build0037() {
     CHECK(bad_pin.code == homeguard::CommandResultCode::Unauthorized);
     CHECK(state.security_mode == homeguard::SecurityMode::ArmedAway);
 
-    const auto denied_role = router.handle({"req-3", "resident", "valve.open", "cold", "", "1357"});
-    CHECK(denied_role.code == homeguard::CommandResultCode::Unauthorized);
+    const auto user_valve = router.handle({"req-3", "resident", "valve.open", "cold", "", "1357"});
+    CHECK(user_valve.code == homeguard::CommandResultCode::Accepted);
 
     const auto guest = router.handle({"req-4", "guest", "security.disarm", "", "", "9999"});
     CHECK(guest.code == homeguard::CommandResultCode::Unauthorized);
