@@ -5,9 +5,9 @@
 #include <string>
 
 void test_build0013() {
-    CHECK(hg::build::number == "0013");
-    CHECK(hg::build::version == "0.0.13");
-    CHECK(hg::build::label == "HomeGuard-S3 Build-0013");
+    CHECK(hg::build::number == "0060");
+    CHECK(hg::build::version == "0.0.60");
+    CHECK(hg::build::label == "HomeGuard-S3 Build-0060");
     const std::string token(48, 'A');
     hg::BearerTokenVerifier verifier(token);
     CHECK(verifier.configured());
