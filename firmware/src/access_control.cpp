@@ -21,6 +21,15 @@ std::string salt_hex(const std::array<std::uint8_t, 16>& salt) {
 bool terminated(const auto& text) {
     return std::find(text.begin(), text.end(), '\0') != text.end();
 }
+
+bool constant_time_text_equal(std::string_view left, std::string_view right) {
+    if (left.size() != right.size()) return false;
+    unsigned char diff = 0U;
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        diff |= static_cast<unsigned char>(left[i]) ^ static_cast<unsigned char>(right[i]);
+    }
+    return diff == 0U;
+}
 }
 
 void AccessControl::copy_text(char* destination, std::size_t capacity, std::string_view source) {
@@ -90,6 +99,45 @@ bool AccessControl::import_user(const AccessUser& user) {
     return true;
 }
 
+bool AccessControl::set_user_enabled(std::string_view id, bool enabled) {
+    for (std::size_t i = 0; i < user_count_; ++i) {
+        if (id != users_[i].id.data()) continue;
+        const bool previous = users_[i].enabled;
+        users_[i].enabled = enabled;
+        if (!has_enabled_admin()) {
+            users_[i].enabled = previous;
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+bool AccessControl::remove_user(std::string_view id) {
+    for (std::size_t i = 0; i < user_count_; ++i) {
+        if (id != users_[i].id.data()) continue;
+        const AccessUser removed = users_[i];
+        for (std::size_t j = i + 1U; j < user_count_; ++j) users_[j - 1U] = users_[j];
+        users_[user_count_ - 1U] = AccessUser{};
+        --user_count_;
+        if (!has_enabled_admin()) {
+            for (std::size_t j = user_count_; j > i; --j) users_[j] = users_[j - 1U];
+            users_[i] = removed;
+            ++user_count_;
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+bool AccessControl::has_enabled_admin() const {
+    for (std::size_t i = 0; i < user_count_; ++i) {
+        if (users_[i].enabled && users_[i].role == AccessRole::Admin) return true;
+    }
+    return false;
+}
+
 void AccessControl::clear_users() {
     for (auto& user : users_) user = AccessUser{};
     user_count_ = 0;
@@ -112,27 +160,25 @@ bool AccessControl::verify_pin(const AccessUser& user, std::string_view pin) con
 }
 
 bool AccessControl::role_allows(AccessRole role, std::string_view command) const {
-    // Admin is the only unrestricted role.
     if (role == AccessRole::Admin) return true;
 
-    // Guest is strictly read-only. Read access is handled by telemetry/state APIs,
-    // therefore no control command is authorized for this role.
-    if (role == AccessRole::Guest) return false;
+    if (role == AccessRole::Guest) {
+        return command == "profile.self" ||
+               command == "sensors.status" || command == "sensors.list";
+    }
 
-    // Operator/User policy agreed for HomeGuard-S3:
-    // monitor state + arm/disarm + operate water valves. Monitoring itself is
-    // read-only and does not pass through the command router.
-    return command == "security.arm_home" || command == "arm_home" ||
+    return command == "profile.self" ||
+           command == "system.status" || command == "status" ||
+           command == "sensors.status" || command == "sensors.list" ||
+           command == "zones.status" || command == "zones.list" ||
+           command == "security.arm_home" || command == "arm_home" ||
            command == "security.arm_away" || command == "arm_away" ||
            command == "security.disarm" || command == "disarm" ||
-           command == "valve.close" || command == "close_valves" ||
-           command == "valve.open" || command == "open_valves";
+           command == "valve.open" || command == "open_valves" ||
+           command == "valve.close" || command == "close_valves";
 }
 
-void AccessControl::append_audit(
-    std::string_view actor,
-    std::string_view command,
-    AuditDecision decision) {
+void AccessControl::append_audit(std::string_view actor, std::string_view command, AuditDecision decision) {
     AccessAuditRecord record{};
     record.sequence = next_audit_sequence_++;
     copy_text(record.actor.data(), record.actor.size(), actor);
@@ -143,10 +189,7 @@ void AccessControl::append_audit(
     if (audit_size_ < audit_capacity) ++audit_size_;
 }
 
-AuditDecision AccessControl::authorize(
-    std::string_view actor,
-    std::string_view pin,
-    std::string_view command) {
+AuditDecision AccessControl::authorize(std::string_view actor, std::string_view pin, std::string_view command) {
     const auto* user = find_user(actor);
     if (user == nullptr || !user->enabled) {
         append_audit(actor, command, AuditDecision::DeniedUnknownUser);
@@ -160,6 +203,44 @@ AuditDecision AccessControl::authorize(
         append_audit(actor, command, AuditDecision::DeniedRole);
         return AuditDecision::DeniedRole;
     }
+    append_audit(actor, command, AuditDecision::Allowed);
+    return AuditDecision::Allowed;
+}
+
+AuditDecision AccessControl::authorize_cloud_proof(
+    std::string_view actor,
+    std::string_view command,
+    std::string_view nonce,
+    std::string_view request_id,
+    std::string_view proof_hex) {
+    const auto* user = find_user(actor);
+    if (user == nullptr || !user->enabled) {
+        append_audit(actor, command, AuditDecision::DeniedUnknownUser);
+        return AuditDecision::DeniedUnknownUser;
+    }
+    if (!role_allows(user->role, command)) {
+        append_audit(actor, command, AuditDecision::DeniedRole);
+        return AuditDecision::DeniedRole;
+    }
+    if (nonce.empty() || request_id.empty() || proof_hex.size() != 64U) {
+        append_audit(actor, command, AuditDecision::DeniedCredential);
+        return AuditDecision::DeniedCredential;
+    }
+
+    std::string material{"HomeGuard-S3|CLOUD|"};
+    material += hg::sha256_hex(user->pin_digest);
+    material.push_back('|');
+    material.append(nonce);
+    material.push_back('|');
+    material.append(request_id);
+    material.push_back('|');
+    material.append(command);
+    const auto expected = hg::sha256_hex(hg::sha256(material));
+    if (!constant_time_text_equal(expected, proof_hex)) {
+        append_audit(actor, command, AuditDecision::DeniedCredential);
+        return AuditDecision::DeniedCredential;
+    }
+
     append_audit(actor, command, AuditDecision::Allowed);
     return AuditDecision::Allowed;
 }

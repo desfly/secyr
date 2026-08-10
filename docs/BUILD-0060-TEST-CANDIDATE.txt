@@ -1,0 +1,54 @@
+HomeGuard-S3 Build-0060 TEST CANDIDATE
+
+Purpose
+- Validate one-time cloud challenge/response authorization on real ESP32-S3 hardware.
+- Validate the completed role-aware Web and Android interfaces.
+- Preserve verified Build-0059 Wi-Fi scan and MQTT/TLS connectivity.
+
+Expected device
+- ESP32-S3.
+- Existing Wi-Fi credentials may be preserved in NVS.
+- Physical outputs MUST remain FAIL-CLOSED until hardware verification/commissioning is valid.
+
+Role matrix
+- Admin: full system access, arm/disarm, valve control, user directory and user management.
+- User: monitoring, arm/disarm and valve control; no user directory or account management.
+- Guest: sensor-only status; no arm state, zones, outputs, valves or user directory.
+- Maximum user accounts: 8.
+
+Interface requirements
+- Web and Android show Wi-Fi status followed immediately by the connected network name (SSID).
+- Android Guest sensor-only status refreshes automatically every 5 seconds.
+- Web Guest sensor-only status refreshes automatically every 5 seconds.
+- User/Guest see only their own profile; only Admin may list or modify accounts.
+- Android Admin may create/update, enable/disable and delete users.
+- Web Admin may create/update, enable/disable and delete users.
+- The last active Admin must not be removable, disableable or demotable.
+
+Cloud auth protocol
+1. Send auth.challenge with request_id, actor and target command.
+2. Device returns nonce, salt and expires_in_ms.
+3. Client derives PIN digest locally from actor + salt + PIN using the HomeGuard-S3 4096-round SHA-256 derivation.
+4. Client computes auth_proof bound to request_id + command + nonce.
+5. Send target command with actor + auth_proof. Raw PIN must NOT be present in MQTT payload.
+6. Challenge is single-use and expires after 30 seconds.
+7. Admin user mutations additionally use canonical payload proof.
+8. New user PIN transport is challenge-bound and encrypted; raw new PIN must not appear in MQTT payload.
+
+Minimum field tests
+- Wi-Fi scan button still returns nearby SSIDs.
+- Wi-Fi status and SSID are visible in both interfaces.
+- MQTT/TLS ping -> pong still works.
+- system.status still works for authorized full-state roles.
+- security.arm_home without auth_proof is rejected.
+- auth.challenge returns challenge data only for a known enabled actor.
+- invalid proof is rejected.
+- reused proof/challenge is rejected.
+- Admin can list up to 8 accounts and manage them.
+- User can arm/disarm and control valves but cannot list/manage accounts.
+- Guest sees sensor status only and receives no retained full-state subscription.
+- Guest polling continues at 5-second intervals while authenticated.
+- Logout removes the active cloud profile and clears the in-memory PIN in Android.
+- physical outputs remain fail-closed.
+
+Do not use a real PIN on a public anonymous MQTT broker. Public broker testing is transport-only.

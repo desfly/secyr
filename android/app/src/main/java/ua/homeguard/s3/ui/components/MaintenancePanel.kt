@@ -22,22 +22,22 @@ fun MaintenancePanel(
     onImportSettings: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Діагностика та обслуговування", style = MaterialTheme.typography.titleLarge)
+        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Діагностика та обслуговування", style = MaterialTheme.typography.titleMedium)
             Text(if (diagnostics.connectionReady) "Зв'язок: ГОТОВО" else "Зв'язок: потребує перевірки")
             diagnostics.connectionItems.forEach { item ->
-                Text("${if (item.ok) "✓" else "!"} ${item.label}: ${item.detail}")
+                Text("${if (item.ok) "✓" else "!"} ${item.label}: ${item.detail}", style = MaterialTheme.typography.bodySmall)
             }
             Text(if (diagnostics.hardwareTestReady) "Hardware-test: ГОТОВО" else "Hardware-test: ще не готово")
             diagnostics.hardwareItems.forEach { item ->
-                Text("${if (item.ok) "✓" else "!"} ${item.label}: ${item.detail}")
+                Text("${if (item.ok) "✓" else "!"} ${item.label}: ${item.detail}", style = MaterialTheme.typography.bodySmall)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onExportSettings) { Text("Backup налаштувань") }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                OutlinedButton(onClick = onExportSettings) { Text("Backup") }
                 OutlinedButton(onClick = onImportSettings) { Text("Restore") }
             }
             Text(backupStatus, style = MaterialTheme.typography.bodySmall)
-            Text("API token не включається у backup і не замінюється під час restore.", style = MaterialTheme.typography.bodySmall)
+            Text("API token не входить у backup.", style = MaterialTheme.typography.bodySmall)
         }
     }
 }

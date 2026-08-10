@@ -9,8 +9,8 @@
 namespace { constexpr char tag[] = "hg_button"; }
 
 bool PhysicalButtonService::begin(const int gpio, const bool active_low, const hg::ServiceButtonConfig config,
-                                  Callback service_callback, Callback factory_reset_callback, void* context) {
-    if (running_ || gpio < 0 || gpio > 48 || !service_callback || !factory_reset_callback) return false;
+                                  Callback reboot_callback, Callback factory_reset_callback, void* context) {
+    if (running_ || gpio < 0 || gpio > 48 || !reboot_callback || !factory_reset_callback) return false;
     gpio_config_t io{};
     io.pin_bit_mask = 1ULL << static_cast<unsigned>(gpio);
     io.mode = GPIO_MODE_INPUT;
@@ -22,7 +22,7 @@ bool PhysicalButtonService::begin(const int gpio, const bool active_low, const h
     gpio_ = gpio;
     active_low_ = active_low;
     button_ = hg::ServiceButton(config);
-    service_callback_ = service_callback;
+    reboot_callback_ = reboot_callback;
     reset_callback_ = factory_reset_callback;
     context_ = context;
     running_ = true;
@@ -30,7 +30,7 @@ bool PhysicalButtonService::begin(const int gpio, const bool active_low, const h
         running_ = false;
         return false;
     }
-    ESP_LOGI(tag, "physical service button enabled on configured GPIO");
+    ESP_LOGI(tag, "physical reset button enabled: short press=reboot, hold=factory reset");
     return true;
 }
 
@@ -46,8 +46,8 @@ void PhysicalButtonService::task() {
         const int level = gpio_get_level(static_cast<gpio_num_t>(gpio_));
         const bool pressed = active_low_ ? level == 0 : level != 0;
         const auto event = button_.update(pressed, static_cast<uint64_t>(esp_timer_get_time() / 1000));
-        if (event == hg::ServiceButtonEvent::ServiceModeRequested) {
-            service_callback_(context_);
+        if (event == hg::ServiceButtonEvent::RebootRequested) {
+            reboot_callback_(context_);
         } else if (event == hg::ServiceButtonEvent::FactoryResetRequested) {
             reset_callback_(context_);
         }

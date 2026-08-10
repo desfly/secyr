@@ -1,0 +1,32 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./passwords:/mosquitto/config/passwords:ro
+      - mosquitto-data:/mosquitto/data
+    networks: [homeguard]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      HOMEGUARD_CLOUD_DOMAIN: ${HOMEGUARD_CLOUD_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [mosquitto]
+    networks: [homeguard]
+
+networks:
+  homeguard:
+
+volumes:
+  mosquitto-data:
+  caddy-data:
+  caddy-config:

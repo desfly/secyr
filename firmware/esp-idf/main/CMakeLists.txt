@@ -19,16 +19,31 @@ idf_component_register(
         "hg_service_http.cpp"
         "hg_output_http.cpp"
         "hg_gpio_output_backend.cpp"
+        "hg_wifi_provisioning.cpp"
+        "hg_wifi_credentials.cpp"
+        "hg_wifi_http.cpp"
+        "hg_cloud_link.cpp"
+        "hg_cloud_config.cpp"
+        "hg_cloud_http.cpp"
         "hg_access_nvs.cpp"
+        "hg_access_bootstrap_http.cpp"
+        "hg_access_admin_http.cpp"
         "hg_commissioning_nvs.cpp"
         "../../src/system_model.cpp"
         "../../src/system_api.cpp"
         "../../src/output_interlock.cpp"
         "../../src/output_command.cpp"
         "../../src/physical_output_runtime.cpp"
+        "../../src/physical_output_diagnostics.cpp"
         "../../src/event_log.cpp"
         "../../src/access_control.cpp"
         "../../src/access_store.cpp"
+        "../../src/self_profile.cpp"
+        "../../src/admin_user_directory.cpp"
+        "../../src/admin_user_commands.cpp"
+        "../../src/admin_pin_transport.cpp"
+        "../../src/admin_payload_auth.cpp"
+        "../../src/admin_payload_canonical.cpp"
         "../../src/crc32.cpp"
         "../../src/sha256.cpp"
         "../../src/hardware_profile.cpp"
@@ -54,10 +69,19 @@ idf_component_register(
         esp_eth
         esp_event
         esp_http_server
+        esp_hw_support
         esp_netif
+        esp_wifi
         fatfs
+        mbedtls
+        mqtt
         nvs_flash
+        physical_button
         sdmmc
+    EMBED_TXTFILES
+        "web/index.html"
+        "web/app.css"
+        "web/app.js"
 )
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)

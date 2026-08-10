@@ -26,6 +26,7 @@ internal object JsonParsers {
                 )
             }
         }.orEmpty()
+        val wifi = json.optJSONObject("wifi")
         return SystemSnapshot(
             sequence = json.optLong("sequence", 0),
             uptimeMs = json.optLong("uptimeMs", 0),
@@ -33,7 +34,9 @@ internal object JsonParsers {
             transport = enumValue(json.optString("transport"), Transport.NONE),
             health = enumValue(json.optString("health"), HealthState.UNKNOWN),
             zones = zones,
-            pressures = pressures
+            pressures = pressures,
+            wifiStatus = json.optString("wifi_status", wifi?.optString("status", "").orEmpty()),
+            wifiSsid = json.optString("wifi_ssid", json.optString("ssid", wifi?.optString("ssid", "").orEmpty())),
         )
     }
 

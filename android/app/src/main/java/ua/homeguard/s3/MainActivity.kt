@@ -8,13 +8,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.control.CommandController
@@ -23,6 +24,7 @@ import ua.homeguard.s3.events.EventLogExporter
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.network.CloudStateMqttClient
 import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
@@ -34,6 +36,8 @@ import ua.homeguard.s3.storage.SettingsBackupCodec
 import ua.homeguard.s3.storage.SettingsStore
 import ua.homeguard.s3.ui.screens.DashboardScreen
 import ua.homeguard.s3.ui.screens.ProvisioningScreen
+import ua.homeguard.s3.ui.theme.MyfistBackground
+import ua.homeguard.s3.ui.theme.MyfistTheme
 
 class MainActivity : ComponentActivity() {
     private lateinit var discovery: LocalDiscoveryCoordinator
@@ -42,6 +46,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var resolver: DeviceEndpointResolver
     private lateinit var provisioning: ProvisioningCoordinator
     private lateinit var telemetry: TelemetrySocket
+    private lateinit var cloudState: CloudStateMqttClient
     private lateinit var session: DeviceSession
     private lateinit var commands: CommandController
     private lateinit var notifications: HomeGuardNotifications
@@ -53,54 +58,27 @@ class MainActivity : ComponentActivity() {
     private var pendingSettingsBackupText: String = ""
 
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-        if (uri != null && pendingExportText.isNotEmpty()) {
-            runCatching {
-                contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(pendingExportText) }
-            }
-        }
+        if (uri != null && pendingExportText.isNotEmpty()) runCatching { contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(pendingExportText) } }
         pendingExportText = ""
     }
-
     private val settingsBackupLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        if (uri == null || pendingSettingsBackupText.isEmpty()) {
-            pendingSettingsBackupText = ""
-            return@registerForActivityResult
-        }
-        val result = runCatching {
-            contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(pendingSettingsBackupText) }
-                ?: error("cannot open destination")
-        }
+        if (uri == null || pendingSettingsBackupText.isEmpty()) { pendingSettingsBackupText = ""; return@registerForActivityResult }
+        val result = runCatching { contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(pendingSettingsBackupText) } ?: error("cannot open destination") }
         backupStatus.value = if (result.isSuccess) "Backup налаштувань збережено" else "Помилка backup: ${result.exceptionOrNull()?.message ?: "write"}"
         pendingSettingsBackupText = ""
     }
-
     private val settingsRestoreLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@registerForActivityResult
         lifecycleScope.launch {
-            val result = runCatching {
-                val text = contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                    ?: error("cannot read backup")
-                SettingsBackupCodec.decode(text, settings.settings.value.apiToken)
-            }
-            result.onSuccess { restored ->
-                settings.update(restored)
-                backupStatus.value = "Restore виконано; секретний API token збережено локально"
-            }.onFailure { error ->
-                backupStatus.value = "Помилка restore: ${error.message ?: "invalid backup"}"
-            }
+            val result = runCatching { val text = contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: error("cannot read backup"); SettingsBackupCodec.decode(text, settings.settings.value.apiToken) }
+            result.onSuccess { restored -> settings.update(restored); backupStatus.value = "Restore виконано; секретний API token збережено локально" }
+                .onFailure { error -> backupStatus.value = "Помилка restore: ${error.message ?: "invalid backup"}" }
         }
     }
-
-    private val qrScanner = registerForActivityResult(ScanContract()) { result ->
-        result.contents?.let(provisioning::acceptQr)
-    }
-
+    private val qrScanner = registerForActivityResult(ScanContract()) { result -> result.contents?.let(provisioning::acceptQr) }
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if (requiredProvisioningPermissions().all { permission ->
-                ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
-            }) launchQrScanner()
+        if (requiredProvisioningPermissions().all { permission -> ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED }) launchQrScanner()
     }
-
     private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -111,17 +89,13 @@ class MainActivity : ComponentActivity() {
         resolver = DeviceEndpointResolver(settings, discovery, lifecycleScope)
         provisioning = ProvisioningCoordinator(this, settings, discovery, lifecycleScope)
         telemetry = TelemetrySocket().apply { seedEvents(eventHistory.load()) }
-        session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry)
-        commands = CommandController(resolver.endpoint, settings)
+        cloudState = CloudStateMqttClient(telemetry)
+        session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry, cloudState)
+        commands = CommandController(resolver.endpoint, settings, cloudState)
         notifications = HomeGuardNotifications(this)
         notifications.createChannels()
         requestNotificationPermission()
-        lifecycleScope.launch {
-            telemetry.liveEvents().collect { event ->
-                eventHistory.append(event)
-                notifications.notify(event, settings.settings.value)
-            }
-        }
+        lifecycleScope.launch { telemetry.liveEvents().collect { event -> eventHistory.append(event); notifications.notify(event, settings.settings.value) } }
         discovery.start()
         session.start()
         setContent {
@@ -129,111 +103,159 @@ class MainActivity : ComponentActivity() {
             val devices by discovery.devices.collectAsState()
             val endpoint by resolver.endpoint.collectAsState()
             val provisioningState by provisioning.state.collectAsState()
+            val wifiNetworks by provisioning.wifiNetworks.collectAsState()
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
             val events by telemetry.events().collectAsState(initial = emptyList())
+            val cloudStatus by cloudState.status.collectAsState()
+            val cloudProfile by cloudState.profile.collectAsState()
+            val adminUsers by cloudState.adminUsers.collectAsState()
+            val adminStatus by cloudState.adminStatus.collectAsState()
             val commandMessage by commandStatus.collectAsState()
             val maintenanceMessage by backupStatus.collectAsState()
             val currentOperator by operatorId.collectAsState()
             val currentPin by operatorPin.collectAsState()
-            val diagnostics = SystemDiagnosticsEvaluator.evaluate(
-                deviceId = appSettings.deviceId,
-                route = endpoint.path.name,
-                localDevices = devices.size,
-                certificateSha256 = appSettings.localCertificateSha256,
-                snapshot = snapshot,
-                eventCount = events.size,
-            )
-            MaterialTheme {
-                val provisioningActive = provisioningState.phase in setOf(
-                    ProvisioningPhase.CONNECTING_SETUP_AP,
-                    ProvisioningPhase.AUTHORIZING,
-                    ProvisioningPhase.APPLYING,
-                    ProvisioningPhase.WAITING_FOR_RESTART,
-                    ProvisioningPhase.DISCOVERING_LOCAL
-                )
-                if (appSettings.deviceId.isBlank() || provisioningActive) {
-                    ProvisioningScreen(
-                        state = provisioningState,
-                        onScan = ::requestQrScan,
-                        onProvision = provisioning::provision
-                    )
-                } else {
-                    DashboardScreen(
-                        versionName = BuildConfig.VERSION_NAME,
-                        localDevices = devices.size,
-                        route = endpoint.path.name,
-                        deviceId = appSettings.deviceId,
-                        snapshot = snapshot,
-                        events = events,
-                        diagnostics = diagnostics,
-                        backupStatus = maintenanceMessage,
-                        commandStatus = commandMessage,
-                        operatorId = currentOperator,
-                        operatorPin = currentPin,
-                        criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled,
-                        statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
-                        zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
-                        onOperatorIdChange = { operatorId.value = it.take(23) },
-                        onOperatorPinChange = { operatorPin.value = it },
-                        onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
-                        onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } },
-                        onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } },
-                        onClearEventHistory = {
-                            eventHistory.clear()
-                            telemetry.clearEvents()
-                        },
-                        onExportEvents = {
-                            pendingExportText = EventLogExporter.toCsv(events)
-                            exportLauncher.launch(EventLogExporter.suggestedFileName())
-                        },
-                        onShareEvents = {
-                            val payload = EventLogExporter.toCsv(events)
-                            val intent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/csv"
-                                putExtra(Intent.EXTRA_SUBJECT, "HomeGuard-S3 event log")
-                                putExtra(Intent.EXTRA_TEXT, payload)
-                            }
-                            startActivity(Intent.createChooser(intent, "Поділитися журналом"))
-                        },
-                        onExportSettings = {
-                            pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings)
-                            settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName())
-                        },
-                        onImportSettings = { settingsRestoreLauncher.launch("application/json") },
-                        onCommand = ::executeCommand,
-                    )
+
+            LaunchedEffect(endpoint.path.name, cloudProfile.authenticated, cloudProfile.sensorOnly, cloudProfile.id, currentOperator, currentPin) {
+                val actor = currentOperator.trim()
+                if (endpoint.path.name == "CLOUD" && cloudProfile.authenticated && cloudProfile.sensorOnly && cloudProfile.id == actor && currentPin.length in 4..12) {
+                    while (true) {
+                        cloudState.refreshGuestSensors(actor, currentPin)
+                        delay(5_000L)
+                    }
+                }
+            }
+
+            val diagnostics = SystemDiagnosticsEvaluator.evaluate(appSettings.deviceId, endpoint.path.name, devices.size, appSettings.localCertificateSha256, snapshot, events.size)
+            MyfistTheme {
+                MyfistBackground {
+                    val provisioningActive = provisioningState.phase in setOf(ProvisioningPhase.CONNECTING_SETUP_AP, ProvisioningPhase.AUTHORIZING, ProvisioningPhase.APPLYING, ProvisioningPhase.WAITING_FOR_RESTART, ProvisioningPhase.DISCOVERING_LOCAL)
+                    if (appSettings.deviceId.isBlank() || provisioningActive) {
+                        ProvisioningScreen(
+                            state = provisioningState,
+                            wifiNetworks = wifiNetworks,
+                            onScan = ::requestQrScan,
+                            onScanWifi = provisioning::scanWifi,
+                            onProvision = provisioning::provision,
+                            onCloudAttach = ::attachExistingCloudDevice,
+                        )
+                    } else {
+                        DashboardScreen(
+                            versionName = BuildConfig.VERSION_NAME,
+                            localDevices = devices.size,
+                            route = endpoint.path.name,
+                            cloudStatus = cloudStatus,
+                            cloudProfile = cloudProfile,
+                            adminUsers = adminUsers,
+                            adminStatus = adminStatus,
+                            deviceId = appSettings.deviceId,
+                            snapshot = snapshot,
+                            events = events,
+                            diagnostics = diagnostics,
+                            backupStatus = maintenanceMessage,
+                            commandStatus = commandMessage,
+                            operatorId = currentOperator,
+                            operatorPin = currentPin,
+                            criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled,
+                            statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
+                            zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
+                            onOperatorIdChange = { operatorId.value = it.take(23) },
+                            onOperatorPinChange = { operatorPin.value = it },
+                            onLogin = ::loginCloudProfile,
+                            onLogout = ::logoutCloudProfile,
+                            onRefreshAdminUsers = ::refreshAdminUsers,
+                            onUpsertAdminUser = ::upsertAdminUser,
+                            onAdminUserAction = ::adminUserAction,
+                            onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
+                            onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } },
+                            onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } },
+                            onClearEventHistory = { eventHistory.clear(); telemetry.clearEvents() },
+                            onExportEvents = { pendingExportText = EventLogExporter.toCsv(events); exportLauncher.launch(EventLogExporter.suggestedFileName()) },
+                            onShareEvents = { val payload = EventLogExporter.toCsv(events); startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/csv"; putExtra(Intent.EXTRA_SUBJECT, "Myfist event log"); putExtra(Intent.EXTRA_TEXT, payload) }, "Поділитися журналом")) },
+                            onExportSettings = { pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings); settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName()) },
+                            onImportSettings = { settingsRestoreLauncher.launch("application/json") },
+                            onCommand = ::executeCommand,
+                        )
+                    }
                 }
             }
         }
     }
 
-    private fun executeCommand(type: CommandType) {
+    private fun attachExistingCloudDevice(deviceId: String, actor: String, pin: String) {
+        if (!deviceId.startsWith("HG-") || actor.isBlank() || pin.length !in 4..12) { commandStatus.value = "Перевірте Device ID, користувача та PIN"; return }
+        operatorId.value = actor
+        operatorPin.value = pin
+        lifecycleScope.launch {
+            settings.update(settings.settings.value.copy(
+                deviceId = deviceId,
+                remoteAccessEnabled = true,
+                cloudBaseUrl = "mqtts://test.mosquitto.org:8886",
+                lastKnownLocalUrl = "",
+            ))
+            commandStatus.value = "Хмарний пристрій підключається…"
+        }
+    }
+
+    private fun loginCloudProfile() {
         val actor = operatorId.value.trim()
-        val credential = operatorPin.value
-        if (actor.isBlank() || credential.length !in 4..12) {
-            commandStatus.value = "Введіть ID оператора та PIN"
+        val pin = operatorPin.value
+        if (actor.isBlank() || pin.length !in 4..12) {
+            commandStatus.value = "Введіть ID користувача та PIN 4–12 цифр"
             return
         }
         lifecycleScope.launch {
+            commandStatus.value = "Перевірка профілю…"
+            val profile = cloudState.loginProfile(actor, pin)
+            commandStatus.value = if (profile.authenticated) {
+                "Вхід: ${profile.name.ifBlank { profile.id }} · ${profile.role.name}"
+            } else {
+                "Вхід відхилено"
+            }
+        }
+    }
+
+    private fun logoutCloudProfile() {
+        cloudState.logoutProfile()
+        operatorPin.value = ""
+        commandStatus.value = "Вихід виконано"
+    }
+
+    private fun refreshAdminUsers() {
+        val actor = operatorId.value.trim()
+        val pin = operatorPin.value
+        lifecycleScope.launch { cloudState.refreshAdminUsers(actor, pin) }
+    }
+
+    private fun upsertAdminUser(targetId: String, name: String, role: String, enabled: Boolean, newPin: String) {
+        val actor = operatorId.value.trim()
+        val pin = operatorPin.value
+        lifecycleScope.launch { cloudState.upsertAdminUser(actor, pin, targetId.trim(), name.trim(), role.lowercase(), enabled, newPin) }
+    }
+
+    private fun adminUserAction(command: String, targetId: String) {
+        val actor = operatorId.value.trim()
+        val pin = operatorPin.value
+        lifecycleScope.launch { cloudState.adminUserAction(actor, pin, command, targetId) }
+    }
+
+    private fun executeCommand(type: CommandType) {
+        val actor = operatorId.value.trim(); val credential = operatorPin.value
+        if (actor.isBlank() || credential.length !in 4..12) { commandStatus.value = "Введіть ID оператора та PIN"; return }
+        lifecycleScope.launch {
             commandStatus.value = "Виконується: ${type.name}…"
             val result = runCatching { commands.execute(type, actor, credential) }
-            commandStatus.value = result.fold(
-                onSuccess = { reply -> if (reply.accepted || reply.duplicate) "OK: ${reply.code}" else "Відхилено: ${reply.code}" },
-                onFailure = { error -> "Помилка: ${error.message ?: "network"}" },
-            )
+            commandStatus.value = result.fold(onSuccess = { reply -> if (reply.accepted || reply.duplicate) "OK: ${reply.code}" else "Відхилено: ${reply.code}" }, onFailure = { error -> "Помилка: ${error.message ?: "network"}" })
         }
     }
 
     private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     private fun requestQrScan() {
-        val missing = requiredProvisioningPermissions().filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
+        val missing = requiredProvisioningPermissions().filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isEmpty()) launchQrScanner() else permissionLauncher.launch(missing.toTypedArray())
     }
 
@@ -243,8 +265,7 @@ class MainActivity : ComponentActivity() {
 
     private fun requiredProvisioningPermissions(): List<String> = buildList {
         add(Manifest.permission.CAMERA)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.NEARBY_WIFI_DEVICES)
-        else add(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.NEARBY_WIFI_DEVICES) else add(Manifest.permission.ACCESS_FINE_LOCATION)
     }
 
     override fun onDestroy() {

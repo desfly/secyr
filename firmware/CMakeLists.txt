@@ -29,8 +29,15 @@ add_library(homeguard_core
     src/output_interlock.cpp
     src/output_command.cpp
     src/physical_output_runtime.cpp
+    src/physical_output_diagnostics.cpp
     src/access_control.cpp
     src/access_store.cpp
+    src/self_profile.cpp
+    src/admin_user_directory.cpp
+    src/admin_user_commands.cpp
+    src/admin_pin_transport.cpp
+    src/admin_payload_auth.cpp
+    src/admin_payload_canonical.cpp
     src/device_api_model.cpp
     src/device_command_router.cpp
     src/zone.cpp
@@ -73,6 +80,14 @@ add_executable(homeguard_tests
     ../tests/test_build0053.cpp
     ../tests/test_build0054.cpp
     ../tests/test_build0055.cpp
+    ../tests/test_access_privacy.cpp
+    ../tests/test_self_profile.cpp
+    ../tests/test_user_lifecycle.cpp
+    ../tests/test_admin_user_directory.cpp
+    ../tests/test_admin_user_commands.cpp
+    ../tests/test_admin_pin_transport.cpp
+    ../tests/test_admin_payload_auth.cpp
+    ../tests/test_admin_payload_canonical.cpp
 )
 target_link_libraries(homeguard_tests PRIVATE homeguard_core)
 enable_testing()

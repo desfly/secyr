@@ -65,19 +65,27 @@ void test_build0009() {
     CHECK(hg::to_string(hg::CapabilityState::Unavailable) == "unavailable");
     CHECK(hg::to_string(hg::CapabilityState::Configured) == "configured");
 
-    hg::ServiceButton button({40, 3000, 10000});
+    // Current button policy: a short released press requests reboot; a long hold requests factory reset.
+    hg::ServiceButton button({40, 10000});
     CHECK(button.update(true, 0) == hg::ServiceButtonEvent::None);
     CHECK(button.update(true, 39) == hg::ServiceButtonEvent::None);
     CHECK(button.update(true, 40) == hg::ServiceButtonEvent::None);
     CHECK(button.pressed());
     CHECK(button.update(true, 3039) == hg::ServiceButtonEvent::None);
-    CHECK(button.update(true, 3040) == hg::ServiceButtonEvent::ServiceModeRequested);
+    CHECK(button.update(true, 3040) == hg::ServiceButtonEvent::None);
     CHECK(button.update(true, 5000) == hg::ServiceButtonEvent::None);
+    CHECK(button.update(true, 10039) == hg::ServiceButtonEvent::None);
     CHECK(button.update(true, 10040) == hg::ServiceButtonEvent::FactoryResetRequested);
     CHECK(button.update(true, 12000) == hg::ServiceButtonEvent::None);
     CHECK(button.update(false, 12001) == hg::ServiceButtonEvent::None);
     CHECK(button.update(false, 12041) == hg::ServiceButtonEvent::None);
     CHECK(!button.pressed());
+
+    hg::ServiceButton short_press({40, 10000});
+    CHECK(short_press.update(true, 0) == hg::ServiceButtonEvent::None);
+    CHECK(short_press.update(true, 40) == hg::ServiceButtonEvent::None);
+    CHECK(short_press.update(false, 100) == hg::ServiceButtonEvent::None);
+    CHECK(short_press.update(false, 140) == hg::ServiceButtonEvent::RebootRequested);
 
     hg::StartupFlow flow;
     CHECK(flow.boot(false, true, 0) == hg::StartupAction::StartSetupAp);

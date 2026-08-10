@@ -1,33 +1,40 @@
 #include "test_framework.hpp"
-#include "homeguard/access_control.hpp"
+#include "homeguard/physical_output_diagnostics.hpp"
 
 void test_build0055() {
-    using homeguard::AccessControl;
-    using homeguard::AccessRole;
+    hg::PhysicalOutputRuntimeState runtime{};
+    runtime.status = hg::PhysicalOutputStatus::FailClosed;
+    runtime.outputs_enabled = false;
+    runtime.writes = 4;
+    runtime.failures = 0;
 
-    AccessControl access;
+    hg::BootReadinessReport blocked{};
+    const auto blocked_diag = hg::make_physical_output_diagnostics(runtime, blocked);
+    TEST_CHECK(blocked_diag.healthy);
+    TEST_CHECK(!blocked_diag.outputs_enabled);
+    TEST_CHECK(!blocked_diag.outputs_allowed);
 
-    CHECK(AccessControl::user_capacity == 8U);
+    hg::BootReadinessReport ready{};
+    ready.status = hg::BootReadinessStatus::ReadyForPhysicalOutputs;
+    runtime.status = hg::PhysicalOutputStatus::Ready;
+    runtime.outputs_enabled = true;
+    const auto ready_diag = hg::make_physical_output_diagnostics(runtime, ready);
+    TEST_CHECK(ready_diag.healthy);
+    TEST_CHECK(ready_diag.outputs_enabled);
+    TEST_CHECK(ready_diag.outputs_allowed);
 
-    CHECK(access.role_allows(AccessRole::Admin, "security.arm_home"));
-    CHECK(access.role_allows(AccessRole::Admin, "security.disarm"));
-    CHECK(access.role_allows(AccessRole::Admin, "valve.open"));
-    CHECK(access.role_allows(AccessRole::Admin, "valve.close"));
-    CHECK(access.role_allows(AccessRole::Admin, "light.set"));
-    CHECK(access.role_allows(AccessRole::Admin, "valve.clear_latch"));
+    runtime.failures = 1;
+    runtime.status = hg::PhysicalOutputStatus::BackendError;
+    const auto failed_diag = hg::make_physical_output_diagnostics(runtime, ready);
+    TEST_CHECK(!failed_diag.healthy);
 
-    CHECK(access.role_allows(AccessRole::User, "security.arm_home"));
-    CHECK(access.role_allows(AccessRole::User, "security.arm_away"));
-    CHECK(access.role_allows(AccessRole::User, "security.disarm"));
-    CHECK(access.role_allows(AccessRole::User, "valve.open"));
-    CHECK(access.role_allows(AccessRole::User, "valve.close"));
-    CHECK(!access.role_allows(AccessRole::User, "light.set"));
-    CHECK(!access.role_allows(AccessRole::User, "valve.clear_latch"));
-    CHECK(!access.role_allows(AccessRole::User, "system.reboot"));
+    runtime.failures = 0;
+    runtime.status = hg::PhysicalOutputStatus::Ready;
+    runtime.outputs_enabled = true;
+    const auto inconsistent = hg::make_physical_output_diagnostics(runtime, blocked);
+    TEST_CHECK(!inconsistent.healthy);
 
-    CHECK(!access.role_allows(AccessRole::Guest, "security.arm_home"));
-    CHECK(!access.role_allows(AccessRole::Guest, "security.disarm"));
-    CHECK(!access.role_allows(AccessRole::Guest, "valve.open"));
-    CHECK(!access.role_allows(AccessRole::Guest, "valve.close"));
-    CHECK(!access.role_allows(AccessRole::Guest, "light.set"));
+    const auto json = hg::physical_output_diagnostics_json(failed_diag);
+    TEST_CHECK(json.find("\"healthy\":false") != std::string::npos);
+    TEST_CHECK(json.find("\"failures\":1") != std::string::npos);
 }

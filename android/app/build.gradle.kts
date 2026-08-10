@@ -12,8 +12,8 @@ android {
         applicationId = "ua.homeguard.s3"
         minSdk = 26
         targetSdk = 35
-        versionCode = 54
-        versionName = "0.0.54"
+        versionCode = 60
+        versionName = "0.0.60"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -26,6 +26,12 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    packaging {
+        resources {
+            excludes += listOf("META-INF/INDEX.LIST", "META-INF/io.netty.versions.properties")
+        }
     }
 
     buildTypes {
@@ -56,6 +62,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("com.hivemq:hivemq-mqtt-client:1.3.14")
 
     testImplementation("junit:junit:4.13.2")
 }

@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "firmware" / "esp-idf" / "main"
 MOCK = ROOT / "tests" / "esp-idf-mock" / "include"
 INCLUDE = ROOT / "firmware" / "include"
+PHYSICAL_BUTTON_INCLUDE = ROOT / "firmware" / "esp-idf" / "components" / "physical_button" / "include"
 
 compiler = shutil.which("g++") or shutil.which("clang++")
 if not compiler:
@@ -24,6 +25,7 @@ for source in sorted(MAIN.glob("*.cpp")):
         "-I", str(MOCK),
         "-I", str(MAIN),
         "-I", str(INCLUDE),
+        "-I", str(PHYSICAL_BUTTON_INCLUDE),
         str(source),
     ]
     run = subprocess.run(command, capture_output=True, text=True)

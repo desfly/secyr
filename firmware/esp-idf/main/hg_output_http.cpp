@@ -1,5 +1,6 @@
 #include "hg_output_http.hpp"
 #include "homeguard/output_command.hpp"
+#include "homeguard/physical_output_diagnostics.hpp"
 
 #include <charconv>
 #include <cstddef>
@@ -50,18 +51,33 @@ esp_err_t OutputHttp::register_handlers(
     readiness_ = readiness;
     physical_ = physical;
     bus_ = bus;
-    const httpd_uri_t route{
-        .uri="/api/v1/system/output-command",
-        .method=HTTP_POST,
-        .handler=&OutputHttp::command_post,
-        .user_ctx=this,
+    const httpd_uri_t routes[] = {
+        {.uri="/api/v1/system/output-command", .method=HTTP_POST, .handler=&OutputHttp::command_post, .user_ctx=this},
+        {.uri="/api/v1/system/output-runtime", .method=HTTP_GET, .handler=&OutputHttp::runtime_get, .user_ctx=this},
     };
-    return httpd_register_uri_handler(server, &route);
+    for (const auto& route : routes) {
+        const auto error = httpd_register_uri_handler(server, &route);
+        if (error != ESP_OK) return error;
+    }
+    return ESP_OK;
 }
 
 esp_err_t OutputHttp::command_post(httpd_req_t* request) {
     auto* self = self_from(request);
     return self == nullptr ? ESP_FAIL : self->handle_command(request);
+}
+
+esp_err_t OutputHttp::runtime_get(httpd_req_t* request) {
+    auto* self = self_from(request);
+    return self == nullptr ? ESP_FAIL : self->handle_runtime(request);
+}
+
+esp_err_t OutputHttp::handle_runtime(httpd_req_t* request) const {
+    if (physical_ == nullptr || readiness_ == nullptr) return ESP_FAIL;
+    const auto diagnostics = hg::make_physical_output_diagnostics(physical_->state(), *readiness_);
+    const auto body = hg::physical_output_diagnostics_json(diagnostics);
+    httpd_resp_set_type(request, "application/json");
+    return httpd_resp_send(request, body.c_str(), static_cast<ssize_t>(body.size()));
 }
 
 esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
@@ -108,7 +124,7 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
     if (result.status != hg::OutputCommandStatus::Applied) {
         httpd_resp_set_status(request, "409 Conflict");
     } else if (bus_ != nullptr) {
-        bus_->publish({hg::SystemEventType::ConfigChanged, output_id, 0, 0, active ? 5401 : 5400});
+        bus_->publish({hg::SystemEventType::ConfigChanged, output_id, 0, 0, active ? 5501 : 5500});
     }
     httpd_resp_set_type(request, "application/json");
     return httpd_resp_send(request, response.c_str(), static_cast<ssize_t>(response.size()));

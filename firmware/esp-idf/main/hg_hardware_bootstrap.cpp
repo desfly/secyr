@@ -1,6 +1,97 @@
 #include "hg_hardware_bootstrap.hpp"
 
+#include "hg_access_nvs.hpp"
+#include "hg_board_hw678.hpp"
+#include "hg_cloud_config.hpp"
+#include "hg_commissioning_nvs.hpp"
+#include "hg_wifi_credentials.hpp"
+#include "physical_button.hpp"
+
+#include "esp_log.h"
+#include "esp_system.h"
+
 namespace homeguard::idf {
+namespace {
+constexpr const char* kTag = "hg_bootstrap";
+PhysicalButtonService g_reset_button;
+
+void reboot_from_button(void*)
+{
+    ESP_LOGW(kTag, "RESET short press: reboot requested");
+    esp_restart();
+}
+
+void factory_reset_from_button(void*)
+{
+    ESP_LOGW(kTag, "RESET held 5 seconds: factory reset requested");
+
+    // Erase commissioning first. Once this succeeds, the next boot is
+    // guaranteed to enter FAIL-CLOSED setup mode even if another NVS erase
+    // later reports an error.
+    const auto commissioning_error = CommissioningNvsStore{}.erase_all();
+    if (commissioning_error != ESP_OK) {
+        ESP_LOGE(kTag, "Factory reset aborted: commissioning erase failed: %s",
+                 esp_err_to_name(commissioning_error));
+        return;
+    }
+
+    bool complete = true;
+    const auto access_error = AccessNvsStore{}.erase();
+    if (access_error != ESP_OK) {
+        complete = false;
+        ESP_LOGE(kTag, "Factory reset: local users erase failed: %s",
+                 esp_err_to_name(access_error));
+    }
+
+    const auto cloud_error = CloudConfigStore{}.erase();
+    if (cloud_error != ESP_OK) {
+        complete = false;
+        ESP_LOGE(kTag, "Factory reset: cloud binding erase failed: %s",
+                 esp_err_to_name(cloud_error));
+    }
+
+    const auto wifi_error = WifiCredentialStore{}.erase();
+    if (wifi_error != ESP_OK) {
+        complete = false;
+        ESP_LOGE(kTag, "Factory reset: WiFi credentials erase failed: %s",
+                 esp_err_to_name(wifi_error));
+    }
+
+    if (complete) {
+        ESP_LOGW(kTag, "Factory reset complete; rebooting into Setup AP mode");
+    } else {
+        ESP_LOGE(kTag,
+                 "Factory reset partially completed; rebooting FAIL-CLOSED so setup can recover remaining state");
+    }
+    esp_restart();
+}
+
+void start_reset_button()
+{
+    if (g_reset_button.active()) return;
+
+    hg::ServiceButtonConfig config{};
+    config.debounce_ms = 40;
+    config.factory_reset_hold_ms = 5000;
+
+    const bool started = g_reset_button.begin(
+        static_cast<int>(homeguard::board::kServiceButton),
+        true,
+        config,
+        &reboot_from_button,
+        &factory_reset_from_button,
+        nullptr);
+
+    if (!started) {
+        ESP_LOGE(kTag, "RESET button initialization failed on GPIO%u",
+                 static_cast<unsigned>(homeguard::board::kServiceButton));
+    } else {
+        ESP_LOGI(kTag,
+                 "RESET button ready on GPIO%u: short press=reboot, hold 5s=factory reset",
+                 static_cast<unsigned>(homeguard::board::kServiceButton));
+    }
+}
+}  // namespace
 
 HardwareModuleStatus HardwareBootstrap::module_status(
     esp_err_t error,
@@ -23,6 +114,9 @@ HardwareModuleStatus HardwareBootstrap::module_status(
 
 esp_err_t HardwareBootstrap::initialize()
 {
+    // RESET must remain available even when another peripheral fails during
+    // hardware bootstrap, so start it before any bus/device initialization.
+    start_reset_button();
     status_.safe_outputs_forced = true;
 
     auto error = i2c_.initialize();

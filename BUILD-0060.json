@@ -1,0 +1,16 @@
+{
+  "build": "0060",
+  "version": "0.0.60",
+  "focus": "cloud challenge-response auth plus completed Web and Android role-aware interfaces",
+  "roles": {
+    "admin": "full_access",
+    "user": "monitor_arm_disarm_valves",
+    "guest": "sensor_only"
+  },
+  "cloud_auth": "single_use_challenge_response",
+  "challenge_ttl_ms": 30000,
+  "max_users": 8,
+  "wifi_ssid_visible_after_wifi_status": true,
+  "physical_outputs": "fail-closed",
+  "public_mqtt": "transport-test-only"
+}
