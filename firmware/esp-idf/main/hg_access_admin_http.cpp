@@ -1,5 +1,6 @@
 #include "hg_access_admin_http.hpp"
 
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <utility>
