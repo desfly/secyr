@@ -16,12 +16,12 @@ namespace {
 constexpr const char* kTag = "hg_wifi_http";
 
 #if defined(ESP_PLATFORM)
-extern const unsigned char web_index_html_start[] asm("_binary_web_index_html_start");
-extern const unsigned char web_index_html_end[] asm("_binary_web_index_html_end");
-extern const unsigned char web_app_css_start[] asm("_binary_web_app_css_start");
-extern const unsigned char web_app_css_end[] asm("_binary_web_app_css_end");
-extern const unsigned char web_app_js_start[] asm("_binary_web_app_js_start");
-extern const unsigned char web_app_js_end[] asm("_binary_web_app_js_end");
+extern const unsigned char web_index_html_start[] asm("_binary_index_html_start");
+extern const unsigned char web_index_html_end[] asm("_binary_index_html_end");
+extern const unsigned char web_app_css_start[] asm("_binary_app_css_start");
+extern const unsigned char web_app_css_end[] asm("_binary_app_css_end");
+extern const unsigned char web_app_js_start[] asm("_binary_app_js_start");
+extern const unsigned char web_app_js_end[] asm("_binary_app_js_end");
 #endif
 
 std::string json_escape(const char* text)
