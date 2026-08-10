@@ -1,5 +1,7 @@
 const actor = `web:${crypto.randomUUID()}`;
 const toast = document.querySelector("#toast");
+let selectedWifiSsid = "";
+let networkPollTimer = null;
 
 function showToast(message) {
   toast.textContent = message;
@@ -37,8 +39,9 @@ function ukZoneState(value) {
 function renderSystem(state) {
   document.querySelector("#securityMode").textContent = ukSecurityMode(state.security_mode);
   document.querySelector("#securitySub").textContent = state.security_mode ? "Реальний стан контролера" : "Стан недоступний";
-  document.querySelector("#zoneCount").textContent = `${state.zones.length}`;
-  document.querySelector("#zoneSub").textContent = state.zones.length ? "Зареєстровано" : "Зони не налаштовані";
+  const zones = Array.isArray(state.zones) ? state.zones : [];
+  document.querySelector("#zoneCount").textContent = `${zones.length}`;
+  document.querySelector("#zoneSub").textContent = zones.length ? "Зареєстровано" : "Зони не налаштовані";
   document.querySelector("#coldPressure").textContent = `${Number(state.cold_pressure_bar || 0).toFixed(2)} бар`;
   document.querySelector("#hotPressure").textContent = `${Number(state.hot_pressure_bar || 0).toFixed(2)} бар`;
   document.querySelector("#coldTemperature").textContent = `${Number(state.cold_temperature_c || 0).toFixed(1)} °C`;
@@ -47,7 +50,6 @@ function renderSystem(state) {
   document.querySelector("#battery").textContent = `${Number(state.battery_voltage_v || 0).toFixed(2)} V / ${Number(state.battery_current_a || 0).toFixed(2)} A`;
   document.querySelector("#light").textContent = state.corridor_light ? "Увімкнено" : "Вимкнено";
 
-  const zones = Array.isArray(state.zones) ? state.zones : [];
   document.querySelector("#zones").innerHTML = zones.length ? zones.map(zone => `
     <div class="zone"><span>${zone.title || zone.name || `Зона ${zone.id}`}${zone.always_on ? " · 24/7" : ""}</span><strong class="${stateClass(zone.state)}">${ukZoneState(zone.state)}</strong></div>
   `).join("") : `<div class="zone"><span>Зони не налаштовані</span><strong class="warning">—</strong></div>`;
@@ -62,11 +64,27 @@ function renderSystem(state) {
   bindCommandButtons();
 }
 
+function setNetworkMessage(text, type = "") {
+  const el = document.querySelector("#networkMessage");
+  el.textContent = text;
+  el.className = `network-message ${type}`.trim();
+}
+
 function renderWifi(wifi) {
   const connected = wifi.station === "connected";
   const connecting = wifi.station === "connecting";
-  document.querySelector("#wifiName").textContent = wifi.station_ssid || (wifi.softap ? wifi.ssid : "Не налаштовано");
-  document.querySelector("#connection").textContent = connected ? (wifi.station_ip || "Підключено") : connecting ? "Підключення…" : (wifi.softap ? `AP ${wifi.ip || "192.168.4.1"}` : "Не налаштовано");
+  const ssid = wifi.station_ssid || (wifi.softap ? wifi.ssid : "Не налаштовано");
+  const ip = connected ? (wifi.station_ip || "—") : (wifi.softap ? (wifi.ip || "192.168.4.1") : "—");
+  const stateText = connected ? "Підключено" : connecting ? "Підключення…" : (wifi.softap ? "Точка налаштування активна" : "Не підключено");
+
+  document.querySelector("#wifiName").textContent = ssid;
+  document.querySelector("#connection").textContent = connected ? ip : connecting ? "Підключення…" : (wifi.softap ? `AP ${ip}` : "Не налаштовано");
+  document.querySelector("#networkState").textContent = stateText;
+  document.querySelector("#networkSsid").textContent = ssid;
+  document.querySelector("#networkIp").textContent = ip;
+
+  if (connected) setNetworkMessage(`Підключено до ${wifi.station_ssid || "Wi-Fi"}. IP: ${wifi.station_ip || "—"}`, "ok");
+  else if (connecting) setNetworkMessage("Підключення до Wi-Fi…", "wait");
 }
 
 function renderCloud(cloud) {
@@ -80,6 +98,139 @@ function renderCloud(cloud) {
   } else {
     state.textContent = "Не налаштовано"; state.className = "status-unconfigured"; sub.textContent = "MQTT вимкнено";
   }
+}
+
+async function refreshWifiOnly() {
+  try {
+    const wifi = await api("/api/v1/wifi/status");
+    renderWifi(wifi);
+    return wifi;
+  } catch (error) {
+    document.querySelector("#networkState").textContent = "Помилка";
+    setNetworkMessage(`Помилка отримання стану: ${error.message}`, "error");
+    throw error;
+  }
+}
+
+async function scanWifi() {
+  const button = document.querySelector("#scanWifi");
+  const list = document.querySelector("#wifiNetworks");
+  button.disabled = true;
+  button.textContent = "Сканування…";
+  list.innerHTML = `<div class="wifi-row"><strong>Сканування Wi-Fi…</strong><small>Зачекайте</small><span></span></div>`;
+  setNetworkMessage("Пошук доступних мереж…", "wait");
+  try {
+    const result = await api("/api/v1/wifi/scan");
+    const networks = Array.isArray(result.networks) ? result.networks.filter(n => n.ssid) : [];
+    const unique = [];
+    const seen = new Set();
+    networks.sort((a,b) => Number(b.rssi || -100) - Number(a.rssi || -100)).forEach(n => { if (!seen.has(n.ssid)) { seen.add(n.ssid); unique.push(n); } });
+    if (!unique.length) {
+      list.innerHTML = `<div class="wifi-row"><strong>Мереж не знайдено</strong><small>Повторіть сканування</small><span></span></div>`;
+      setNetworkMessage("Мереж не знайдено", "error");
+      return;
+    }
+    list.innerHTML = unique.map(n => `<button type="button" class="wifi-row" data-ssid="${escapeHtml(n.ssid)}"><strong>${escapeHtml(n.ssid)}</strong><span class="wifi-rssi">${Number(n.rssi)} dBm</span><small>Канал ${Number(n.channel || 0)}</small></button>`).join("");
+    list.querySelectorAll(".wifi-row[data-ssid]").forEach(row => row.onclick = () => selectWifi(row));
+    setNetworkMessage(`Знайдено мереж: ${unique.length}`, "ok");
+  } catch (error) {
+    list.innerHTML = `<div class="wifi-row"><strong>Помилка сканування</strong><small>${escapeHtml(error.message)}</small><span></span></div>`;
+    setNetworkMessage(`Помилка сканування: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Сканувати Wi-Fi";
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+}
+
+function selectWifi(row) {
+  document.querySelectorAll(".wifi-row.selected").forEach(el => el.classList.remove("selected"));
+  row.classList.add("selected");
+  selectedWifiSsid = row.dataset.ssid || "";
+  document.querySelector("#wifiSsid").value = selectedWifiSsid;
+  document.querySelector("#wifiPassword").focus();
+  setNetworkMessage(`Обрано мережу: ${selectedWifiSsid}`);
+}
+
+async function connectWifi() {
+  const button = document.querySelector("#connectWifi");
+  const ssid = document.querySelector("#wifiSsid").value.trim();
+  const password = document.querySelector("#wifiPassword").value;
+  if (!ssid) { setNetworkMessage("Оберіть або введіть SSID", "error"); return; }
+  if (ssid.length > 32) { setNetworkMessage("SSID задовгий", "error"); return; }
+  if (password.length > 64) { setNetworkMessage("Пароль задовгий", "error"); return; }
+
+  button.disabled = true;
+  button.textContent = "Підключення…";
+  setNetworkMessage(`Передаю налаштування для ${ssid}…`, "wait");
+  try {
+    const response = await api("/api/v1/provisioning/wifi", {method:"POST", body:JSON.stringify({ssid,password})});
+    if (!response.accepted) throw new Error("контролер відхилив налаштування");
+    setNetworkMessage("Підключення… очікую IP-адресу", "wait");
+    startNetworkPolling(ssid);
+  } catch (error) {
+    setNetworkMessage(`Помилка: ${error.message}`, "error");
+    button.disabled = false;
+    button.textContent = "Підключити";
+  }
+}
+
+function startNetworkPolling(expectedSsid) {
+  clearInterval(networkPollTimer);
+  let attempts = 0;
+  networkPollTimer = setInterval(async () => {
+    attempts += 1;
+    try {
+      const wifi = await refreshWifiOnly();
+      if (wifi.station === "connected") {
+        clearInterval(networkPollTimer);
+        networkPollTimer = null;
+        document.querySelector("#connectWifi").disabled = false;
+        document.querySelector("#connectWifi").textContent = "Підключити";
+        setNetworkMessage(`Підключено до ${wifi.station_ssid || expectedSsid}. IP: ${wifi.station_ip || "—"}`, "ok");
+      } else if (attempts >= 20) {
+        clearInterval(networkPollTimer);
+        networkPollTimer = null;
+        document.querySelector("#connectWifi").disabled = false;
+        document.querySelector("#connectWifi").textContent = "Підключити";
+        setNetworkMessage("Помилка або таймаут підключення. Перевірте пароль і спробуйте ще раз.", "error");
+      }
+    } catch (_) {
+      if (attempts >= 20) {
+        clearInterval(networkPollTimer);
+        networkPollTimer = null;
+        document.querySelector("#connectWifi").disabled = false;
+        document.querySelector("#connectWifi").textContent = "Підключити";
+      }
+    }
+  }, 1500);
+}
+
+function showNetworkScreen() {
+  document.querySelector("#overview").style.display = "none";
+  document.querySelector("#network-screen").classList.add("active");
+  document.querySelectorAll(".sidebar nav a").forEach(a => a.classList.remove("active"));
+  document.querySelector("#navNetwork").classList.add("active");
+  refreshWifiOnly().catch(() => {});
+}
+
+function showDashboard() {
+  document.querySelector("#network-screen").classList.remove("active");
+  document.querySelector("#overview").style.display = "block";
+  document.querySelectorAll(".sidebar nav a").forEach(a => a.classList.remove("active"));
+  document.querySelector("#navOverview").classList.add("active");
+}
+
+function resetWifiForm() {
+  selectedWifiSsid = "";
+  document.querySelector("#wifiSsid").value = "";
+  document.querySelector("#wifiPassword").value = "";
+  document.querySelectorAll(".wifi-row.selected").forEach(el => el.classList.remove("selected"));
+  setNetworkMessage("Оберіть іншу мережу та натисніть «Підключити»");
+  scanWifi();
 }
 
 async function refresh() {
@@ -110,6 +261,12 @@ async function sendCommand(button) {
 function bindCommandButtons() { document.querySelectorAll("[data-command]").forEach(button => button.onclick = () => sendCommand(button)); }
 document.querySelector("#panicButton").onclick = () => showToast("Паніка ще не підключена до API — команда не відправлена");
 document.querySelector("#refresh").onclick = refresh;
+document.querySelector("#navNetwork").onclick = event => { event.preventDefault(); showNetworkScreen(); };
+document.querySelector("#navOverview").onclick = event => { event.preventDefault(); showDashboard(); };
+document.querySelector("#backDashboard").onclick = showDashboard;
+document.querySelector("#scanWifi").onclick = scanWifi;
+document.querySelector("#connectWifi").onclick = connectWifi;
+document.querySelector("#changeWifi").onclick = resetWifiForm;
 bindCommandButtons();
 refresh();
 setInterval(refresh, 5000);
