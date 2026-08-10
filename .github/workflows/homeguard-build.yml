@@ -55,6 +55,8 @@ jobs:
         run: python tools/preflight_build0022.py
       - name: Cloud dashboard syntax and security gate
         run: python tools/check_cloud_web.py
+      - name: Android role-aware interface gate
+        run: python tools/check_android_cloud_ui.py
       - name: ESP-IDF source audit
         run: python tools/audit_esp_idf_sources.py
       - name: Component dependency audit
