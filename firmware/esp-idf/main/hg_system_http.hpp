@@ -18,10 +18,12 @@ private:
     static esp_err_t outputs_get(httpd_req_t* request);
     static esp_err_t partitions_get(httpd_req_t* request);
     static esp_err_t events_get(httpd_req_t* request);
+    static esp_err_t security_command_post(httpd_req_t* request);
     static esp_err_t websocket(httpd_req_t* request);
     static void on_event(const hg::SystemEvent& event, void* context);
 
     esp_err_t send_json(httpd_req_t* request, const char* body, std::size_t size) const;
+    esp_err_t handle_security_command(httpd_req_t* request);
     void remember_client(int socket_fd);
     void record(const hg::SystemEvent& event);
     void broadcast(const hg::SystemEvent& event);
