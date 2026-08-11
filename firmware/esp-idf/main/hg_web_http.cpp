@@ -39,8 +39,6 @@ esp_err_t WebHttp::send_asset(httpd_req_t* request,
 {
     if (request == nullptr || start == nullptr || end == nullptr || end < start) return ESP_ERR_INVALID_ARG;
     httpd_resp_set_type(request, content_type);
-    httpd_resp_set_hdr(request, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-    httpd_resp_set_hdr(request, "Pragma", "no-cache");
     return httpd_resp_send(
         request,
         reinterpret_cast<const char*>(start),
