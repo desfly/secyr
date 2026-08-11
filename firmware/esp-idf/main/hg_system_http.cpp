@@ -31,6 +31,29 @@ const char* severity_name(hg::Severity severity) {
         default: return "info";
     }
 }
+
+bool parse_json_string(const std::string& body, const char* key, std::string& value) {
+    const std::string marker = std::string{"\""} + key + "\"";
+    auto pos = body.find(marker);
+    if (pos == std::string::npos) return false;
+    pos = body.find(':', pos + marker.size());
+    if (pos == std::string::npos) return false;
+    pos = body.find('"', pos + 1U);
+    if (pos == std::string::npos) return false;
+    const auto end = body.find('"', pos + 1U);
+    if (end == std::string::npos) return false;
+    value.assign(body, pos + 1U, end - pos - 1U);
+    return true;
+}
+
+const char* arm_state_name(hg::PartitionArmState state) {
+    switch (state) {
+        case hg::PartitionArmState::Stay: return "stay";
+        case hg::PartitionArmState::Away: return "away";
+        case hg::PartitionArmState::Alarm: return "alarm";
+        default: return "disarmed";
+    }
+}
 }
 
 esp_err_t SystemHttp::register_handlers(httpd_handle_t server, hg::SystemModel* model, hg::SystemEventBus* bus) {
@@ -46,6 +69,7 @@ esp_err_t SystemHttp::register_handlers(httpd_handle_t server, hg::SystemModel* 
         {.uri="/api/v1/system/outputs", .method=HTTP_GET, .handler=&SystemHttp::outputs_get, .user_ctx=this},
         {.uri="/api/v1/system/partitions", .method=HTTP_GET, .handler=&SystemHttp::partitions_get, .user_ctx=this},
         {.uri="/api/v1/system/events", .method=HTTP_GET, .handler=&SystemHttp::events_get, .user_ctx=this},
+        {.uri="/api/v1/system/security-command", .method=HTTP_POST, .handler=&SystemHttp::security_command_post, .user_ctx=this},
         {.uri="/ws/system", .method=HTTP_GET, .handler=&SystemHttp::websocket, .user_ctx=this, .is_websocket=true},
     };
     for (const auto& route : routes) {
@@ -93,6 +117,53 @@ esp_err_t SystemHttp::events_get(httpd_req_t* request) {
     if (self == nullptr) return ESP_FAIL;
     const auto body = self->events_json();
     return self->send_json(request, body.c_str(), body.size());
+}
+
+esp_err_t SystemHttp::security_command_post(httpd_req_t* request) {
+    auto* self = self_from(request);
+    return self == nullptr ? ESP_FAIL : self->handle_security_command(request);
+}
+
+esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
+    if (model_ == nullptr || bus_ == nullptr) return ESP_FAIL;
+    if (request->content_len == 0 || request->content_len > 192) {
+        httpd_resp_set_status(request, "400 Bad Request");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_body\"}", -1);
+    }
+
+    std::string body(request->content_len, '\0');
+    const auto received = httpd_req_recv(request, body.data(), body.size());
+    if (received <= 0) {
+        httpd_resp_set_status(request, "400 Bad Request");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"read_failed\"}", -1);
+    }
+    body.resize(static_cast<std::size_t>(received));
+
+    std::string command;
+    if (!parse_json_string(body, "command", command)) {
+        httpd_resp_set_status(request, "400 Bad Request");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"missing_command\"}", -1);
+    }
+
+    hg::PartitionArmState target{};
+    if (command == "security.arm_away") target = hg::PartitionArmState::Away;
+    else if (command == "security.arm_home") target = hg::PartitionArmState::Stay;
+    else if (command == "security.disarm") target = hg::PartitionArmState::Disarmed;
+    else if (command == "security.panic") target = hg::PartitionArmState::Alarm;
+    else {
+        httpd_resp_set_status(request, "400 Bad Request");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"unsupported_command\"}", -1);
+    }
+
+    if (!model_->set_partition_arm(1, target, 0)) {
+        httpd_resp_set_status(request, "409 Conflict");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"partition_command_failed\"}", -1);
+    }
+    (void)bus_->dispatch_all();
+
+    const std::string response = std::string{"{\"ok\":true,\"command\":\""} + command +
+        "\",\"armState\":\"" + arm_state_name(target) + "\"}";
+    return send_json(request, response.c_str(), response.size());
 }
 
 void SystemHttp::remember_client(int socket_fd) {
