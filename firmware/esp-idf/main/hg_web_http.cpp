@@ -4,14 +4,15 @@
 #include <cstdint>
 #include <sys/types.h>
 
-// ESP-IDF EMBED_TXTFILES exports these exact linker symbols. Keep the
-// declarations at global scope, matching Espressif's documented pattern.
-extern const uint8_t web_index_html_start[] asm("_binary_web_index_html_start");
-extern const uint8_t web_index_html_end[] asm("_binary_web_index_html_end");
-extern const uint8_t web_app_css_start[] asm("_binary_web_app_css_start");
-extern const uint8_t web_app_css_end[] asm("_binary_web_app_css_end");
-extern const uint8_t web_app_js_start[] asm("_binary_web_app_js_start");
-extern const uint8_t web_app_js_end[] asm("_binary_web_app_js_end");
+// ESP-IDF EMBED_TXTFILES creates symbols from the embedded file name as seen
+// by the component build. For files generated as index.html.S/app.css.S/app.js.S
+// the linker symbols do not contain the local "web/" directory prefix.
+extern const uint8_t index_html_start[] asm("_binary_index_html_start");
+extern const uint8_t index_html_end[] asm("_binary_index_html_end");
+extern const uint8_t app_css_start[] asm("_binary_app_css_start");
+extern const uint8_t app_css_end[] asm("_binary_app_css_end");
+extern const uint8_t app_js_start[] asm("_binary_app_js_start");
+extern const uint8_t app_js_end[] asm("_binary_app_js_end");
 
 namespace homeguard::idf {
 
@@ -48,17 +49,17 @@ esp_err_t WebHttp::send_asset(httpd_req_t* request,
 
 esp_err_t WebHttp::index_get(httpd_req_t* request)
 {
-    return send_asset(request, "text/html; charset=utf-8", web_index_html_start, web_index_html_end);
+    return send_asset(request, "text/html; charset=utf-8", index_html_start, index_html_end);
 }
 
 esp_err_t WebHttp::css_get(httpd_req_t* request)
 {
-    return send_asset(request, "text/css; charset=utf-8", web_app_css_start, web_app_css_end);
+    return send_asset(request, "text/css; charset=utf-8", app_css_start, app_css_end);
 }
 
 esp_err_t WebHttp::js_get(httpd_req_t* request)
 {
-    return send_asset(request, "application/javascript; charset=utf-8", web_app_js_start, web_app_js_end);
+    return send_asset(request, "application/javascript; charset=utf-8", app_js_start, app_js_end);
 }
 
 }  // namespace homeguard::idf
