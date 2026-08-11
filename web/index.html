@@ -1,2 +1,120 @@
 <!doctype html>
-<html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#10243a"><title>Myfist · HomeGuard-S3</title><link rel="stylesheet" href="/app.css"></head><body><div class="shell"><aside class="sidebar"><div class="brand"><h1>Myfist</h1></div><div class="bruce" aria-hidden="true"></div><nav><a class="active" href="#overview">⌂ <span>Панель</span></a><a href="#zones-section">▧ <span>Зони</span></a><a href="#zones-section">◉ <span>Датчики</span></a><a href="#io-section">⇥ <span>Входи</span></a><a href="#io-section">⇆ <span>Виходи</span></a><a href="#events">♙ <span>Події</span></a><a href="#events">◷ <span>Історія</span></a><a href="#system">⚙ <span>Налаштування</span></a><a href="#network">⌁ <span>Мережа</span></a><a href="#system">⚙ <span>Система</span></a></nav><div class="side-foot"><b><i></i> Онлайн</b><small>HG-ACA7041DA710</small></div></aside><div class="workspace"><header><div><h2>HomeGuard-S3</h2><p>Локальна панель контролера</p></div><div class="header-status"><div class="clock"><span>◷ &nbsp;<b id="clock">--:--:--</b></span><small id="date">--.--.----</small></div><div class="online">☁ &nbsp; Онлайн</div></div></header><main id="overview"><section class="status-grid"><article><div class="round green">♢</div><div><span>Стан охорони</span><strong id="securityMode" class="green-text">—</strong><small>Система в нормі</small></div></article><article><div class="round blue">♢</div><div><span>Зони</span><strong id="zoneCount">—</strong><small>Нормальні</small></div></article><article id="network"><div class="round purple">◉</div><div><span>Wi-Fi</span><strong id="wifiName">—</strong><small id="connection">Підключення…</small></div></article><article><div class="round orange">☁</div><div><span>Хмара (MQTT)</span><strong class="orange-text">Підключено</strong><small>10.0.0.12:8883</small></div></article></section><section class="two-col"><article class="panel"><h3>Швидкий доступ</h3><div class="quick"><button data-command="security.arm_away"><b>♙</b><strong>Поставити</strong><small>Під охорону</small></button><button data-command="security.disarm"><b class="red">♙</b><strong>Зняти</strong><small>з охорони</small></button><button data-command="security.arm_home"><b class="blue-text">⌂</b><strong>Нічний режим</strong><small>Активувати</small></button><button><b class="orange-text">♧</b><strong>Тривога</strong><small>Паніка</small></button></div></article><article class="panel" id="zones-section"><h3>Стан зон</h3><div id="zones" class="zones"></div></article><article class="panel" id="events"><h3>Останні події</h3><div class="events"><div><i></i><time>15:41:22</time><span>Користувач admin зняв з охорони</span><a>Інформація ›</a></div><div><i></i><time>15:40:10</time><span>Зона 1 відновлена</span><a>Інформація ›</a></div><div><i></i><time>15:39:58</time><span>Wi-Fi підключено</span><a>Інформація ›</a></div><div><i></i><time>15:39:42</time><span>Система завантажена</span><a>Інформація ›</a></div></div><div class="history">Переглянути всю історію ›</div></article><article class="panel" id="io-section"><h3>Стан входів / виходів</h3><div class="io"><div><b>▯</b><span>Вх. 1</span><small>Норма</small></div><div><b>▯</b><span>Вх. 2</span><small>Норма</small></div><div><b>▯</b><span>Вх. 3</span><small class="alarm">Тривога</small></div><div><b>▯</b><span>Вх. 4</span><small>Норма</small></div><hr><div><b>⇆</b><span>Вих. 1</span><small>Увімк.</small></div><div class="muted"><b>⇆</b><span>Вих. 2</span><small>Вимк.</small></div><div class="orange-text"><b>⇆</b><span>Вих. 3</span><small>Увімк.</small></div></div></article></section><section id="system" hidden><pre id="buildInfo">—</pre><span id="mains"></span><span id="battery"></span><span id="light"></span><span id="coldPressure"></span><span id="hotPressure"></span><span id="coldTemperature"></span><span id="hotTemperature"></span><div id="valves"></div></section></main></div></div><div id="toast" hidden></div><button id="refresh" hidden>Оновити</button><script src="/app.js"></script><script>function tick(){const d=new Date();document.getElementById('clock').textContent=d.toLocaleTimeString('uk-UA');document.getElementById('date').textContent=d.toLocaleDateString('uk-UA')}tick();setInterval(tick,1000);</script></body></html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#10243a">
+  <title>MyFist · HomeGuard-S3</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><h1>MyFist</h1></div>
+    <div class="bruce" aria-hidden="true"></div>
+    <nav>
+      <a class="active" href="#overview">⌂ <span>Панель</span></a>
+      <a href="#zones-section">▧ <span>Зони</span></a>
+      <a href="#zones-section">◉ <span>Датчики</span></a>
+      <a href="#io-section">⇥ <span>Входи</span></a>
+      <a href="#io-section">⇆ <span>Виходи</span></a>
+      <a href="#events">♙ <span>Події</span></a>
+      <a href="#events">◷ <span>Історія</span></a>
+      <a href="#system">⚙ <span>Налаштування</span></a>
+      <a id="networkNav" href="#networkPage">⌁ <span>Мережа</span></a>
+      <a href="#system">⚙ <span>Система</span></a>
+    </nav>
+    <div class="side-foot"><b><i></i> Онлайн</b><small>HG-ACA7041DA710</small></div>
+  </aside>
+
+  <div class="workspace">
+    <header>
+      <div><h2>HomeGuard-S3</h2><p>Локальна панель контролера</p></div>
+      <div class="header-status">
+        <div class="clock"><span>◷ &nbsp;<b id="clock">--:--:--</b></span><small id="date">--.--.----</small></div>
+        <div class="online">☁ &nbsp; Онлайн</div>
+      </div>
+    </header>
+
+    <main id="overview">
+      <section class="status-grid">
+        <article><div class="round green">♢</div><div><span>Стан охорони</span><strong id="securityMode" class="green-text">—</strong><small>Система в нормі</small></div></article>
+        <article><div class="round blue">♢</div><div><span>Зони</span><strong id="zoneCount">—</strong><small>Нормальні</small></div></article>
+        <article id="networkCard"><div class="round purple">◉</div><div><span>Wi-Fi</span><strong id="wifiName">—</strong><small id="connection">Перевірка…</small></div></article>
+        <article><div class="round orange">☁</div><div><span>Хмара (MQTT)</span><strong class="orange-text">Не налаштовано</strong><small>—</small></div></article>
+      </section>
+
+      <section class="two-col">
+        <article class="panel">
+          <h3>Швидкий доступ</h3>
+          <div class="quick">
+            <button data-command="security.arm_away"><b>♙</b><strong>Поставити</strong><small>Під охорону</small></button>
+            <button data-command="security.disarm"><b class="red">♙</b><strong>Зняти</strong><small>з охорони</small></button>
+            <button data-command="security.arm_home"><b class="blue-text">⌂</b><strong>Нічний режим</strong><small>Активувати</small></button>
+            <button data-command="security.panic"><b class="orange-text">♧</b><strong>Тривога</strong><small>Паніка</small></button>
+          </div>
+        </article>
+
+        <article class="panel" id="zones-section"><h3>Стан зон</h3><div id="zones" class="zones"></div></article>
+
+        <article class="panel" id="events">
+          <h3>Останні події</h3>
+          <div class="events" id="eventList"><div><i></i><time>—</time><span>Журнал подій ще не завантажений</span><a>Інформація ›</a></div></div>
+          <div class="history">Переглянути всю історію ›</div>
+        </article>
+
+        <article class="panel" id="io-section">
+          <h3>Стан входів / виходів</h3>
+          <div class="io" id="ioState"><div><span>Очікування реальних даних контролера…</span></div></div>
+        </article>
+      </section>
+
+      <section id="networkPage" hidden style="margin-top:22px">
+        <article class="panel" style="max-width:920px">
+          <h3>Мережа Wi-Fi</h3>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:14px 0 18px">
+            <div><small>Стан</small><strong id="networkState" style="display:block;margin-top:5px">Перевірка…</strong></div>
+            <div><small>SSID</small><strong id="networkSsid" style="display:block;margin-top:5px">—</strong></div>
+            <div><small>IP</small><strong id="networkIp" style="display:block;margin-top:5px">—</strong></div>
+          </div>
+
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+            <button id="wifiScan" type="button">Сканувати Wi-Fi</button>
+            <span id="scanState">Натисніть для пошуку мереж</span>
+          </div>
+
+          <div id="wifiNetworks" style="display:grid;gap:8px;margin-bottom:18px"></div>
+
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:end">
+            <label>Мережа
+              <input id="wifiSsid" type="text" maxlength="32" autocomplete="off" placeholder="SSID" style="display:block;width:100%;margin-top:6px;padding:11px;border:1px solid #d7deea;border-radius:8px">
+            </label>
+            <label>Пароль
+              <input id="wifiPassword" type="password" maxlength="64" autocomplete="current-password" placeholder="Пароль Wi-Fi" style="display:block;width:100%;margin-top:6px;padding:11px;border:1px solid #d7deea;border-radius:8px">
+            </label>
+            <button id="wifiConnect" type="button">Підключити</button>
+          </div>
+          <p id="wifiResult" style="margin:14px 0 0">—</p>
+        </article>
+      </section>
+
+      <section id="system" hidden>
+        <pre id="buildInfo">—</pre>
+        <span id="mains"></span><span id="battery"></span><span id="light"></span>
+        <span id="coldPressure"></span><span id="hotPressure"></span>
+        <span id="coldTemperature"></span><span id="hotTemperature"></span>
+        <div id="valves"></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div id="toast" hidden></div>
+<button id="refresh" hidden>Оновити</button>
+<script src="/app.js"></script>
+<script>
+function tick(){const d=new Date();document.getElementById('clock').textContent=d.toLocaleTimeString('uk-UA');document.getElementById('date').textContent=d.toLocaleDateString('uk-UA')}
+tick();setInterval(tick,1000);
+</script>
+</body>
+</html>

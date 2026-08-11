@@ -10,6 +10,7 @@ idf_component_register(
     SRCS
         "app_main.cpp"
         "hg_web_http.cpp"
+        "hg_network_http.cpp"
         "hg_build_info.cpp"
         "hg_build_http.cpp"
         "hg_i2c_bus.cpp"
@@ -64,6 +65,7 @@ idf_component_register(
         esp_event
         esp_http_server
         esp_netif
+        esp_wifi
         fatfs
         nvs_flash
         sdmmc

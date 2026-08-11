@@ -1,5 +1,6 @@
 #include "hg_hardware_bootstrap.hpp"
 #include "hg_web_http.hpp"
+#include "hg_network_http.hpp"
 #include "hg_build_http.hpp"
 #include "hg_infrastructure_http.hpp"
 #include "hg_system_http.hpp"
@@ -29,6 +30,7 @@ constexpr const char* kTag = "homeguard_main";
 homeguard::idf::HardwareBootstrap g_hardware;
 homeguard::idf::TelemetryRuntime g_telemetry;
 homeguard::idf::WebHttp g_web_http;
+homeguard::idf::NetworkHttp g_network_http;
 homeguard::idf::InfrastructureHttp g_http_api;
 homeguard::idf::BuildHttp g_build_http;
 homeguard::idf::SystemHttp g_system_http;
@@ -120,12 +122,13 @@ void initialize_physical_outputs()
 esp_err_t start_http_server()
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 40;
+    config.max_uri_handlers = 48;
     config.stack_size = 8192;
     config.lru_purge_enable = true;
 
     ESP_RETURN_ON_ERROR(httpd_start(&g_http_server, &config), kTag, "httpd_start");
     ESP_RETURN_ON_ERROR(g_web_http.register_handlers(g_http_server), kTag, "web routes");
+    ESP_RETURN_ON_ERROR(g_network_http.register_handlers(g_http_server), kTag, "network routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus), kTag, "system routes");
     ESP_RETURN_ON_ERROR(
@@ -155,6 +158,13 @@ extern "C" void app_main()
     restore_commissioning_state();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    const auto network_error = g_network_http.begin();
+    if (network_error != ESP_OK) {
+        ESP_LOGE(kTag, "Wi-Fi network runtime failed: %s", esp_err_to_name(network_error));
+    } else {
+        ESP_LOGI(kTag, "Wi-Fi network runtime ready");
+    }
 
     initialize_system_model();
     initialize_physical_outputs();
