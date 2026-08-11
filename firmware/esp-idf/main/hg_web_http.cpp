@@ -1,18 +1,19 @@
 #include "hg_web_http.hpp"
 
 #include <cstddef>
+#include <cstdint>
+#include <sys/types.h>
+
+// ESP-IDF EMBED_TXTFILES exports these exact linker symbols. Keep the
+// declarations at global scope, matching Espressif's documented pattern.
+extern const uint8_t web_index_html_start[] asm("_binary_web_index_html_start");
+extern const uint8_t web_index_html_end[] asm("_binary_web_index_html_end");
+extern const uint8_t web_app_css_start[] asm("_binary_web_app_css_start");
+extern const uint8_t web_app_css_end[] asm("_binary_web_app_css_end");
+extern const uint8_t web_app_js_start[] asm("_binary_web_app_js_start");
+extern const uint8_t web_app_js_end[] asm("_binary_web_app_js_end");
 
 namespace homeguard::idf {
-namespace {
-
-extern const unsigned char web_index_html_start[] asm("_binary_web_index_html_start");
-extern const unsigned char web_index_html_end[] asm("_binary_web_index_html_end");
-extern const unsigned char web_app_css_start[] asm("_binary_web_app_css_start");
-extern const unsigned char web_app_css_end[] asm("_binary_web_app_css_end");
-extern const unsigned char web_app_js_start[] asm("_binary_web_app_js_start");
-extern const unsigned char web_app_js_end[] asm("_binary_web_app_js_end");
-
-}  // namespace
 
 esp_err_t WebHttp::register_handlers(httpd_handle_t server)
 {
