@@ -222,6 +222,13 @@ function openNetworkPage() {
   refreshNetwork();
 }
 
+function openSystemPage() {
+  const system = document.querySelector("#system");
+  system.hidden = false;
+  system.scrollIntoView({ behavior: "smooth", block: "start" });
+  refresh();
+}
+
 function bindNavigation() {
   document.querySelectorAll(".sidebar nav a").forEach(link => {
     link.addEventListener("click", event => {
@@ -230,6 +237,9 @@ function bindNavigation() {
       if (link.id === "networkNav") {
         event.preventDefault();
         openNetworkPage();
+      } else if (link.getAttribute("href") === "#system") {
+        event.preventDefault();
+        openSystemPage();
       }
     });
   });
