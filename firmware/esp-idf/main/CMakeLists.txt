@@ -1,6 +1,15 @@
+# Keep the approved Web UI in /web as the single source of truth.
+# Copy it into the component directory at configure time so ESP-IDF can embed
+# the exact same files into flash without maintaining a second checked-in copy.
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/web")
+configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/index.html" "${CMAKE_CURRENT_LIST_DIR}/web/index.html" COPYONLY)
+configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.css" "${CMAKE_CURRENT_LIST_DIR}/web/app.css" COPYONLY)
+configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.js" "${CMAKE_CURRENT_LIST_DIR}/web/app.js" COPYONLY)
+
 idf_component_register(
     SRCS
         "app_main.cpp"
+        "hg_web_http.cpp"
         "hg_build_info.cpp"
         "hg_build_http.cpp"
         "hg_i2c_bus.cpp"
@@ -58,6 +67,10 @@ idf_component_register(
         fatfs
         nvs_flash
         sdmmc
+    EMBED_TXTFILES
+        "web/index.html"
+        "web/app.css"
+        "web/app.js"
 )
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)

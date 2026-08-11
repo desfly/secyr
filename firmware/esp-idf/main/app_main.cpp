@@ -1,4 +1,5 @@
 #include "hg_hardware_bootstrap.hpp"
+#include "hg_web_http.hpp"
 #include "hg_build_http.hpp"
 #include "hg_infrastructure_http.hpp"
 #include "hg_system_http.hpp"
@@ -27,6 +28,7 @@ constexpr const char* kTag = "homeguard_main";
 
 homeguard::idf::HardwareBootstrap g_hardware;
 homeguard::idf::TelemetryRuntime g_telemetry;
+homeguard::idf::WebHttp g_web_http;
 homeguard::idf::InfrastructureHttp g_http_api;
 homeguard::idf::BuildHttp g_build_http;
 homeguard::idf::SystemHttp g_system_http;
@@ -118,11 +120,12 @@ void initialize_physical_outputs()
 esp_err_t start_http_server()
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 32;
+    config.max_uri_handlers = 40;
     config.stack_size = 8192;
     config.lru_purge_enable = true;
 
     ESP_RETURN_ON_ERROR(httpd_start(&g_http_server, &config), kTag, "httpd_start");
+    ESP_RETURN_ON_ERROR(g_web_http.register_handlers(g_http_server), kTag, "web routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus), kTag, "system routes");
     ESP_RETURN_ON_ERROR(
