@@ -94,6 +94,7 @@ bool PhysicalOutputRuntime::synchronize(const SystemModel& model, const BootRead
     bool ok = true;
     ok = write_logical(hardware_->pins.siren, output_state(model, 1)) && ok;
     ok = write_logical(hardware_->pins.valve1, output_state(model, 2)) && ok;
+    ok = write_logical(hardware_->pins.valve2, output_state(model, 3)) && ok;
     if (!ok) force_safe();
     return ok;
 }

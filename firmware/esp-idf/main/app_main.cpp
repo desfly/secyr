@@ -106,6 +106,7 @@ void initialize_system_model()
     g_system_model.add_zone(2, "Zone 2", hg::ModelZoneType::Interior);
     g_system_model.add_output(1, hg::ModelOutputType::Siren);
     g_system_model.add_output(2, hg::ModelOutputType::Valve);
+    g_system_model.add_output(3, hg::ModelOutputType::Valve);
 }
 
 void initialize_physical_outputs()
