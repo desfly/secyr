@@ -197,6 +197,25 @@ async function connectWifi() {
   }
 }
 
+async function sendSecurityCommand(button) {
+  const command = button.dataset.command;
+  if (!command) return;
+  const buttons = [...document.querySelectorAll("[data-command]")];
+  buttons.forEach(item => item.disabled = true);
+  try {
+    const result = await api("/api/v1/system/security-command", {
+      method: "POST",
+      body: JSON.stringify({ command })
+    });
+    showToast(result.ok ? "Команду виконано" : "Команду відхилено");
+    await refresh();
+  } catch (error) {
+    showToast(`Помилка команди: ${error.message}`);
+  } finally {
+    buttons.forEach(item => item.disabled = false);
+  }
+}
+
 function openNetworkPage() {
   document.querySelector("#networkPage").hidden = false;
   document.querySelector("#networkPage").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -219,7 +238,7 @@ function bindNavigation() {
 
 function bindCommandButtons() {
   document.querySelectorAll("[data-command]").forEach(button => {
-    button.onclick = () => showToast("Команда охорони ще не підключена до нового системного API");
+    button.onclick = () => sendSecurityCommand(button);
   });
 }
 
