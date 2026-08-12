@@ -177,9 +177,41 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     label.appendChild(toggle);
   }
 
+  function installWifiConnectHandoverFetchGuard() {
+    if (window.__homeguardWifiConnectFetchGuard) return;
+    const nativeFetch = window.fetch.bind(window);
+
+    window.fetch = async (input, init = {}) => {
+      const url = typeof input === "string" ? input : (input && typeof input.url === "string" ? input.url : "");
+      const method = String(init.method || (input && input.method) || "GET").toUpperCase();
+      const isWifiConnect = method === "POST" && (url === "/api/v1/network/connect" || url.endsWith("/api/v1/network/connect"));
+
+      try {
+        return await nativeFetch(input, init);
+      } catch (error) {
+        if (!isWifiConnect) throw error;
+
+        // AP+STA may briefly retune the radio while the controller starts the
+        // new STA association. That can tear down the HTTP socket even though
+        // the command was accepted. Treat only this endpoint as transitional;
+        // app.js will poll /network/status and still report a real timeout if
+        // the controller never connects.
+        const result = document.getElementById("wifiResult");
+        if (result) result.textContent = "Wi-Fi перемикається, перевіряємо підключення…";
+        return new Response(
+          JSON.stringify({ ok: true, state: "connecting", handover: true }),
+          { status: 202, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    };
+
+    window.__homeguardWifiConnectFetchGuard = true;
+  }
+
   window.addEventListener("hashchange", applyEmbeddedView);
   applyEmbeddedView();
   ensureWifiPasswordToggle();
+  installWifiConnectHandoverFetchGuard();
 })();
 )JS";
 
