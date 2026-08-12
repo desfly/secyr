@@ -4,6 +4,7 @@
 #include "mqtt_client.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace homeguard { class AccessControl; }
