@@ -1,0 +1,32 @@
+{
+  "build": "0059",
+  "project": "HomeGuard-S3",
+  "date": "2026-08-12",
+  "focus": "bring Android network client onto the backend role/capability login contract",
+  "android": {
+    "login_endpoint": "/api/v1/access/login",
+    "roles": ["ADMIN", "USER", "GUEST"],
+    "pin_validation": "4-12 digits",
+    "pin_persistence": "not introduced",
+    "capabilities": [
+      "monitor",
+      "armHome",
+      "armAway",
+      "disarm",
+      "panic",
+      "valves",
+      "networkConfigure",
+      "accessManage",
+      "serviceInvalidate"
+    ]
+  },
+  "policy": {
+    "admin": "all CommandType values allowed by role",
+    "user": "arm/disarm and valve commands follow backend capabilities",
+    "guest": "no control commands unless backend capability explicitly permits one"
+  },
+  "files": [
+    "android/app/src/main/java/ua/homeguard/s3/model/AccessModels.kt",
+    "android/app/src/main/java/ua/homeguard/s3/network/HttpDeviceApi.kt"
+  ]
+}
