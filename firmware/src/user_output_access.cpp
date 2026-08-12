@@ -1,6 +1,7 @@
 #include "homeguard/user_output_access.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <limits>
 
 namespace homeguard {
