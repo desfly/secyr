@@ -155,7 +155,10 @@ async function connectWifi() {
       const status = await refreshNetwork();
       if (status?.state === "connected") { result.textContent = `Підключено · IP ${status.ip || "—"}`; connected = true; break; }
     }
-    if (!connected) { result.textContent = "Помилка: не вдалося підключитися. Перевірте пароль і спробуйте ще раз."; document.querySelector("#networkState").textContent = "Помилка"; }
+    if (!connected) {
+      result.textContent = "Помилка: не вдалося підключитися. Перевірте пароль і спробуйте ще раз.";
+      document.querySelector("#networkState").textContent = "Помилка";
+    }
   } catch (error) {
     result.textContent = `Помилка: ${error.message}`;
     document.querySelector("#networkState").textContent = "Помилка";
@@ -165,9 +168,11 @@ async function connectWifi() {
 function operatorCredentials() {
   return { actor: document.querySelector("#operatorId").value.trim(), credential: document.querySelector("#operatorPin").value.trim() };
 }
+
 function validOperator(actor, credential) {
   if (actor && /^\d{4,12}$/.test(credential)) return true;
-  showToast("Введіть ID користувача та PIN 4–12 цифр"); return false;
+  showToast("Введіть ID користувача та PIN 4–12 цифр");
+  return false;
 }
 
 async function sendOutputCommand(button) {
@@ -175,25 +180,156 @@ async function sendOutputCommand(button) {
   const active = button.dataset.outputActive === "true";
   const { actor, credential } = operatorCredentials();
   if (!Number.isInteger(outputId) || outputId <= 0 || !validOperator(actor, credential)) return;
-  const buttons = [...document.querySelectorAll("[data-output-id]")]; buttons.forEach(item => { item.disabled = true; });
+
+  const buttons = [...document.querySelectorAll("[data-output-id]")];
+  const priorDisabled = buttons.map(item => item.disabled);
+  buttons.forEach(item => { item.disabled = true; });
   try {
-    const result = await api("/api/v1/system/output-command", { method: "POST", body: JSON.stringify({ outputId, active, actor, credential }) });
+    const result = await api("/api/v1/system/output-command", {
+      method: "POST",
+      body: JSON.stringify({ outputId, active, actor, credential })
+    });
     showToast(result.ok ? (active ? "Клапан відкрито" : "Клапан закрито") : `Команду відхилено: ${result.interlock || result.status || "невідома причина"}`);
+  } catch (error) {
+    showToast(`Помилка клапана: ${error.message}`);
+  } finally {
+    document.querySelector("#operatorPin").value = "";
     await refresh();
-  } catch (error) { showToast(`Помилка клапана: ${error.message}`); }
-  finally { document.querySelector("#operatorPin").value = ""; buttons.forEach(item => { item.disabled = false; }); }
+    buttons.forEach((item, index) => { if (item.isConnected) item.disabled = priorDisabled[index]; });
+  }
 }
 
 async function sendSecurityCommand(button) {
   const command = button.dataset.command;
   const { actor, credential } = operatorCredentials();
   if (!command || !validOperator(actor, credential)) return;
-  const buttons = [...document.querySelectorAll("[data-command]")]; buttons.forEach(item => { item.disabled = true; });
+  const buttons = [...document.querySelectorAll("[data-command]")];
+  buttons.forEach(item => { item.disabled = true; });
   try {
     const result = await api("/api/v1/system/security-command", { method: "POST", body: JSON.stringify({ command, actor, credential }) });
-    showToast(result.ok ? "Команду виконано" : "Команду відхилено"); await refresh();
-  } catch (error) { showToast(`Помилка команди: ${error.message}`); }
-  finally { document.querySelector("#operatorPin").value = ""; buttons.forEach(item => { item.disabled = false; }); }
+    showToast(result.ok ? "Команду виконано" : "Команду відхилено");
+    await refresh();
+  } catch (error) {
+    showToast(`Помилка команди: ${error.message}`);
+  } finally {
+    document.querySelector("#operatorPin").value = "";
+    buttons.forEach(item => { item.disabled = false; });
+  }
+}
+
+function ensureAccessPanel() {
+  if (!systemPage || document.querySelector("#accessPanel")) return;
+  const panel = document.createElement("article");
+  panel.id = "accessPanel";
+  panel.className = "panel";
+  panel.style.cssText = "max-width:920px;margin-top:18px";
+  panel.innerHTML = `
+    <h3>Користувачі та права доступу</h3>
+    <p style="margin:4px 0 14px">До 8 користувачів. Admin — повний доступ; User — моніторинг, охорона та клапани; Guest — лише перегляд стану.</p>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:end;margin-bottom:14px">
+      <label>Admin ID<input id="accessActor" type="text" maxlength="23" autocomplete="username" placeholder="ID адміністратора" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #d7deea;border-radius:8px"></label>
+      <label>Admin PIN<input id="accessCredential" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password" placeholder="PIN адміністратора" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #d7deea;border-radius:8px"></label>
+      <button id="accessLoad" type="button">Оновити список</button>
+    </div>
+    <div id="accessUsers" style="display:grid;gap:8px;margin-bottom:16px"><small>Список ще не завантажений</small></div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+      <label>ID<input id="managedUserId" type="text" maxlength="23" placeholder="user1" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #d7deea;border-radius:8px"></label>
+      <label>Ім'я<input id="managedUserName" type="text" maxlength="31" placeholder="Користувач" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #d7deea;border-radius:8px"></label>
+      <label>Роль<select id="managedUserRole" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #d7deea;border-radius:8px"><option value="guest">Guest</option><option value="user">User</option><option value="admin">Admin</option></select></label>
+      <label>Новий PIN<input id="managedUserPin" type="password" inputmode="numeric" minlength="4" maxlength="12" placeholder="4–12 цифр" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #d7deea;border-radius:8px"></label>
+    </div>
+    <div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap">
+      <label><input id="managedUserEnabled" type="checkbox" checked> Активний</label>
+      <button id="accessSave" type="button">Зберегти користувача</button>
+      <span id="accessResult">—</span>
+    </div>`;
+  systemPage.appendChild(panel);
+  document.querySelector("#accessLoad").onclick = loadAccessUsers;
+  document.querySelector("#accessSave").onclick = saveAccessUser;
+}
+
+function accessAdminCredentials() {
+  return {
+    actor: document.querySelector("#accessActor")?.value.trim() || "",
+    credential: document.querySelector("#accessCredential")?.value.trim() || ""
+  };
+}
+
+function validAdminCredentials(actor, credential) {
+  if (actor && /^\d{4,12}$/.test(credential)) return true;
+  const result = document.querySelector("#accessResult");
+  if (result) result.textContent = "Введіть Admin ID та PIN 4–12 цифр";
+  return false;
+}
+
+function renderAccessUsers(data) {
+  const target = document.querySelector("#accessUsers");
+  const users = Array.isArray(data?.users) ? data.users : [];
+  target.innerHTML = users.length ? users.map((user, index) => `
+    <button type="button" data-access-user="${index}" style="display:grid;grid-template-columns:1fr 1.5fr .8fr .7fr;gap:8px;align-items:center;width:100%;padding:10px 12px;text-align:left">
+      <strong>${escapeHtml(user.id)}</strong><span>${escapeHtml(user.name)}</span><span>${escapeHtml(user.role)}</span><span>${user.enabled ? "активний" : "вимкнено"}</span>
+    </button>`).join("") : "<small>Користувачів немає</small>";
+  target.querySelectorAll("[data-access-user]").forEach(button => {
+    button.onclick = () => {
+      const user = users[Number(button.dataset.accessUser)];
+      if (!user) return;
+      document.querySelector("#managedUserId").value = user.id || "";
+      document.querySelector("#managedUserName").value = user.name || "";
+      document.querySelector("#managedUserRole").value = user.role || "guest";
+      document.querySelector("#managedUserEnabled").checked = user.enabled !== false;
+      document.querySelector("#managedUserPin").focus();
+    };
+  });
+}
+
+async function loadAccessUsers() {
+  const { actor, credential } = accessAdminCredentials();
+  if (!validAdminCredentials(actor, credential)) return;
+  const button = document.querySelector("#accessLoad");
+  const result = document.querySelector("#accessResult");
+  button.disabled = true;
+  result.textContent = "Завантаження…";
+  try {
+    const data = await api("/api/v1/access/users", { method: "POST", body: JSON.stringify({ actor, credential, action: "list" }) });
+    renderAccessUsers(data);
+    result.textContent = `Користувачів: ${Number(data.count) || 0} / ${Number(data.capacity) || 8}`;
+  } catch (error) {
+    result.textContent = `Помилка: ${error.message}`;
+  } finally {
+    document.querySelector("#accessCredential").value = "";
+    button.disabled = false;
+  }
+}
+
+async function saveAccessUser() {
+  const { actor, credential } = accessAdminCredentials();
+  const id = document.querySelector("#managedUserId").value.trim();
+  const name = document.querySelector("#managedUserName").value.trim();
+  const role = document.querySelector("#managedUserRole").value;
+  const pin = document.querySelector("#managedUserPin").value.trim();
+  const enabled = document.querySelector("#managedUserEnabled").checked;
+  const result = document.querySelector("#accessResult");
+  if (!validAdminCredentials(actor, credential)) return;
+  if (!id || !name || !["admin", "user", "guest"].includes(role) || !/^\d{4,12}$/.test(pin)) {
+    result.textContent = "Перевірте ID, ім'я, роль і PIN користувача";
+    return;
+  }
+  const button = document.querySelector("#accessSave");
+  button.disabled = true;
+  result.textContent = "Збереження…";
+  try {
+    await api("/api/v1/access/users", {
+      method: "POST",
+      body: JSON.stringify({ actor, credential, action: "set", id, name, role, pin, enabled })
+    });
+    result.textContent = "Користувача збережено";
+    document.querySelector("#managedUserPin").value = "";
+  } catch (error) {
+    result.textContent = `Помилка: ${error.message}`;
+  } finally {
+    document.querySelector("#accessCredential").value = "";
+    button.disabled = false;
+  }
 }
 
 function setView(view, targetId = "overview") {
@@ -204,9 +340,11 @@ function setView(view, targetId = "overview") {
   systemPage.hidden = !isSystem;
   if (!isNetwork && !isSystem && targetId && targetId !== "overview") {
     requestAnimationFrame(() => document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  } else { window.scrollTo({ top: 0, behavior: "smooth" }); }
+  } else {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
   if (isNetwork) refreshNetwork();
-  if (isSystem) refresh();
+  if (isSystem) { ensureAccessPanel(); refresh(); }
 }
 
 function routeFromHash() {
@@ -237,6 +375,7 @@ function bootUi() {
   document.querySelector("#wifiScan").onclick = scanWifi;
   document.querySelector("#wifiConnect").onclick = connectWifi;
   document.querySelector("#refresh").onclick = refresh;
+  ensureAccessPanel();
   bindNavigation();
   bindCommandButtons();
   routeFromHash();
