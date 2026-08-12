@@ -1,5 +1,6 @@
 #pragma once
 
+#include "homeguard/access_control.hpp"
 #include "homeguard/event_log.hpp"
 #include "homeguard/system_model.hpp"
 #include "esp_http_server.h"
@@ -10,7 +11,11 @@ namespace homeguard::idf {
 
 class SystemHttp {
 public:
-    esp_err_t register_handlers(httpd_handle_t server, hg::SystemModel* model, hg::SystemEventBus* bus);
+    esp_err_t register_handlers(
+        httpd_handle_t server,
+        hg::SystemModel* model,
+        hg::SystemEventBus* bus,
+        homeguard::AccessControl* access_control);
 
 private:
     static esp_err_t status_get(httpd_req_t* request);
@@ -32,6 +37,7 @@ private:
     httpd_handle_t server_{};
     hg::SystemModel* model_{};
     hg::SystemEventBus* bus_{};
+    homeguard::AccessControl* access_control_{};
     hg::EventLog event_log_{};
     std::array<int, 4> clients_{{-1, -1, -1, -1}};
 };

@@ -47,6 +47,14 @@
       <section class="two-col">
         <article class="panel">
           <h3>Швидкий доступ</h3>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin:0 0 12px">
+            <label>Користувач
+              <input id="operatorId" type="text" maxlength="23" autocomplete="username" placeholder="ID користувача" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #d7deea;border-radius:8px">
+            </label>
+            <label>PIN
+              <input id="operatorPin" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password" placeholder="4–12 цифр" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #d7deea;border-radius:8px">
+            </label>
+          </div>
           <div class="quick">
             <button data-command="security.arm_away"><b>♙</b><strong>Поставити</strong><small>Під охорону</small></button>
             <button data-command="security.disarm"><b class="red">♙</b><strong>Зняти</strong><small>з охорони</small></button>

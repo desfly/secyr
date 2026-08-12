@@ -199,19 +199,26 @@ async function connectWifi() {
 
 async function sendSecurityCommand(button) {
   const command = button.dataset.command;
+  const actor = document.querySelector("#operatorId").value.trim();
+  const credential = document.querySelector("#operatorPin").value.trim();
   if (!command) return;
+  if (!actor || !/^\d{4,12}$/.test(credential)) {
+    showToast("Введіть ID користувача та PIN 4–12 цифр");
+    return;
+  }
   const buttons = [...document.querySelectorAll("[data-command]")];
   buttons.forEach(item => item.disabled = true);
   try {
     const result = await api("/api/v1/system/security-command", {
       method: "POST",
-      body: JSON.stringify({ command })
+      body: JSON.stringify({ command, actor, credential })
     });
     showToast(result.ok ? "Команду виконано" : "Команду відхилено");
     await refresh();
   } catch (error) {
     showToast(`Помилка команди: ${error.message}`);
   } finally {
+    document.querySelector("#operatorPin").value = "";
     buttons.forEach(item => item.disabled = false);
   }
 }

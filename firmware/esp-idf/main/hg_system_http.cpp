@@ -56,11 +56,18 @@ const char* arm_state_name(hg::PartitionArmState state) {
 }
 }
 
-esp_err_t SystemHttp::register_handlers(httpd_handle_t server, hg::SystemModel* model, hg::SystemEventBus* bus) {
-    if (server == nullptr || model == nullptr || bus == nullptr) return ESP_ERR_INVALID_ARG;
+esp_err_t SystemHttp::register_handlers(
+    httpd_handle_t server,
+    hg::SystemModel* model,
+    hg::SystemEventBus* bus,
+    homeguard::AccessControl* access_control) {
+    if (server == nullptr || model == nullptr || bus == nullptr || access_control == nullptr) {
+        return ESP_ERR_INVALID_ARG;
+    }
     server_ = server;
     model_ = model;
     bus_ = bus;
+    access_control_ = access_control;
     if (!bus_->subscribe(&SystemHttp::on_event, this)) return ESP_ERR_NO_MEM;
 
     const httpd_uri_t routes[] = {
@@ -125,8 +132,8 @@ esp_err_t SystemHttp::security_command_post(httpd_req_t* request) {
 }
 
 esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
-    if (model_ == nullptr || bus_ == nullptr) return ESP_FAIL;
-    if (request->content_len == 0 || request->content_len > 192) {
+    if (model_ == nullptr || bus_ == nullptr || access_control_ == nullptr) return ESP_FAIL;
+    if (request->content_len == 0 || request->content_len > 384) {
         httpd_resp_set_status(request, "400 Bad Request");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_body\"}", -1);
     }
@@ -140,9 +147,23 @@ esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
     body.resize(static_cast<std::size_t>(received));
 
     std::string command;
+    std::string actor;
+    std::string credential;
     if (!parse_json_string(body, "command", command)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"missing_command\"}", -1);
+    }
+    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
+        httpd_resp_set_status(request, "401 Unauthorized");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"credential_required\"}", -1);
+    }
+
+    const auto decision = access_control_->authorize(actor, credential, command);
+    if (decision != homeguard::AuditDecision::Allowed) {
+        httpd_resp_set_status(request, "403 Forbidden");
+        const std::string response = std::string{"{\"ok\":false,\"reason\":\""} +
+            homeguard::to_string(decision) + "\"}";
+        return send_json(request, response.c_str(), response.size());
     }
 
     hg::PartitionArmState target{};
