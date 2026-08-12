@@ -230,18 +230,23 @@ jobs:
         working-directory: android
         run: gradle --no-daemon --stacktrace testDebugUnitTest assembleDebug
 
-      - name: Generate APK checksum
+      - name: Prepare MyFist installer
         if: success()
         shell: bash
-        run: sha256sum android/app/build/outputs/apk/debug/*.apk > android/app/build/outputs/apk/debug/SHA256SUMS.txt
+        run: |
+          set -euo pipefail
+          source_apk=$(find android/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)
+          test -n "$source_apk"
+          cp "$source_apk" android/app/build/outputs/apk/debug/MyFist.apk
+          sha256sum android/app/build/outputs/apk/debug/MyFist.apk > android/app/build/outputs/apk/debug/SHA256SUMS.txt
 
       - name: Upload Android APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: HomeGuard-S3-Android
+          name: MyFist-Android
           path: |
-            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/debug/MyFist.apk
             android/app/build/outputs/apk/debug/SHA256SUMS.txt
           if-no-files-found: error
 
@@ -249,7 +254,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: HomeGuard-S3-Android-diagnostics
+          name: MyFist-Android-diagnostics
           path: |
             android/.gradle/**
             android/app/build/reports/**
