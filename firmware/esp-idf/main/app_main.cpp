@@ -29,6 +29,10 @@
 #include "esp_netif.h"
 #include "nvs_flash.h"
 
+#include <cstddef>
+#include <string>
+#include <string_view>
+
 namespace {
 constexpr const char* kTag = "homeguard_main";
 
@@ -58,6 +62,13 @@ hg::SystemEventBus g_system_bus;
 hg::SystemModel g_system_model{g_system_bus};
 httpd_handle_t g_http_server = nullptr;
 bool g_access_bootstrap_allowed = false;
+
+std::string route_cloud_command(const char* payload, std::size_t size, void*) {
+    if (payload == nullptr || size == 0U) {
+        return "{\"ok\":false,\"reason\":\"invalid_body\"}";
+    }
+    return g_system_http.route_security_command_json(std::string_view(payload, size));
+}
 
 esp_err_t initialize_nvs() {
     auto error = nvs_flash_init();
@@ -158,6 +169,9 @@ extern "C" void app_main() {
     const auto config_error = g_config_http.initialize(&g_system_model, &g_access_control);
     if (config_error != ESP_OK) ESP_LOGE(kTag, "Configuration runtime failed: %s", esp_err_to_name(config_error));
     else ESP_LOGI(kTag, "Configuration import/export runtime ready");
+
+    g_cloud_link.set_command_handler(&route_cloud_command, nullptr);
+
     initialize_physical_outputs();
 
     const auto hardware_error = g_hardware.initialize();
