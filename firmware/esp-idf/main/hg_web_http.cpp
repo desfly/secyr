@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <sys/types.h>
 
-// ESP-IDF embed symbols use the copied asset basename.
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[] asm("_binary_index_html_end");
 extern const uint8_t app_css_start[] asm("_binary_app_css_start");
@@ -13,6 +12,8 @@ extern const uint8_t app_js_start[] asm("_binary_app_js_start");
 extern const uint8_t app_js_end[] asm("_binary_app_js_end");
 extern const uint8_t access_session_js_start[] asm("_binary_access_session_js_start");
 extern const uint8_t access_session_js_end[] asm("_binary_access_session_js_end");
+extern const uint8_t cloud_status_js_start[] asm("_binary_cloud_status_js_start");
+extern const uint8_t cloud_status_js_end[] asm("_binary_cloud_status_js_end");
 extern const uint8_t bruce_jpg_start[] asm("_binary_bruce_jpg_start");
 extern const uint8_t bruce_jpg_end[] asm("_binary_bruce_jpg_end");
 
@@ -28,6 +29,7 @@ esp_err_t WebHttp::register_handlers(httpd_handle_t server)
         {.uri="/app.css", .method=HTTP_GET, .handler=&WebHttp::css_get, .user_ctx=this},
         {.uri="/app.js", .method=HTTP_GET, .handler=&WebHttp::js_get, .user_ctx=this},
         {.uri="/access-session.js", .method=HTTP_GET, .handler=&WebHttp::access_session_js_get, .user_ctx=this},
+        {.uri="/cloud-status.js", .method=HTTP_GET, .handler=&WebHttp::cloud_status_js_get, .user_ctx=this},
         {.uri="/bruce.jpg", .method=HTTP_GET, .handler=&WebHttp::bruce_get, .user_ctx=this},
     };
 
@@ -44,9 +46,6 @@ esp_err_t WebHttp::send_asset(httpd_req_t* request,
                               const unsigned char* end)
 {
     if (request == nullptr || start == nullptr || end == nullptr || end < start) return ESP_ERR_INVALID_ARG;
-
-    // HomeGuard is repeatedly reflashed during commissioning. Stable asset
-    // URLs must never let an old browser cache mask a freshly flashed UI.
     httpd_resp_set_hdr(request, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     httpd_resp_set_hdr(request, "Pragma", "no-cache");
     httpd_resp_set_hdr(request, "Expires", "0");
@@ -75,6 +74,11 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
 esp_err_t WebHttp::access_session_js_get(httpd_req_t* request)
 {
     return send_asset(request, "application/javascript; charset=utf-8", access_session_js_start, access_session_js_end);
+}
+
+esp_err_t WebHttp::cloud_status_js_get(httpd_req_t* request)
+{
+    return send_asset(request, "application/javascript; charset=utf-8", cloud_status_js_start, cloud_status_js_end);
 }
 
 esp_err_t WebHttp::bruce_get(httpd_req_t* request)
