@@ -34,6 +34,20 @@ bool parse_bool(const std::string& body, const char* key, bool& value) {
     if (body.compare(value_pos, 5, "false") == 0) { value = false; return true; }
     return false;
 }
+
+bool parse_json_string(const std::string& body, const char* key, std::string& value) {
+    const std::string marker = std::string{"\""} + key + "\"";
+    auto pos = body.find(marker);
+    if (pos == std::string::npos) return false;
+    pos = body.find(':', pos + marker.size());
+    if (pos == std::string::npos) return false;
+    pos = body.find('"', pos + 1U);
+    if (pos == std::string::npos) return false;
+    const auto end = body.find('"', pos + 1U);
+    if (end == std::string::npos) return false;
+    value.assign(body, pos + 1U, end - pos - 1U);
+    return true;
+}
 }
 
 esp_err_t OutputHttp::register_handlers(
@@ -65,7 +79,7 @@ esp_err_t OutputHttp::command_post(httpd_req_t* request) {
 }
 
 esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
-    if (request->content_len == 0 || request->content_len > 256) {
+    if (request->content_len == 0 || request->content_len > 384) {
         httpd_resp_set_status(request, "400 Bad Request");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_body\"}", -1);
     }
@@ -81,11 +95,37 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
     std::uint16_t output_id{};
     bool active{};
     bool alarm_active{};
+    std::string actor;
+    std::string credential;
     if (!parse_uint(body, "outputId", output_id) || !parse_bool(body, "active", active)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_command\"}", -1);
     }
     (void)parse_bool(body, "alarmActive", alarm_active);
+
+    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
+        httpd_resp_set_status(request, "401 Unauthorized");
+        httpd_resp_set_type(request, "application/json");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"credential_required\"}", -1);
+    }
+    if (access_control_ == nullptr) {
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        httpd_resp_set_type(request, "application/json");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"access_unavailable\"}", -1);
+    }
+
+    const auto* output = model_->output(output_id);
+    const std::string command = output != nullptr && output->type == hg::ModelOutputType::Valve
+        ? (active ? "valve.open" : "valve.close")
+        : "output.control";
+    const auto decision = access_control_->authorize(actor, credential, command);
+    if (decision != homeguard::AuditDecision::Allowed) {
+        httpd_resp_set_status(request, "403 Forbidden");
+        httpd_resp_set_type(request, "application/json");
+        const std::string response = std::string{"{\"ok\":false,\"reason\":\""} +
+            homeguard::to_string(decision) + "\"}";
+        return httpd_resp_send(request, response.c_str(), static_cast<ssize_t>(response.size()));
+    }
 
     const auto result = hg::apply_output_command(
         *model_, *readiness_, {output_id, active, alarm_active, 0});
