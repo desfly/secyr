@@ -1,5 +1,6 @@
 #pragma once
 
+#include "homeguard/access_control.hpp"
 #include "esp_err.h"
 #include "esp_http_server.h"
 
@@ -10,6 +11,7 @@ namespace homeguard::idf {
 class NetworkHttp {
 public:
     esp_err_t begin();
+    void set_access_control(AccessControl* access) { access_ = access; }
     esp_err_t register_handlers(httpd_handle_t server);
 
 private:
@@ -27,6 +29,7 @@ private:
     std::string status_json() const;
     std::string scan_json() const;
 
+    AccessControl* access_{};
     void* sta_netif_{};
     std::string ap_ssid_;
     bool initialized_{};
