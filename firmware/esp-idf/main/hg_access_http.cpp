@@ -1,4 +1,5 @@
 #include "hg_access_http.hpp"
+#include "hg_access_time.hpp"
 
 #include "esp_random.h"
 
@@ -106,6 +107,13 @@ std::string capabilities_json(const AccessControl& access, AccessRole role) {
            ",\"serviceInvalidate\":" + allowed("system.service.invalidate") + "}";
 }
 
+esp_err_t send_rate_limited(httpd_req_t* request, AccessControl& access, std::string_view actor, std::uint64_t now_ms) {
+    httpd_resp_set_status(request, "429 Too Many Requests");
+    const auto retry = access.authentication_retry_after_ms(actor, now_ms);
+    return send_json(request, "{\"ok\":false,\"reason\":\"rate_limited\",\"retryAfterMs\":" +
+        std::to_string(retry) + "}");
+}
+
 }  // namespace
 
 esp_err_t AccessHttp::register_handlers(httpd_handle_t server,
@@ -152,16 +160,21 @@ esp_err_t AccessHttp::handle_login(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
     }
 
-    const auto decision = access_->authenticate(actor, credential);
+    const auto now_ms = access_now_ms();
+    const auto decision = access_->authenticate(actor, credential, now_ms);
+    if (decision == AuditDecision::DeniedRateLimited) {
+        return send_rate_limited(request, *access_, actor, now_ms);
+    }
     if (decision != AuditDecision::Allowed) {
+        // Do not reveal whether an account exists or merely has a wrong PIN.
         httpd_resp_set_status(request, "401 Unauthorized");
-        return send_json(request, std::string{"{\"ok\":false,\"reason\":\""} + to_string(decision) + "\"}");
+        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
     }
 
     const auto* user = access_->find_user(actor);
     if (user == nullptr || !user->enabled) {
         httpd_resp_set_status(request, "401 Unauthorized");
-        return send_json(request, "{\"ok\":false,\"reason\":\"denied_unknown_user\"}");
+        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
     }
 
     return send_json(request,
@@ -184,8 +197,6 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"action_required\"}");
     }
 
-    // Bootstrap is available only when boot proved that the access NVS key
-    // does not exist. Corrupt or unreadable access storage stays fail-closed.
     if (action == "bootstrap") {
         if (!bootstrap_allowed_) {
             httpd_resp_set_status(request, "409 Conflict");
@@ -207,8 +218,6 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
             return send_json(request, "{\"ok\":false,\"reason\":\"invalid_bootstrap_admin\"}");
         }
 
-        // Close the one-time gate before mutating RAM. If persistence fails,
-        // rollback and reopen only this factory commissioning attempt.
         bootstrap_allowed_ = false;
         std::array<std::uint8_t, 16> salt{};
         esp_fill_random(salt.data(), salt.size());
@@ -235,10 +244,15 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
     }
 
-    const auto decision = access_->authorize(actor, credential, "access.manage");
+    const auto now_ms = access_now_ms();
+    const auto decision = access_->authorize(actor, credential, "access.manage", now_ms);
+    if (decision == AuditDecision::DeniedRateLimited) {
+        return send_rate_limited(request, *access_, actor, now_ms);
+    }
     if (decision != AuditDecision::Allowed) {
         httpd_resp_set_status(request, "403 Forbidden");
-        return send_json(request, std::string{"{\"ok\":false,\"reason\":\""} + to_string(decision) + "\"}");
+        const char* reason = decision == AuditDecision::DeniedRole ? "forbidden_role" : "invalid_credentials";
+        return send_json(request, std::string{"{\"ok\":false,\"reason\":\""} + reason + "\"}");
     }
 
     if (action == "list") {
@@ -280,17 +294,11 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_user\"}");
     }
 
-    // An access database without an enabled administrator has no supported
-    // recovery path except factory reset. Reject the mutation before touching
-    // RAM/NVS if it would demote or disable the last enabled Admin.
     if (!access_->would_preserve_admin_access(id, role, enabled)) {
         httpd_resp_set_status(request, "409 Conflict");
         return send_json(request, "{\"ok\":false,\"reason\":\"last_admin_required\"}");
     }
 
-    // Treat RAM + NVS as one transaction. If persistence fails, restore the
-    // exact pre-mutation access state so the running controller cannot diverge
-    // from the database that will be loaded on reboot.
     const auto previous_access = *access_;
     std::array<std::uint8_t, 16> salt{};
     esp_fill_random(salt.data(), salt.size());
