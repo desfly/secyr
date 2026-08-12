@@ -42,6 +42,14 @@ bool parse_bool(const std::string& body, const char* key, bool& value) {
     return false;
 }
 
+bool valid_pin(std::string_view pin) {
+    if (pin.size() < 4U || pin.size() > 12U) return false;
+    for (const char ch : pin) {
+        if (ch < '0' || ch > '9') return false;
+    }
+    return true;
+}
+
 std::string json_escape(std::string_view value) {
     std::string out;
     out.reserve(value.size() + 8U);
@@ -108,11 +116,52 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
     }
     body.resize(static_cast<std::size_t>(received));
 
+    std::string action;
+    if (!parse_json_string(body, "action", action)) {
+        httpd_resp_set_status(request, "400 Bad Request");
+        return send_json(request, "{\"ok\":false,\"reason\":\"action_required\"}");
+    }
+
+    // One-time commissioning escape hatch: a factory-fresh controller has no
+    // users, so requiring an existing administrator would deadlock setup.
+    // Bootstrap is accepted only while the access database is empty, always
+    // creates an enabled Admin, and becomes unavailable immediately after the
+    // first successful persisted user is created.
+    if (action == "bootstrap") {
+        if (access_->user_count() != 0U) {
+            httpd_resp_set_status(request, "409 Conflict");
+            return send_json(request, "{\"ok\":false,\"reason\":\"already_provisioned\"}");
+        }
+
+        std::string id;
+        std::string name;
+        std::string pin;
+        if (!parse_json_string(body, "id", id) || !parse_json_string(body, "name", name) ||
+            !parse_json_string(body, "pin", pin) || id.empty() || id.size() > 23U ||
+            name.empty() || name.size() > 31U || !valid_pin(pin)) {
+            httpd_resp_set_status(request, "400 Bad Request");
+            return send_json(request, "{\"ok\":false,\"reason\":\"invalid_bootstrap_admin\"}");
+        }
+
+        std::array<std::uint8_t, 16> salt{};
+        esp_fill_random(salt.data(), salt.size());
+        if (!access_->set_user(id, name, AccessRole::Admin, pin, salt, true)) {
+            httpd_resp_set_status(request, "409 Conflict");
+            return send_json(request, "{\"ok\":false,\"reason\":\"bootstrap_failed\"}");
+        }
+
+        const auto persist = store_->save(*access_);
+        if (persist != ESP_OK) {
+            access_->clear_users();
+            httpd_resp_set_status(request, "500 Internal Server Error");
+            return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
+        }
+        return send_json(request, "{\"ok\":true,\"role\":\"admin\",\"bootstrap\":true}");
+    }
+
     std::string actor;
     std::string credential;
-    std::string action;
-    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential) ||
-        !parse_json_string(body, "action", action)) {
+    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
         httpd_resp_set_status(request, "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
     }
@@ -156,7 +205,7 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
 
     bool role_valid = false;
     const auto role = parse_role(role_text, role_valid);
-    if (!role_valid || id.size() > 23U || name.size() > 31U || pin.size() < 4U || pin.size() > 12U) {
+    if (!role_valid || id.empty() || id.size() > 23U || name.empty() || name.size() > 31U || !valid_pin(pin)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_user\"}");
     }
