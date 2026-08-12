@@ -62,11 +62,19 @@ jobs:
       - name: Firmware partition budget
         run: python tools/check_firmware_budget.py
 
+      - name: Host unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S firmware -B build-host -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-host
+          ctest --test-dir build-host --output-on-failure
+
       - name: Web UI contract
         run: python tools/check_web_ui_contract.py
 
       - name: Web UI JavaScript syntax
-        run: node --check web/app.js
+        run: node --check web/app.js && node --check web/access-session.js
 
       - name: Web UI browser boot smoke
         shell: bash

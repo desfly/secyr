@@ -50,6 +50,7 @@ public:
     [[nodiscard]] const AccessUser* find_user(std::string_view id) const;
     [[nodiscard]] bool verify_pin(const AccessUser& user, std::string_view pin) const;
     [[nodiscard]] bool role_allows(AccessRole role, std::string_view command) const;
+    [[nodiscard]] AuditDecision authenticate(std::string_view actor, std::string_view pin);
     [[nodiscard]] AuditDecision authorize(
         std::string_view actor,
         std::string_view pin,

@@ -143,6 +143,20 @@ void AccessControl::append_audit(
     if (audit_size_ < audit_capacity) ++audit_size_;
 }
 
+AuditDecision AccessControl::authenticate(std::string_view actor, std::string_view pin) {
+    const auto* user = find_user(actor);
+    if (user == nullptr || !user->enabled) {
+        append_audit(actor, "access.login", AuditDecision::DeniedUnknownUser);
+        return AuditDecision::DeniedUnknownUser;
+    }
+    if (!verify_pin(*user, pin)) {
+        append_audit(actor, "access.login", AuditDecision::DeniedCredential);
+        return AuditDecision::DeniedCredential;
+    }
+    append_audit(actor, "access.login", AuditDecision::Allowed);
+    return AuditDecision::Allowed;
+}
+
 AuditDecision AccessControl::authorize(
     std::string_view actor,
     std::string_view pin,

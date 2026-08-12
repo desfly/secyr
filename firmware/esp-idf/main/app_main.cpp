@@ -154,6 +154,7 @@ esp_err_t start_http_server()
             g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed),
         kTag,
         "access routes");
+    g_service_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(
         g_service_http.register_handlers(
             g_http_server,
