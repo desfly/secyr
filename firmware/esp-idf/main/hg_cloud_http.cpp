@@ -35,7 +35,7 @@ esp_err_t CloudHttp::status_get(httpd_req_t* request)
                   static_cast<unsigned>(self->cloud_->connect_count()),
                   static_cast<unsigned>(self->cloud_->disconnect_count()));
     httpd_resp_set_type(request, "application/json");
-    return httpd_resp_sendstr(request, body);
+    return httpd_resp_send(request, body, HTTPD_RESP_USE_STRLEN);
 }
 
 }  // namespace homeguard::idf
