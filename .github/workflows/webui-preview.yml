@@ -1,0 +1,35 @@
+name: Web UI Preview
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  preview:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Render real Web UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m http.server 8765 --directory web >/tmp/webui-preview.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8765/ >/dev/null; then break; fi
+            sleep 0.2
+          done
+          google-chrome --headless --no-sandbox --disable-gpu \
+            --hide-scrollbars --window-size=1600,1200 \
+            --virtual-time-budget=4000 \
+            --screenshot=HomeGuard-S3-WebUI.png \
+            http://127.0.0.1:8765/
+          test -s HomeGuard-S3-WebUI.png
+      - name: Upload Web UI screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuard-S3-WebUI-preview
+          path: HomeGuard-S3-WebUI.png
+          if-no-files-found: error
