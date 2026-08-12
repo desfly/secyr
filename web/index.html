@@ -111,6 +111,23 @@
           </div>
           <p id="wifiResult" style="margin:14px 0 0">—</p>
         </article>
+
+        <article class="panel" id="lanMonitor" style="max-width:920px;margin-top:18px">
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+            <div>
+              <h3 style="margin-bottom:4px">Пристрої домашньої мережі</h3>
+              <small>Активних у ARP-таблиці: <strong id="lanDeviceCount">0</strong></small>
+            </div>
+            <button id="lanRefresh" type="button">Оновити пристрої</button>
+          </div>
+          <p id="lanScanState" style="margin:12px 0">Автооновлення кожні 15 секунд</p>
+          <div style="overflow:auto">
+            <table style="width:100%;border-collapse:collapse">
+              <thead><tr><th style="text-align:left;padding:8px">Online</th><th style="text-align:left;padding:8px">IP</th><th style="text-align:left;padding:8px">MAC</th><th style="text-align:left;padding:8px">Ім’я</th></tr></thead>
+              <tbody id="lanDevices"><tr><td colspan="4" style="padding:8px">Очікування даних…</td></tr></tbody>
+            </table>
+          </div>
+        </article>
       </section>
 
       <section id="system" hidden>
@@ -129,6 +146,7 @@
 <script src="/app.js?v=281"></script>
 <script src="/access-session.js?v=281"></script>
 <script src="/cloud-status.js?v=0060"></script>
+<script src="/lan-monitor.js?v=0060"></script>
 <script>
 function tick(){const d=new Date();document.getElementById('clock').textContent=d.toLocaleTimeString('uk-UA');document.getElementById('date').textContent=d.toLocaleDateString('uk-UA')}
 tick();setInterval(tick,1000);
