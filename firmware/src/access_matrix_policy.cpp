@@ -1,5 +1,6 @@
 #include "homeguard/access_matrix_policy.hpp"
 
+#include <cstddef>
 #include <string_view>
 
 namespace homeguard {
