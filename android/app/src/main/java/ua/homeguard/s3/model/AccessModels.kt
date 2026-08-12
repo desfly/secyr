@@ -29,6 +29,9 @@ data class AccessSession(
     val role: AccessRole,
     val capabilities: AccessCapabilities,
 ) {
-    fun allows(command: CommandType): Boolean =
-        role == AccessRole.ADMIN || capabilities.allowsOperatorCommand(command)
+    fun allows(command: CommandType): Boolean = when (role) {
+        AccessRole.ADMIN -> true
+        AccessRole.USER -> capabilities.allowsOperatorCommand(command)
+        AccessRole.GUEST -> false
+    }
 }
