@@ -131,6 +131,7 @@ esp_err_t start_http_server()
 
     ESP_RETURN_ON_ERROR(httpd_start(&g_http_server, &config), kTag, "httpd_start");
     ESP_RETURN_ON_ERROR(g_web_http.register_handlers(g_http_server), kTag, "web routes");
+    g_network_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_network_http.register_handlers(g_http_server), kTag, "network routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(
