@@ -133,7 +133,7 @@ esp_err_t start_http_server() {
     g_network_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_network_http.register_handlers(g_http_server), kTag, "network routes");
     ESP_RETURN_ON_ERROR(g_lan_discovery_http.register_handlers(g_http_server), kTag, "lan discovery route");
-    ESP_RETURN_ON_ERROR(g_cloud_http.register_handlers(g_http_server, &g_cloud_link), kTag, "cloud routes");
+    ESP_RETURN_ON_ERROR(g_cloud_http.register_handlers(g_http_server), kTag, "cloud routes");
     ESP_RETURN_ON_ERROR(g_config_http.register_handlers(g_http_server), kTag, "config routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(g_system_http.register_handlers(
@@ -171,6 +171,9 @@ extern "C" void app_main() {
     else ESP_LOGI(kTag, "Configuration import/export runtime ready");
 
     g_cloud_link.set_command_handler(&route_cloud_command, nullptr);
+    const auto cloud_error = g_cloud_http.initialize(&g_cloud_link, &g_access_control);
+    if (cloud_error != ESP_OK) ESP_LOGE(kTag, "Cloud configuration restore/start failed: %s", esp_err_to_name(cloud_error));
+    else ESP_LOGI(kTag, "Cloud configuration runtime ready");
 
     initialize_physical_outputs();
 
