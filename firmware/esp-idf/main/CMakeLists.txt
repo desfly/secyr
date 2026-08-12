@@ -30,6 +30,7 @@ idf_component_register(
         "hg_output_http.cpp"
         "hg_gpio_output_backend.cpp"
         "hg_access_nvs.cpp"
+        "hg_access_http.cpp"
         "hg_commissioning_nvs.cpp"
         "../../src/system_model.cpp"
         "../../src/system_api.cpp"

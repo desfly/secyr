@@ -10,6 +10,7 @@
 #include "hg_gpio_output_backend.hpp"
 #include "hg_telemetry_runtime.hpp"
 #include "hg_access_nvs.hpp"
+#include "hg_access_http.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
 #include "homeguard/boot_readiness.hpp"
@@ -38,6 +39,7 @@ homeguard::idf::ServiceHttp g_service_http;
 homeguard::idf::OutputHttp g_output_http;
 homeguard::idf::GpioOutputBackend g_gpio_outputs;
 homeguard::idf::AccessNvsStore g_access_store;
+homeguard::idf::AccessHttp g_access_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
 homeguard::AccessControl g_access_control;
 hg::HardwareVerificationRecord g_hardware_verification;
@@ -142,6 +144,10 @@ esp_err_t start_http_server()
             g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus),
         kTag,
         "output routes");
+    ESP_RETURN_ON_ERROR(
+        g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store),
+        kTag,
+        "access routes");
     ESP_RETURN_ON_ERROR(
         g_service_http.register_handlers(
             g_http_server,
