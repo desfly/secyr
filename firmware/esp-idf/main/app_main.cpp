@@ -11,6 +11,7 @@
 #include "hg_telemetry_runtime.hpp"
 #include "hg_access_nvs.hpp"
 #include "hg_access_http.hpp"
+#include "hg_access_time.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
 #include "homeguard/boot_readiness.hpp"
@@ -173,6 +174,9 @@ esp_err_t start_http_server()
 extern "C" void app_main()
 {
     ESP_ERROR_CHECK(initialize_nvs());
+    // A single monotonic clock enables brute-force throttling for every
+    // AccessControl caller, including HTTP and command-router/MQTT paths.
+    g_access_control.set_auth_clock(&homeguard::idf::access_now_ms);
     restore_access_control();
     restore_commissioning_state();
     ESP_ERROR_CHECK(esp_netif_init());
