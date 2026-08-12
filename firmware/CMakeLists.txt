@@ -34,6 +34,7 @@ add_library(homeguard_core
     src/user_zone_access.cpp
     src/user_output_access.cpp
     src/config_exchange.cpp
+    src/config_import.cpp
     src/device_api_model.cpp
     src/device_command_router.cpp
     src/zone.cpp
