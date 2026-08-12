@@ -242,7 +242,8 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
     }
 
     if (action == "list") {
-        std::string response = "{\"ok\":true,\"capacity\":8,\"count\":" + std::to_string(access_->user_count()) + ",\"users\":[";
+        std::string response = "{\"ok\":true,\"capacity\":8,\"count\":" + std::to_string(access_->user_count()) +
+                               ",\"enabledAdmins\":" + std::to_string(access_->enabled_admin_count()) + ",\"users\":[";
         for (std::size_t i = 0; i < access_->user_count(); ++i) {
             const auto* user = access_->user_at(i);
             if (user == nullptr) continue;
@@ -279,20 +280,35 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_user\"}");
     }
 
+    // An access database without an enabled administrator has no supported
+    // recovery path except factory reset. Reject the mutation before touching
+    // RAM/NVS if it would demote or disable the last enabled Admin.
+    if (!access_->would_preserve_admin_access(id, role, enabled)) {
+        httpd_resp_set_status(request, "409 Conflict");
+        return send_json(request, "{\"ok\":false,\"reason\":\"last_admin_required\"}");
+    }
+
+    // Treat RAM + NVS as one transaction. If persistence fails, restore the
+    // exact pre-mutation access state so the running controller cannot diverge
+    // from the database that will be loaded on reboot.
+    const auto previous_access = *access_;
     std::array<std::uint8_t, 16> salt{};
     esp_fill_random(salt.data(), salt.size());
     if (!access_->set_user(id, name, role, pin, salt, enabled)) {
+        *access_ = previous_access;
         httpd_resp_set_status(request, "409 Conflict");
         return send_json(request, "{\"ok\":false,\"reason\":\"user_capacity_or_validation\"}");
     }
 
     const auto persist = store_->save(*access_);
     if (persist != ESP_OK) {
+        *access_ = previous_access;
         httpd_resp_set_status(request, "500 Internal Server Error");
         return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
     }
 
-    return send_json(request, "{\"ok\":true}");
+    return send_json(request, "{\"ok\":true,\"enabledAdmins\":" +
+        std::to_string(access_->enabled_admin_count()) + "}");
 }
 
 }  // namespace homeguard::idf
