@@ -1,0 +1,45 @@
+name: HomeGuard-S3 Source Snapshot
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact Build-0050 main snapshot
+        uses: actions/checkout@v5
+        with:
+          ref: 4c21bd927ddc4ff8e0a18b1c5202a1021d27bbef
+          fetch-depth: 1
+
+      - name: Create full tracked source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="HomeGuard-S3-Build-0050-full-source-4c21bd9.zip"
+          git archive --format=zip --prefix=HomeGuard-S3/ --output="$ARCHIVE" HEAD
+          printf '%s\n' \
+            'HomeGuard-S3 intermediate full source snapshot' \
+            'Stage: after Build-0050' \
+            'Branch: main' \
+            'Commit: 4c21bd927ddc4ff8e0a18b1c5202a1021d27bbef' \
+            'CI: Build-0050 run #74 success before merge' \
+            > SNAPSHOT-INFO.txt
+          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+          unzip -t "$ARCHIVE" >/dev/null
+
+      - name: Upload full source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuard-S3-Build-0050-full-source
+          path: |
+            HomeGuard-S3-Build-0050-full-source-4c21bd9.zip
+            HomeGuard-S3-Build-0050-full-source-4c21bd9.zip.sha256
+            SNAPSHOT-INFO.txt
+          if-no-files-found: error
+          retention-days: 90
