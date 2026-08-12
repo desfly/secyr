@@ -2,6 +2,7 @@
 
 #include "lwip/etharp.h"
 #include "lwip/ip4_addr.h"
+#include "lwip/opt.h"
 
 #include <cstddef>
 #include <cstdio>
@@ -36,7 +37,7 @@ esp_err_t LanDiscoveryHttp::scan_get(httpd_req_t* request)
 
     std::string out = "{\"ok\":true,\"method\":\"arp\",\"devices\":[";
     bool first = true;
-    for (std::size_t i = 0; i < ETHARP_TABLE_SIZE; ++i) {
+    for (std::size_t i = 0; i < ARP_TABLE_SIZE; ++i) {
         ip4_addr_t* ip = nullptr;
         struct netif* netif = nullptr;
         struct eth_addr* mac = nullptr;
