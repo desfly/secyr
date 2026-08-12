@@ -26,6 +26,44 @@ class HttpDeviceApi(
         client = PinnedTlsClientFactory.create(certificatePin)
     }
 
+    suspend fun login(actor: String, credential: String): AccessSession {
+        val normalizedActor = actor.trim()
+        require(normalizedActor.isNotEmpty()) { "User ID is required" }
+        require(credential.length in 4..12 && credential.all(Char::isDigit)) { "PIN must contain 4-12 digits" }
+
+        val json = execute(
+            "/api/v1/access/login",
+            "POST",
+            JSONObject().put("actor", normalizedActor).put("credential", credential),
+        )
+        if (!json.optBoolean("ok", false)) {
+            throw IOException("Login rejected: ${json.optString("reason", "unknown")}")
+        }
+
+        val role = when (json.optString("role", "guest").lowercase()) {
+            "admin" -> AccessRole.ADMIN
+            "user" -> AccessRole.USER
+            else -> AccessRole.GUEST
+        }
+        val raw = json.optJSONObject("capabilities") ?: JSONObject()
+        return AccessSession(
+            actor = json.optString("actor", normalizedActor),
+            name = json.optString("name", normalizedActor),
+            role = role,
+            capabilities = AccessCapabilities(
+                monitor = raw.optBoolean("monitor", true),
+                armHome = raw.optBoolean("armHome", false),
+                armAway = raw.optBoolean("armAway", false),
+                disarm = raw.optBoolean("disarm", false),
+                panic = raw.optBoolean("panic", false),
+                valves = raw.optBoolean("valves", false),
+                networkConfigure = raw.optBoolean("networkConfigure", false),
+                accessManage = raw.optBoolean("accessManage", false),
+                serviceInvalidate = raw.optBoolean("serviceInvalidate", false),
+            ),
+        )
+    }
+
     override suspend fun command(command: DeviceCommand): CommandReply {
         val body = JSONObject()
             .put("requestId", LocalApiContract.requestId(command.requestId))
