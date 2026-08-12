@@ -136,6 +136,7 @@ esp_err_t start_http_server()
             g_http_server, &g_system_model, &g_system_bus, &g_access_control),
         kTag,
         "system routes");
+    g_output_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(
         g_output_http.register_handlers(
             g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus),
