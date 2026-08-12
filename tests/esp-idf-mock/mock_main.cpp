@@ -4,13 +4,10 @@
 #include "esp_crt_bundle.h"
 #include "esp_mac.h"
 #include "mqtt_client.h"
+#include "lwip/netif.h"
 
 extern "C" void app_main();
 
-// ESP-IDF EMBED_TXTFILES/EMBED_FILES creates these linker symbols during the
-// real firmware build. The host-link gate does not run the ESP-IDF embedding
-// step, so provide harmless externally visible stand-ins that match
-// hg_web_http.cpp exactly.
 extern "C" {
 extern const uint8_t _binary_index_html_start[] = {0};
 extern const uint8_t _binary_index_html_end[] = {0};
@@ -22,6 +19,8 @@ extern const uint8_t _binary_access_session_js_start[] = {0};
 extern const uint8_t _binary_access_session_js_end[] = {0};
 extern const uint8_t _binary_bruce_jpg_start[] = {0};
 extern const uint8_t _binary_bruce_jpg_end[] = {0};
+
+struct netif* netif_default = nullptr;
 
 esp_err_t esp_read_mac(uint8_t* mac, esp_mac_type_t)
 {
