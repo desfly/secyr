@@ -45,38 +45,38 @@ homeguard::HomeGuardConfigDocument valid_document()
 void test_build0060_config()
 {
     auto doc = valid_document();
-    EXPECT_TRUE(homeguard::validate_config_document(doc).ok());
+    CHECK(homeguard::validate_config_document(doc).ok());
 
     const std::string json = homeguard::export_config_json(doc);
-    EXPECT_TRUE(json.find("\"schema\":\"homeguard-s3-config\"") != std::string::npos);
-    EXPECT_TRUE(json.find("\"entryDelaySec\":30") != std::string::npos);
-    EXPECT_TRUE(json.find("\"outputAccess\"") != std::string::npos);
-    EXPECT_TRUE(json.find("pin") == std::string::npos);
+    CHECK(json.find("\"schema\":\"homeguard-s3-config\"") != std::string::npos);
+    CHECK(json.find("\"entryDelaySec\":30") != std::string::npos);
+    CHECK(json.find("\"outputAccess\"") != std::string::npos);
+    CHECK(json.find("pin") == std::string::npos);
 
     homeguard::HomeGuardConfigDocument restored{};
     const auto imported = homeguard::import_config_json(json, restored);
-    EXPECT_TRUE(imported.ok());
-    EXPECT_TRUE(restored.zone_count == 2);
-    EXPECT_TRUE(restored.output_count == 2);
-    EXPECT_TRUE(restored.user_count == 3);
-    EXPECT_TRUE(homeguard::validate_config_document(restored).ok());
+    CHECK(imported.ok());
+    CHECK(restored.zone_count == 2);
+    CHECK(restored.output_count == 2);
+    CHECK(restored.user_count == 3);
+    CHECK(homeguard::validate_config_document(restored).ok());
     const auto* restored_valve = restored.output_access.rule("user1", 2);
-    EXPECT_TRUE(restored_valve != nullptr && restored_valve->can_on && restored_valve->can_off);
+    CHECK(restored_valve != nullptr && restored_valve->can_on && restored_valve->can_off);
 
     homeguard::HomeGuardConfigDocument untouched = doc;
     const auto malformed = homeguard::import_config_json("{broken", untouched);
-    EXPECT_TRUE(!malformed.ok());
-    EXPECT_TRUE(untouched.zone_count == doc.zone_count);
-    EXPECT_TRUE(untouched.user_count == doc.user_count);
+    CHECK(!malformed.ok());
+    CHECK(untouched.zone_count == doc.zone_count);
+    CHECK(untouched.user_count == doc.user_count);
 
     auto no_admin = doc; no_admin.users[0].enabled = false;
-    EXPECT_TRUE(homeguard::validate_config_document(no_admin).error == homeguard::ConfigValidationError::MissingEnabledAdmin);
+    CHECK(homeguard::validate_config_document(no_admin).error == homeguard::ConfigValidationError::MissingEnabledAdmin);
     auto guest_zone_control = doc; (void)guest_zone_control.zone_access.set_rule("guest", 1, {true, true, false, false});
-    EXPECT_TRUE(homeguard::validate_config_document(guest_zone_control).error == homeguard::ConfigValidationError::GuestControlDenied);
+    CHECK(homeguard::validate_config_document(guest_zone_control).error == homeguard::ConfigValidationError::GuestControlDenied);
     auto guest_output_control = doc; (void)guest_output_control.output_access.set_rule("guest", 2, {true, true, false});
-    EXPECT_TRUE(homeguard::validate_config_document(guest_output_control).error == homeguard::ConfigValidationError::GuestControlDenied);
+    CHECK(homeguard::validate_config_document(guest_output_control).error == homeguard::ConfigValidationError::GuestControlDenied);
     auto duplicate_zone = doc; duplicate_zone.zones[1].id = 1;
-    EXPECT_TRUE(homeguard::validate_config_document(duplicate_zone).error == homeguard::ConfigValidationError::DuplicateZoneId);
+    CHECK(homeguard::validate_config_document(duplicate_zone).error == homeguard::ConfigValidationError::DuplicateZoneId);
     auto bad_version = doc; bad_version.schema_version = 999;
-    EXPECT_TRUE(homeguard::validate_config_document(bad_version).error == homeguard::ConfigValidationError::UnsupportedVersion);
+    CHECK(homeguard::validate_config_document(bad_version).error == homeguard::ConfigValidationError::UnsupportedVersion);
 }
