@@ -4,7 +4,10 @@
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "homeguard/access_control.hpp"
+#include "homeguard/system_model.hpp"
 
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -15,6 +18,74 @@ namespace homeguard::idf {
 namespace {
 constexpr const char* kTag = "hg_cloud";
 constexpr const char* kPrefix = "homeguard/v1/devices";
+
+bool parse_json_string(const std::string& body, const char* key, std::string& value)
+{
+    const std::string marker = std::string{"\""} + key + "\"";
+    auto pos = body.find(marker);
+    if (pos == std::string::npos) return false;
+    pos = body.find(':', pos + marker.size());
+    if (pos == std::string::npos) return false;
+    ++pos;
+    while (pos < body.size() && std::isspace(static_cast<unsigned char>(body[pos]))) ++pos;
+    if (pos >= body.size() || body[pos] != '"') return false;
+    ++pos;
+    value.clear();
+    bool escaped = false;
+    for (; pos < body.size(); ++pos) {
+        const char ch = body[pos];
+        if (escaped) {
+            if (ch == '"' || ch == '\\' || ch == '/') value.push_back(ch);
+            else if (ch == 'n') value.push_back('\n');
+            else if (ch == 'r') value.push_back('\r');
+            else if (ch == 't') value.push_back('\t');
+            else return false;
+            escaped = false;
+        } else if (ch == '\\') {
+            escaped = true;
+        } else if (ch == '"') {
+            return true;
+        } else {
+            value.push_back(ch);
+        }
+    }
+    return false;
+}
+
+std::string json_escape(const std::string& value)
+{
+    std::string out;
+    out.reserve(value.size() + 8);
+    for (const char ch : value) {
+        if (ch == '"') out += "\\\"";
+        else if (ch == '\\') out += "\\\\";
+        else if (ch == '\n') out += "\\n";
+        else if (ch == '\r') out += "\\r";
+        else if (ch == '\t') out += "\\t";
+        else if (static_cast<unsigned char>(ch) >= 0x20U) out.push_back(ch);
+    }
+    return out;
+}
+
+const char* arm_state_name(hg::PartitionArmState state)
+{
+    switch (state) {
+        case hg::PartitionArmState::Stay: return "stay";
+        case hg::PartitionArmState::Away: return "away";
+        case hg::PartitionArmState::Alarm: return "alarm";
+        default: return "disarmed";
+    }
+}
+}
+
+void CloudLink::set_command_runtime(
+    hg::SystemModel* model,
+    hg::SystemEventBus* bus,
+    homeguard::AccessControl* access_control)
+{
+    model_ = model;
+    bus_ = bus;
+    access_control_ = access_control;
 }
 
 void CloudLink::make_device_id()
@@ -34,6 +105,7 @@ void CloudLink::make_topics()
     std::snprintf(state_topic_.data(), state_topic_.size(), "%s/%s/state", kPrefix, device_id_.data());
     std::snprintf(availability_topic_.data(), availability_topic_.size(), "%s/%s/availability", kPrefix, device_id_.data());
     std::snprintf(command_topic_.data(), command_topic_.size(), "%s/%s/commands", kPrefix, device_id_.data());
+    std::snprintf(response_topic_.data(), response_topic_.size(), "%s/%s/responses", kPrefix, device_id_.data());
 }
 
 esp_err_t CloudLink::prepare_identity()
@@ -101,7 +173,11 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
 
 void CloudLink::stop()
 {
-    if (client_ == nullptr) return;
+    if (client_ == nullptr) {
+        connected_ = false;
+        configured_ = false;
+        return;
+    }
     if (connected_) publish_online(false);
     (void)esp_mqtt_client_stop(client_);
     esp_mqtt_client_destroy(client_);
@@ -134,6 +210,59 @@ void CloudLink::mqtt_event_handler(void* handler_args,
     self->on_mqtt_event(static_cast<esp_mqtt_event_handle_t>(event_data));
 }
 
+void CloudLink::handle_command(const char* data, std::size_t size)
+{
+    if (client_ == nullptr || data == nullptr || size == 0) return;
+    const std::string body(data, size);
+    std::string request_id, actor, credential, command;
+    (void)parse_json_string(body, "request_id", request_id);
+    if (request_id.empty()) (void)parse_json_string(body, "requestId", request_id);
+
+    auto publish_response = [&](bool ok, const char* reason, const char* arm_state = nullptr) {
+        std::string response = std::string{"{\"ok\":"} + (ok ? "true" : "false") +
+            ",\"requestId\":\"" + json_escape(request_id) + "\"";
+        if (reason != nullptr) response += ",\"reason\":\"" + json_escape(reason) + "\"";
+        if (arm_state != nullptr) response += ",\"armState\":\"" + std::string(arm_state) + "\"";
+        response += '}';
+        (void)esp_mqtt_client_publish(client_, response_topic_.data(), response.c_str(), 0, 1, 0);
+    };
+
+    if (model_ == nullptr || bus_ == nullptr || access_control_ == nullptr) {
+        publish_response(false, "runtime_unavailable");
+        return;
+    }
+    if (!parse_json_string(body, "command", command) ||
+        !parse_json_string(body, "actor", actor) ||
+        !parse_json_string(body, "credential", credential)) {
+        publish_response(false, "invalid_request");
+        return;
+    }
+
+    const auto decision = access_control_->authorize(actor, credential, command);
+    std::fill(credential.begin(), credential.end(), '\0');
+    if (decision != homeguard::AuditDecision::Allowed) {
+        publish_response(false, homeguard::to_string(decision));
+        return;
+    }
+
+    hg::PartitionArmState target{};
+    if (command == "security.arm_away") target = hg::PartitionArmState::Away;
+    else if (command == "security.arm_home") target = hg::PartitionArmState::Stay;
+    else if (command == "security.disarm") target = hg::PartitionArmState::Disarmed;
+    else if (command == "security.panic") target = hg::PartitionArmState::Alarm;
+    else {
+        publish_response(false, "unsupported_command");
+        return;
+    }
+
+    if (!model_->set_partition_arm(1, target, 0)) {
+        publish_response(false, "partition_command_failed");
+        return;
+    }
+    (void)bus_->dispatch_all();
+    publish_response(true, "accepted", arm_state_name(target));
+}
+
 void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
 {
     switch (event->event_id) {
@@ -142,7 +271,7 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             ++connect_count_;
             publish_online(true);
             (void)esp_mqtt_client_subscribe(client_, command_topic_.data(), 1);
-            ESP_LOGI(kTag, "Cloud connected; commands=%s", command_topic_.data());
+            ESP_LOGI(kTag, "Cloud connected; commands=%s responses=%s", command_topic_.data(), response_topic_.data());
             break;
         case MQTT_EVENT_DISCONNECTED:
             connected_ = false;
@@ -151,10 +280,8 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             break;
         case MQTT_EVENT_DATA: {
             const std::string topic(event->topic, static_cast<std::size_t>(event->topic_len));
-            const std::string data(event->data, static_cast<std::size_t>(event->data_len));
             if (topic == command_topic_.data()) {
-                ESP_LOGI(kTag, "Cloud command received (%u bytes), deferred to safe command router",
-                         static_cast<unsigned>(data.size()));
+                handle_command(event->data, static_cast<std::size_t>(event->data_len));
             }
             break;
         }
