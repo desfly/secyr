@@ -120,7 +120,9 @@ esp_err_t start_http_server() {
     ESP_RETURN_ON_ERROR(g_lan_discovery_http.register_handlers(g_http_server), kTag, "lan discovery route");
     ESP_RETURN_ON_ERROR(g_config_http.register_handlers(g_http_server), kTag, "config routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
-    ESP_RETURN_ON_ERROR(g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus, &g_access_control), kTag, "system routes");
+    ESP_RETURN_ON_ERROR(g_system_http.register_handlers(
+        g_http_server, &g_system_model, &g_system_bus, &g_access_control,
+        &g_config_http.document().zone_access), kTag, "system routes");
     g_output_http.set_access_control(&g_access_control);
     g_output_http.set_output_access(&g_config_http.document().output_access);
     ESP_RETURN_ON_ERROR(g_output_http.register_handlers(g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus), kTag, "output routes");
