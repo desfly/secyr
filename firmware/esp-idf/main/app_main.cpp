@@ -21,6 +21,8 @@
 #include "homeguard/boot_readiness.hpp"
 #include "homeguard/physical_output_runtime.hpp"
 #include "homeguard/system_model.hpp"
+#include "homeguard/user_output_access.hpp"
+#include "homeguard/user_zone_access.hpp"
 #include "esp_check.h"
 
 #include "esp_event.h"
@@ -30,6 +32,7 @@
 #include "nvs_flash.h"
 
 #include <algorithm>
+#include <string_view>
 
 namespace {
 
@@ -53,6 +56,8 @@ homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::AccessHttp g_access_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
 homeguard::AccessControl g_access_control;
+homeguard::UserZoneAccess g_zone_access;
+homeguard::UserOutputAccess g_output_access;
 hg::HardwareVerificationRecord g_hardware_verification;
 hg::CommissioningPersistentState g_commissioning_state;
 hg::BootReadinessReport g_boot_readiness;
@@ -139,6 +144,50 @@ void initialize_system_model()
     g_system_model.add_output(3, hg::ModelOutputType::Valve);
 }
 
+void initialize_access_matrices()
+{
+    for (std::size_t user_index = 0; user_index < g_access_control.user_count(); ++user_index) {
+        const auto* user = g_access_control.user_at(user_index);
+        if (user == nullptr || !user->enabled) continue;
+        const std::string_view user_id{user->id.data()};
+        if (!g_zone_access.ensure_user(user_id) || !g_output_access.ensure_user(user_id)) {
+            ESP_LOGE(kTag, "Unable to initialize access matrix for user %s", user->id.data());
+            continue;
+        }
+
+        for (std::size_t zone_index = 0; zone_index < g_system_model.zone_count(); ++zone_index) {
+            const auto* zone = g_system_model.zone_at(zone_index);
+            if (zone == nullptr) continue;
+            homeguard::ZoneAccessRule rule{};
+            rule.visible = true;
+            if (user->role == homeguard::AccessRole::Admin) {
+                rule.can_arm = true;
+                rule.can_disarm = true;
+                rule.can_bypass = true;
+            } else if (user->role == homeguard::AccessRole::User) {
+                rule.can_arm = true;
+                rule.can_disarm = true;
+            }
+            (void)g_zone_access.set_rule(user_id, zone->id, rule);
+        }
+
+        for (std::size_t output_index = 0; output_index < g_system_model.output_count(); ++output_index) {
+            const auto* output = g_system_model.output_at(output_index);
+            if (output == nullptr) continue;
+            homeguard::OutputAccessRule rule{};
+            rule.visible = true;
+            if (user->role == homeguard::AccessRole::Admin) {
+                rule.can_on = true;
+                rule.can_off = true;
+            } else if (user->role == homeguard::AccessRole::User && output->type == hg::ModelOutputType::Valve) {
+                rule.can_on = true;
+                rule.can_off = true;
+            }
+            (void)g_output_access.set_rule(user_id, output->id, rule);
+        }
+    }
+}
+
 void initialize_physical_outputs()
 {
     if (!g_physical_outputs.initialize(g_gpio_outputs, g_hardware_verification, g_boot_readiness)) {
@@ -162,8 +211,9 @@ esp_err_t start_http_server()
     ESP_RETURN_ON_ERROR(g_lan_http.register_handlers(g_http_server), kTag, "LAN discovery routes");
     ESP_RETURN_ON_ERROR(g_cloud_http.register_handlers(g_http_server, &g_cloud_link, &g_cloud_store, &g_access_control), kTag, "cloud routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
-    ESP_RETURN_ON_ERROR(g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus, &g_access_control), kTag, "system routes");
+    ESP_RETURN_ON_ERROR(g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus, &g_access_control, &g_zone_access), kTag, "system routes");
     g_output_http.set_access_control(&g_access_control);
+    g_output_http.set_output_access(&g_output_access);
     ESP_RETURN_ON_ERROR(g_output_http.register_handlers(g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus), kTag, "output routes");
     ESP_RETURN_ON_ERROR(g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed), kTag, "access routes");
     g_service_http.set_access_control(&g_access_control);
@@ -194,6 +244,7 @@ extern "C" void app_main()
     }
 
     initialize_system_model();
+    initialize_access_matrices();
     g_cloud_link.set_command_runtime(&g_system_model, &g_system_bus, &g_access_control);
     if (cloud_identity_error == ESP_OK) restore_cloud_config();
     initialize_physical_outputs();
