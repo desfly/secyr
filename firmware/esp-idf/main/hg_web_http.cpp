@@ -40,6 +40,14 @@ esp_err_t WebHttp::send_asset(httpd_req_t* request,
                               const unsigned char* end)
 {
     if (request == nullptr || start == nullptr || end == nullptr || end < start) return ESP_ERR_INVALID_ARG;
+
+    // HomeGuard is repeatedly reflashed during commissioning. The Web UI uses
+    // stable URLs (/app.css and /app.js), so browser caching can otherwise mix
+    // a fresh index.html with stale CSS/JS from an older firmware image. That
+    // makes every control appear dead even though the new firmware is running.
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    httpd_resp_set_hdr(request, "Pragma", "no-cache");
+    httpd_resp_set_hdr(request, "Expires", "0");
     httpd_resp_set_type(request, content_type);
     return httpd_resp_send(
         request,
