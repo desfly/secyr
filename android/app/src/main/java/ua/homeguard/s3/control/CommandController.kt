@@ -1,6 +1,7 @@
 package ua.homeguard.s3.control
 
 import kotlinx.coroutines.flow.StateFlow
+import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandReply
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ControlPath
@@ -16,6 +17,10 @@ class CommandController(
 ) {
     private val requestIds = AtomicLong(System.currentTimeMillis())
 
+    suspend fun login(actor: String, credential: String): AccessSession {
+        return requireOnlineApi().login(actor, credential)
+    }
+
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
         val target = endpoint.value
         val appSettings = settings.settings.value
@@ -23,13 +28,7 @@ class CommandController(
             return CommandReply(accepted = false, code = "offline")
         }
 
-        val pin = if (target.path == ControlPath.CLOUD) "" else target.certificateSha256
-        val api = HttpDeviceApi(
-            baseUrl = target.apiBaseUrl,
-            tokenProvider = { settings.settings.value.apiToken },
-            certificatePin = pin,
-        )
-
+        val api = createApi(target)
         val challenge = if (requiresChallenge(type)) api.challenge(type) else null
         val command = DeviceCommand(
             requestId = requestIds.incrementAndGet(),
@@ -40,6 +39,24 @@ class CommandController(
             credential = credential,
         )
         return api.command(command)
+    }
+
+    private fun requireOnlineApi(): HttpDeviceApi {
+        val target = endpoint.value
+        val appSettings = settings.settings.value
+        require(target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank() && appSettings.apiToken.isNotBlank()) {
+            "controller offline"
+        }
+        return createApi(target)
+    }
+
+    private fun createApi(target: DeviceEndpoint): HttpDeviceApi {
+        val pin = if (target.path == ControlPath.CLOUD) "" else target.certificateSha256
+        return HttpDeviceApi(
+            baseUrl = target.apiBaseUrl,
+            tokenProvider = { settings.settings.value.apiToken },
+            certificatePin = pin,
+        )
     }
 
     private fun requiresChallenge(type: CommandType): Boolean = when (type) {
