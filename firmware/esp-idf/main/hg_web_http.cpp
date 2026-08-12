@@ -16,6 +16,8 @@ extern const uint8_t cloud_status_js_start[] asm("_binary_cloud_status_js_start"
 extern const uint8_t cloud_status_js_end[] asm("_binary_cloud_status_js_end");
 extern const uint8_t config_ui_js_start[] asm("_binary_config_ui_js_start");
 extern const uint8_t config_ui_js_end[] asm("_binary_config_ui_js_end");
+extern const uint8_t lan_monitor_js_start[] asm("_binary_lan_monitor_js_start");
+extern const uint8_t lan_monitor_js_end[] asm("_binary_lan_monitor_js_end");
 extern const uint8_t bruce_jpg_start[] asm("_binary_bruce_jpg_start");
 extern const uint8_t bruce_jpg_end[] asm("_binary_bruce_jpg_end");
 
@@ -32,6 +34,7 @@ esp_err_t WebHttp::register_handlers(httpd_handle_t server)
         {.uri="/access-session.js", .method=HTTP_GET, .handler=&WebHttp::access_session_js_get, .user_ctx=this},
         {.uri="/cloud-status.js", .method=HTTP_GET, .handler=&WebHttp::cloud_status_js_get, .user_ctx=this},
         {.uri="/config-ui.js", .method=HTTP_GET, .handler=&WebHttp::config_ui_js_get, .user_ctx=this},
+        {.uri="/lan-monitor.js", .method=HTTP_GET, .handler=&WebHttp::lan_monitor_js_get, .user_ctx=this},
         {.uri="/bruce.jpg", .method=HTTP_GET, .handler=&WebHttp::bruce_get, .user_ctx=this},
     };
     for (const auto& route : routes) {
@@ -60,6 +63,7 @@ esp_err_t WebHttp::js_get(httpd_req_t* request) { return send_asset(request, "ap
 esp_err_t WebHttp::access_session_js_get(httpd_req_t* request) { return send_asset(request, "application/javascript; charset=utf-8", access_session_js_start, access_session_js_end); }
 esp_err_t WebHttp::cloud_status_js_get(httpd_req_t* request) { return send_asset(request, "application/javascript; charset=utf-8", cloud_status_js_start, cloud_status_js_end); }
 esp_err_t WebHttp::config_ui_js_get(httpd_req_t* request) { return send_asset(request, "application/javascript; charset=utf-8", config_ui_js_start, config_ui_js_end); }
+esp_err_t WebHttp::lan_monitor_js_get(httpd_req_t* request) { return send_asset(request, "application/javascript; charset=utf-8", lan_monitor_js_start, lan_monitor_js_end); }
 esp_err_t WebHttp::bruce_get(httpd_req_t* request) { return send_asset(request, "image/jpeg", bruce_jpg_start, bruce_jpg_end); }
 
 }  // namespace homeguard::idf
