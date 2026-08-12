@@ -119,10 +119,26 @@ void ConfigHttp::seed_from_runtime() {
         document_.user_count = std::min(access_->user_count(), document_.users.size());
         for (std::size_t i = 0; i < document_.user_count; ++i) {
             const auto* source = access_->user_at(i); if (source == nullptr) continue;
-            auto& target = document_.users[i]; copy_text(target.id, text_view(source->id)); copy_text(target.name, text_view(source->name));
+            const auto uid = text_view(source->id);
+            auto& target = document_.users[i]; copy_text(target.id, uid); copy_text(target.name, text_view(source->name));
             target.role = source->role; target.enabled = source->enabled;
-            (void)document_.zone_access.ensure_user(text_view(source->id));
-            (void)document_.output_access.ensure_user(text_view(source->id));
+            (void)document_.zone_access.ensure_user(uid);
+            (void)document_.output_access.ensure_user(uid);
+
+            for (std::size_t z = 0; z < document_.zone_count; ++z) {
+                const auto zone_id = document_.zones[z].id;
+                ZoneAccessRule rule{true, false, false, false};
+                if (source->role == AccessRole::Admin) rule = {true, true, true, true};
+                else if (source->role == AccessRole::User) rule = {true, true, true, false};
+                (void)document_.zone_access.set_rule(uid, zone_id, rule);
+            }
+            for (std::size_t o = 0; o < document_.output_count; ++o) {
+                const auto output_id = document_.outputs[o].id;
+                OutputAccessRule rule{true, false, false};
+                if (source->role == AccessRole::Admin) rule = {true, true, true};
+                else if (source->role == AccessRole::User && document_.outputs[o].type == ConfigOutputType::Valve) rule = {true, true, true};
+                (void)document_.output_access.set_rule(uid, output_id, rule);
+            }
         }
     }
 }
@@ -180,6 +196,7 @@ esp_err_t ConfigHttp::import_post(httpd_req_t* request) { auto* self=self_from(r
 
 esp_err_t ConfigHttp::handle_export(httpd_req_t* request) {
     if (!authorize_admin(request, "config.export")) return json_error(request, "403 Forbidden", "admin_required");
+    if (document_.user_count == 0U && access_ != nullptr && access_->user_count() > 0U) seed_from_runtime();
     const auto validation = validate_config_document(document_);
     if (!validation.ok()) return json_error(request, "409 Conflict", std::string{"config_invalid:"} + to_string(validation.error));
     const std::string body = export_config_json(document_);
