@@ -7,6 +7,8 @@
 #include "esp_http_server.h"
 #include <array>
 #include <cstddef>
+#include <string>
+#include <string_view>
 
 namespace homeguard::idf {
 
@@ -18,6 +20,10 @@ public:
         hg::SystemEventBus* bus,
         homeguard::AccessControl* access_control,
         const homeguard::UserZoneAccess* zone_access);
+
+    // Shared safe command path for non-HTTP transports (MQTT/cloud).
+    // Uses the same AccessControl and zone matrix as the Web UI route.
+    [[nodiscard]] std::string route_security_command_json(std::string_view body);
 
 private:
     static esp_err_t status_get(httpd_req_t* request);
