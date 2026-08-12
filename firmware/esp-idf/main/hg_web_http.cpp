@@ -110,9 +110,8 @@ esp_err_t WebHttp::css_get(httpd_req_t* request)
 
 esp_err_t WebHttp::js_get(httpd_req_t* request)
 {
-    // Belt-and-suspenders routing for the real embedded browser. The normal
-    // app router still owns navigation; this handler only enforces actual
-    // visibility with inline !important styles after every hash change.
+    // Embedded-browser fixes live in one suffix so the flashed controller does
+    // not depend on user-agent quirks or stale UI assets during commissioning.
     static constexpr char kEmbeddedViewFix[] = R"JS(
 
 ;(() => {
@@ -147,8 +146,40 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     }
   }
 
+  function ensureWifiPasswordToggle() {
+    const password = document.getElementById("wifiPassword");
+    if (!password || document.getElementById("wifiPasswordToggle")) return;
+
+    const label = password.parentElement;
+    if (!label) return;
+    label.style.position = "relative";
+    password.style.paddingRight = "52px";
+
+    const toggle = document.createElement("button");
+    toggle.id = "wifiPasswordToggle";
+    toggle.type = "button";
+    toggle.textContent = "👁";
+    toggle.setAttribute("aria-label", "Показати пароль Wi-Fi");
+    toggle.setAttribute("aria-pressed", "false");
+    toggle.title = "Показати пароль";
+    toggle.style.cssText = "position:absolute;right:7px;bottom:6px;width:40px;height:34px;padding:0;border:0;background:transparent;cursor:pointer;font-size:18px;line-height:34px;text-align:center";
+    toggle.addEventListener("click", () => {
+      const show = password.type === "password";
+      password.type = show ? "text" : "password";
+      toggle.setAttribute("aria-pressed", show ? "true" : "false");
+      toggle.setAttribute("aria-label", show ? "Сховати пароль Wi-Fi" : "Показати пароль Wi-Fi");
+      toggle.title = show ? "Сховати пароль" : "Показати пароль";
+      toggle.textContent = show ? "◉" : "👁";
+      password.focus();
+      const end = password.value.length;
+      if (typeof password.setSelectionRange === "function") password.setSelectionRange(end, end);
+    });
+    label.appendChild(toggle);
+  }
+
   window.addEventListener("hashchange", applyEmbeddedView);
   applyEmbeddedView();
+  ensureWifiPasswordToggle();
 })();
 )JS";
 
