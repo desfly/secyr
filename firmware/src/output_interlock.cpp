@@ -9,14 +9,17 @@ OutputInterlockResult evaluate_output_interlock(
     if (model.output(request.output_id) == nullptr) {
         return {OutputInterlockDecision::InvalidOutput, false};
     }
-    if (request.readiness == nullptr || !request.readiness->outputs_allowed()) {
-        return {OutputInterlockDecision::BootNotReady, false};
-    }
 
-    // Deactivation is always permitted once the target exists: fail-safe actions
-    // must never be blocked by an alarm or commissioning transition.
+    // Deactivation is always permitted once the target exists. This is the
+    // fail-safe path and must stay available even while boot/commissioning
+    // readiness is not established or an alarm currently owns the outputs.
     if (!request.requested_active) {
         return {OutputInterlockDecision::Allowed, true};
+    }
+
+    // Only activation requires the commissioning/readiness gate.
+    if (request.readiness == nullptr || !request.readiness->outputs_allowed()) {
+        return {OutputInterlockDecision::BootNotReady, false};
     }
 
     // While alarm handling owns physical outputs, service/manual activation is
