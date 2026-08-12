@@ -3,6 +3,7 @@
 #include "lwip/etharp.h"
 #include "lwip/ip4_addr.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <string>
 
