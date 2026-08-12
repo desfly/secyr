@@ -3,6 +3,8 @@
 #include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
 #include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "nvs.h"
 
 #include <algorithm>
@@ -21,6 +23,7 @@ constexpr std::uint32_t kCredentialsMagic = 0x48475746U; // HGWF
 constexpr char kNvsNamespace[] = "hg_wifi";
 constexpr char kNvsKey[] = "credentials";
 constexpr std::size_t kMaxScanRecords = 20;
+constexpr TickType_t kStaHandoverDelay = pdMS_TO_TICKS(400);
 
 struct CredentialsRecord {
     std::uint32_t magic{};
@@ -240,15 +243,33 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"invalid_credentials\"}");
     }
 
-    const bool applied = apply_sta(ssid, password, true);
-    std::fill(password.begin(), password.end(), '\0');
-    if (!applied) {
+    // Stage STA credentials first, but do not retune the AP+STA radio until the
+    // HTTP client has received an acknowledgement. Connecting immediately here
+    // can move the SoftAP to the infrastructure AP channel and tear down the
+    // very socket that submitted this request.
+    wifi_config_t sta{};
+    std::memcpy(sta.sta.ssid, ssid.data(), std::min(ssid.size(), sizeof(sta.sta.ssid)));
+    std::memcpy(sta.sta.password, password.data(), std::min(password.size(), sizeof(sta.sta.password)));
+    sta.sta.threshold.authmode = WIFI_AUTH_OPEN;
+    sta.sta.pmf_cfg.capable = true;
+    sta.sta.pmf_cfg.required = false;
+
+    if (esp_wifi_set_config(WIFI_IF_STA, &sta) != ESP_OK || !save_credentials(ssid, password)) {
+        std::fill(password.begin(), password.end(), '\0');
         httpd_resp_set_status(request, "503 Service Unavailable");
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_connect_failed\"}");
     }
+    std::fill(password.begin(), password.end(), '\0');
 
-    return send_json(request,
+    const auto response_error = send_json(request,
         std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) + "\"}");
+    if (response_error != ESP_OK) return response_error;
+
+    // Give lwIP/httpd time to put the acknowledgement on the wire before the
+    // STA association potentially changes the shared radio channel.
+    vTaskDelay(kStaHandoverDelay);
+    (void)esp_wifi_disconnect();
+    return esp_wifi_connect();
 }
 
 bool NetworkHttp::apply_sta(const std::string& ssid, const std::string& password, bool persist)
