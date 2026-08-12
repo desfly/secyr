@@ -145,7 +145,9 @@ jobs:
           fetch-depth: 0
 
       - name: Show toolchain versions
+        shell: bash
         run: |
+          source "$IDF_PATH/export.sh"
           idf.py --version
           cmake --version
           ninja --version
@@ -153,13 +155,17 @@ jobs:
 
       - name: Configure ESP32-S3 target
         working-directory: firmware/esp-idf
-        run: idf.py set-target esp32s3
+        shell: bash
+        run: |
+          source "$IDF_PATH/export.sh"
+          idf.py set-target esp32s3
 
       - name: Build firmware
         working-directory: firmware/esp-idf
         shell: bash
         run: |
           set -o pipefail
+          source "$IDF_PATH/export.sh"
           idf.py build 2>&1 | tee firmware-build.log
 
       - name: Generate firmware checksums
