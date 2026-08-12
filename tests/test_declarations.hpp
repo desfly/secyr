@@ -2,6 +2,7 @@
 void test_zone(); void test_pressure(); void test_reliability(); void test_controller();
 void test_connectivity();
 void test_provisioning();
+void test_access_matrix();
 void test_build0009();
 void test_build0013();
 void test_build0032();
