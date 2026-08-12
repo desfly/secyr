@@ -1,6 +1,7 @@
 #include "homeguard/user_zone_access.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <limits>
 
 namespace homeguard {
