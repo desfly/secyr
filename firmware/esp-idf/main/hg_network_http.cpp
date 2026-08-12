@@ -159,7 +159,7 @@ esp_err_t NetworkHttp::begin()
 
 esp_err_t NetworkHttp::register_handlers(httpd_handle_t server)
 {
-    if (server == nullptr || !initialized_) return ESP_ERR_INVALID_ARG;
+    if (server == nullptr || !initialized_ || access_ == nullptr) return ESP_ERR_INVALID_ARG;
 
     const httpd_uri_t routes[] = {
         {.uri="/api/v1/network/status", .method=HTTP_GET, .handler=&NetworkHttp::status_get, .user_ctx=this},
@@ -204,7 +204,7 @@ esp_err_t NetworkHttp::handle_scan(httpd_req_t* request)
 
 esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
 {
-    if (request->content_len == 0 || request->content_len > 256) {
+    if (request->content_len == 0 || request->content_len > 384) {
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"invalid_body\"}");
     }
@@ -216,6 +216,20 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"read_failed\"}");
     }
     body.resize(static_cast<std::size_t>(received));
+
+    std::string actor;
+    std::string credential;
+    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
+        httpd_resp_set_status(request, "401 Unauthorized");
+        return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"admin_credential_required\"}");
+    }
+
+    const auto decision = access_->authorize(actor, credential, "network.configure");
+    std::fill(credential.begin(), credential.end(), '\0');
+    if (decision != AuditDecision::Allowed) {
+        httpd_resp_set_status(request, "403 Forbidden");
+        return send_json(request, std::string{"{\"ok\":false,\"state\":\"error\",\"reason\":\""} + to_string(decision) + "\"}");
+    }
 
     std::string ssid;
     std::string password;
