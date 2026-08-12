@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hg_commissioning_nvs.hpp"
+#include "homeguard/access_control.hpp"
 #include "homeguard/boot_readiness.hpp"
 #include "homeguard/commissioning_state.hpp"
 #include "homeguard/hardware_verification.hpp"
@@ -21,6 +22,10 @@ public:
         hg::BootReadinessReport* readiness,
         hg::SystemEventBus* bus);
 
+    void set_access_control(homeguard::AccessControl* access_control) {
+        access_control_ = access_control;
+    }
+
 private:
     static esp_err_t readiness_get(httpd_req_t* request);
     static esp_err_t invalidate_post(httpd_req_t* request);
@@ -31,6 +36,7 @@ private:
     hg::CommissioningPersistentState* commissioning_{};
     hg::BootReadinessReport* readiness_{};
     hg::SystemEventBus* bus_{};
+    homeguard::AccessControl* access_control_{};
 };
 
 }  // namespace homeguard::idf

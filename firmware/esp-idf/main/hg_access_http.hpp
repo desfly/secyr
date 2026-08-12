@@ -16,7 +16,9 @@ public:
 
 private:
     static esp_err_t users_post(httpd_req_t* request);
+    static esp_err_t login_post(httpd_req_t* request);
     esp_err_t handle_users(httpd_req_t* request);
+    esp_err_t handle_login(httpd_req_t* request);
 
     AccessControl* access_{};
     AccessNvsStore* store_{};

@@ -50,12 +50,18 @@ public:
     [[nodiscard]] const AccessUser* find_user(std::string_view id) const;
     [[nodiscard]] bool verify_pin(const AccessUser& user, std::string_view pin) const;
     [[nodiscard]] bool role_allows(AccessRole role, std::string_view command) const;
+    [[nodiscard]] AuditDecision authenticate(std::string_view actor, std::string_view pin);
     [[nodiscard]] AuditDecision authorize(
         std::string_view actor,
         std::string_view pin,
         std::string_view command);
 
     [[nodiscard]] std::size_t user_count() const { return user_count_; }
+    [[nodiscard]] std::size_t enabled_admin_count() const;
+    [[nodiscard]] bool would_preserve_admin_access(
+        std::string_view user_id,
+        AccessRole replacement_role,
+        bool replacement_enabled) const;
     [[nodiscard]] std::size_t audit_size() const { return audit_size_; }
     [[nodiscard]] const AccessAuditRecord* audit_at_oldest(std::size_t index) const;
 

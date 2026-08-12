@@ -18,3 +18,5 @@ void test_build0052();
 void test_build0053();
 void test_build0054();
 void test_build0055();
+void test_build0056();
+void test_build0057();

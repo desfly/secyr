@@ -2,9 +2,8 @@
 """Headless-browser control smoke server for the HomeGuard-S3 Web UI.
 
 `serve` exposes the real checked-in web assets plus deterministic mock API
-responses and injects a test-only script that clicks every high-priority
-control. `verify` then checks the captured HTTP requests, proving that visible
-buttons actually produce the expected firmware API payloads.
+responses and injects a test-only script that exercises login, role gating and
+high-priority controls. `verify` checks the captured HTTP requests.
 """
 from __future__ import annotations
 
@@ -19,7 +18,7 @@ HARNESS = r"""
 <script>
 (async () => {
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const waitFor = async (selector, timeout = 4000) => {
+  const waitFor = async (selector, timeout = 5000) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       const item = document.querySelector(selector);
@@ -28,7 +27,7 @@ HARNESS = r"""
     }
     throw new Error(`timeout waiting for ${selector}`);
   };
-  const waitEnabled = async (selector, timeout = 4000) => {
+  const waitEnabled = async (selector, timeout = 5000) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       const item = document.querySelector(selector);
@@ -37,41 +36,24 @@ HARNESS = r"""
     }
     throw new Error(`timeout waiting for enabled ${selector}`);
   };
-  const operator = () => {
-    document.querySelector('#operatorId').value = 'smoke-user';
-    document.querySelector('#operatorPin').value = '1234';
+  const login = async (actor, pin) => {
+    document.querySelector('#operatorId').value = actor;
+    document.querySelector('#operatorPin').value = pin;
+    (await waitEnabled('#accessLogin')).click();
+    await waitFor('#accessLogout:not([hidden])');
+    await sleep(250);
+  };
+  const logout = async () => {
+    (await waitEnabled('#accessLogout')).click();
+    await waitFor('#accessLogin:not([hidden])');
+    await sleep(150);
   };
 
   await waitFor('html[data-homeguard-ui="ready"]');
+  await waitFor('#accessBootstrap');
   await waitFor('[data-output-id="2"][data-output-active="true"]');
 
-  for (const command of [
-    'security.arm_away',
-    'security.disarm',
-    'security.arm_home',
-    'security.panic'
-  ]) {
-    operator();
-    (await waitEnabled(`[data-command="${command}"]`)).click();
-    await sleep(450);
-  }
-
-  operator();
-  (await waitEnabled('[data-output-id="2"][data-output-active="true"]')).click();
-  await sleep(650);
-  operator();
-  (await waitEnabled('[data-output-id="2"][data-output-active="false"]')).click();
-  await sleep(650);
-
-  (await waitEnabled('#wifiScan')).click();
-  await sleep(500);
-  document.querySelector('#networkActor').value = 'admin-smoke';
-  document.querySelector('#networkCredential').value = '4321';
-  document.querySelector('#wifiSsid').value = 'SmokeNet';
-  document.querySelector('#wifiPassword').value = 'password123';
-  (await waitEnabled('#wifiConnect')).click();
-  await sleep(2100);
-
+  // Factory-fresh bootstrap is the only unauthenticated write path.
   document.querySelector('#managedUserId').value = 'admin-smoke';
   document.querySelector('#managedUserName').value = 'Smoke Admin';
   document.querySelector('#managedUserRole').value = 'admin';
@@ -79,20 +61,73 @@ HARNESS = r"""
   (await waitEnabled('#accessBootstrap')).click();
   await sleep(500);
 
-  document.querySelector('#accessActor').value = 'admin-smoke';
-  document.querySelector('#accessCredential').value = '4321';
+  // Admin: full access, including Panic, network and account management.
+  await login('admin-smoke', '4321');
+  (await waitEnabled('[data-command="security.panic"]')).click();
+  await sleep(450);
+
+  (await waitEnabled('#wifiScan')).click();
+  await sleep(500);
+  document.querySelector('#wifiSsid').value = 'SmokeNet';
+  document.querySelector('#wifiPassword').value = 'password123';
+  (await waitEnabled('#wifiConnect')).click();
+  await sleep(2100);
+
   (await waitEnabled('#accessLoad')).click();
   await sleep(500);
 
-  document.querySelector('#accessActor').value = 'admin-smoke';
-  document.querySelector('#accessCredential').value = '4321';
-  document.querySelector('#managedUserId').value = 'user-smoke';
+  document.querySelector('#managedUserId').value = 'smoke-user';
   document.querySelector('#managedUserName').value = 'Smoke User';
   document.querySelector('#managedUserRole').value = 'user';
-  document.querySelector('#managedUserPin').value = '5678';
+  document.querySelector('#managedUserPin').value = '1234';
   document.querySelector('#managedUserEnabled').checked = true;
   (await waitEnabled('#accessSave')).click();
-  await sleep(600);
+  await sleep(500);
+
+  document.querySelector('#managedUserId').value = 'guest-smoke';
+  document.querySelector('#managedUserName').value = 'Smoke Guest';
+  document.querySelector('#managedUserRole').value = 'guest';
+  document.querySelector('#managedUserPin').value = '6789';
+  document.querySelector('#managedUserEnabled').checked = true;
+  (await waitEnabled('#accessSave')).click();
+  await sleep(500);
+  await logout();
+
+  // User: arm/disarm + valves, but no Panic/network/account management.
+  await login('smoke-user', '1234');
+  for (const command of ['security.arm_away', 'security.disarm', 'security.arm_home']) {
+    (await waitEnabled(`[data-command="${command}"]`)).click();
+    await sleep(450);
+  }
+  if (!document.querySelector('[data-command="security.panic"]')?.disabled) {
+    throw new Error('panic unexpectedly enabled for user');
+  }
+  if (!document.querySelector('#wifiConnect')?.disabled) {
+    throw new Error('Wi-Fi connect unexpectedly enabled for user');
+  }
+  if (!document.querySelector('#accessSave')?.disabled) {
+    throw new Error('access management unexpectedly enabled for user');
+  }
+
+  (await waitEnabled('[data-output-id="2"][data-output-active="true"]')).click();
+  await sleep(650);
+  (await waitEnabled('[data-output-id="2"][data-output-active="false"]')).click();
+  await sleep(650);
+  await logout();
+
+  // Guest: monitoring only; every command control remains disabled.
+  await login('guest-smoke', '6789');
+  for (const selector of [
+    '[data-command="security.arm_away"]',
+    '[data-command="security.disarm"]',
+    '[data-command="security.arm_home"]',
+    '[data-command="security.panic"]',
+    '[data-output-id="2"][data-output-active="true"]',
+    '#wifiConnect', '#accessLoad', '#accessSave'
+  ]) {
+    const item = await waitFor(selector);
+    if (!item.disabled) throw new Error(`${selector} unexpectedly enabled for guest`);
+  }
 
   document.documentElement.dataset.homeguardControlSmoke = 'done';
 })().catch(error => {
@@ -110,6 +145,7 @@ class SmokeState:
         self.valve_active = False
         self.network_ssid = "InitialNet"
         self.users: list[dict[str, object]] = []
+        self.credentials: dict[str, str] = {}
         self.sequence = 1
         self.log_path.write_text("", encoding="utf-8")
 
@@ -121,9 +157,14 @@ class SmokeState:
             with self.log_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
+    def find_user(self, actor: object) -> dict[str, object] | None:
+        if not isinstance(actor, str):
+            return None
+        return next((user for user in self.users if user.get("id") == actor and user.get("enabled") is True), None)
+
 
 class SmokeHandler(BaseHTTPRequestHandler):
-    server_version = "HomeGuardWebSmoke/1.0"
+    server_version = "HomeGuardWebSmoke/1.1"
 
     @property
     def state(self) -> SmokeState:
@@ -169,6 +210,9 @@ class SmokeHandler(BaseHTTPRequestHandler):
             return
         if path == "/app.js":
             self._asset("app.js", "application/javascript; charset=utf-8")
+            return
+        if path == "/access-session.js":
+            self._asset("access-session.js", "application/javascript; charset=utf-8")
             return
         if path == "/bruce.jpg":
             self._asset("bruce.jpg", "image/jpeg")
@@ -221,6 +265,22 @@ class SmokeHandler(BaseHTTPRequestHandler):
             raise ValueError("JSON body must be an object")
         return value
 
+    @staticmethod
+    def _capabilities(role: str) -> dict[str, bool]:
+        admin = role == "admin"
+        user = role == "user"
+        return {
+            "monitor": True,
+            "armHome": admin or user,
+            "armAway": admin or user,
+            "disarm": admin or user,
+            "panic": admin,
+            "valves": admin or user,
+            "networkConfigure": admin,
+            "accessManage": admin,
+            "serviceInvalidate": admin,
+        }
+
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         try:
@@ -231,6 +291,19 @@ class SmokeHandler(BaseHTTPRequestHandler):
             return
         self.state.log("POST", path, body)
 
+        if path == "/api/v1/access/login":
+            actor = body.get("actor")
+            credential = body.get("credential")
+            user = self.state.find_user(actor)
+            if user is None or not isinstance(actor, str) or self.state.credentials.get(actor) != credential:
+                self._json({"ok": False, "reason": "denied_credential"}, 401)
+                return
+            role = str(user.get("role", "guest"))
+            self._json({
+                "ok": True, "actor": actor, "name": user.get("name", actor), "role": role,
+                "capabilities": self._capabilities(role),
+            })
+            return
         if path == "/api/v1/system/security-command":
             self.state.sequence += 1
             self._json({"ok": True})
@@ -253,10 +326,12 @@ class SmokeHandler(BaseHTTPRequestHandler):
         if path == "/api/v1/access/users":
             action = body.get("action")
             if action == "bootstrap":
+                user_id = str(body.get("id", ""))
                 self.state.users = [{
-                    "id": body.get("id", ""), "name": body.get("name", ""),
+                    "id": user_id, "name": body.get("name", ""),
                     "role": "admin", "enabled": True,
                 }]
+                self.state.credentials[user_id] = str(body.get("pin", ""))
                 self._json({"ok": True, "role": "admin", "bootstrap": True})
                 return
             if action == "list":
@@ -264,10 +339,12 @@ class SmokeHandler(BaseHTTPRequestHandler):
                             "users": self.state.users})
                 return
             if action == "set":
-                user = {"id": body.get("id", ""), "name": body.get("name", ""),
+                user_id = str(body.get("id", ""))
+                user = {"id": user_id, "name": body.get("name", ""),
                         "role": body.get("role", "guest"), "enabled": bool(body.get("enabled", True))}
                 self.state.users = [item for item in self.state.users if item.get("id") != user["id"]]
                 self.state.users.append(user)
+                self.state.credentials[user_id] = str(body.get("pin", ""))
                 self._json({"ok": True})
                 return
             self._json({"ok": False, "reason": "unknown_action"}, 400)
@@ -279,7 +356,7 @@ class SmokeHandler(BaseHTTPRequestHandler):
 def serve(args: argparse.Namespace) -> int:
     web_root = Path(args.web).resolve()
     log_path = Path(args.log).resolve()
-    for required in ("index.html", "app.css", "app.js", "bruce.jpg"):
+    for required in ("index.html", "app.css", "app.js", "access-session.js", "bruce.jpg"):
         if not (web_root / required).is_file():
             raise SystemExit(f"missing web asset: {web_root / required}")
     server = ThreadingHTTPServer((args.host, args.port), SmokeHandler)
@@ -307,13 +384,24 @@ def verify(args: argparse.Namespace) -> int:
     def bodies(path: str) -> list[dict[str, object]]:
         return [record.get("body", {}) for record in posts if record.get("path") == path]
 
+    logins = bodies("/api/v1/access/login")
+    expected_logins = [
+        {"actor": "admin-smoke", "credential": "4321"},
+        {"actor": "smoke-user", "credential": "1234"},
+        {"actor": "guest-smoke", "credential": "6789"},
+    ]
+    if logins != expected_logins:
+        errors.append(f"login order/payload mismatch: {logins}")
+
     security = bodies("/api/v1/system/security-command")
-    expected_commands = ["security.arm_away", "security.disarm", "security.arm_home", "security.panic"]
-    if [item.get("command") for item in security] != expected_commands:
-        errors.append(f"security command order/payload mismatch: {security}")
-    for item in security:
-        if item.get("actor") != "smoke-user" or item.get("credential") != "1234":
-            errors.append(f"security credentials missing/wrong: {item}")
+    expected_security = [
+        {"command": "security.panic", "actor": "admin-smoke", "credential": "4321"},
+        {"command": "security.arm_away", "actor": "smoke-user", "credential": "1234"},
+        {"command": "security.disarm", "actor": "smoke-user", "credential": "1234"},
+        {"command": "security.arm_home", "actor": "smoke-user", "credential": "1234"},
+    ]
+    if security != expected_security:
+        errors.append(f"security role/payload mismatch: {security}")
 
     outputs = bodies("/api/v1/system/output-command")
     expected_outputs = [
@@ -332,30 +420,34 @@ def verify(args: argparse.Namespace) -> int:
         errors.append("Wi-Fi scan button did not call /api/v1/network/scan")
 
     access = bodies("/api/v1/access/users")
-    if len(access) != 3:
-        errors.append(f"expected bootstrap/list/set access actions, got: {access}")
+    if len(access) != 4:
+        errors.append(f"expected bootstrap/list/user-set/guest-set actions, got: {access}")
     else:
-        bootstrap, listing, setting = access
+        bootstrap, listing, user_set, guest_set = access
         if bootstrap != {"action": "bootstrap", "id": "admin-smoke", "name": "Smoke Admin", "pin": "4321"}:
             errors.append(f"first Admin bootstrap payload mismatch: {bootstrap}")
         if listing != {"actor": "admin-smoke", "credential": "4321", "action": "list"}:
             errors.append(f"access list payload mismatch: {listing}")
-        if setting != {"actor": "admin-smoke", "credential": "4321", "action": "set",
-                       "id": "user-smoke", "name": "Smoke User", "role": "user",
-                       "pin": "5678", "enabled": True}:
-            errors.append(f"access set payload mismatch: {setting}")
+        if user_set != {"actor": "admin-smoke", "credential": "4321", "action": "set",
+                       "id": "smoke-user", "name": "Smoke User", "role": "user",
+                       "pin": "1234", "enabled": True}:
+            errors.append(f"user set payload mismatch: {user_set}")
+        if guest_set != {"actor": "admin-smoke", "credential": "4321", "action": "set",
+                        "id": "guest-smoke", "name": "Smoke Guest", "role": "guest",
+                        "pin": "6789", "enabled": True}:
+            errors.append(f"guest set payload mismatch: {guest_set}")
 
     if errors:
-        print("Web UI control click smoke FAIL")
+        print("Web UI role/control smoke FAIL")
         for error in errors:
             print(f" - {error}")
         return 1
 
-    print("Web UI control click smoke PASS")
-    print(" - security buttons: 4/4 exact POST payloads")
-    print(" - valve buttons: open + close exact POST payloads")
-    print(" - Wi-Fi buttons: scan + Admin-authorized connect")
-    print(" - access buttons: first Admin bootstrap + list + user save")
+    print("Web UI role/control smoke PASS")
+    print(" - login: Admin + User + Guest")
+    print(" - Admin: Panic + Wi-Fi + user management")
+    print(" - User: arm/disarm + valve open/close; restricted Admin controls")
+    print(" - Guest: monitoring-only controls remain disabled")
     return 0
 
 
