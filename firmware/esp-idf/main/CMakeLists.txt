@@ -13,6 +13,7 @@ idf_component_register(
         "app_main.cpp"
         "hg_web_http.cpp"
         "hg_network_http.cpp"
+        "hg_lan_discovery_http.cpp"
         "hg_build_info.cpp"
         "hg_build_http.cpp"
         "hg_i2c_bus.cpp"
@@ -71,6 +72,7 @@ idf_component_register(
         esp_timer
         esp_wifi
         fatfs
+        lwip
         nvs_flash
         sdmmc
     EMBED_TXTFILES
