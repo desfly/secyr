@@ -2,6 +2,7 @@
 #include "hg_web_http.hpp"
 #include "hg_network_http.hpp"
 #include "hg_build_http.hpp"
+#include "hg_build_info.hpp"
 #include "hg_infrastructure_http.hpp"
 #include "hg_system_http.hpp"
 #include "hg_service_http.hpp"
@@ -12,7 +13,6 @@
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
 #include "homeguard/boot_readiness.hpp"
-#include "homeguard/build_info.hpp"
 #include "homeguard/physical_output_runtime.hpp"
 #include "homeguard/system_model.hpp"
 #include "esp_check.h"
@@ -192,6 +192,7 @@ extern "C" void app_main()
         ESP_LOGE(kTag, "Telemetry task failed: %s", esp_err_to_name(telemetry_error));
     }
 
-    ESP_LOGI(kTag, "%.*s runtime started",
-             static_cast<int>(hg::build::label.size()), hg::build::label.data());
+    const auto build = homeguard::idf::current_build_info();
+    ESP_LOGI(kTag, "%s Build-%s (%s) runtime started",
+             build.project.c_str(), build.build.c_str(), build.git_revision.c_str());
 }
