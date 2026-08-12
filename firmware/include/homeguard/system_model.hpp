@@ -7,7 +7,16 @@
 
 namespace hg {
 
-enum class ModelZoneType : std::uint8_t { Perimeter, Interior, Fire, Flood, Tamper };
+enum class ModelZoneType : std::uint8_t {
+    Perimeter,
+    Interior,
+    Fire,
+    Flood,
+    Tamper,
+    EntryExit,
+    Instant,
+    Panic,
+};
 enum class ModelZoneState : std::uint8_t { Normal, Open, Alarm, Fault, Tamper, Bypassed };
 enum class ModelSensorType : std::uint8_t { Digital, Temperature, Pressure, Current, Voltage };
 enum class ModelOutputType : std::uint8_t { Relay, Siren, Valve, Light };
@@ -58,6 +67,8 @@ struct ZoneRecord {
     bool enabled{true};
     bool bypassed{};
     bool always_on{};
+    std::uint32_t entry_delay_sec{30};
+    std::uint32_t exit_delay_sec{30};
 };
 struct SensorRecord {
     std::uint16_t id{};
@@ -69,7 +80,9 @@ struct SensorRecord {
 };
 struct OutputRecord {
     std::uint16_t id{};
+    std::array<char, 24> name{};
     ModelOutputType type{ModelOutputType::Relay};
+    bool enabled{true};
     bool active{};
     std::uint32_t timeout_ms{};
 };
@@ -89,8 +102,12 @@ public:
     explicit SystemModel(SystemEventBus& bus) : bus_(bus) {}
     bool add_zone(std::uint16_t id, std::string_view name, ModelZoneType type, bool always_on = false);
     bool add_sensor(std::uint16_t id, ModelSensorType type);
-    bool add_output(std::uint16_t id, ModelOutputType type);
+    bool add_output(std::uint16_t id, ModelOutputType type, std::string_view name = {});
     bool add_partition(std::uint16_t id);
+    bool configure_zone(std::uint16_t id, std::string_view name, ModelZoneType type, bool enabled, bool bypassed,
+                        std::uint32_t entry_delay_sec, std::uint32_t exit_delay_sec, std::uint64_t now_ms = 0);
+    bool configure_output(std::uint16_t id, std::string_view name, ModelOutputType type, bool enabled,
+                          std::uint32_t timeout_ms, std::uint64_t now_ms = 0);
     bool set_zone_state(std::uint16_t id, ModelZoneState state, std::uint64_t now_ms);
     bool set_output_active(std::uint16_t id, bool active, std::uint64_t now_ms);
     bool set_partition_arm(std::uint16_t id, PartitionArmState state, std::uint64_t now_ms);
