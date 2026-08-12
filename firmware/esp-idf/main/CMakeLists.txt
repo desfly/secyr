@@ -47,6 +47,7 @@ idf_component_register(
         "../../src/user_zone_access.cpp"
         "../../src/user_output_access.cpp"
         "../../src/config_exchange.cpp"
+        "../../src/config_import.cpp"
         "../../src/crc32.cpp"
         "../../src/sha256.cpp"
         "../../src/hardware_profile.cpp"
