@@ -5,13 +5,18 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#10243a">
   <title>MyFist · HomeGuard-S3</title>
-  <link rel="stylesheet" href="/app.css?v=269">
+  <link rel="stylesheet" href="/app.css?v=272">
+  <style>
+    /* Bruce is part of the approved sidebar. Keep him visibly rendered even on
+       displays where the original dark photographic treatment loses detail. */
+    .bruce{filter:grayscale(.12) brightness(1.38) contrast(1.08)!important;opacity:1!important;background-position:center 18%!important}
+  </style>
 </head>
 <body>
 <div class="shell">
   <aside class="sidebar">
     <div class="brand"><h1>MyFist</h1></div>
-    <div class="bruce" aria-hidden="true"></div>
+    <div class="bruce" role="img" aria-label="Bruce"></div>
     <nav>
       <a class="active" href="#overview">⌂ <span>Панель</span></a>
       <a href="#zones-section">▧ <span>Зони</span></a>
@@ -119,7 +124,7 @@
 
 <div id="toast" hidden></div>
 <button id="refresh" hidden>Оновити</button>
-<script src="/app.js?v=269"></script>
+<script src="/app.js?v=272"></script>
 <script>
 function tick(){const d=new Date();document.getElementById('clock').textContent=d.toLocaleTimeString('uk-UA');document.getElementById('date').textContent=d.toLocaleDateString('uk-UA')}
 tick();setInterval(tick,1000);
