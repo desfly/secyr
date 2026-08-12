@@ -72,9 +72,19 @@ function renderEvents(data) {
 function renderOutputs(data) {
   const outputs = Array.isArray(data?.outputs) ? data.outputs : [];
   const target = document.querySelector("#ioState");
-  target.innerHTML = outputs.length ? outputs.map(item => `
-    <div class="${item.active ? "" : "muted"}"><b>⇆</b><span>Вих. ${Number(item.id) || 0}</span><small>${item.active ? "Увімк." : "Вимк."}</small></div>`).join("") :
-    "<div><span>Очікування реальних даних контролера…</span></div>";
+  target.innerHTML = outputs.length ? outputs.map(item => {
+    const id = Number(item.id) || 0;
+    const isValve = item.type === "valve";
+    const controls = isValve ? `<span style="display:flex;gap:6px;margin-left:auto">
+      <button type="button" data-output-id="${id}" data-output-active="true" ${item.active ? "disabled" : ""}>Відкрити</button>
+      <button type="button" data-output-id="${id}" data-output-active="false" ${item.active ? "" : "disabled"}>Закрити</button>
+    </span>` : "";
+    return `<div class="${item.active ? "" : "muted"}"><b>⇆</b><span>${isValve ? "Клапан" : "Вих."} ${id}</span><small>${item.active ? "Увімк." : "Вимк."}</small>${controls}</div>`;
+  }).join("") : "<div><span>Очікування реальних даних контролера…</span></div>";
+
+  target.querySelectorAll("[data-output-id]").forEach(button => {
+    button.onclick = () => sendOutputCommand(button);
+  });
 }
 
 function renderNetwork(status) {
@@ -197,15 +207,51 @@ async function connectWifi() {
   }
 }
 
+function operatorCredentials() {
+  return {
+    actor: document.querySelector("#operatorId").value.trim(),
+    credential: document.querySelector("#operatorPin").value.trim()
+  };
+}
+
+function validOperator(actor, credential) {
+  if (actor && /^\d{4,12}$/.test(credential)) return true;
+  showToast("Введіть ID користувача та PIN 4–12 цифр");
+  return false;
+}
+
+async function sendOutputCommand(button) {
+  const outputId = Number(button.dataset.outputId);
+  const active = button.dataset.outputActive === "true";
+  const { actor, credential } = operatorCredentials();
+  if (!Number.isInteger(outputId) || outputId <= 0 || !validOperator(actor, credential)) return;
+
+  const buttons = [...document.querySelectorAll("[data-output-id]")];
+  buttons.forEach(item => item.disabled = true);
+  try {
+    const result = await api("/api/v1/system/output-command", {
+      method: "POST",
+      body: JSON.stringify({ outputId, active, actor, credential })
+    });
+    if (result.ok) {
+      showToast(active ? "Клапан відкрито" : "Клапан закрито");
+    } else {
+      showToast(`Команду відхилено: ${result.interlock || result.status || "невідома причина"}`);
+    }
+    await refresh();
+  } catch (error) {
+    showToast(`Помилка клапана: ${error.message}`);
+  } finally {
+    document.querySelector("#operatorPin").value = "";
+    buttons.forEach(item => item.disabled = false);
+  }
+}
+
 async function sendSecurityCommand(button) {
   const command = button.dataset.command;
-  const actor = document.querySelector("#operatorId").value.trim();
-  const credential = document.querySelector("#operatorPin").value.trim();
+  const { actor, credential } = operatorCredentials();
   if (!command) return;
-  if (!actor || !/^\d{4,12}$/.test(credential)) {
-    showToast("Введіть ID користувача та PIN 4–12 цифр");
-    return;
-  }
+  if (!validOperator(actor, credential)) return;
   const buttons = [...document.querySelectorAll("[data-command]")];
   buttons.forEach(item => item.disabled = true);
   try {
