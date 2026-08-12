@@ -223,9 +223,9 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Build Android debug APK
+      - name: Test Android access policy and build debug APK
         working-directory: android
-        run: gradle --no-daemon --stacktrace assembleDebug
+        run: gradle --no-daemon --stacktrace testDebugUnitTest assembleDebug
 
       - name: Generate APK checksum
         if: success()
@@ -250,4 +250,5 @@ jobs:
           path: |
             android/.gradle/**
             android/app/build/reports/**
+            android/app/build/test-results/**
           if-no-files-found: warn
