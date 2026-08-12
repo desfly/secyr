@@ -4,6 +4,7 @@
 #include "hg_lan_http.hpp"
 #include "hg_cloud_link.hpp"
 #include "hg_cloud_http.hpp"
+#include "hg_cloud_nvs.hpp"
 #include "hg_build_http.hpp"
 #include "hg_build_info.hpp"
 #include "hg_infrastructure_http.hpp"
@@ -28,6 +29,8 @@
 #include "esp_netif.h"
 #include "nvs_flash.h"
 
+#include <algorithm>
+
 namespace {
 
 constexpr const char* kTag = "homeguard_main";
@@ -39,6 +42,7 @@ homeguard::idf::NetworkHttp g_network_http;
 homeguard::idf::LanHttp g_lan_http;
 homeguard::idf::CloudLink g_cloud_link;
 homeguard::idf::CloudHttp g_cloud_http;
+homeguard::idf::CloudNvsStore g_cloud_store;
 homeguard::idf::InfrastructureHttp g_http_api;
 homeguard::idf::BuildHttp g_build_http;
 homeguard::idf::SystemHttp g_system_http;
@@ -112,6 +116,34 @@ void restore_commissioning_state()
     }
 }
 
+void restore_cloud_config()
+{
+    homeguard::idf::CloudConfig config{};
+    const auto error = g_cloud_store.load(config);
+    if (error == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(kTag, "Cloud MQTT is not configured");
+        return;
+    }
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag, "Cloud MQTT config rejected: %s", esp_err_to_name(error));
+        return;
+    }
+    if (!config.enabled) {
+        ESP_LOGI(kTag, "Cloud MQTT is disabled by persisted configuration");
+        std::fill(config.password.begin(), config.password.end(), '\0');
+        return;
+    }
+
+    const auto start_error = g_cloud_link.start(
+        config.broker_uri.c_str(), config.username.c_str(), config.password.c_str());
+    std::fill(config.password.begin(), config.password.end(), '\0');
+    if (start_error != ESP_OK) {
+        ESP_LOGE(kTag, "Cloud MQTT auto-start failed: %s", esp_err_to_name(start_error));
+    } else {
+        ESP_LOGI(kTag, "Cloud MQTT auto-started from persisted configuration");
+    }
+}
+
 void initialize_system_model()
 {
     g_system_model.add_partition(1);
@@ -145,7 +177,10 @@ esp_err_t start_http_server()
     g_network_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_network_http.register_handlers(g_http_server), kTag, "network routes");
     ESP_RETURN_ON_ERROR(g_lan_http.register_handlers(g_http_server), kTag, "LAN discovery routes");
-    ESP_RETURN_ON_ERROR(g_cloud_http.register_handlers(g_http_server, &g_cloud_link), kTag, "cloud routes");
+    ESP_RETURN_ON_ERROR(
+        g_cloud_http.register_handlers(g_http_server, &g_cloud_link, &g_cloud_store, &g_access_control),
+        kTag,
+        "cloud routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(
         g_system_http.register_handlers(
@@ -182,8 +217,6 @@ esp_err_t start_http_server()
 extern "C" void app_main()
 {
     ESP_ERROR_CHECK(initialize_nvs());
-    // A single monotonic clock enables brute-force throttling for every
-    // AccessControl caller, including HTTP and command-router/MQTT paths.
     g_access_control.set_auth_clock(&homeguard::idf::access_now_ms);
     restore_access_control();
     restore_commissioning_state();
@@ -202,6 +235,7 @@ extern "C" void app_main()
         ESP_LOGE(kTag, "Cloud identity preparation failed: %s", esp_err_to_name(cloud_identity_error));
     } else {
         ESP_LOGI(kTag, "Cloud identity ready: %s", g_cloud_link.device_id());
+        restore_cloud_config();
     }
 
     initialize_system_model();
