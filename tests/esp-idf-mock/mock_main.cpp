@@ -15,6 +15,10 @@ extern const uint8_t _binary_app_js_start[] = {0};
 extern const uint8_t _binary_app_js_end[] = {0};
 extern const uint8_t _binary_access_session_js_start[] = {0};
 extern const uint8_t _binary_access_session_js_end[] = {0};
+extern const uint8_t _binary_cloud_status_js_start[] = {0};
+extern const uint8_t _binary_cloud_status_js_end[] = {0};
+extern const uint8_t _binary_config_ui_js_start[] = {0};
+extern const uint8_t _binary_config_ui_js_end[] = {0};
 extern const uint8_t _binary_bruce_jpg_start[] = {0};
 extern const uint8_t _binary_bruce_jpg_end[] = {0};
 }
