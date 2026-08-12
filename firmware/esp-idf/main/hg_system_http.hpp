@@ -3,6 +3,7 @@
 #include "homeguard/access_control.hpp"
 #include "homeguard/event_log.hpp"
 #include "homeguard/system_model.hpp"
+#include "homeguard/user_zone_access.hpp"
 #include "esp_http_server.h"
 #include <array>
 #include <cstddef>
@@ -15,7 +16,8 @@ public:
         httpd_handle_t server,
         hg::SystemModel* model,
         hg::SystemEventBus* bus,
-        homeguard::AccessControl* access_control);
+        homeguard::AccessControl* access_control,
+        const homeguard::UserZoneAccess* zone_access);
 
 private:
     static esp_err_t status_get(httpd_req_t* request);
@@ -29,6 +31,7 @@ private:
 
     esp_err_t send_json(httpd_req_t* request, const char* body, std::size_t size) const;
     esp_err_t handle_security_command(httpd_req_t* request);
+    [[nodiscard]] bool zone_matrix_allows(std::string_view actor, hg::PartitionArmState target) const;
     void remember_client(int socket_fd);
     void record(const hg::SystemEvent& event);
     void broadcast(const hg::SystemEvent& event);
@@ -38,6 +41,7 @@ private:
     hg::SystemModel* model_{};
     hg::SystemEventBus* bus_{};
     homeguard::AccessControl* access_control_{};
+    const homeguard::UserZoneAccess* zone_access_{};
     hg::EventLog event_log_{};
     std::array<int, 4> clients_{{-1, -1, -1, -1}};
 };
