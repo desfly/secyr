@@ -1,34 +1,36 @@
+"use strict";
+
 const toast = document.querySelector("#toast");
+const dashboardSections = [document.querySelector(".status-grid"), document.querySelector(".two-col")].filter(Boolean);
+const networkPage = document.querySelector("#networkPage");
+const systemPage = document.querySelector("#system");
 
 function showToast(message) {
   toast.textContent = message;
   toast.hidden = false;
   clearTimeout(showToast.timer);
-  showToast.timer = setTimeout(() => toast.hidden = true, 3000);
+  showToast.timer = setTimeout(() => { toast.hidden = true; }, 3000);
 }
 
 function escapeHtml(value) {
   return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
     cache: "no-store",
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    }
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) }
   });
   const text = await response.text();
   let body = {};
-  try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
-  if (!response.ok) throw new Error(body.reason || `${response.status} ${response.statusText}`);
+  try { body = text ? JSON.parse(text) : {}; } catch (_) { body = { raw: text }; }
+  if (!response.ok || body.ok === false) throw new Error(body.reason || `${response.status} ${response.statusText}`);
   return body;
 }
 
@@ -50,10 +52,7 @@ function renderZones(data) {
   const zones = Array.isArray(data?.zones) ? data.zones : [];
   document.querySelector("#zoneCount").textContent = zones.length || "—";
   document.querySelector("#zones").innerHTML = zones.length ? zones.map(zone => `
-    <div class="zone">
-      <span>${escapeHtml(zone.name || `Зона ${zone.id}`)}${zone.alwaysOn ? " · 24/7" : ""}</span>
-      <strong class="${stateClass(zone.state)}">${escapeHtml(zone.state)}</strong>
-    </div>`).join("") : "<div class=\"zone\"><span>Дані ще не отримані</span><strong>—</strong></div>";
+    <div class="zone"><span>${escapeHtml(zone.name || `Зона ${zone.id}`)}${zone.alwaysOn ? " · 24/7" : ""}</span><strong class="${stateClass(zone.state)}">${escapeHtml(zone.state)}</strong></div>`).join("") : "<div class=\"zone\"><span>Дані ще не отримані</span><strong>—</strong></div>";
 }
 
 function renderPartitions(data) {
@@ -63,10 +62,8 @@ function renderPartitions(data) {
 
 function renderEvents(data) {
   const events = Array.isArray(data?.events) ? data.events.slice(-6).reverse() : [];
-  const list = document.querySelector("#eventList");
-  list.innerHTML = events.length ? events.map(item => `
-    <div><i></i><time>#${escapeHtml(item.sequence ?? "—")}</time><span>${escapeHtml(item.event || "Подія")}</span><a>${escapeHtml(item.severity || "info")}</a></div>`).join("") :
-    "<div><i></i><time>—</time><span>Подій ще немає</span><a>Інформація ›</a></div>";
+  document.querySelector("#eventList").innerHTML = events.length ? events.map(item => `
+    <div><i></i><time>#${escapeHtml(item.sequence ?? "—")}</time><span>${escapeHtml(item.event || "Подія")}</span><a>${escapeHtml(item.severity || "info")}</a></div>`).join("") : "<div><i></i><time>—</time><span>Подій ще немає</span><a>Інформація ›</a></div>";
 }
 
 function renderOutputs(data) {
@@ -75,16 +72,10 @@ function renderOutputs(data) {
   target.innerHTML = outputs.length ? outputs.map(item => {
     const id = Number(item.id) || 0;
     const isValve = item.type === "valve";
-    const controls = isValve ? `<span style="display:flex;gap:6px;margin-left:auto">
-      <button type="button" data-output-id="${id}" data-output-active="true" ${item.active ? "disabled" : ""}>Відкрити</button>
-      <button type="button" data-output-id="${id}" data-output-active="false" ${item.active ? "" : "disabled"}>Закрити</button>
-    </span>` : "";
+    const controls = isValve ? `<span style="display:flex;gap:6px;margin-left:auto"><button type="button" data-output-id="${id}" data-output-active="true" ${item.active ? "disabled" : ""}>Відкрити</button><button type="button" data-output-id="${id}" data-output-active="false" ${item.active ? "" : "disabled"}>Закрити</button></span>` : "";
     return `<div class="${item.active ? "" : "muted"}"><b>⇆</b><span>${isValve ? "Клапан" : "Вих."} ${id}</span><small>${item.active ? "Увімк." : "Вимк."}</small>${controls}</div>`;
   }).join("") : "<div><span>Очікування реальних даних контролера…</span></div>";
-
-  target.querySelectorAll("[data-output-id]").forEach(button => {
-    button.onclick = () => sendOutputCommand(button);
-  });
+  target.querySelectorAll("[data-output-id]").forEach(button => { button.onclick = () => sendOutputCommand(button); });
 }
 
 function renderNetwork(status) {
@@ -96,9 +87,7 @@ function renderNetwork(status) {
   document.querySelector("#networkState").textContent = wifiStateLabel(state);
   document.querySelector("#networkSsid").textContent = ssid;
   document.querySelector("#networkIp").textContent = ip;
-  if (ssid !== "—" && !document.querySelector("#wifiSsid").value) {
-    document.querySelector("#wifiSsid").value = ssid;
-  }
+  if (ssid !== "—" && !document.querySelector("#wifiSsid").value) document.querySelector("#wifiSsid").value = ssid;
 }
 
 async function refreshNetwork() {
@@ -115,14 +104,9 @@ async function refreshNetwork() {
 
 async function refresh() {
   const requests = await Promise.allSettled([
-    api("/api/v1/system/zones"),
-    api("/api/v1/system/partitions"),
-    api("/api/v1/system/outputs"),
-    api("/api/v1/system/events"),
-    api("/api/v1/build"),
-    api("/api/v1/network/status")
+    api("/api/v1/system/zones"), api("/api/v1/system/partitions"), api("/api/v1/system/outputs"),
+    api("/api/v1/system/events"), api("/api/v1/build"), api("/api/v1/network/status")
   ]);
-
   if (requests[0].status === "fulfilled") renderZones(requests[0].value);
   if (requests[1].status === "fulfilled") renderPartitions(requests[1].value);
   if (requests[2].status === "fulfilled") renderOutputs(requests[2].value);
@@ -144,21 +128,12 @@ async function scanWifi() {
     state.textContent = networks.length ? `Знайдено мереж: ${networks.length}` : "Мереж не знайдено";
     list.innerHTML = networks.map(item => {
       const ssid = String(item.ssid || "");
-      return `<button type="button" class="wifi-network" data-ssid="${escapeHtml(ssid)}" style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:11px 14px;text-align:left">
-        <strong>${escapeHtml(ssid || "(прихована мережа)")}</strong><span>${Number(item.rssi) || 0} dBm</span>
-      </button>`;
+      return `<button type="button" class="wifi-network" data-ssid="${escapeHtml(ssid)}" style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:11px 14px;text-align:left"><strong>${escapeHtml(ssid || "(прихована мережа)")}</strong><span>${Number(item.rssi) || 0} dBm</span></button>`;
     }).join("");
-    list.querySelectorAll("[data-ssid]").forEach(item => {
-      item.onclick = () => {
-        document.querySelector("#wifiSsid").value = item.dataset.ssid;
-        document.querySelector("#wifiPassword").focus();
-      };
-    });
+    list.querySelectorAll("[data-ssid]").forEach(item => { item.onclick = () => { document.querySelector("#wifiSsid").value = item.dataset.ssid; document.querySelector("#wifiPassword").focus(); }; });
   } catch (error) {
     state.textContent = `Помилка: ${error.message}`;
-  } finally {
-    button.disabled = false;
-  }
+  } finally { button.disabled = false; }
 }
 
 async function connectWifi() {
@@ -166,58 +141,33 @@ async function connectWifi() {
   const password = document.querySelector("#wifiPassword").value;
   const button = document.querySelector("#wifiConnect");
   const result = document.querySelector("#wifiResult");
-  if (!ssid) {
-    result.textContent = "Помилка: виберіть мережу";
-    return;
-  }
-  if (password.length > 0 && password.length < 8) {
-    result.textContent = "Помилка: пароль має містити щонайменше 8 символів";
-    return;
-  }
-
+  if (!ssid) { result.textContent = "Помилка: виберіть мережу"; return; }
+  if (password.length > 0 && password.length < 8) { result.textContent = "Помилка: пароль має містити щонайменше 8 символів"; return; }
   button.disabled = true;
   result.textContent = "Підключення…";
   document.querySelector("#networkState").textContent = "Підключення…";
   try {
-    await api("/api/v1/network/connect", {
-      method: "POST",
-      body: JSON.stringify({ ssid, password })
-    });
+    await api("/api/v1/network/connect", { method: "POST", body: JSON.stringify({ ssid, password }) });
     document.querySelector("#wifiPassword").value = "";
-
     let connected = false;
-    for (let attempt = 0; attempt < 10; attempt += 1) {
+    for (let attempt = 0; attempt < 12; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 1500));
       const status = await refreshNetwork();
-      if (status?.state === "connected") {
-        result.textContent = `Підключено · IP ${status.ip || "—"}`;
-        connected = true;
-        break;
-      }
+      if (status?.state === "connected") { result.textContent = `Підключено · IP ${status.ip || "—"}`; connected = true; break; }
     }
-    if (!connected) {
-      result.textContent = "Помилка: не вдалося отримати підключення. Перевірте пароль і спробуйте ще раз.";
-      document.querySelector("#networkState").textContent = "Помилка";
-    }
+    if (!connected) { result.textContent = "Помилка: не вдалося підключитися. Перевірте пароль і спробуйте ще раз."; document.querySelector("#networkState").textContent = "Помилка"; }
   } catch (error) {
     result.textContent = `Помилка: ${error.message}`;
     document.querySelector("#networkState").textContent = "Помилка";
-  } finally {
-    button.disabled = false;
-  }
+  } finally { button.disabled = false; }
 }
 
 function operatorCredentials() {
-  return {
-    actor: document.querySelector("#operatorId").value.trim(),
-    credential: document.querySelector("#operatorPin").value.trim()
-  };
+  return { actor: document.querySelector("#operatorId").value.trim(), credential: document.querySelector("#operatorPin").value.trim() };
 }
-
 function validOperator(actor, credential) {
   if (actor && /^\d{4,12}$/.test(credential)) return true;
-  showToast("Введіть ID користувача та PIN 4–12 цифр");
-  return false;
+  showToast("Введіть ID користувача та PIN 4–12 цифр"); return false;
 }
 
 async function sendOutputCommand(button) {
@@ -225,90 +175,74 @@ async function sendOutputCommand(button) {
   const active = button.dataset.outputActive === "true";
   const { actor, credential } = operatorCredentials();
   if (!Number.isInteger(outputId) || outputId <= 0 || !validOperator(actor, credential)) return;
-
-  const buttons = [...document.querySelectorAll("[data-output-id]")];
-  buttons.forEach(item => item.disabled = true);
+  const buttons = [...document.querySelectorAll("[data-output-id]")]; buttons.forEach(item => { item.disabled = true; });
   try {
-    const result = await api("/api/v1/system/output-command", {
-      method: "POST",
-      body: JSON.stringify({ outputId, active, actor, credential })
-    });
-    if (result.ok) {
-      showToast(active ? "Клапан відкрито" : "Клапан закрито");
-    } else {
-      showToast(`Команду відхилено: ${result.interlock || result.status || "невідома причина"}`);
-    }
+    const result = await api("/api/v1/system/output-command", { method: "POST", body: JSON.stringify({ outputId, active, actor, credential }) });
+    showToast(result.ok ? (active ? "Клапан відкрито" : "Клапан закрито") : `Команду відхилено: ${result.interlock || result.status || "невідома причина"}`);
     await refresh();
-  } catch (error) {
-    showToast(`Помилка клапана: ${error.message}`);
-  } finally {
-    document.querySelector("#operatorPin").value = "";
-    buttons.forEach(item => item.disabled = false);
-  }
+  } catch (error) { showToast(`Помилка клапана: ${error.message}`); }
+  finally { document.querySelector("#operatorPin").value = ""; buttons.forEach(item => { item.disabled = false; }); }
 }
 
 async function sendSecurityCommand(button) {
   const command = button.dataset.command;
   const { actor, credential } = operatorCredentials();
-  if (!command) return;
-  if (!validOperator(actor, credential)) return;
-  const buttons = [...document.querySelectorAll("[data-command]")];
-  buttons.forEach(item => item.disabled = true);
+  if (!command || !validOperator(actor, credential)) return;
+  const buttons = [...document.querySelectorAll("[data-command]")]; buttons.forEach(item => { item.disabled = true; });
   try {
-    const result = await api("/api/v1/system/security-command", {
-      method: "POST",
-      body: JSON.stringify({ command, actor, credential })
-    });
-    showToast(result.ok ? "Команду виконано" : "Команду відхилено");
-    await refresh();
-  } catch (error) {
-    showToast(`Помилка команди: ${error.message}`);
-  } finally {
-    document.querySelector("#operatorPin").value = "";
-    buttons.forEach(item => item.disabled = false);
-  }
+    const result = await api("/api/v1/system/security-command", { method: "POST", body: JSON.stringify({ command, actor, credential }) });
+    showToast(result.ok ? "Команду виконано" : "Команду відхилено"); await refresh();
+  } catch (error) { showToast(`Помилка команди: ${error.message}`); }
+  finally { document.querySelector("#operatorPin").value = ""; buttons.forEach(item => { item.disabled = false; }); }
 }
 
-function openNetworkPage() {
-  document.querySelector("#networkPage").hidden = false;
-  document.querySelector("#networkPage").scrollIntoView({ behavior: "smooth", block: "start" });
-  refreshNetwork();
+function setView(view, targetId = "overview") {
+  const isNetwork = view === "network";
+  const isSystem = view === "system";
+  dashboardSections.forEach(section => { section.hidden = isNetwork || isSystem; });
+  networkPage.hidden = !isNetwork;
+  systemPage.hidden = !isSystem;
+  if (!isNetwork && !isSystem && targetId && targetId !== "overview") {
+    requestAnimationFrame(() => document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  } else { window.scrollTo({ top: 0, behavior: "smooth" }); }
+  if (isNetwork) refreshNetwork();
+  if (isSystem) refresh();
 }
 
-function openSystemPage() {
-  const system = document.querySelector("#system");
-  system.hidden = false;
-  system.scrollIntoView({ behavior: "smooth", block: "start" });
-  refresh();
+function routeFromHash() {
+  const hash = window.location.hash || "#overview";
+  if (hash === "#networkPage") setView("network");
+  else if (hash === "#system") setView("system");
+  else setView("dashboard", hash.slice(1));
+  document.querySelectorAll(".sidebar nav a").forEach(link => link.classList.toggle("active", link.getAttribute("href") === hash || (hash === "#overview" && link.getAttribute("href") === "#overview")));
 }
 
 function bindNavigation() {
   document.querySelectorAll(".sidebar nav a").forEach(link => {
     link.addEventListener("click", event => {
-      document.querySelectorAll(".sidebar nav a").forEach(item => item.classList.remove("active"));
-      link.classList.add("active");
-      if (link.id === "networkNav") {
-        event.preventDefault();
-        openNetworkPage();
-      } else if (link.getAttribute("href") === "#system") {
-        event.preventDefault();
-        openSystemPage();
-      }
+      event.preventDefault();
+      const href = link.getAttribute("href") || "#overview";
+      if (window.location.hash === href) routeFromHash(); else window.location.hash = href;
     });
   });
-  document.querySelector("#networkCard").addEventListener("click", openNetworkPage);
+  document.querySelector("#networkCard").addEventListener("click", () => { window.location.hash = "#networkPage"; });
+  window.addEventListener("hashchange", routeFromHash);
 }
 
 function bindCommandButtons() {
-  document.querySelectorAll("[data-command]").forEach(button => {
-    button.onclick = () => sendSecurityCommand(button);
-  });
+  document.querySelectorAll("[data-command]").forEach(button => { button.onclick = () => sendSecurityCommand(button); });
 }
 
-document.querySelector("#wifiScan").onclick = scanWifi;
-document.querySelector("#wifiConnect").onclick = connectWifi;
-document.querySelector("#refresh").onclick = refresh;
-bindNavigation();
-bindCommandButtons();
-refresh();
-setInterval(refresh, 5000);
+function bootUi() {
+  document.querySelector("#wifiScan").onclick = scanWifi;
+  document.querySelector("#wifiConnect").onclick = connectWifi;
+  document.querySelector("#refresh").onclick = refresh;
+  bindNavigation();
+  bindCommandButtons();
+  routeFromHash();
+  refresh();
+  setInterval(refresh, 5000);
+  document.documentElement.dataset.homeguardUi = "ready";
+}
+
+bootUi();
