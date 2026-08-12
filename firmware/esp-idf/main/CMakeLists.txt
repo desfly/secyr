@@ -92,11 +92,18 @@ else()
     endif()
 endif()
 
+if(DEFINED ENV{GITHUB_RUN_NUMBER})
+    set(HG_CI_BUILD_NUMBER "$ENV{GITHUB_RUN_NUMBER}")
+else()
+    set(HG_CI_BUILD_NUMBER "local")
+endif()
+
 string(TIMESTAMP HG_BUILD_TIMESTAMP_UTC "%Y-%m-%dT%H:%M:%SZ" UTC)
 
 target_compile_definitions(
     ${COMPONENT_LIB}
     PRIVATE
         HG_GIT_REVISION="${HG_GIT_REVISION}"
+        HG_CI_BUILD_NUMBER="${HG_CI_BUILD_NUMBER}"
         HG_BUILD_TIMESTAMP_UTC="${HG_BUILD_TIMESTAMP_UTC}"
 )
