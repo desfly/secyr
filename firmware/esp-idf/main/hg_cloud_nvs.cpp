@@ -3,6 +3,7 @@
 #include "nvs.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace homeguard::idf {
