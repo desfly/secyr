@@ -92,8 +92,27 @@ struct ConfigValidationResult {
     [[nodiscard]] bool ok() const noexcept { return error == ConfigValidationError::None; }
 };
 
+enum class ConfigImportError : std::uint8_t {
+    None,
+    MalformedJson,
+    WrongSchema,
+    MissingRequiredField,
+    CapacityExceeded,
+    InvalidValue,
+    ValidationFailed,
+};
+
+struct ConfigImportResult {
+    ConfigImportError error{ConfigImportError::None};
+    ConfigValidationResult validation{};
+    std::size_t offset{};
+    [[nodiscard]] bool ok() const noexcept { return error == ConfigImportError::None; }
+};
+
 [[nodiscard]] ConfigValidationResult validate_config_document(const HomeGuardConfigDocument& document);
 [[nodiscard]] std::string export_config_json(const HomeGuardConfigDocument& document);
+[[nodiscard]] ConfigImportResult import_config_json(std::string_view json, HomeGuardConfigDocument& destination);
 [[nodiscard]] const char* to_string(ConfigValidationError error) noexcept;
+[[nodiscard]] const char* to_string(ConfigImportError error) noexcept;
 
 }  // namespace homeguard
