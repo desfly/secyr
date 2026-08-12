@@ -31,6 +31,8 @@ add_library(homeguard_core
     src/physical_output_runtime.cpp
     src/access_control.cpp
     src/access_store.cpp
+    src/user_zone_access.cpp
+    src/user_output_access.cpp
     src/device_api_model.cpp
     src/device_command_router.cpp
     src/zone.cpp
@@ -57,6 +59,7 @@ add_executable(homeguard_tests
     ../tests/test_controller.cpp
     ../tests/test_connectivity.cpp
     ../tests/test_provisioning.cpp
+    ../tests/test_access_matrix.cpp
     ../tests/test_build0009.cpp
     ../tests/test_build0013.cpp
     ../tests/test_build0032.cpp
