@@ -1,6 +1,7 @@
 #include "hg_hardware_bootstrap.hpp"
 #include "hg_web_http.hpp"
 #include "hg_network_http.hpp"
+#include "hg_lan_discovery_http.hpp"
 #include "hg_build_http.hpp"
 #include "hg_build_info.hpp"
 #include "hg_infrastructure_http.hpp"
@@ -33,6 +34,7 @@ homeguard::idf::HardwareBootstrap g_hardware;
 homeguard::idf::TelemetryRuntime g_telemetry;
 homeguard::idf::WebHttp g_web_http;
 homeguard::idf::NetworkHttp g_network_http;
+homeguard::idf::LanDiscoveryHttp g_lan_discovery_http;
 homeguard::idf::InfrastructureHttp g_http_api;
 homeguard::idf::BuildHttp g_build_http;
 homeguard::idf::SystemHttp g_system_http;
@@ -138,6 +140,7 @@ esp_err_t start_http_server()
     ESP_RETURN_ON_ERROR(g_web_http.register_handlers(g_http_server), kTag, "web routes");
     g_network_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_network_http.register_handlers(g_http_server), kTag, "network routes");
+    ESP_RETURN_ON_ERROR(g_lan_discovery_http.register_handlers(g_http_server), kTag, "lan discovery route");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(
         g_system_http.register_handlers(
@@ -174,8 +177,6 @@ esp_err_t start_http_server()
 extern "C" void app_main()
 {
     ESP_ERROR_CHECK(initialize_nvs());
-    // A single monotonic clock enables brute-force throttling for every
-    // AccessControl caller, including HTTP and command-router/MQTT paths.
     g_access_control.set_auth_clock(&homeguard::idf::access_now_ms);
     restore_access_control();
     restore_commissioning_state();
