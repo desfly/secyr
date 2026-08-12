@@ -68,6 +68,19 @@ jobs:
       - name: Web UI JavaScript syntax
         run: node --check web/app.js
 
+      - name: Web UI browser boot smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m http.server 8765 --directory web >/tmp/homeguard-web.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          sleep 1
+          google-chrome --headless --no-sandbox --disable-gpu --virtual-time-budget=3000 \
+            --dump-dom http://127.0.0.1:8765/ > /tmp/homeguard-dom.html
+          grep -q 'data-homeguard-ui="ready"' /tmp/homeguard-dom.html
+          echo "Web UI browser boot PASS: app.js executed and bootUi completed"
+
       - name: Mock syntax
         run: python tools/syntax_check_esp_idf_mock.py
 
