@@ -13,6 +13,7 @@ idf_component_register(
         "app_main.cpp"
         "hg_web_http.cpp"
         "hg_network_http.cpp"
+        "hg_lan_http.cpp"
         "hg_cloud_link.cpp"
         "hg_cloud_http.cpp"
         "hg_build_info.cpp"
