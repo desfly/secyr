@@ -88,8 +88,6 @@ bool AccessControl::import_user(const AccessUser& user) {
         index = user_count_++;
     }
     users_[index] = user;
-    // Changing/importing credentials intentionally clears a previous runtime
-    // throttle for that account. This state is not persisted across reboot.
     auth_throttles_[index] = {};
     return true;
 }
@@ -190,8 +188,6 @@ void AccessControl::update_throttle(
     std::uint64_t now_ms) {
     auto& state = throttle_for(actor);
 
-    // A valid credential proves ownership even when the role forbids the
-    // requested command. Clear prior PIN failures in both cases.
     if (decision == AuditDecision::Allowed || decision == AuditDecision::DeniedRole) {
         state = {};
         return;
@@ -220,7 +216,9 @@ void AccessControl::append_audit(
     if (audit_size_ < audit_capacity) ++audit_size_;
 }
 
-AuditDecision AccessControl::authenticate(std::string_view actor, std::string_view pin) {
+AuditDecision AccessControl::authenticate_unthrottled(
+    std::string_view actor,
+    std::string_view pin) {
     const auto* user = find_user(actor);
     if (user == nullptr || !user->enabled) {
         append_audit(actor, "access.login", AuditDecision::DeniedUnknownUser);
@@ -234,6 +232,11 @@ AuditDecision AccessControl::authenticate(std::string_view actor, std::string_vi
     return AuditDecision::Allowed;
 }
 
+AuditDecision AccessControl::authenticate(std::string_view actor, std::string_view pin) {
+    if (auth_clock_ != nullptr) return authenticate(actor, pin, auth_clock_());
+    return authenticate_unthrottled(actor, pin);
+}
+
 AuditDecision AccessControl::authenticate(
     std::string_view actor,
     std::string_view pin,
@@ -242,12 +245,12 @@ AuditDecision AccessControl::authenticate(
         append_audit(actor, "access.login", AuditDecision::DeniedRateLimited);
         return AuditDecision::DeniedRateLimited;
     }
-    const auto decision = authenticate(actor, pin);
+    const auto decision = authenticate_unthrottled(actor, pin);
     update_throttle(actor, decision, now_ms);
     return decision;
 }
 
-AuditDecision AccessControl::authorize(
+AuditDecision AccessControl::authorize_unthrottled(
     std::string_view actor,
     std::string_view pin,
     std::string_view command) {
@@ -271,13 +274,21 @@ AuditDecision AccessControl::authorize(
 AuditDecision AccessControl::authorize(
     std::string_view actor,
     std::string_view pin,
+    std::string_view command) {
+    if (auth_clock_ != nullptr) return authorize(actor, pin, command, auth_clock_());
+    return authorize_unthrottled(actor, pin, command);
+}
+
+AuditDecision AccessControl::authorize(
+    std::string_view actor,
+    std::string_view pin,
     std::string_view command,
     std::uint64_t now_ms) {
     if (authentication_retry_after_ms(actor, now_ms) != 0U) {
         append_audit(actor, command, AuditDecision::DeniedRateLimited);
         return AuditDecision::DeniedRateLimited;
     }
-    const auto decision = authorize(actor, pin, command);
+    const auto decision = authorize_unthrottled(actor, pin, command);
     update_throttle(actor, decision, now_ms);
     return decision;
 }
