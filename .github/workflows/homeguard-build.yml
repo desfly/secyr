@@ -73,8 +73,11 @@ jobs:
       - name: Web UI contract
         run: python tools/check_web_ui_contract.py
 
+      - name: LAN monitor contract
+        run: python tools/check_lan_monitor_contract.py
+
       - name: Web UI JavaScript syntax
-        run: node --check web/app.js && node --check web/access-session.js && node --check web/cloud-status.js && node --check web/config-ui.js
+        run: node --check web/app.js && node --check web/access-session.js && node --check web/cloud-status.js && node --check web/config-ui.js && node --check web/lan-monitor.js
 
       - name: Web UI browser boot smoke
         shell: bash
