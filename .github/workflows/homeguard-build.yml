@@ -73,6 +73,9 @@ jobs:
       - name: Web UI contract
         run: python tools/check_web_ui_contract.py
 
+      - name: LAN UI/API contract
+        run: python tools/check_lan_ui_contract.py
+
       - name: Web UI JavaScript syntax
         run: node --check web/app.js && node --check web/access-session.js
 
