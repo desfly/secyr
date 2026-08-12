@@ -64,7 +64,32 @@ esp_err_t WebHttp::index_get(httpd_req_t* request)
 
 esp_err_t WebHttp::css_get(httpd_req_t* request)
 {
-    return send_asset(request, "text/css; charset=utf-8", app_css_start, app_css_end);
+    if (request == nullptr) return ESP_ERR_INVALID_ARG;
+
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    httpd_resp_set_hdr(request, "Pragma", "no-cache");
+    httpd_resp_set_hdr(request, "Expires", "0");
+    httpd_resp_set_type(request, "text/css; charset=utf-8");
+
+    auto error = httpd_resp_send_chunk(
+        request,
+        reinterpret_cast<const char*>(app_css_start),
+        static_cast<ssize_t>(app_css_end - app_css_start));
+    if (error != ESP_OK) return error;
+
+    // The browser's UA rule for the HTML `hidden` attribute is overridden by
+    // author rules such as `.status-grid { display:grid }` and `.two-col {
+    // display:grid }`. The SPA router correctly toggles `hidden`, but without
+    // this authoritative rule the old dashboard remains visible and makes the
+    // sidebar look dead. Keep hidden sections truly hidden for every view.
+    static constexpr char kHiddenVisibilityFix[] = "\n[hidden]{display:none!important}\n";
+    error = httpd_resp_send_chunk(
+        request,
+        kHiddenVisibilityFix,
+        static_cast<ssize_t>(sizeof(kHiddenVisibilityFix) - 1U));
+    if (error != ESP_OK) return error;
+
+    return httpd_resp_send_chunk(request, nullptr, 0);
 }
 
 esp_err_t WebHttp::js_get(httpd_req_t* request)
