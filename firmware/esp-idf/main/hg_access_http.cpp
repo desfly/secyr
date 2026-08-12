@@ -1,5 +1,6 @@
 #include "hg_access_http.hpp"
 #include "hg_access_time.hpp"
+#include "homeguard/access_matrix_policy.hpp"
 
 #include "esp_random.h"
 
@@ -119,10 +120,17 @@ esp_err_t send_rate_limited(httpd_req_t* request, AccessControl& access, std::st
 esp_err_t AccessHttp::register_handlers(httpd_handle_t server,
                                         AccessControl* access,
                                         AccessNvsStore* store,
-                                        bool bootstrap_allowed) {
-    if (server == nullptr || access == nullptr || store == nullptr) return ESP_ERR_INVALID_ARG;
+                                        bool bootstrap_allowed,
+                                        hg::SystemModel* model,
+                                        UserZoneAccess* zone_access,
+                                        UserOutputAccess* output_access) {
+    if (server == nullptr || access == nullptr || store == nullptr || model == nullptr ||
+        zone_access == nullptr || output_access == nullptr) return ESP_ERR_INVALID_ARG;
     access_ = access;
     store_ = store;
+    model_ = model;
+    zone_access_ = zone_access;
+    output_access_ = output_access;
     bootstrap_allowed_ = bootstrap_allowed;
     const httpd_uri_t routes[] = {
         {.uri = "/api/v1/access/users", .method = HTTP_POST, .handler = &AccessHttp::users_post, .user_ctx = this},
@@ -166,7 +174,6 @@ esp_err_t AccessHttp::handle_login(httpd_req_t* request) {
         return send_rate_limited(request, *access_, actor, now_ms);
     }
     if (decision != AuditDecision::Allowed) {
-        // Do not reveal whether an account exists or merely has a wrong PIN.
         httpd_resp_set_status(request, "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
     }
@@ -233,6 +240,11 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
             bootstrap_allowed_ = true;
             httpd_resp_set_status(request, "500 Internal Server Error");
             return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
+        }
+        const auto* created = access_->find_user(id);
+        if (created == nullptr || !apply_default_access_for_user(*created, *model_, *zone_access_, *output_access_)) {
+            httpd_resp_set_status(request, "500 Internal Server Error");
+            return send_json(request, "{\"ok\":false,\"reason\":\"access_matrix_failed\"}");
         }
         return send_json(request, "{\"ok\":true,\"role\":\"admin\",\"bootstrap\":true}");
     }
@@ -313,6 +325,12 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         *access_ = previous_access;
         httpd_resp_set_status(request, "500 Internal Server Error");
         return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
+    }
+
+    const auto* changed = access_->find_user(id);
+    if (changed == nullptr || !apply_default_access_for_user(*changed, *model_, *zone_access_, *output_access_)) {
+        httpd_resp_set_status(request, "500 Internal Server Error");
+        return send_json(request, "{\"ok\":false,\"reason\":\"access_matrix_failed\"}");
     }
 
     return send_json(request, "{\"ok\":true,\"enabledAdmins\":" +
