@@ -101,15 +101,33 @@ require("if (role == AccessRole::Admin) return true" in access_core,
 require("if (role == AccessRole::Guest) return false" in access_core,
         "Guest is not fail-closed for control commands")
 
+# First-Admin bootstrap must break the fresh-device deadlock without becoming
+# an unauthenticated account-reset path after storage corruption.
 for needle in ("accessBootstrap", 'action: "bootstrap"', "bootstrapAccessAdmin"):
     require(needle in js, f"first-Admin Web UI bootstrap missing: {needle}")
 require('action == "bootstrap"' in access_http, "firmware first-Admin bootstrap action missing")
+require("bootstrap_allowed_" in access_http,
+        "AccessHttp does not keep an explicit one-time bootstrap gate")
+require("if (!bootstrap_allowed_)" in access_http,
+        "bootstrap endpoint is not protected by the factory-fresh gate")
 require("access_->user_count() != 0U" in access_http,
         "bootstrap is not locked out after the first user exists")
 require("AccessRole::Admin" in access_http,
         "bootstrap does not force the first account to Admin")
 require("access_->clear_users()" in access_http,
         "failed bootstrap persistence does not roll back the RAM user")
+require("bootstrap_allowed_ = false" in access_http,
+        "successful bootstrap does not close the one-time gate")
+require("bootstrap_allowed_ = true" in access_http,
+        "failed factory bootstrap cannot be retried safely")
+require("bool g_access_bootstrap_allowed = false" in app_main,
+        "boot code does not default bootstrap to disabled")
+require(re.search(r'if\s*\(error\s*==\s*ESP_ERR_NVS_NOT_FOUND\)\s*\{[^}]*g_access_bootstrap_allowed\s*=\s*true', app_main, re.S) is not None,
+        "factory-fresh NVS does not explicitly enable first-Admin bootstrap")
+require(re.search(r'if\s*\(error\s*!=\s*ESP_OK\)\s*\{[^}]*clear_users\(\)[^}]*bootstrap stays disabled', app_main, re.S) is not None,
+        "corrupt access storage does not remain fail-closed with bootstrap disabled")
+require("&g_access_store, g_access_bootstrap_allowed" in app_main,
+        "factory-fresh bootstrap state is not injected into AccessHttp")
 
 for endpoint in ("/api/v1/network/status", "/api/v1/network/scan", "/api/v1/network/connect"):
     require(endpoint in network, f"network firmware endpoint missing: {endpoint}")
@@ -126,8 +144,6 @@ require("ip" in network, "Wi-Fi status backend does not expose IP")
 require("save_credentials" in network and "load_credentials" in network,
         "Wi-Fi reconnect persistence missing")
 
-# Approved Bruce portrait must be a real binary firmware asset, not a drawn
-# placeholder or a data URI hidden in index.html.
 require((WEB / "bruce.jpg").is_file(), "Bruce JPEG asset missing")
 require((WEB / "bruce.jpg").stat().st_size > 1024 if (WEB / "bruce.jpg").exists() else False,
         "Bruce JPEG asset is unexpectedly small")
@@ -157,7 +173,7 @@ print("Web UI contract PASS")
 print(f" - DOM ids checked: {len(required_ids)}")
 print(" - quick security buttons -> authorized firmware route: 4")
 print(" - live valve buttons -> authorized firmware route: present")
-print(" - first Admin one-time bootstrap: present and fail-closed after provisioning")
+print(" - first Admin bootstrap: factory-fresh NVS only; corruption stays fail-closed")
 print(" - Wi-Fi configuration: Admin-authorized; status/scan + RSSI/IP/persistence present")
 print(" - roles: Admin full; User arm/disarm + valves; Guest control denied")
 print(" - Bruce: approved JPEG embedded and served as a firmware asset")

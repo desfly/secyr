@@ -49,6 +49,7 @@ hg::PhysicalOutputRuntime g_physical_outputs;
 hg::SystemEventBus g_system_bus;
 hg::SystemModel g_system_model{g_system_bus};
 httpd_handle_t g_http_server = nullptr;
+bool g_access_bootstrap_allowed = false;
 
 esp_err_t initialize_nvs()
 {
@@ -63,17 +64,20 @@ esp_err_t initialize_nvs()
 
 void restore_access_control()
 {
+    g_access_bootstrap_allowed = false;
     const auto error = g_access_store.load(g_access_control);
     if (error == ESP_ERR_NVS_NOT_FOUND) {
-        ESP_LOGW(kTag, "No persisted access database; access starts fail-closed with zero users");
+        g_access_bootstrap_allowed = true;
+        ESP_LOGW(kTag, "No persisted access database; factory first-Admin bootstrap enabled");
         return;
     }
     if (error != ESP_OK) {
         g_access_control.clear_users();
-        ESP_LOGE(kTag, "Access database rejected (%s); access starts fail-closed", esp_err_to_name(error));
+        ESP_LOGE(kTag, "Access database rejected (%s); bootstrap stays disabled and access remains fail-closed",
+                 esp_err_to_name(error));
         return;
     }
-    ESP_LOGI(kTag, "Restored %u access user(s) from NVS",
+    ESP_LOGI(kTag, "Restored %u access user(s) from NVS; bootstrap disabled",
              static_cast<unsigned>(g_access_control.user_count()));
 }
 
@@ -146,7 +150,8 @@ esp_err_t start_http_server()
         kTag,
         "output routes");
     ESP_RETURN_ON_ERROR(
-        g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store),
+        g_access_http.register_handlers(
+            g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed),
         kTag,
         "access routes");
     ESP_RETURN_ON_ERROR(

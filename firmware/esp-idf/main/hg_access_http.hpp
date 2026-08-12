@@ -9,7 +9,10 @@ namespace homeguard::idf {
 
 class AccessHttp {
 public:
-    esp_err_t register_handlers(httpd_handle_t server, AccessControl* access, AccessNvsStore* store);
+    esp_err_t register_handlers(httpd_handle_t server,
+                                AccessControl* access,
+                                AccessNvsStore* store,
+                                bool bootstrap_allowed);
 
 private:
     static esp_err_t users_post(httpd_req_t* request);
@@ -17,6 +20,7 @@ private:
 
     AccessControl* access_{};
     AccessNvsStore* store_{};
+    bool bootstrap_allowed_{};
 };
 
 }  // namespace homeguard::idf

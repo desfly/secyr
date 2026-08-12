@@ -84,10 +84,14 @@ esp_err_t send_json(httpd_req_t* request, const std::string& body) {
 
 }  // namespace
 
-esp_err_t AccessHttp::register_handlers(httpd_handle_t server, AccessControl* access, AccessNvsStore* store) {
+esp_err_t AccessHttp::register_handlers(httpd_handle_t server,
+                                        AccessControl* access,
+                                        AccessNvsStore* store,
+                                        bool bootstrap_allowed) {
     if (server == nullptr || access == nullptr || store == nullptr) return ESP_ERR_INVALID_ARG;
     access_ = access;
     store_ = store;
+    bootstrap_allowed_ = bootstrap_allowed;
     const httpd_uri_t route{
         .uri = "/api/v1/access/users",
         .method = HTTP_POST,
@@ -122,13 +126,17 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"action_required\"}");
     }
 
-    // One-time commissioning escape hatch: a factory-fresh controller has no
-    // users, so requiring an existing administrator would deadlock setup.
-    // Bootstrap is accepted only while the access database is empty, always
-    // creates an enabled Admin, and becomes unavailable immediately after the
-    // first successful persisted user is created.
+    // First-Admin bootstrap is intentionally narrower than "zero users".
+    // It is enabled only when boot established that the access NVS key does
+    // not exist. A CRC/format/read failure therefore remains fail-closed and
+    // cannot be converted into an unauthenticated administrator reset.
     if (action == "bootstrap") {
+        if (!bootstrap_allowed_) {
+            httpd_resp_set_status(request, "409 Conflict");
+            return send_json(request, "{\"ok\":false,\"reason\":\"bootstrap_unavailable\"}");
+        }
         if (access_->user_count() != 0U) {
+            bootstrap_allowed_ = false;
             httpd_resp_set_status(request, "409 Conflict");
             return send_json(request, "{\"ok\":false,\"reason\":\"already_provisioned\"}");
         }
@@ -143,9 +151,13 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
             return send_json(request, "{\"ok\":false,\"reason\":\"invalid_bootstrap_admin\"}");
         }
 
+        // Close the one-time gate before mutating RAM state. If persistence
+        // fails, roll back and reopen it so factory commissioning can retry.
+        bootstrap_allowed_ = false;
         std::array<std::uint8_t, 16> salt{};
         esp_fill_random(salt.data(), salt.size());
         if (!access_->set_user(id, name, AccessRole::Admin, pin, salt, true)) {
+            bootstrap_allowed_ = true;
             httpd_resp_set_status(request, "409 Conflict");
             return send_json(request, "{\"ok\":false,\"reason\":\"bootstrap_failed\"}");
         }
@@ -153,6 +165,7 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         const auto persist = store_->save(*access_);
         if (persist != ESP_OK) {
             access_->clear_users();
+            bootstrap_allowed_ = true;
             httpd_resp_set_status(request, "500 Internal Server Error");
             return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
         }
