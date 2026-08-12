@@ -28,6 +28,7 @@ import ua.homeguard.s3.diagnostics.SystemDiagnostics
 import ua.homeguard.s3.events.EventLogCategory
 import ua.homeguard.s3.events.EventLogFilter
 import ua.homeguard.s3.events.EventLogFilterEngine
+import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
@@ -46,11 +47,14 @@ fun DashboardScreen(
     commandStatus: String,
     operatorId: String,
     operatorPin: String,
+    accessSession: AccessSession?,
     criticalNotificationsEnabled: Boolean,
     statusNotificationsEnabled: Boolean,
     zoneNotificationsEnabled: Boolean,
     onOperatorIdChange: (String) -> Unit,
     onOperatorPinChange: (String) -> Unit,
+    onLogin: () -> Unit,
+    onLogout: () -> Unit,
     onCriticalNotificationsChange: (Boolean) -> Unit,
     onStatusNotificationsChange: (Boolean) -> Unit,
     onZoneNotificationsChange: (Boolean) -> Unit,
@@ -66,7 +70,9 @@ fun DashboardScreen(
     var eventCategory by remember { mutableStateOf(EventLogCategory.ALL) }
     var eventQuery by remember { mutableStateOf("") }
     var eventSourceText by remember { mutableStateOf("") }
-    val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12
+    val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12 && operatorPin.all(Char::isDigit)
+    val authenticated = accessSession != null
+    val canCommand: (CommandType) -> Boolean = { command -> accessSession?.allows(command) == true }
     val sourceFilter = eventSourceText.trim().toIntOrNull()
     val filteredEvents = EventLogFilterEngine.apply(events, EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter))
 
@@ -74,8 +80,13 @@ fun DashboardScreen(
         AlertDialog(
             onDismissRequest = { pendingDangerousCommand = null },
             title = { Text("Підтвердіть команду") },
-            text = { Text("Виконати ${command.name}? Контролер перевірить PIN оператора та challenge.") },
-            confirmButton = { TextButton(onClick = { pendingDangerousCommand = null; onCommand(command) }) { Text("Виконати") } },
+            text = { Text("Виконати ${command.name}? Контролер повторно перевірить PIN, роль та challenge.") },
+            confirmButton = {
+                TextButton(
+                    enabled = canCommand(command),
+                    onClick = { pendingDangerousCommand = null; onCommand(command) },
+                ) { Text("Виконати") }
+            },
             dismissButton = { TextButton(onClick = { pendingDangerousCommand = null }) { Text("Скасувати") } },
         )
     }
@@ -110,13 +121,37 @@ fun DashboardScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Оператор", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(value = operatorId, onValueChange = onOperatorIdChange, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("ID користувача") })
+                    OutlinedTextField(
+                        value = operatorId,
+                        onValueChange = onOperatorIdChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !authenticated,
+                        singleLine = true,
+                        label = { Text("ID користувача") },
+                    )
                     OutlinedTextField(
                         value = operatorPin,
                         onValueChange = { value -> if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value) },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("PIN") }, visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !authenticated,
+                        singleLine = true,
+                        label = { Text("PIN") },
+                        visualTransformation = PasswordVisualTransformation(),
                     )
-                    Text(if (credentialsReady) "PIN готовий до перевірки контролером" else "Введіть ID та PIN 4–12 цифр")
+                    if (accessSession == null) {
+                        Text(if (credentialsReady) "Готово до входу" else "Введіть ID та PIN 4–12 цифр")
+                        Button(enabled = credentialsReady, onClick = onLogin) { Text("Увійти") }
+                    } else {
+                        Text("${accessSession.name} · роль ${accessSession.role.name.lowercase()}")
+                        Text(
+                            when (accessSession.role.name) {
+                                "ADMIN" -> "Повний доступ до керування"
+                                "USER" -> "Моніторинг, охорона та клапани"
+                                else -> "Тільки моніторинг"
+                            }
+                        )
+                        OutlinedButton(onClick = onLogout) { Text("Вийти") }
+                    }
                     Text("PIN зберігається тільки в оперативній пам’яті застосунку.")
                 }
             }
@@ -148,19 +183,20 @@ fun DashboardScreen(
 
         item {
             Text("Керування", style = MaterialTheme.typography.titleLarge)
+            if (!authenticated) Text("Увійдіть, щоб активувати дозволені для вашої ролі команди")
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(enabled = credentialsReady, onClick = { onCommand(CommandType.ARM_HOME) }) { Text("Охорона дім") }
-                    Button(enabled = credentialsReady, onClick = { onCommand(CommandType.ARM_AWAY) }) { Text("Охорона") }
+                    Button(enabled = canCommand(CommandType.ARM_HOME), onClick = { onCommand(CommandType.ARM_HOME) }) { Text("Охорона дім") }
+                    Button(enabled = canCommand(CommandType.ARM_AWAY), onClick = { onCommand(CommandType.ARM_AWAY) }) { Text("Охорона") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(enabled = credentialsReady, onClick = { pendingDangerousCommand = CommandType.DISARM }) { Text("Зняти") }
-                    OutlinedButton(enabled = credentialsReady, onClick = { onCommand(CommandType.SILENCE) }) { Text("Тиша") }
-                    OutlinedButton(enabled = credentialsReady, onClick = { pendingDangerousCommand = CommandType.RESET_ALARM }) { Text("Скинути тривогу") }
+                    OutlinedButton(enabled = canCommand(CommandType.DISARM), onClick = { pendingDangerousCommand = CommandType.DISARM }) { Text("Зняти") }
+                    OutlinedButton(enabled = canCommand(CommandType.SILENCE), onClick = { onCommand(CommandType.SILENCE) }) { Text("Тиша") }
+                    OutlinedButton(enabled = canCommand(CommandType.RESET_ALARM), onClick = { pendingDangerousCommand = CommandType.RESET_ALARM }) { Text("Скинути тривогу") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(enabled = credentialsReady, onClick = { pendingDangerousCommand = CommandType.OPEN_VALVES }) { Text("Відкрити клапани") }
-                    Button(enabled = credentialsReady, onClick = { onCommand(CommandType.CLOSE_VALVES) }) { Text("Закрити клапани") }
+                    OutlinedButton(enabled = canCommand(CommandType.OPEN_VALVES), onClick = { pendingDangerousCommand = CommandType.OPEN_VALVES }) { Text("Відкрити клапани") }
+                    Button(enabled = canCommand(CommandType.CLOSE_VALVES), onClick = { onCommand(CommandType.CLOSE_VALVES) }) { Text("Закрити клапани") }
                 }
             }
         }
