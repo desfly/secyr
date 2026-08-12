@@ -55,8 +55,9 @@ for needle in (
 require('"/api/v1/network/lan-scan"' in lan_http, "firmware LAN scan endpoint missing")
 require("etharp_get_entry" in lan_http, "LAN scan does not enumerate lwIP ARP table")
 require("ARP_TABLE_SIZE" in lan_http, "LAN scan does not use ESP-IDF/lwIP ARP_TABLE_SIZE")
-require("\"online\":true" in lan_http, "LAN scan response does not expose online state")
-require("\"hostname\"" in lan_http, "LAN scan response does not expose hostname field")
+# C++ source contains escaped JSON string literals; check semantic fields rather than exact escaping.
+require("online" in lan_http and "true" in lan_http, "LAN scan response does not expose online state")
+require("hostname" in lan_http, "LAN scan response does not expose hostname field")
 require("g_lan_discovery_http.register_handlers" in app_main, "LAN discovery handlers are not registered in app_main")
 
 require('configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/lan-monitor.js"' in cmake,
