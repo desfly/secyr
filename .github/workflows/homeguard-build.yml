@@ -62,6 +62,12 @@ jobs:
       - name: Firmware partition budget
         run: python tools/check_firmware_budget.py
 
+      - name: Web UI contract
+        run: python tools/check_web_ui_contract.py
+
+      - name: Web UI JavaScript syntax
+        run: node --check web/app.js
+
       - name: Mock syntax
         run: python tools/syntax_check_esp_idf_mock.py
 
