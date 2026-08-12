@@ -60,14 +60,16 @@ esp_err_t SystemHttp::register_handlers(
     httpd_handle_t server,
     hg::SystemModel* model,
     hg::SystemEventBus* bus,
-    homeguard::AccessControl* access_control) {
-    if (server == nullptr || model == nullptr || bus == nullptr || access_control == nullptr) {
+    homeguard::AccessControl* access_control,
+    homeguard::UserZoneAccess* zone_access) {
+    if (server == nullptr || model == nullptr || bus == nullptr || access_control == nullptr || zone_access == nullptr) {
         return ESP_ERR_INVALID_ARG;
     }
     server_ = server;
     model_ = model;
     bus_ = bus;
     access_control_ = access_control;
+    zone_access_ = zone_access;
     if (!bus_->subscribe(&SystemHttp::on_event, this)) return ESP_ERR_NO_MEM;
 
     const httpd_uri_t routes[] = {
@@ -131,8 +133,24 @@ esp_err_t SystemHttp::security_command_post(httpd_req_t* request) {
     return self == nullptr ? ESP_FAIL : self->handle_security_command(request);
 }
 
+bool SystemHttp::zone_command_allowed(std::string_view actor, bool disarm) const {
+    if (access_control_ == nullptr || zone_access_ == nullptr || model_ == nullptr) return false;
+    const auto* user = access_control_->find_user(actor);
+    if (user == nullptr || !user->enabled) return false;
+    if (user->role == homeguard::AccessRole::Admin) return true;
+
+    for (std::size_t i = 0; i < model_->zone_count(); ++i) {
+        const auto* zone = model_->zone_at(i);
+        if (zone == nullptr || !zone->enabled) continue;
+        const auto* rule = zone_access_->rule(actor, zone->id);
+        if (rule == nullptr || !rule->visible) return false;
+        if (disarm ? !rule->can_disarm : !rule->can_arm) return false;
+    }
+    return true;
+}
+
 esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
-    if (model_ == nullptr || bus_ == nullptr || access_control_ == nullptr) return ESP_FAIL;
+    if (model_ == nullptr || bus_ == nullptr || access_control_ == nullptr || zone_access_ == nullptr) return ESP_FAIL;
     if (request->content_len == 0 || request->content_len > 384) {
         httpd_resp_set_status(request, "400 Bad Request");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_body\"}", -1);
@@ -174,6 +192,11 @@ esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
     else {
         httpd_resp_set_status(request, "400 Bad Request");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"unsupported_command\"}", -1);
+    }
+
+    if (target != hg::PartitionArmState::Alarm && !zone_command_allowed(actor, target == hg::PartitionArmState::Disarmed)) {
+        httpd_resp_set_status(request, "403 Forbidden");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"zone_access_denied\"}", -1);
     }
 
     if (!model_->set_partition_arm(1, target, 0)) {
