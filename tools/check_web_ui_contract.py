@@ -69,7 +69,6 @@ security_commands = (
 for command in security_commands:
     require(f'data-command="{command}"' in html, f"quick command button missing: {command}")
 
-# Base browser wiring.
 for needle in (
     '#wifiScan', '#wifiConnect', '[data-command]', '[data-output-id]', '.sidebar nav a',
     'hashchange', 'routeFromHash', '#networkPage', '/api/v1/network/status',
@@ -79,26 +78,22 @@ for needle in (
 ):
     require(needle in js, f"app.js contract missing: {needle}")
 
-# Security quick buttons: HTML command -> JS POST -> firmware route -> access control.
 require("sendSecurityCommand" in js and "JSON.stringify({ command, actor, credential })" in js,
         "security buttons are not posting command + operator credentials")
 require('"/api/v1/system/security-command"' in system_http,
         "security-command firmware route missing")
-require("access_->authorize(actor, credential, command)" in system_http,
+require(re.search(r'authorize\s*\(actor,\s*credential,\s*command\)', system_http) is not None,
         "security-command route does not authorize the requested command")
 
-# Valve buttons are rendered from live output state and must call the protected output route.
 require('data-output-id="${id}"' in js and "sendOutputCommand(button)" in js,
         "live valve controls are not bound to sendOutputCommand")
 require("JSON.stringify({ outputId, active, actor, credential })" in js,
         "valve buttons are not posting output state + operator credentials")
 require('"/api/v1/system/output-command"' in output_http,
         "output-command firmware route missing")
-require("set_access_control(&g_access_control)" in app_main,
+require("g_output_http.set_access_control(&g_access_control)" in app_main,
         "output access-control injection missing from app_main")
 
-# Role contract agreed for HomeGuard-S3: User can arm/disarm and operate valves;
-# Guest receives no control-command permission; Admin is unrestricted.
 for command in ("security.arm_home", "security.arm_away", "security.disarm", "valve.open", "valve.close"):
     require(command in access_core, f"User role permission missing: {command}")
 require("if (role == AccessRole::Admin) return true" in access_core,
@@ -106,7 +101,6 @@ require("if (role == AccessRole::Admin) return true" in access_core,
 require("if (role == AccessRole::Guest) return false" in access_core,
         "Guest is not fail-closed for control commands")
 
-# First administrator bootstrap must break the zero-user deadlock but only once.
 for needle in ("accessBootstrap", 'action: "bootstrap"', "bootstrapAccessAdmin"):
     require(needle in js, f"first-Admin Web UI bootstrap missing: {needle}")
 require('action == "bootstrap"' in access_http, "firmware first-Admin bootstrap action missing")
@@ -117,14 +111,13 @@ require("AccessRole::Admin" in access_http,
 require("access_->clear_users()" in access_http,
         "failed bootstrap persistence does not roll back the RAM user")
 
-# Wi-Fi status/scan is readable, but changing credentials is an Admin command.
 for endpoint in ("/api/v1/network/status", "/api/v1/network/scan", "/api/v1/network/connect"):
     require(endpoint in network, f"network firmware endpoint missing: {endpoint}")
 require("networkActor" in js and "networkCredential" in js,
         "Wi-Fi page does not request administrator credentials")
 require("JSON.stringify({ ssid, password, actor, credential })" in js,
         "Wi-Fi connect does not send administrator credentials")
-require('access_->authorize(actor, credential, "network.configure")' in network,
+require(re.search(r'authorize\s*\(actor,\s*credential,\s*"network\.configure"\)', network) is not None,
         "Wi-Fi configuration is not protected by access control")
 require("g_network_http.set_access_control(&g_access_control)" in app_main,
         "NetworkHttp access-control injection missing from app_main")
@@ -133,7 +126,6 @@ require("ip" in network, "Wi-Fi status backend does not expose IP")
 require("save_credentials" in network and "load_credentials" in network,
         "Wi-Fi reconnect persistence missing")
 
-# Bruce stays inline so it cannot disappear because of an omitted firmware asset.
 require('class="bruce"' in html, "Bruce DOM container missing")
 require('<svg id="bruceArt"' in html, "self-contained Bruce SVG missing")
 require('viewBox="0 0 220 210"' in html, "Bruce SVG viewport missing")
