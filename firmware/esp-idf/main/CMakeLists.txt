@@ -17,6 +17,8 @@ idf_component_register(
         "hg_web_http.cpp"
         "hg_network_http.cpp"
         "hg_lan_discovery_http.cpp"
+        "hg_cloud_link.cpp"
+        "hg_cloud_http.cpp"
         "hg_config_nvs.cpp"
         "hg_config_http.cpp"
         "hg_build_info.cpp"
@@ -82,6 +84,7 @@ idf_component_register(
         esp_wifi
         fatfs
         lwip
+        mqtt
         nvs_flash
         sdmmc
     EMBED_TXTFILES
