@@ -14,6 +14,7 @@ private:
     static esp_err_t css_get(httpd_req_t* request);
     static esp_err_t js_get(httpd_req_t* request);
     static esp_err_t access_session_js_get(httpd_req_t* request);
+    static esp_err_t cloud_status_js_get(httpd_req_t* request);
     static esp_err_t bruce_get(httpd_req_t* request);
     static esp_err_t send_asset(httpd_req_t* request,
                                 const char* content_type,
