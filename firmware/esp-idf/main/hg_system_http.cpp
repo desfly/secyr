@@ -114,6 +114,40 @@ bool SystemHttp::zone_matrix_allows(std::string_view actor, hg::PartitionArmStat
     return true;
 }
 
+std::string SystemHttp::route_security_command_json(std::string_view input) {
+    if(model_==nullptr||bus_==nullptr||access_control_==nullptr||zone_access_==nullptr)
+        return "{\"ok\":false,\"reason\":\"router_unavailable\"}";
+    if(input.empty()||input.size()>384U)
+        return "{\"ok\":false,\"reason\":\"invalid_body\"}";
+
+    const std::string body(input);
+    std::string request_id,command,actor,credential;
+    (void)parse_json_string(body,"request_id",request_id);
+    if(!parse_json_string(body,"command",command))
+        return "{\"ok\":false,\"reason\":\"missing_command\"}";
+    if(!parse_json_string(body,"actor",actor)||!parse_json_string(body,"credential",credential))
+        return "{\"ok\":false,\"reason\":\"credential_required\"}";
+
+    const auto decision=access_control_->authorize(actor,credential,command);
+    if(decision!=homeguard::AuditDecision::Allowed)
+        return std::string{"{\"ok\":false,\"request_id\":\""}+request_id+"\",\"reason\":\""+homeguard::to_string(decision)+"\"}";
+
+    hg::PartitionArmState target{};
+    if(command=="security.arm_away") target=hg::PartitionArmState::Away;
+    else if(command=="security.arm_home") target=hg::PartitionArmState::Stay;
+    else if(command=="security.disarm") target=hg::PartitionArmState::Disarmed;
+    else if(command=="security.panic") target=hg::PartitionArmState::Alarm;
+    else return std::string{"{\"ok\":false,\"request_id\":\""}+request_id+"\",\"reason\":\"unsupported_command\"}";
+
+    if(target!=hg::PartitionArmState::Alarm && !zone_matrix_allows(actor,target))
+        return std::string{"{\"ok\":false,\"request_id\":\""}+request_id+"\",\"reason\":\"zone_matrix_denied\"}";
+    if(!model_->set_partition_arm(1,target,0))
+        return std::string{"{\"ok\":false,\"request_id\":\""}+request_id+"\",\"reason\":\"partition_command_failed\"}";
+
+    (void)bus_->dispatch_all();
+    return std::string{"{\"ok\":true,\"request_id\":\""}+request_id+"\",\"command\":\""+command+"\",\"armState\":\""+arm_state_name(target)+"\"}";
+}
+
 esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
     if(model_==nullptr||bus_==nullptr||access_control_==nullptr||zone_access_==nullptr) return ESP_FAIL;
     if(request->content_len==0||request->content_len>384){httpd_resp_set_status(request,"400 Bad Request");return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"invalid_body\"}",-1);}
