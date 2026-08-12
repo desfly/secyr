@@ -8,6 +8,9 @@
 
 namespace homeguard::idf {
 namespace {
+using hg::ModelOutputType;
+using hg::ModelZoneType;
+
 constexpr std::size_t kMaxImportBytes = 32768;
 
 ConfigHttp* self_from(httpd_req_t* request) { return request == nullptr ? nullptr : static_cast<ConfigHttp*>(request->user_ctx); }
