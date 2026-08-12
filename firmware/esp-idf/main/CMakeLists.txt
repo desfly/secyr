@@ -5,6 +5,7 @@ file(MAKE_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/web")
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/index.html" "${CMAKE_CURRENT_LIST_DIR}/web/index.html" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.css" "${CMAKE_CURRENT_LIST_DIR}/web/app.css" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.js" "${CMAKE_CURRENT_LIST_DIR}/web/app.js" COPYONLY)
+configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/bruce.jpg" "${CMAKE_CURRENT_LIST_DIR}/web/bruce.jpg" COPYONLY)
 
 idf_component_register(
     SRCS
@@ -74,6 +75,8 @@ idf_component_register(
         "web/index.html"
         "web/app.css"
         "web/app.js"
+    EMBED_FILES
+        "web/bruce.jpg"
 )
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)
