@@ -103,7 +103,7 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
     }
 
     std::string response = std::string{"{\"ok\":"} + (result.status == hg::OutputCommandStatus::Applied ? "true" : "false") +
-        ",\"status\":\"" + hg::to_string(result.status) + ",\"interlock\":\"" + hg::to_string(result.interlock) +
+        ",\"status\":\"" + hg::to_string(result.status) + "\",\"interlock\":\"" + hg::to_string(result.interlock) +
         "\",\"active\":" + (result.resulting_active ? "true" : "false") + "}";
     if (result.status != hg::OutputCommandStatus::Applied) httpd_resp_set_status(request, "409 Conflict");
     else if (bus_ != nullptr) bus_->publish({hg::SystemEventType::ConfigChanged, output_id, 0, 0, active ? 5401 : 5400});
