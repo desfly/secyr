@@ -2,12 +2,16 @@
   "build": "0059",
   "project": "HomeGuard-S3",
   "date": "2026-08-12",
-  "focus": "bring Android network client onto the backend role/capability login contract",
+  "focus": "align Android login, session UI and command controls with backend role/capability policy",
   "android": {
     "login_endpoint": "/api/v1/access/login",
     "roles": ["ADMIN", "USER", "GUEST"],
     "pin_validation": "4-12 digits",
-    "pin_persistence": "not introduced",
+    "pin_persistence": "RAM only; cleared on logout/activity destroy",
+    "explicit_session_ui": true,
+    "login_logout": true,
+    "command_buttons_role_gated": true,
+    "backend_authorization_remains_authoritative": true,
     "capabilities": [
       "monitor",
       "armHome",
@@ -21,12 +25,21 @@
     ]
   },
   "policy": {
-    "admin": "all CommandType values allowed by role",
-    "user": "arm/disarm and valve commands follow backend capabilities",
-    "guest": "no control commands unless backend capability explicitly permits one"
+    "admin": "all current CommandType values allowed by role",
+    "user": "arm/disarm and valve commands only when backend capability permits",
+    "guest": "strict monitoring-only; control commands denied even if a malformed backend response sets operator capabilities true"
+  },
+  "regression": {
+    "android_unit_tests": "testDebugUnitTest runs before assembleDebug in GitHub Actions",
+    "guest_payload_escalation_guard": true
   },
   "files": [
     "android/app/src/main/java/ua/homeguard/s3/model/AccessModels.kt",
-    "android/app/src/main/java/ua/homeguard/s3/network/HttpDeviceApi.kt"
+    "android/app/src/main/java/ua/homeguard/s3/network/HttpDeviceApi.kt",
+    "android/app/src/main/java/ua/homeguard/s3/control/CommandController.kt",
+    "android/app/src/main/java/ua/homeguard/s3/MainActivity.kt",
+    "android/app/src/main/java/ua/homeguard/s3/ui/screens/DashboardScreen.kt",
+    "android/app/src/test/java/ua/homeguard/s3/model/AccessModelsTest.kt",
+    ".github/workflows/homeguard-build.yml"
   ]
 }
