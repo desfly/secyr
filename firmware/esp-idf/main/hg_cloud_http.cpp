@@ -1,6 +1,7 @@
 #include "hg_cloud_http.hpp"
 
 #include "hg_cloud_link.hpp"
+#include "nvs.h"
 
 #include <algorithm>
 #include <cctype>
