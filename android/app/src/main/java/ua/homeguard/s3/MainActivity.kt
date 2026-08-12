@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 import ua.homeguard.s3.control.CommandController
 import ua.homeguard.s3.diagnostics.SystemDiagnosticsEvaluator
 import ua.homeguard.s3.events.EventLogExporter
+import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.SystemSnapshot
@@ -49,6 +50,7 @@ class MainActivity : ComponentActivity() {
     private val backupStatus = MutableStateFlow("Backup/restore готовий")
     private val operatorId = MutableStateFlow("admin")
     private val operatorPin = MutableStateFlow("")
+    private val accessSession = MutableStateFlow<AccessSession?>(null)
     private var pendingExportText: String = ""
     private var pendingSettingsBackupText: String = ""
 
@@ -135,6 +137,7 @@ class MainActivity : ComponentActivity() {
             val maintenanceMessage by backupStatus.collectAsState()
             val currentOperator by operatorId.collectAsState()
             val currentPin by operatorPin.collectAsState()
+            val currentAccessSession by accessSession.collectAsState()
             val diagnostics = SystemDiagnosticsEvaluator.evaluate(
                 deviceId = appSettings.deviceId,
                 route = endpoint.path.name,
@@ -170,11 +173,20 @@ class MainActivity : ComponentActivity() {
                         commandStatus = commandMessage,
                         operatorId = currentOperator,
                         operatorPin = currentPin,
+                        accessSession = currentAccessSession,
                         criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled,
                         statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
                         zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
-                        onOperatorIdChange = { operatorId.value = it.take(23) },
-                        onOperatorPinChange = { operatorPin.value = it.filter(Char::isDigit).take(12) },
+                        onOperatorIdChange = { value ->
+                            operatorId.value = value.take(23)
+                            accessSession.value = null
+                        },
+                        onOperatorPinChange = { value ->
+                            operatorPin.value = value.filter(Char::isDigit).take(12)
+                            accessSession.value = null
+                        },
+                        onLogin = ::loginOperator,
+                        onLogout = ::logoutOperator,
                         onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
                         onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } },
                         onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } },
@@ -207,31 +219,65 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun executeCommand(type: CommandType) {
+    private fun loginOperator() {
         val actor = operatorId.value.trim()
         val credential = operatorPin.value
         if (actor.isBlank() || credential.length !in 4..12 || !credential.all(Char::isDigit)) {
-            commandStatus.value = "Введіть ID оператора та PIN 4–12 цифр"
+            commandStatus.value = "Введіть ID користувача та PIN 4–12 цифр"
+            accessSession.value = null
             return
         }
 
         lifecycleScope.launch {
             commandStatus.value = "Перевірка доступу…"
-            val access = runCatching { commands.login(actor, credential) }.getOrElse { error ->
+            val result = runCatching { commands.login(actor, credential) }
+            result.onSuccess { authenticated ->
+                accessSession.value = authenticated
+                commandStatus.value = "Вхід: ${authenticated.name} · ${authenticated.role.name.lowercase()}"
+            }.onFailure { error ->
+                accessSession.value = null
                 commandStatus.value = "Вхід відхилено: ${error.message ?: "network"}"
-                return@launch
             }
-            if (!access.allows(type)) {
-                commandStatus.value = "Недоступно для ролі ${access.role.name.lowercase()}"
-                return@launch
-            }
+        }
+    }
 
+    private fun logoutOperator() {
+        accessSession.value = null
+        operatorPin.value = ""
+        commandStatus.value = "Сеанс завершено"
+    }
+
+    private fun executeCommand(type: CommandType) {
+        val actor = operatorId.value.trim()
+        val credential = operatorPin.value
+        val authenticated = accessSession.value
+        if (authenticated == null || authenticated.actor != actor) {
+            commandStatus.value = "Спочатку увійдіть"
+            return
+        }
+        if (!authenticated.allows(type)) {
+            commandStatus.value = "Недоступно для ролі ${authenticated.role.name.lowercase()}"
+            return
+        }
+        if (credential.length !in 4..12 || !credential.all(Char::isDigit)) {
+            accessSession.value = null
+            commandStatus.value = "PIN сеансу відсутній — увійдіть знову"
+            return
+        }
+
+        lifecycleScope.launch {
             commandStatus.value = "Виконується: ${type.name}…"
             val result = runCatching { commands.execute(type, actor, credential) }
             commandStatus.value = result.fold(
                 onSuccess = { reply ->
                     if (reply.accepted || reply.duplicate) "OK: ${reply.code}"
-                    else "Відхилено: ${reply.code}"
+                    else {
+                        if (reply.code.contains("unauthorized", ignoreCase = true) ||
+                            reply.code.contains("credential", ignoreCase = true) ||
+                            reply.code.contains("rate", ignoreCase = true)
+                        ) accessSession.value = null
+                        "Відхилено: ${reply.code}"
+                    }
                 },
                 onFailure = { error -> "Помилка: ${error.message ?: "network"}" },
             )
@@ -262,6 +308,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        accessSession.value = null
         operatorPin.value = ""
         session.stop()
         discovery.stop()
