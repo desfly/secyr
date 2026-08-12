@@ -106,6 +106,34 @@ const AccessUser* AccessControl::find_user(std::string_view id) const {
     return nullptr;
 }
 
+std::size_t AccessControl::enabled_admin_count() const {
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < user_count_; ++i) {
+        if (users_[i].enabled && users_[i].role == AccessRole::Admin) ++count;
+    }
+    return count;
+}
+
+bool AccessControl::would_preserve_admin_access(
+    std::string_view user_id,
+    AccessRole replacement_role,
+    bool replacement_enabled) const {
+    auto projected = enabled_admin_count();
+    const auto* existing = find_user(user_id);
+    const bool existing_enabled_admin =
+        existing != nullptr && existing->enabled && existing->role == AccessRole::Admin;
+    const bool replacement_enabled_admin =
+        replacement_enabled && replacement_role == AccessRole::Admin;
+
+    if (existing_enabled_admin && !replacement_enabled_admin) {
+        if (projected == 0U) return false;
+        --projected;
+    } else if (!existing_enabled_admin && replacement_enabled_admin) {
+        ++projected;
+    }
+    return projected > 0U;
+}
+
 bool AccessControl::verify_pin(const AccessUser& user, std::string_view pin) const {
     if (!user.enabled || pin.empty()) return false;
     return hg::constant_time_equal(user.pin_digest, derive_pin_digest(user.id.data(), pin, user.salt));
