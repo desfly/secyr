@@ -174,7 +174,7 @@ class MainActivity : ComponentActivity() {
                         statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
                         zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
                         onOperatorIdChange = { operatorId.value = it.take(23) },
-                        onOperatorPinChange = { operatorPin.value = it },
+                        onOperatorPinChange = { operatorPin.value = it.filter(Char::isDigit).take(12) },
                         onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
                         onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } },
                         onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } },
@@ -210,15 +210,29 @@ class MainActivity : ComponentActivity() {
     private fun executeCommand(type: CommandType) {
         val actor = operatorId.value.trim()
         val credential = operatorPin.value
-        if (actor.isBlank() || credential.length !in 4..12) {
-            commandStatus.value = "Введіть ID оператора та PIN"
+        if (actor.isBlank() || credential.length !in 4..12 || !credential.all(Char::isDigit)) {
+            commandStatus.value = "Введіть ID оператора та PIN 4–12 цифр"
             return
         }
+
         lifecycleScope.launch {
+            commandStatus.value = "Перевірка доступу…"
+            val access = runCatching { commands.login(actor, credential) }.getOrElse { error ->
+                commandStatus.value = "Вхід відхилено: ${error.message ?: "network"}"
+                return@launch
+            }
+            if (!access.allows(type)) {
+                commandStatus.value = "Недоступно для ролі ${access.role.name.lowercase()}"
+                return@launch
+            }
+
             commandStatus.value = "Виконується: ${type.name}…"
             val result = runCatching { commands.execute(type, actor, credential) }
             commandStatus.value = result.fold(
-                onSuccess = { reply -> if (reply.accepted || reply.duplicate) "OK: ${reply.code}" else "Відхилено: ${reply.code}" },
+                onSuccess = { reply ->
+                    if (reply.accepted || reply.duplicate) "OK: ${reply.code}"
+                    else "Відхилено: ${reply.code}"
+                },
                 onFailure = { error -> "Помилка: ${error.message ?: "network"}" },
             )
         }
