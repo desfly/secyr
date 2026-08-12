@@ -7,6 +7,7 @@ configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.css" "${CMAKE_CURRENT
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.js" "${CMAKE_CURRENT_LIST_DIR}/web/app.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/access-session.js" "${CMAKE_CURRENT_LIST_DIR}/web/access-session.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/cloud-status.js" "${CMAKE_CURRENT_LIST_DIR}/web/cloud-status.js" COPYONLY)
+configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/config-ui.js" "${CMAKE_CURRENT_LIST_DIR}/web/config-ui.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/bruce.jpg" "${CMAKE_CURRENT_LIST_DIR}/web/bruce.jpg" COPYONLY)
 
 idf_component_register(
@@ -88,6 +89,7 @@ idf_component_register(
         "web/app.js"
         "web/access-session.js"
         "web/cloud-status.js"
+        "web/config-ui.js"
     EMBED_FILES
         "web/bruce.jpg"
 )
