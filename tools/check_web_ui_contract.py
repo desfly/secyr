@@ -44,9 +44,9 @@ app_main = text(MAIN / "app_main.cpp")
 build_info = text(MAIN / "hg_build_info.cpp")
 access_core = text(CORE / "access_control.cpp")
 
-for asset in ("web/index.html", "web/app.css", "web/app.js"):
+for asset in ("web/index.html", "web/app.css", "web/app.js", "web/bruce.jpg"):
     require(asset in cmake, f"CMake does not embed/copy {asset}")
-for route in ('"/"', '"/index.html"', '"/app.css"', '"/app.js"'):
+for route in ('"/"', '"/index.html"', '"/app.css"', '"/app.js"', '"/bruce.jpg"'):
     require(route in web_http, f"WebHttp route missing: {route}")
 for header in ("Cache-Control", "no-store", "Pragma", "Expires"):
     require(header in web_http, f"WebHttp cache prevention missing: {header}")
@@ -126,11 +126,21 @@ require("ip" in network, "Wi-Fi status backend does not expose IP")
 require("save_credentials" in network and "load_credentials" in network,
         "Wi-Fi reconnect persistence missing")
 
+# Approved Bruce portrait must be a real binary firmware asset, not a drawn
+# placeholder or a data URI hidden in index.html.
+require((WEB / "bruce.jpg").is_file(), "Bruce JPEG asset missing")
+require((WEB / "bruce.jpg").stat().st_size > 1024 if (WEB / "bruce.jpg").exists() else False,
+        "Bruce JPEG asset is unexpectedly small")
 require('class="bruce"' in html, "Bruce DOM container missing")
-require('<svg id="bruceArt"' in html, "self-contained Bruce SVG missing")
-require('viewBox="0 0 220 210"' in html, "Bruce SVG viewport missing")
-require(".bruce{background:none!important" in html, "legacy broken Bruce background is not overridden")
-require("<ellipse" in html and "<path" in html, "Bruce SVG artwork is unexpectedly empty")
+require('<img id="bruceArt"' in html, "Bruce portrait image element missing")
+require('/bruce.jpg?v=' in html, "Bruce portrait cache-busted URL missing")
+require('<svg id="bruceArt"' not in html, "old drawn Bruce SVG placeholder still present")
+require(".bruce img{" in html, "Bruce portrait sizing rule missing")
+require("EMBED_FILES" in cmake and '"web/bruce.jpg"' in cmake,
+        "Bruce JPEG is not embedded as a binary ESP-IDF asset")
+require('"image/jpeg"' in web_http, "Bruce route does not use image/jpeg")
+require("bruce_jpg_start" in web_http and "bruce_jpg_end" in web_http,
+        "Bruce embedded linker symbols missing")
 
 require("Build-0039" not in app_main, "stale Build-0039 runtime label remains in app_main.cpp")
 require("HG_CI_BUILD_NUMBER" in build_info, "build endpoint is not using CI build number")
@@ -150,6 +160,6 @@ print(" - live valve buttons -> authorized firmware route: present")
 print(" - first Admin one-time bootstrap: present and fail-closed after provisioning")
 print(" - Wi-Fi configuration: Admin-authorized; status/scan + RSSI/IP/persistence present")
 print(" - roles: Admin full; User arm/disarm + valves; Guest control denied")
-print(" - Bruce: self-contained inline SVG, no extra firmware asset required")
+print(" - Bruce: approved JPEG embedded and served as a firmware asset")
 print(" - embedded assets + anti-cache headers: present")
 print(" - runtime build number sourced from GitHub Actions run number")
