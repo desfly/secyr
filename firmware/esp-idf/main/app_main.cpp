@@ -1,6 +1,7 @@
 #include "hg_hardware_bootstrap.hpp"
 #include "hg_web_http.hpp"
 #include "hg_network_http.hpp"
+#include "hg_lan_http.hpp"
 #include "hg_cloud_link.hpp"
 #include "hg_cloud_http.hpp"
 #include "hg_build_http.hpp"
@@ -35,6 +36,7 @@ homeguard::idf::HardwareBootstrap g_hardware;
 homeguard::idf::TelemetryRuntime g_telemetry;
 homeguard::idf::WebHttp g_web_http;
 homeguard::idf::NetworkHttp g_network_http;
+homeguard::idf::LanHttp g_lan_http;
 homeguard::idf::CloudLink g_cloud_link;
 homeguard::idf::CloudHttp g_cloud_http;
 homeguard::idf::InfrastructureHttp g_http_api;
@@ -142,6 +144,7 @@ esp_err_t start_http_server()
     ESP_RETURN_ON_ERROR(g_web_http.register_handlers(g_http_server), kTag, "web routes");
     g_network_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_network_http.register_handlers(g_http_server), kTag, "network routes");
+    ESP_RETURN_ON_ERROR(g_lan_http.register_handlers(g_http_server), kTag, "LAN discovery routes");
     ESP_RETURN_ON_ERROR(g_cloud_http.register_handlers(g_http_server, &g_cloud_link), kTag, "cloud routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(
