@@ -4,15 +4,15 @@
 #include <cstdint>
 #include <sys/types.h>
 
-// ESP-IDF EMBED_TXTFILES creates symbols from the embedded file name as seen
-// by the component build. For files generated as index.html.S/app.css.S/app.js.S
-// the linker symbols do not contain the local "web/" directory prefix.
+// ESP-IDF embed symbols use the copied asset basename.
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[] asm("_binary_index_html_end");
 extern const uint8_t app_css_start[] asm("_binary_app_css_start");
 extern const uint8_t app_css_end[] asm("_binary_app_css_end");
 extern const uint8_t app_js_start[] asm("_binary_app_js_start");
 extern const uint8_t app_js_end[] asm("_binary_app_js_end");
+extern const uint8_t bruce_jpg_start[] asm("_binary_bruce_jpg_start");
+extern const uint8_t bruce_jpg_end[] asm("_binary_bruce_jpg_end");
 
 namespace homeguard::idf {
 
@@ -25,6 +25,7 @@ esp_err_t WebHttp::register_handlers(httpd_handle_t server)
         {.uri="/index.html", .method=HTTP_GET, .handler=&WebHttp::index_get, .user_ctx=this},
         {.uri="/app.css", .method=HTTP_GET, .handler=&WebHttp::css_get, .user_ctx=this},
         {.uri="/app.js", .method=HTTP_GET, .handler=&WebHttp::js_get, .user_ctx=this},
+        {.uri="/bruce.jpg", .method=HTTP_GET, .handler=&WebHttp::bruce_get, .user_ctx=this},
     };
 
     for (const auto& route : routes) {
@@ -41,10 +42,8 @@ esp_err_t WebHttp::send_asset(httpd_req_t* request,
 {
     if (request == nullptr || start == nullptr || end == nullptr || end < start) return ESP_ERR_INVALID_ARG;
 
-    // HomeGuard is repeatedly reflashed during commissioning. The Web UI uses
-    // stable URLs (/app.css and /app.js), so browser caching can otherwise mix
-    // a fresh index.html with stale CSS/JS from an older firmware image. That
-    // makes every control appear dead even though the new firmware is running.
+    // HomeGuard is repeatedly reflashed during commissioning. Stable asset
+    // URLs must never let an old browser cache mask a freshly flashed UI.
     httpd_resp_set_hdr(request, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     httpd_resp_set_hdr(request, "Pragma", "no-cache");
     httpd_resp_set_hdr(request, "Expires", "0");
@@ -68,6 +67,11 @@ esp_err_t WebHttp::css_get(httpd_req_t* request)
 esp_err_t WebHttp::js_get(httpd_req_t* request)
 {
     return send_asset(request, "application/javascript; charset=utf-8", app_js_start, app_js_end);
+}
+
+esp_err_t WebHttp::bruce_get(httpd_req_t* request)
+{
+    return send_asset(request, "image/jpeg", bruce_jpg_start, bruce_jpg_end);
 }
 
 }  // namespace homeguard::idf
