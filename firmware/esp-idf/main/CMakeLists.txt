@@ -15,6 +15,8 @@ idf_component_register(
         "hg_web_http.cpp"
         "hg_network_http.cpp"
         "hg_lan_discovery_http.cpp"
+        "hg_config_nvs.cpp"
+        "hg_config_http.cpp"
         "hg_build_info.cpp"
         "hg_build_http.cpp"
         "hg_i2c_bus.cpp"
