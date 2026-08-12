@@ -6,6 +6,9 @@ configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/index.html" "${CMAKE_CURR
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.css" "${CMAKE_CURRENT_LIST_DIR}/web/app.css" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.js" "${CMAKE_CURRENT_LIST_DIR}/web/app.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/access-session.js" "${CMAKE_CURRENT_LIST_DIR}/web/access-session.js" COPYONLY)
+configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/cloud-status.js" "${CMAKE_CURRENT_LIST_DIR}/web/cloud-status.js" COPYONLY)
+configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/config-ui.js" "${CMAKE_CURRENT_LIST_DIR}/web/config-ui.js" COPYONLY)
+configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/lan-monitor.js" "${CMAKE_CURRENT_LIST_DIR}/web/lan-monitor.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/bruce.jpg" "${CMAKE_CURRENT_LIST_DIR}/web/bruce.jpg" COPYONLY)
 
 idf_component_register(
@@ -13,6 +16,12 @@ idf_component_register(
         "app_main.cpp"
         "hg_web_http.cpp"
         "hg_network_http.cpp"
+        "hg_lan_discovery_http.cpp"
+        "hg_cloud_link.cpp"
+        "hg_cloud_nvs.cpp"
+        "hg_cloud_http.cpp"
+        "hg_config_nvs.cpp"
+        "hg_config_http.cpp"
         "hg_build_info.cpp"
         "hg_build_http.cpp"
         "hg_i2c_bus.cpp"
@@ -42,6 +51,10 @@ idf_component_register(
         "../../src/event_log.cpp"
         "../../src/access_control.cpp"
         "../../src/access_store.cpp"
+        "../../src/user_zone_access.cpp"
+        "../../src/user_output_access.cpp"
+        "../../src/config_exchange.cpp"
+        "../../src/config_import.cpp"
         "../../src/crc32.cpp"
         "../../src/sha256.cpp"
         "../../src/hardware_profile.cpp"
@@ -71,6 +84,8 @@ idf_component_register(
         esp_timer
         esp_wifi
         fatfs
+        lwip
+        mqtt
         nvs_flash
         sdmmc
     EMBED_TXTFILES
@@ -78,6 +93,9 @@ idf_component_register(
         "web/app.css"
         "web/app.js"
         "web/access-session.js"
+        "web/cloud-status.js"
+        "web/config-ui.js"
+        "web/lan-monitor.js"
     EMBED_FILES
         "web/bruce.jpg"
 )

@@ -19,6 +19,8 @@ inline esp_err_t httpd_resp_set_type(httpd_req_t*,const char*){return ESP_OK;}
 inline esp_err_t httpd_resp_set_hdr(httpd_req_t*,const char*,const char*){return ESP_OK;}
 inline esp_err_t httpd_resp_send(httpd_req_t*,const char*,std::ptrdiff_t){return ESP_OK;}
 inline esp_err_t httpd_resp_send_err(httpd_req_t*,int,const char*){return ESP_OK;}
+inline std::size_t httpd_req_get_hdr_value_len(httpd_req_t*,const char*){return 0;}
+inline esp_err_t httpd_req_get_hdr_value_str(httpd_req_t*,const char*,char* value,std::size_t value_len){if(value!=nullptr && value_len>0)value[0]='\0';return ESP_OK;}
 inline int httpd_req_to_sockfd(httpd_req_t*){ return 1; }
 inline esp_err_t httpd_ws_send_frame_async(httpd_handle_t,int,httpd_ws_frame_t*){ return ESP_OK; }
 inline int httpd_req_recv(httpd_req_t* req, char* buffer, std::size_t length){
