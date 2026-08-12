@@ -2,6 +2,8 @@
 #include "hg_web_http.hpp"
 #include "hg_network_http.hpp"
 #include "hg_lan_discovery_http.hpp"
+#include "hg_cloud_link.hpp"
+#include "hg_cloud_http.hpp"
 #include "hg_config_http.hpp"
 #include "hg_build_http.hpp"
 #include "hg_build_info.hpp"
@@ -35,6 +37,8 @@ homeguard::idf::TelemetryRuntime g_telemetry;
 homeguard::idf::WebHttp g_web_http;
 homeguard::idf::NetworkHttp g_network_http;
 homeguard::idf::LanDiscoveryHttp g_lan_discovery_http;
+homeguard::idf::CloudLink g_cloud_link;
+homeguard::idf::CloudHttp g_cloud_http;
 homeguard::idf::ConfigHttp g_config_http;
 homeguard::idf::InfrastructureHttp g_http_api;
 homeguard::idf::BuildHttp g_build_http;
@@ -118,6 +122,7 @@ esp_err_t start_http_server() {
     g_network_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_network_http.register_handlers(g_http_server), kTag, "network routes");
     ESP_RETURN_ON_ERROR(g_lan_discovery_http.register_handlers(g_http_server), kTag, "lan discovery route");
+    ESP_RETURN_ON_ERROR(g_cloud_http.register_handlers(g_http_server, &g_cloud_link), kTag, "cloud routes");
     ESP_RETURN_ON_ERROR(g_config_http.register_handlers(g_http_server), kTag, "config routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(g_system_http.register_handlers(
@@ -144,6 +149,10 @@ extern "C" void app_main() {
     const auto network_error = g_network_http.begin();
     if (network_error != ESP_OK) ESP_LOGE(kTag, "Wi-Fi network runtime failed: %s", esp_err_to_name(network_error));
     else ESP_LOGI(kTag, "Wi-Fi network runtime ready");
+
+    const auto cloud_identity_error = g_cloud_link.prepare_identity();
+    if (cloud_identity_error != ESP_OK) ESP_LOGE(kTag, "Cloud identity failed: %s", esp_err_to_name(cloud_identity_error));
+    else ESP_LOGI(kTag, "Cloud identity ready: %s", g_cloud_link.device_id());
 
     initialize_system_model();
     const auto config_error = g_config_http.initialize(&g_system_model, &g_access_control);
