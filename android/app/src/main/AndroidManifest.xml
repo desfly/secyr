@@ -11,6 +11,8 @@
     <application
         android:theme="@style/Theme.HomeGuardS3"
         android:label="MyFist"
+        android:icon="@drawable/ic_myfist"
+        android:roundIcon="@drawable/ic_myfist"
         android:usesCleartextTraffic="false"
         android:allowBackup="false">
         <activity android:name=".MainActivity" android:exported="true">
