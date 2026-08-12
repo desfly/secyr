@@ -2,7 +2,9 @@
 
 #include "nvs.h"
 
+#include <cstddef>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace homeguard::idf {
