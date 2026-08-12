@@ -16,6 +16,7 @@ inline esp_err_t httpd_start(httpd_handle_t* h,const httpd_config_t*){*h=(void*)
 inline esp_err_t httpd_register_uri_handler(httpd_handle_t,const httpd_uri_t*){return ESP_OK;}
 inline esp_err_t httpd_resp_set_status(httpd_req_t*,const char*){return ESP_OK;}
 inline esp_err_t httpd_resp_set_type(httpd_req_t*,const char*){return ESP_OK;}
+inline esp_err_t httpd_resp_set_hdr(httpd_req_t*,const char*,const char*){return ESP_OK;}
 inline esp_err_t httpd_resp_send(httpd_req_t*,const char*,std::ptrdiff_t){return ESP_OK;}
 inline esp_err_t httpd_resp_send_err(httpd_req_t*,int,const char*){return ESP_OK;}
 inline int httpd_req_to_sockfd(httpd_req_t*){ return 1; }
