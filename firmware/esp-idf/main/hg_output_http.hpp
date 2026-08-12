@@ -1,5 +1,6 @@
 #pragma once
 
+#include "homeguard/access_control.hpp"
 #include "homeguard/boot_readiness.hpp"
 #include "homeguard/physical_output_runtime.hpp"
 #include "homeguard/system_model.hpp"
@@ -16,6 +17,10 @@ public:
         hg::PhysicalOutputRuntime* physical,
         hg::SystemEventBus* bus);
 
+    void set_access_control(homeguard::AccessControl* access_control) {
+        access_control_ = access_control;
+    }
+
 private:
     static esp_err_t command_post(httpd_req_t* request);
     esp_err_t handle_command(httpd_req_t* request);
@@ -24,6 +29,7 @@ private:
     hg::BootReadinessReport* readiness_{};
     hg::PhysicalOutputRuntime* physical_{};
     hg::SystemEventBus* bus_{};
+    homeguard::AccessControl* access_control_{};
 };
 
 }  // namespace homeguard::idf
