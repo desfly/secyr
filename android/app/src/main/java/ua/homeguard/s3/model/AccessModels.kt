@@ -13,7 +13,7 @@ data class AccessCapabilities(
     val accessManage: Boolean = false,
     val serviceInvalidate: Boolean = false,
 ) {
-    fun allows(command: CommandType): Boolean = when (command) {
+    fun allowsOperatorCommand(command: CommandType): Boolean = when (command) {
         CommandType.ARM_HOME -> armHome
         CommandType.ARM_AWAY -> armAway
         CommandType.DISARM -> disarm
@@ -28,4 +28,7 @@ data class AccessSession(
     val name: String,
     val role: AccessRole,
     val capabilities: AccessCapabilities,
-)
+) {
+    fun allows(command: CommandType): Boolean =
+        role == AccessRole.ADMIN || capabilities.allowsOperatorCommand(command)
+}
