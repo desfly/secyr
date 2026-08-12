@@ -108,14 +108,20 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         httpd_resp_set_type(request, "application/json");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"credential_required\"}", -1);
     }
-    if (access_control_ == nullptr) {
+    if (access_control_ == nullptr || output_access_ == nullptr) {
         httpd_resp_set_status(request, "503 Service Unavailable");
         httpd_resp_set_type(request, "application/json");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"access_unavailable\"}", -1);
     }
 
     const auto* output = model_->output(output_id);
-    const std::string command = output != nullptr && output->type == hg::ModelOutputType::Valve
+    if (output == nullptr) {
+        httpd_resp_set_status(request, "404 Not Found");
+        httpd_resp_set_type(request, "application/json");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"output_not_found\"}", -1);
+    }
+
+    const std::string command = output->type == hg::ModelOutputType::Valve
         ? (active ? "valve.open" : "valve.close")
         : "output.control";
     const auto decision = access_control_->authorize(actor, credential, command);
@@ -125,6 +131,21 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         const std::string response = std::string{"{\"ok\":false,\"reason\":\""} +
             homeguard::to_string(decision) + "\"}";
         return httpd_resp_send(request, response.c_str(), static_cast<ssize_t>(response.size()));
+    }
+
+    const auto* user = access_control_->find_user(actor);
+    if (user == nullptr || !user->enabled) {
+        httpd_resp_set_status(request, "403 Forbidden");
+        httpd_resp_set_type(request, "application/json");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"output_access_denied\"}", -1);
+    }
+    if (user->role != homeguard::AccessRole::Admin) {
+        const auto* rule = output_access_->rule(actor, output_id);
+        if (rule == nullptr || !rule->visible || (active ? !rule->can_on : !rule->can_off)) {
+            httpd_resp_set_status(request, "403 Forbidden");
+            httpd_resp_set_type(request, "application/json");
+            return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"output_access_denied\"}", -1);
+        }
     }
 
     const auto result = hg::apply_output_command(
