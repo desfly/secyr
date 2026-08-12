@@ -74,7 +74,7 @@ jobs:
         run: python tools/check_web_ui_contract.py
 
       - name: Web UI JavaScript syntax
-        run: node --check web/app.js && node --check web/access-session.js
+        run: node --check web/app.js && node --check web/access-session.js && node --check web/cloud-status.js && node --check web/config-ui.js
 
       - name: Web UI browser boot smoke
         shell: bash
