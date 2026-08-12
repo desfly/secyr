@@ -1,0 +1,41 @@
+{
+  "build": "0056",
+  "project": "HomeGuard-S3",
+  "date": "2026-08-12",
+  "focus": "access hardening, audited role login and role-aware Web UI",
+  "security": {
+    "destructive_service_endpoint": "/api/v1/service/invalidate",
+    "destructive_service_command": "system.service.invalidate",
+    "destructive_service_required_role": "admin",
+    "login_endpoint": "/api/v1/access/login",
+    "fail_closed": true,
+    "audit": true,
+    "pin_persisted_in_browser": false
+  },
+  "roles": {
+    "admin": "full control including panic, network, users and service operations",
+    "user": "monitoring, arm/disarm and valve control",
+    "guest": "monitoring only"
+  },
+  "behavior": {
+    "missing_access_control": "503 access_unavailable",
+    "missing_credentials": "401 credential_required",
+    "user_or_guest_service_reset": "403 denied_role",
+    "bad_admin_pin": "403 denied_credential",
+    "valid_admin_service_reset": "commissioning NVS invalidation allowed",
+    "corrupt_access_storage": "first-Admin bootstrap remains disabled",
+    "web_role_gate": "forbidden controls disabled and capture-blocked before dispatch"
+  },
+  "regression_guards": [
+    "User retains arm/disarm permissions.",
+    "User retains valve open/close permissions.",
+    "Guest remains command read-only.",
+    "Direct HTTP calls cannot bypass service reset authorization.",
+    "Login accepts valid Admin, User and Guest identities without granting extra command permissions.",
+    "Browser role gating is backed by server-side authorization on every protected command."
+  ],
+  "tests": [
+    "tests/test_build0056.cpp",
+    "tools/web_control_smoke_server.py"
+  ]
+}

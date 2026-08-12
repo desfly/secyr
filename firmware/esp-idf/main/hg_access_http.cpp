@@ -1,4 +1,5 @@
 #include "hg_access_http.hpp"
+#include "hg_access_time.hpp"
 
 #include "esp_random.h"
 
@@ -82,6 +83,37 @@ esp_err_t send_json(httpd_req_t* request, const std::string& body) {
     return httpd_resp_send(request, body.c_str(), static_cast<ssize_t>(body.size()));
 }
 
+bool read_body(httpd_req_t* request, std::size_t limit, std::string& body) {
+    if (request == nullptr || request->content_len == 0 || request->content_len > limit) return false;
+    body.assign(request->content_len, '\0');
+    std::size_t offset = 0;
+    while (offset < body.size()) {
+        const auto received = httpd_req_recv(request, body.data() + offset, body.size() - offset);
+        if (received <= 0) return false;
+        offset += static_cast<std::size_t>(received);
+    }
+    return true;
+}
+
+std::string capabilities_json(const AccessControl& access, AccessRole role) {
+    const auto allowed = [&](std::string_view command) { return access.role_allows(role, command) ? "true" : "false"; };
+    return std::string{"{\"monitor\":true,\"armHome\":"} + allowed("security.arm_home") +
+           ",\"armAway\":" + allowed("security.arm_away") +
+           ",\"disarm\":" + allowed("security.disarm") +
+           ",\"panic\":" + allowed("security.panic") +
+           ",\"valves\":" + allowed("valve.open") +
+           ",\"networkConfigure\":" + allowed("system.network.configure") +
+           ",\"accessManage\":" + allowed("access.manage") +
+           ",\"serviceInvalidate\":" + allowed("system.service.invalidate") + "}";
+}
+
+esp_err_t send_rate_limited(httpd_req_t* request, AccessControl& access, std::string_view actor, std::uint64_t now_ms) {
+    httpd_resp_set_status(request, "429 Too Many Requests");
+    const auto retry = access.authentication_retry_after_ms(actor, now_ms);
+    return send_json(request, "{\"ok\":false,\"reason\":\"rate_limited\",\"retryAfterMs\":" +
+        std::to_string(retry) + "}");
+}
+
 }  // namespace
 
 esp_err_t AccessHttp::register_handlers(httpd_handle_t server,
@@ -92,13 +124,15 @@ esp_err_t AccessHttp::register_handlers(httpd_handle_t server,
     access_ = access;
     store_ = store;
     bootstrap_allowed_ = bootstrap_allowed;
-    const httpd_uri_t route{
-        .uri = "/api/v1/access/users",
-        .method = HTTP_POST,
-        .handler = &AccessHttp::users_post,
-        .user_ctx = this,
+    const httpd_uri_t routes[] = {
+        {.uri = "/api/v1/access/users", .method = HTTP_POST, .handler = &AccessHttp::users_post, .user_ctx = this},
+        {.uri = "/api/v1/access/login", .method = HTTP_POST, .handler = &AccessHttp::login_post, .user_ctx = this},
     };
-    return httpd_register_uri_handler(server, &route);
+    for (const auto& route : routes) {
+        const auto error = httpd_register_uri_handler(server, &route);
+        if (error != ESP_OK) return error;
+    }
+    return ESP_OK;
 }
 
 esp_err_t AccessHttp::users_post(httpd_req_t* request) {
@@ -106,19 +140,56 @@ esp_err_t AccessHttp::users_post(httpd_req_t* request) {
     return self == nullptr ? ESP_FAIL : self->handle_users(request);
 }
 
-esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
-    if (request->content_len == 0 || request->content_len > 768) {
+esp_err_t AccessHttp::login_post(httpd_req_t* request) {
+    auto* self = self_from(request);
+    return self == nullptr ? ESP_FAIL : self->handle_login(request);
+}
+
+esp_err_t AccessHttp::handle_login(httpd_req_t* request) {
+    std::string body;
+    if (!read_body(request, 384U, body)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_body\"}");
     }
 
-    std::string body(request->content_len, '\0');
-    const auto received = httpd_req_recv(request, body.data(), body.size());
-    if (received <= 0) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return send_json(request, "{\"ok\":false,\"reason\":\"read_failed\"}");
+    std::string actor;
+    std::string credential;
+    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential) ||
+        actor.empty() || actor.size() > 23U || !valid_pin(credential)) {
+        httpd_resp_set_status(request, "401 Unauthorized");
+        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
     }
-    body.resize(static_cast<std::size_t>(received));
+
+    const auto now_ms = access_now_ms();
+    const auto decision = access_->authenticate(actor, credential, now_ms);
+    if (decision == AuditDecision::DeniedRateLimited) {
+        return send_rate_limited(request, *access_, actor, now_ms);
+    }
+    if (decision != AuditDecision::Allowed) {
+        // Do not reveal whether an account exists or merely has a wrong PIN.
+        httpd_resp_set_status(request, "401 Unauthorized");
+        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
+    }
+
+    const auto* user = access_->find_user(actor);
+    if (user == nullptr || !user->enabled) {
+        httpd_resp_set_status(request, "401 Unauthorized");
+        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
+    }
+
+    return send_json(request,
+        std::string{"{\"ok\":true,\"actor\":\""} + json_escape(user->id.data()) +
+        "\",\"name\":\"" + json_escape(user->name.data()) +
+        "\",\"role\":\"" + to_string(user->role) +
+        "\",\"capabilities\":" + capabilities_json(*access_, user->role) + "}");
+}
+
+esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
+    std::string body;
+    if (!read_body(request, 768U, body)) {
+        httpd_resp_set_status(request, "400 Bad Request");
+        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_body\"}");
+    }
 
     std::string action;
     if (!parse_json_string(body, "action", action)) {
@@ -126,10 +197,6 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"action_required\"}");
     }
 
-    // First-Admin bootstrap is intentionally narrower than "zero users".
-    // It is enabled only when boot established that the access NVS key does
-    // not exist. A CRC/format/read failure therefore remains fail-closed and
-    // cannot be converted into an unauthenticated administrator reset.
     if (action == "bootstrap") {
         if (!bootstrap_allowed_) {
             httpd_resp_set_status(request, "409 Conflict");
@@ -151,8 +218,6 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
             return send_json(request, "{\"ok\":false,\"reason\":\"invalid_bootstrap_admin\"}");
         }
 
-        // Close the one-time gate before mutating RAM state. If persistence
-        // fails, roll back and reopen it so factory commissioning can retry.
         bootstrap_allowed_ = false;
         std::array<std::uint8_t, 16> salt{};
         esp_fill_random(salt.data(), salt.size());
@@ -179,14 +244,20 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
     }
 
-    const auto decision = access_->authorize(actor, credential, "access.manage");
+    const auto now_ms = access_now_ms();
+    const auto decision = access_->authorize(actor, credential, "access.manage", now_ms);
+    if (decision == AuditDecision::DeniedRateLimited) {
+        return send_rate_limited(request, *access_, actor, now_ms);
+    }
     if (decision != AuditDecision::Allowed) {
         httpd_resp_set_status(request, "403 Forbidden");
-        return send_json(request, std::string{"{\"ok\":false,\"reason\":\""} + to_string(decision) + "\"}");
+        const char* reason = decision == AuditDecision::DeniedRole ? "forbidden_role" : "invalid_credentials";
+        return send_json(request, std::string{"{\"ok\":false,\"reason\":\""} + reason + "\"}");
     }
 
     if (action == "list") {
-        std::string response = "{\"ok\":true,\"capacity\":8,\"count\":" + std::to_string(access_->user_count()) + ",\"users\":[";
+        std::string response = "{\"ok\":true,\"capacity\":8,\"count\":" + std::to_string(access_->user_count()) +
+                               ",\"enabledAdmins\":" + std::to_string(access_->enabled_admin_count()) + ",\"users\":[";
         for (std::size_t i = 0; i < access_->user_count(); ++i) {
             const auto* user = access_->user_at(i);
             if (user == nullptr) continue;
@@ -223,20 +294,29 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_user\"}");
     }
 
+    if (!access_->would_preserve_admin_access(id, role, enabled)) {
+        httpd_resp_set_status(request, "409 Conflict");
+        return send_json(request, "{\"ok\":false,\"reason\":\"last_admin_required\"}");
+    }
+
+    const auto previous_access = *access_;
     std::array<std::uint8_t, 16> salt{};
     esp_fill_random(salt.data(), salt.size());
     if (!access_->set_user(id, name, role, pin, salt, enabled)) {
+        *access_ = previous_access;
         httpd_resp_set_status(request, "409 Conflict");
         return send_json(request, "{\"ok\":false,\"reason\":\"user_capacity_or_validation\"}");
     }
 
     const auto persist = store_->save(*access_);
     if (persist != ESP_OK) {
+        *access_ = previous_access;
         httpd_resp_set_status(request, "500 Internal Server Error");
         return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
     }
 
-    return send_json(request, "{\"ok\":true}");
+    return send_json(request, "{\"ok\":true,\"enabledAdmins\":" +
+        std::to_string(access_->enabled_admin_count()) + "}");
 }
 
 }  // namespace homeguard::idf
