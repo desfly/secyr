@@ -18,6 +18,7 @@
 #include "hg_access_time.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
+#include "homeguard/access_matrix_policy.hpp"
 #include "homeguard/boot_readiness.hpp"
 #include "homeguard/physical_output_runtime.hpp"
 #include "homeguard/system_model.hpp"
@@ -32,7 +33,6 @@
 #include "nvs_flash.h"
 
 #include <algorithm>
-#include <string_view>
 
 namespace {
 
@@ -146,45 +146,8 @@ void initialize_system_model()
 
 void initialize_access_matrices()
 {
-    for (std::size_t user_index = 0; user_index < g_access_control.user_count(); ++user_index) {
-        const auto* user = g_access_control.user_at(user_index);
-        if (user == nullptr || !user->enabled) continue;
-        const std::string_view user_id{user->id.data()};
-        if (!g_zone_access.ensure_user(user_id) || !g_output_access.ensure_user(user_id)) {
-            ESP_LOGE(kTag, "Unable to initialize access matrix for user %s", user->id.data());
-            continue;
-        }
-
-        for (std::size_t zone_index = 0; zone_index < g_system_model.zone_count(); ++zone_index) {
-            const auto* zone = g_system_model.zone_at(zone_index);
-            if (zone == nullptr) continue;
-            homeguard::ZoneAccessRule rule{};
-            rule.visible = true;
-            if (user->role == homeguard::AccessRole::Admin) {
-                rule.can_arm = true;
-                rule.can_disarm = true;
-                rule.can_bypass = true;
-            } else if (user->role == homeguard::AccessRole::User) {
-                rule.can_arm = true;
-                rule.can_disarm = true;
-            }
-            (void)g_zone_access.set_rule(user_id, zone->id, rule);
-        }
-
-        for (std::size_t output_index = 0; output_index < g_system_model.output_count(); ++output_index) {
-            const auto* output = g_system_model.output_at(output_index);
-            if (output == nullptr) continue;
-            homeguard::OutputAccessRule rule{};
-            rule.visible = true;
-            if (user->role == homeguard::AccessRole::Admin) {
-                rule.can_on = true;
-                rule.can_off = true;
-            } else if (user->role == homeguard::AccessRole::User && output->type == hg::ModelOutputType::Valve) {
-                rule.can_on = true;
-                rule.can_off = true;
-            }
-            (void)g_output_access.set_rule(user_id, output->id, rule);
-        }
+    if (!homeguard::sync_default_access_matrices(g_access_control, g_system_model, g_zone_access, g_output_access)) {
+        ESP_LOGE(kTag, "Access matrix initialization failed; non-Admin control remains fail-closed");
     }
 }
 
@@ -215,7 +178,7 @@ esp_err_t start_http_server()
     g_output_http.set_access_control(&g_access_control);
     g_output_http.set_output_access(&g_output_access);
     ESP_RETURN_ON_ERROR(g_output_http.register_handlers(g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus), kTag, "output routes");
-    ESP_RETURN_ON_ERROR(g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed), kTag, "access routes");
+    ESP_RETURN_ON_ERROR(g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed, &g_system_model, &g_zone_access, &g_output_access), kTag, "access routes");
     g_service_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_service_http.register_handlers(g_http_server, &g_commissioning_store, &g_hardware_verification, &g_commissioning_state, &g_boot_readiness, &g_system_bus), kTag, "service routes");
     return g_build_http.register_handlers(g_http_server);
