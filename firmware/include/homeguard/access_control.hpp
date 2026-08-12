@@ -36,6 +36,8 @@ struct AccessAuditRecord {
 
 class AccessControl {
 public:
+    using AuthClock = std::uint64_t (*)();
+
     static constexpr std::size_t user_capacity = 8;
     static constexpr std::size_t audit_capacity = 64;
     static constexpr std::uint64_t max_auth_backoff_ms = 30000U;
@@ -48,8 +50,6 @@ public:
         const std::array<std::uint8_t, 16>& salt,
         bool enabled = true);
 
-    // Persistence path: imports a record that already contains a salted PIN
-    // digest. Raw PIN material is never required during restore.
     bool import_user(const AccessUser& user);
     void clear_users();
     [[nodiscard]] const AccessUser* user_at(std::size_t index) const;
@@ -58,8 +58,13 @@ public:
     [[nodiscard]] bool verify_pin(const AccessUser& user, std::string_view pin) const;
     [[nodiscard]] bool role_allows(AccessRole role, std::string_view command) const;
 
-    // Untimed overloads are kept for offline/internal callers and historical
-    // host tests. Network-facing entry points must use the timed overloads.
+    // Firmware installs a monotonic clock once at boot. After that every
+    // authenticate()/authorize() caller (HTTP, command router, MQTT, etc.) is
+    // transparently protected by the same per-account throttle. Host/offline
+    // users that do not install a clock keep deterministic untimed behavior.
+    void set_auth_clock(AuthClock clock) noexcept { auth_clock_ = clock; }
+    [[nodiscard]] bool auth_throttle_enabled() const noexcept { return auth_clock_ != nullptr; }
+
     [[nodiscard]] AuditDecision authenticate(std::string_view actor, std::string_view pin);
     [[nodiscard]] AuditDecision authenticate(
         std::string_view actor,
@@ -102,6 +107,11 @@ private:
     [[nodiscard]] std::size_t user_index(std::string_view actor) const;
     [[nodiscard]] AuthThrottleState& throttle_for(std::string_view actor);
     [[nodiscard]] const AuthThrottleState& throttle_for(std::string_view actor) const;
+    [[nodiscard]] AuditDecision authenticate_unthrottled(std::string_view actor, std::string_view pin);
+    [[nodiscard]] AuditDecision authorize_unthrottled(
+        std::string_view actor,
+        std::string_view pin,
+        std::string_view command);
     void update_throttle(std::string_view actor, AuditDecision decision, std::uint64_t now_ms);
     void append_audit(std::string_view actor, std::string_view command, AuditDecision decision);
 
@@ -109,6 +119,7 @@ private:
     std::size_t user_count_{};
     std::array<AuthThrottleState, user_capacity> auth_throttles_{};
     AuthThrottleState unknown_auth_throttle_{};
+    AuthClock auth_clock_{};
     std::array<AccessAuditRecord, audit_capacity> audit_{};
     std::size_t audit_head_{};
     std::size_t audit_size_{};
