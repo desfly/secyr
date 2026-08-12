@@ -7,6 +7,10 @@
 #define HG_GIT_REVISION "unknown"
 #endif
 
+#ifndef HG_CI_BUILD_NUMBER
+#define HG_CI_BUILD_NUMBER "local"
+#endif
+
 #ifndef HG_BUILD_TIMESTAMP_UTC
 #define HG_BUILD_TIMESTAMP_UTC "unknown"
 #endif
@@ -17,7 +21,7 @@ BuildInfo current_build_info()
 {
     return {
         HG_PROJECT_NAME,
-        HG_BUILD_NUMBER,
+        HG_CI_BUILD_NUMBER,
         HG_FIRMWARE_VERSION,
         HG_BOARD_NAME,
         HG_MODULE_NAME,
