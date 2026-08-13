@@ -103,6 +103,13 @@ class MainActivity : ComponentActivity() {
             }) launchQrScanner()
     }
 
+    private val localNetworkPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted && ::discovery.isInitialized) {
+            lifecycleScope.launch { discovery.rescan() }
+        }
+        requestNotificationPermission()
+    }
+
     private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -117,7 +124,7 @@ class MainActivity : ComponentActivity() {
         commands = CommandController(resolver.endpoint, settings)
         notifications = HomeGuardNotifications(this)
         notifications.createChannels()
-        requestNotificationPermission()
+        requestLocalNetworkPermission()
         lifecycleScope.launch {
             telemetry.liveEvents().collect { event ->
                 eventHistory.append(event)
@@ -282,6 +289,16 @@ class MainActivity : ComponentActivity() {
                 onFailure = { error -> "Помилка: ${error.message ?: "network"}" },
             )
         }
+    }
+
+    private fun requestLocalNetworkPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
+                localNetworkPermissionLauncher.launch(Manifest.permission.NEARBY_WIFI_DEVICES)
+                return
+            }
+        }
+        requestNotificationPermission()
     }
 
     private fun requestNotificationPermission() {
