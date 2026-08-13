@@ -3,7 +3,7 @@ name: HomeGuard-S3 Build
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, android-device-flow-v1]
     paths:
       - "firmware/**"
       - "android/**"
