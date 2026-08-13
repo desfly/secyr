@@ -16,6 +16,9 @@ data class RegisteredDevice(
     val access: RegisteredDeviceAccess = RegisteredDeviceAccess.UNKNOWN,
     val lastSeenAtMs: Long = 0L,
     val lastVerifiedAtMs: Long = 0L,
+    val lastKnownMode: SystemMode? = null,
+    val lastKnownAlarmCount: Int? = null,
+    val lastTelemetryAtMs: Long = 0L,
 ) {
     val accessRevoked: Boolean get() = access == RegisteredDeviceAccess.ACCESS_REVOKED
 
