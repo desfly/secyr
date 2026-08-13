@@ -23,6 +23,20 @@
     return body;
   }
 
+  async function configApi(payload) {
+    const response = await fetch("/api/v1/config", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const text = await response.text();
+    let body = {};
+    try { body = text ? JSON.parse(text) : {}; } catch (_) { body = {}; }
+    if (!response.ok || body.ok === false) throw new Error(body.reason || `${response.status} ${response.statusText}`);
+    return body;
+  }
+
   function ensureSessionUi() {
     if (document.querySelector("#accessSessionBar")) return;
     const operatorId = document.querySelector("#operatorId");
@@ -48,6 +62,86 @@
         login();
       }
     });
+  }
+
+  function ensureConfigPanel() {
+    const systemPage = document.querySelector("#system");
+    if (!systemPage || document.querySelector("#configTransferPanel")) return;
+    const panel = document.createElement("article");
+    panel.id = "configTransferPanel";
+    panel.className = "panel";
+    panel.style.cssText = "max-width:920px;margin-top:18px";
+    panel.innerHTML = `
+      <h3>Резервна копія конфігурації JSON</h3>
+      <p style="margin:4px 0 14px"><small>Тільки Admin. Експорт не містить паролів Wi-Fi/Cloud або TLS-ключів. Імпорт може змінити мережу та розірвати поточне з’єднання.</small></p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button id="configExport" type="button">Експорт JSON</button>
+        <button id="configImportPick" type="button">Імпорт JSON</button>
+        <input id="configImportFile" type="file" accept="application/json,.json" hidden>
+        <span id="configTransferResult">—</span>
+      </div>`;
+    systemPage.appendChild(panel);
+    document.querySelector("#configExport")?.addEventListener("click", exportConfig);
+    document.querySelector("#configImportPick")?.addEventListener("click", () => document.querySelector("#configImportFile")?.click());
+    document.querySelector("#configImportFile")?.addEventListener("change", importConfigFile);
+  }
+
+  async function exportConfig() {
+    if (session?.role !== "admin") return;
+    const result = document.querySelector("#configTransferResult");
+    const button = document.querySelector("#configExport");
+    if (button) button.disabled = true;
+    setText(result, "Експорт…");
+    try {
+      const config = await configApi({ action: "export" });
+      if (config.format !== "homeguard.config" || Number(config.version) !== 1) throw new Error("unsupported config format");
+      const blob = new Blob([JSON.stringify(config, null, 2) + "\n"], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `homeguard-config-v1-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setText(result, "JSON експортовано без секретів");
+    } catch (error) {
+      setText(result, `Помилка експорту: ${error.message}`);
+    } finally {
+      applyRoleUi();
+    }
+  }
+
+  async function importConfigFile(event) {
+    const input = event.currentTarget;
+    const file = input?.files?.[0];
+    if (!file || session?.role !== "admin") return;
+    const result = document.querySelector("#configTransferResult");
+    const button = document.querySelector("#configImportPick");
+    if (file.size > 16 * 1024) {
+      setText(result, "Помилка: JSON більший за 16 KiB");
+      input.value = "";
+      return;
+    }
+    if (button) button.disabled = true;
+    setText(result, "Перевірка JSON…");
+    try {
+      const config = JSON.parse(await file.text());
+      if (config?.format !== "homeguard.config" || Number(config?.version) !== 1) throw new Error("потрібен homeguard.config v1");
+      if (!window.confirm("Імпорт може змінити Wi-Fi/Cloud і розірвати з’єднання з контролером. Продовжити?")) {
+        setText(result, "Імпорт скасовано");
+        return;
+      }
+      setText(result, "Імпорт…");
+      await configApi({ action: "import", config });
+      setText(result, "Конфігурацію імпортовано");
+      if (typeof refresh === "function") await refresh();
+    } catch (error) {
+      setText(result, `Помилка імпорту: ${error.message}`);
+    } finally {
+      input.value = "";
+      applyRoleUi();
+    }
   }
 
   function commandAllowed(command) {
@@ -78,6 +172,7 @@
 
   function applyRoleUi() {
     ensureSessionUi();
+    ensureConfigPanel();
     const caps = session?.capabilities || {};
     const loggedIn = Boolean(session);
     const isAdmin = session?.role === "admin";
@@ -120,6 +215,14 @@
       if (button) {
         button.disabled = !loggedIn || caps.accessManage !== true;
         button.title = button.disabled ? "Керування користувачами доступне тільки Admin" : "";
+      }
+    });
+
+    ["#configExport", "#configImportPick"].forEach(selector => {
+      const button = document.querySelector(selector);
+      if (button) {
+        button.disabled = !isAdmin;
+        button.title = isAdmin ? "" : "Імпорт/експорт конфігурації доступний тільки Admin";
       }
     });
 
@@ -184,6 +287,7 @@
     if (control.matches("[data-output-id]")) return caps.valves === true;
     if (control.matches("#wifiConnect")) return caps.networkConfigure === true;
     if (control.matches("#accessLoad,#accessSave")) return caps.accessManage === true;
+    if (control.matches("#configExport,#configImportPick")) return session.role === "admin";
     return false;
   }
 
@@ -192,7 +296,7 @@
   // in finally blocks) so a forbidden command cannot even be dispatched by
   // the browser between role-refresh cycles.
   document.addEventListener("click", event => {
-    const protectedControl = event.target.closest?.("[data-command],[data-output-id],#wifiConnect,#accessLoad,#accessSave");
+    const protectedControl = event.target.closest?.("[data-command],[data-output-id],#wifiConnect,#accessLoad,#accessSave,#configExport,#configImportPick");
     if (!protectedControl) return;
     if (!protectedActionAllowed(protectedControl)) {
       event.preventDefault();
@@ -217,6 +321,7 @@
   observer.observe(document.body, { childList: true, subtree: true });
 
   ensureSessionUi();
+  ensureConfigPanel();
   applyRoleUi();
   setInterval(applyRoleUi, 1000);
 })();
