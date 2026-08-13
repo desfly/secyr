@@ -14,7 +14,12 @@ class DeviceRegistryCoordinator(
     private val registry: RegisteredDeviceStore,
     private val verifier: DeviceAccessVerifier = DeviceAccessVerifier(),
 ) {
-    fun addIfAuthorized(device: DiscoveredDevice, displayName: String, certificateSha256: String = "", onResult: (Boolean) -> Unit = {}) {
+    fun addIfAuthorized(
+        device: DiscoveredDevice,
+        displayName: String,
+        certificateSha256: String = "",
+        onResult: (Boolean) -> Unit = {},
+    ) {
         val savedCredentials = credentials.credentials.value ?: return onResult(false)
         scope.launch {
             val access = verifier.verify(device, savedCredentials, certificateSha256)
@@ -37,12 +42,37 @@ class DeviceRegistryCoordinator(
         }
     }
 
+    fun addById(
+        deviceId: String,
+        displayName: String,
+        discovered: List<DiscoveredDevice>,
+        onResult: (Boolean) -> Unit = {},
+    ) {
+        val wanted = normalizeId(deviceId)
+        val device = discovered.firstOrNull { normalizeId(it.deviceId) == wanted }
+            ?: return onResult(false)
+        addIfAuthorized(device, displayName, onResult = onResult)
+    }
+
+    fun addByIp(
+        ip: String,
+        displayName: String,
+        discovered: List<DiscoveredDevice>,
+        onResult: (Boolean) -> Unit = {},
+    ) {
+        val wanted = normalizeHost(ip)
+        val device = discovered.firstOrNull { normalizeHost(it.host) == wanted }
+            ?: return onResult(false)
+        addIfAuthorized(device, displayName, onResult = onResult)
+    }
+
     fun refresh(discovered: List<DiscoveredDevice>) {
         val savedCredentials = credentials.credentials.value ?: return
         scope.launch {
             registry.devices.value.forEach { registered ->
                 val visible = discovered.firstOrNull { it.deviceId == registered.deviceId }
                 if (visible == null) {
+                    // Network loss is never treated as revoked access.
                     registry.updateAccess(registered.deviceId, RegisteredDeviceAccess.OFFLINE)
                 } else {
                     val access = verifier.verify(visible, savedCredentials, registered.certificateSha256)
@@ -58,4 +88,13 @@ class DeviceRegistryCoordinator(
             }
         }
     }
+
+    private fun normalizeId(value: String): String = value.trim().uppercase()
+
+    private fun normalizeHost(value: String): String = value.trim()
+        .removePrefix("http://")
+        .removePrefix("https://")
+        .substringBefore('/')
+        .substringBefore(':')
+        .lowercase()
 }
