@@ -120,10 +120,6 @@ fun AddDeviceScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("Додати пристрій", style = MaterialTheme.typography.titleLarge)
-        Text(
-            "Вкажіть свою назву. Технічний ID у списку не показується.",
-            style = MaterialTheme.typography.bodySmall,
-        )
 
         OutlinedTextField(
             value = name,
