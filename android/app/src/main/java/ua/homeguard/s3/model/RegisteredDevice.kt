@@ -4,6 +4,7 @@ enum class RegisteredDeviceAccess {
     UNKNOWN,
     ONLINE,
     OFFLINE,
+    CREDENTIALS_REJECTED,
     ACCESS_REVOKED,
 }
 
