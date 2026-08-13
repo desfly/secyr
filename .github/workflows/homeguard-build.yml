@@ -196,15 +196,22 @@ jobs:
       - name: Test Android access policy and build debug APK
         working-directory: android
         run: gradle --no-daemon --stacktrace testDebugUnitTest assembleDebug
-      - name: Prepare MyFist installer
+      - name: Prepare and verify MyFist installer
         if: success()
         shell: bash
         run: |
           set -euo pipefail
-          source_apk=$(find android/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)
+          source_apk=$(find android/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' ! -name 'MyFist.apk' | head -n 1)
           test -n "$source_apk"
           cp "$source_apk" android/app/build/outputs/apk/debug/MyFist.apk
-          sha256sum android/app/build/outputs/apk/debug/MyFist.apk > android/app/build/outputs/apk/debug/SHA256SUMS.txt
+          APK=android/app/build/outputs/apk/debug/MyFist.apk
+          test -s "$APK"
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$SDK_ROOT"
+          APKSIGNER=$(find "$SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee android/app/build/outputs/apk/debug/APKSIGNER-VERIFY.txt
+          sha256sum "$APK" > android/app/build/outputs/apk/debug/SHA256SUMS.txt
       - name: Upload Android APK
         if: success()
         uses: actions/upload-artifact@v4
@@ -213,6 +220,7 @@ jobs:
           path: |
             android/app/build/outputs/apk/debug/MyFist.apk
             android/app/build/outputs/apk/debug/SHA256SUMS.txt
+            android/app/build/outputs/apk/debug/APKSIGNER-VERIFY.txt
           if-no-files-found: error
       - name: Upload Android diagnostics
         if: failure()
@@ -223,4 +231,5 @@ jobs:
             android/.gradle/**
             android/app/build/reports/**
             android/app/build/test-results/**
+            android/app/build/outputs/apk/debug/APKSIGNER-VERIFY.txt
           if-no-files-found: warn
