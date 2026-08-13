@@ -193,8 +193,10 @@ fun AddDeviceScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(
-                    enabled = value.isNotBlank(),
-                    onClick = { onAddByIp(effectiveName(), value.trim()) },
+                    onClick = {
+                        val address = value.trim()
+                        if (address.isNotEmpty()) onAddByIp(effectiveName(), address)
+                    },
                 ) { Text("Підключити") }
                 if (value.trim() == "192.168.4.1") {
                     Text(
