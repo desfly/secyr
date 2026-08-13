@@ -43,6 +43,8 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.DiscoveredDevice
+import java.net.Inet4Address
+import java.net.NetworkInterface
 
 enum class AddDeviceMethod { ID, IP, NETWORK }
 
@@ -67,6 +69,26 @@ private fun localNetworkState(context: Context): LocalNetworkState {
     val info: NetworkInfo = manager.activeNetworkInfo ?: return LocalNetworkState.OFFLINE
     if (!info.isConnected) return LocalNetworkState.OFFLINE
     return if (info.type == ConnectivityManager.TYPE_WIFI) LocalNetworkState.WIFI else LocalNetworkState.OTHER
+}
+
+private fun localIpv4Address(): String? = runCatching {
+    val interfaces = NetworkInterface.getNetworkInterfaces() ?: return@runCatching null
+    interfaces.toList()
+        .asSequence()
+        .filter { it.isUp && !it.isLoopback }
+        .flatMap { it.inetAddresses.toList().asSequence() }
+        .filterIsInstance<Inet4Address>()
+        .map { it.hostAddress.orEmpty() }
+        .firstOrNull { address ->
+            val parts = address.split('.')
+            parts.size == 4 && parts[0] != "127" && parts[0] != "169"
+        }
+}.getOrNull()
+
+private fun setupGatewayFor(address: String?): String? {
+    val parts = address?.split('.') ?: return null
+    if (parts.size != 4 || parts[2] != "4") return null
+    return "${parts[0]}.${parts[1]}.4.1"
 }
 
 @Composable
@@ -112,8 +134,17 @@ fun AddDeviceScreen(
         if (networkState != LocalNetworkState.WIFI || !permissionGranted || searchRunning) return
         searchProgress = 0f
         searchRunning = true
-        scope.launch {
-            runCatching { onRescan() }
+        scope.launch { runCatching { onRescan() } }
+    }
+
+    LaunchedEffect(networkState, permissionGranted) {
+        if (networkState == LocalNetworkState.WIFI) {
+            val gateway = setupGatewayFor(localIpv4Address())
+            if (gateway != null) {
+                value = gateway
+                method = AddDeviceMethod.IP
+                if (permissionGranted) runCatching { onRescan() }
+            }
         }
     }
 
@@ -133,10 +164,7 @@ fun AddDeviceScreen(
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("Додати пристрій", style = MaterialTheme.typography.titleLarge)
@@ -151,120 +179,59 @@ fun AddDeviceScreen(
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilterChip(
-                selected = method == AddDeviceMethod.NETWORK,
-                onClick = { method = AddDeviceMethod.NETWORK },
-                label = { Text("Мережа") },
-            )
-            FilterChip(
-                selected = method == AddDeviceMethod.IP,
-                onClick = { method = AddDeviceMethod.IP },
-                label = { Text("IP") },
-            )
-            FilterChip(
-                selected = method == AddDeviceMethod.ID,
-                onClick = { method = AddDeviceMethod.ID },
-                label = { Text("ID") },
-            )
+            FilterChip(selected = method == AddDeviceMethod.NETWORK, onClick = { method = AddDeviceMethod.NETWORK }, label = { Text("Мережа") })
+            FilterChip(selected = method == AddDeviceMethod.IP, onClick = { method = AddDeviceMethod.IP }, label = { Text("IP") })
+            FilterChip(selected = method == AddDeviceMethod.ID, onClick = { method = AddDeviceMethod.ID }, label = { Text("ID") })
         }
 
         when (method) {
             AddDeviceMethod.ID -> {
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = { value = it.trim().take(96) },
-                    label = { Text("ID пристрою") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Button(
-                    enabled = value.isNotBlank(),
-                    onClick = { onAddById(effectiveName(), value.trim()) },
-                ) { Text("Додати") }
+                OutlinedTextField(value = value, onValueChange = { value = it.trim().take(96) }, label = { Text("ID пристрою") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Button(enabled = value.isNotBlank(), onClick = { onAddById(effectiveName(), value.trim()) }) { Text("Додати") }
             }
 
             AddDeviceMethod.IP -> {
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = { value = it.trim().take(128) },
-                    label = { Text("IP або адреса") },
-                    placeholder = { Text("192.168.4.1") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Button(
-                    onClick = {
-                        val address = value.trim()
-                        if (address.isNotEmpty()) onAddByIp(effectiveName(), address)
-                    },
-                ) { Text("Підключити") }
-                if (value.trim() == "192.168.4.1") {
-                    Text(
-                        "Режим налаштування HomeGuard-S3: телефон має бути підключений до Wi-Fi точки доступу контролера.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                OutlinedTextField(value = value, onValueChange = { value = it.trim().take(128) }, label = { Text("IP або адреса") }, placeholder = { Text("192.168.4.1") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Button(onClick = {
+                    val address = value.trim()
+                    if (address.isNotEmpty()) onAddByIp(effectiveName(), address)
+                }) { Text("Підключити") }
+                if (value.trim().endsWith(".4.1")) {
+                    Text("Режим налаштування HomeGuard-S3 визначено автоматично. Виконується пошук контролера в локальній мережі.", style = MaterialTheme.typography.bodySmall)
                 }
             }
 
             AddDeviceMethod.NETWORK -> {
                 Text("Знайдено: ${discoveredDevices.size}", style = MaterialTheme.typography.titleMedium)
-
                 if (!permissionGranted) {
                     Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("Потрібен доступ до пристроїв поруч", style = MaterialTheme.typography.bodyMedium)
-                            OutlinedButton(onClick = { permissionLauncher.launch(discoveryPermission) }) {
-                                Text("Дозволити")
-                            }
+                            OutlinedButton(onClick = { permissionLauncher.launch(discoveryPermission) }) { Text("Дозволити") }
                         }
                     }
                 } else if (networkState != LocalNetworkState.WIFI) {
                     Card(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            "Для автоматичного пошуку підключіться до Wi-Fi",
-                            modifier = Modifier.padding(12.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                        Text("Для автоматичного пошуку підключіться до Wi-Fi", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
                     }
                 } else {
                     if (searchRunning) {
                         Text("Пошук пристроїв… ${(searchProgress * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
-                        LinearProgressIndicator(
-                            progress = { searchProgress },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        LinearProgressIndicator(progress = { searchProgress }, modifier = Modifier.fillMaxWidth())
                     } else {
-                        Button(onClick = { startSearch() }) {
-                            Text(if (discoveredDevices.isEmpty()) "Шукати" else "Шукати знову")
-                        }
-                        if (discoveredDevices.isEmpty() && searchProgress >= 1f) {
-                            Text("Пристроїв не знайдено", style = MaterialTheme.typography.bodyMedium)
-                        }
+                        Button(onClick = { startSearch() }) { Text(if (discoveredDevices.isEmpty()) "Шукати" else "Шукати знову") }
+                        if (discoveredDevices.isEmpty() && searchProgress >= 1f) Text("Пристроїв не знайдено", style = MaterialTheme.typography.bodyMedium)
                     }
 
                     if (discoveredDevices.isNotEmpty()) {
-                        LazyColumn(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
+                        LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(discoveredDevices, key = { it.deviceId }) { device ->
                                 Card(modifier = Modifier.fillMaxWidth()) {
-                                    Column(
-                                        Modifier.padding(12.dp),
-                                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                                    ) {
-                                        Text(
-                                            device.serviceName.ifBlank { "HomeGuard-S3" },
-                                            style = MaterialTheme.typography.titleMedium,
-                                        )
+                                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(device.serviceName.ifBlank { "HomeGuard-S3" }, style = MaterialTheme.typography.titleMedium)
                                         Text("${device.host}:${device.port}", style = MaterialTheme.typography.bodySmall)
                                         Spacer(Modifier.height(2.dp))
-                                        Button(
-                                            onClick = { onAddDiscovered(effectiveName(), device) },
-                                        ) { Text("Додати") }
+                                        Button(onClick = { onAddDiscovered(effectiveName(), device) }) { Text("Додати") }
                                     }
                                 }
                             }
