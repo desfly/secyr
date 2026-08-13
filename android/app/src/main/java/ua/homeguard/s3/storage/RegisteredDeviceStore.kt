@@ -7,6 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import ua.homeguard.s3.model.RegisteredDevice
 import ua.homeguard.s3.model.RegisteredDeviceAccess
+import ua.homeguard.s3.model.SystemMode
 
 class RegisteredDeviceStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences("homeguard_registered_devices", Context.MODE_PRIVATE)
@@ -40,6 +41,22 @@ class RegisteredDeviceStore(context: Context) {
         })
     }
 
+    fun updateTelemetry(
+        deviceId: String,
+        mode: SystemMode,
+        alarmCount: Int,
+        telemetryAtMs: Long = System.currentTimeMillis(),
+    ) {
+        persist(mutable.value.map { device ->
+            if (device.deviceId != deviceId) device
+            else device.copy(
+                lastKnownMode = mode,
+                lastKnownAlarmCount = alarmCount.coerceAtLeast(0),
+                lastTelemetryAtMs = telemetryAtMs,
+            )
+        })
+    }
+
     fun remove(deviceId: String) {
         persist(mutable.value.filterNot { it.deviceId == deviceId })
     }
@@ -56,6 +73,9 @@ class RegisteredDeviceStore(context: Context) {
                     .put("access", device.access.name)
                     .put("lastSeenAtMs", device.lastSeenAtMs)
                     .put("lastVerifiedAtMs", device.lastVerifiedAtMs)
+                    .put("lastKnownMode", device.lastKnownMode?.name ?: JSONObject.NULL)
+                    .put("lastKnownAlarmCount", device.lastKnownAlarmCount ?: JSONObject.NULL)
+                    .put("lastTelemetryAtMs", device.lastTelemetryAtMs)
             )
         }
         preferences.edit().putString(KEY_DEVICES, array.toString()).apply()
@@ -79,6 +99,11 @@ class RegisteredDeviceStore(context: Context) {
                         }.getOrDefault(RegisteredDeviceAccess.UNKNOWN),
                         lastSeenAtMs = item.optLong("lastSeenAtMs", 0L),
                         lastVerifiedAtMs = item.optLong("lastVerifiedAtMs", 0L),
+                        lastKnownMode = item.optString("lastKnownMode").takeIf { it.isNotBlank() }?.let { rawMode ->
+                            runCatching { SystemMode.valueOf(rawMode) }.getOrNull()
+                        },
+                        lastKnownAlarmCount = if (item.isNull("lastKnownAlarmCount")) null else item.optInt("lastKnownAlarmCount"),
+                        lastTelemetryAtMs = item.optLong("lastTelemetryAtMs", 0L),
                     )
                 )
             }
