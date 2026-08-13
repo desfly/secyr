@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.NetworkInfo
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,17 +48,25 @@ enum class AddDeviceMethod { ID, IP, NETWORK }
 
 private enum class LocalNetworkState { WIFI, OTHER, OFFLINE }
 
+@Suppress("DEPRECATION")
 private fun localNetworkState(context: Context): LocalNetworkState {
     val manager = context.applicationContext
         .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
         ?: return LocalNetworkState.OFFLINE
-    val network = manager.activeNetwork ?: return LocalNetworkState.OFFLINE
-    val capabilities = manager.getNetworkCapabilities(network) ?: return LocalNetworkState.OFFLINE
-    return when {
-        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> LocalNetworkState.WIFI
-        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) -> LocalNetworkState.OTHER
-        else -> LocalNetworkState.OFFLINE
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        val network = manager.activeNetwork ?: return LocalNetworkState.OFFLINE
+        val capabilities = manager.getNetworkCapabilities(network) ?: return LocalNetworkState.OFFLINE
+        return when {
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> LocalNetworkState.WIFI
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) -> LocalNetworkState.OTHER
+            else -> LocalNetworkState.OFFLINE
+        }
     }
+
+    val info: NetworkInfo = manager.activeNetworkInfo ?: return LocalNetworkState.OFFLINE
+    if (!info.isConnected) return LocalNetworkState.OFFLINE
+    return if (info.type == ConnectivityManager.TYPE_WIFI) LocalNetworkState.WIFI else LocalNetworkState.OTHER
 }
 
 @Composable
@@ -97,6 +106,8 @@ fun AddDeviceScreen(
     var searchProgress by remember { mutableFloatStateOf(0f) }
     val networkState = localNetworkState(context)
 
+    fun effectiveName(): String = name.trim().ifBlank { "HomeGuard-S3" }
+
     fun startSearch() {
         if (networkState != LocalNetworkState.WIFI || !permissionGranted || searchRunning) return
         searchProgress = 0f
@@ -134,6 +145,7 @@ fun AddDeviceScreen(
             value = name,
             onValueChange = { name = it.take(48) },
             label = { Text("Назва пристрою") },
+            placeholder = { Text("HomeGuard-S3") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -166,8 +178,8 @@ fun AddDeviceScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(
-                    enabled = name.isNotBlank() && value.isNotBlank(),
-                    onClick = { onAddById(name.trim(), value.trim()) },
+                    enabled = value.isNotBlank(),
+                    onClick = { onAddById(effectiveName(), value.trim()) },
                 ) { Text("Додати") }
             }
 
@@ -176,14 +188,20 @@ fun AddDeviceScreen(
                     value = value,
                     onValueChange = { value = it.trim().take(128) },
                     label = { Text("IP або адреса") },
-                    placeholder = { Text("192.168.1.50") },
+                    placeholder = { Text("192.168.4.1") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(
-                    enabled = name.isNotBlank() && value.isNotBlank(),
-                    onClick = { onAddByIp(name.trim(), value.trim()) },
-                ) { Text("Перевірити й додати") }
+                    enabled = value.isNotBlank(),
+                    onClick = { onAddByIp(effectiveName(), value.trim()) },
+                ) { Text("Підключити") }
+                if (value.trim() == "192.168.4.1") {
+                    Text(
+                        "Режим налаштування HomeGuard-S3: телефон має бути підключений до Wi-Fi точки доступу контролера.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
 
             AddDeviceMethod.NETWORK -> {
@@ -213,7 +231,7 @@ fun AddDeviceScreen(
                     if (searchRunning) {
                         Text("Пошук пристроїв… ${(searchProgress * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
                         LinearProgressIndicator(
-                            progress = searchProgress,
+                            progress = { searchProgress },
                             modifier = Modifier.fillMaxWidth(),
                         )
                     } else {
@@ -243,9 +261,8 @@ fun AddDeviceScreen(
                                         Text("${device.host}:${device.port}", style = MaterialTheme.typography.bodySmall)
                                         Spacer(Modifier.height(2.dp))
                                         Button(
-                                            enabled = name.isNotBlank(),
-                                            onClick = { onAddDiscovered(name.trim(), device) },
-                                        ) { Text(if (name.isBlank()) "Введіть назву" else "Додати") }
+                                            onClick = { onAddDiscovered(effectiveName(), device) },
+                                        ) { Text("Додати") }
                                     }
                                 }
                             }
