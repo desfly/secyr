@@ -17,6 +17,7 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
     private val _isScanning = MutableStateFlow(false)
 
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
+    val scanStatus: StateFlow<UdpDeviceDiscovery.ScanStatus> = udp.status
 
     val devices: StateFlow<List<DiscoveredDevice>> = combine(nsd.devices, udp.devices) { mdns, fallback ->
         (mdns + fallback)
@@ -36,8 +37,6 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         if (_isScanning.value) return
         _isScanning.value = true
         try {
-            // NSD runs continuously after start(); this forces the UDP fallback
-            // to probe the current LAN immediately instead of showing an animation.
             udp.scanOnce()
         } finally {
             _isScanning.value = false
