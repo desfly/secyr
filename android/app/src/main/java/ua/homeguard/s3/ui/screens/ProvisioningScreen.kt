@@ -1,5 +1,6 @@
 package ua.homeguard.s3.ui.screens
 
+import android.app.Activity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,18 +17,82 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.ProvisioningForm
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.ProvisioningUiState
+import ua.homeguard.s3.network.LocalDiscoveryCoordinator
+import ua.homeguard.s3.storage.SettingsStore
+import java.net.URI
+
+@Composable
+fun ProvisioningScreen(
+    state: ProvisioningUiState,
+    onScan: () -> Unit,
+    onProvision: (ProvisioningForm) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val discovery = remember(context) { LocalDiscoveryCoordinator(context, scope) }
+    val localSettings = remember(context) { SettingsStore(context) }
+    val devices by discovery.devices.collectAsState()
+    val isScanning by discovery.isScanning.collectAsState()
+
+    DisposableEffect(discovery) {
+        discovery.start()
+        onDispose { discovery.stop() }
+    }
+
+    fun finishManualSelection(address: String) {
+        val endpoint = normalizeLocalAddress(address) ?: return
+        val uri = runCatching { URI(endpoint) }.getOrNull() ?: return
+        val host = uri.host ?: return
+        val port = when {
+            uri.port in 1..65535 -> uri.port
+            uri.scheme.equals("https", ignoreCase = true) -> 443
+            else -> 80
+        }
+        scope.launch {
+            localSettings.update(
+                localSettings.settings.value.copy(
+                    deviceId = "manual-${host.lowercase()}-$port",
+                    lastKnownLocalUrl = endpoint,
+                    localCertificateSha256 = "",
+                )
+            )
+            (context as? Activity)?.recreate()
+        }
+    }
+
+    ProvisioningScreen(
+        state = state,
+        devices = devices,
+        isScanningNetwork = isScanning,
+        onScanQr = onScan,
+        onDiscover = { scope.launch { discovery.rescan() } },
+        onUseDevice = { device ->
+            scope.launch {
+                localSettings.remember(device)
+                (context as? Activity)?.recreate()
+            }
+        },
+        onUseManualIp = ::finishManualSelection,
+        onProvision = onProvision,
+    )
+}
 
 @Composable
 fun ProvisioningScreen(
@@ -49,10 +114,7 @@ fun ProvisioningScreen(
         ProvisioningPhase.WAITING_FOR_RESTART,
         ProvisioningPhase.DISCOVERING_LOCAL,
     )
-    val manualAddressValid = manualAddress.trim().let { value ->
-        value.isNotEmpty() && !value.any(Char::isWhitespace) &&
-            !value.contains('/') && !value.contains('?') && !value.contains('#')
-    }
+    val manualAddressValid = normalizeLocalAddress(manualAddress) != null
 
     Column(
         modifier = Modifier
@@ -164,4 +226,21 @@ fun ProvisioningScreen(
         }
         if (busy) CircularProgressIndicator()
     }
+}
+
+private fun normalizeLocalAddress(raw: String): String? {
+    val value = raw.trim().trimEnd('/')
+    if (value.isEmpty() || value.any(Char::isWhitespace)) return null
+    val withScheme = when {
+        value.startsWith("http://", ignoreCase = true) || value.startsWith("https://", ignoreCase = true) -> value
+        else -> "http://$value"
+    }
+    val uri = runCatching { URI(withScheme) }.getOrNull() ?: return null
+    val scheme = uri.scheme?.lowercase()
+    if (scheme != "http" && scheme != "https") return null
+    if (uri.host.isNullOrBlank()) return null
+    if (uri.port == 0 || uri.port > 65535) return null
+    if (!uri.path.isNullOrBlank() && uri.path != "/") return null
+    if (!uri.query.isNullOrBlank() || !uri.fragment.isNullOrBlank() || !uri.userInfo.isNullOrBlank()) return null
+    return withScheme.trimEnd('/')
 }
