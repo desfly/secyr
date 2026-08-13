@@ -1,0 +1,40 @@
+name: MyFist Android Stable
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [android-device-flow-v1]
+    paths: ["android/**", ".github/workflows/myfist-android-stable.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: Use project debug key
+        run: |
+          mkdir -p "$HOME/.android"
+          base64 -d android/ci/myfist-debug.keystore.b64 > "$HOME/.android/debug.keystore"
+      - name: Build
+        working-directory: android
+        run: gradle --no-daemon lintDebug testDebugUnitTest assembleDebug
+      - name: Prepare APK
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/MyFist.apk
+          sha256sum android/app/build/outputs/apk/debug/MyFist.apk > android/app/build/outputs/apk/debug/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MyFist-Android-Stable
+          path: |
+            android/app/build/outputs/apk/debug/MyFist.apk
+            android/app/build/outputs/apk/debug/SHA256SUMS.txt
