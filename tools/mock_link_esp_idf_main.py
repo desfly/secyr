@@ -21,6 +21,9 @@ if not compiler:
 component_include_dirs = sorted(
     path for path in COMPONENTS.glob("*/include") if path.is_dir()
 )
+component_sources = sorted(
+    path for path in COMPONENTS.glob("*/*.cpp") if path.is_file()
+)
 
 if BUILD.exists():
     shutil.rmtree(BUILD)
@@ -33,13 +36,16 @@ for ref in source_refs:
     path = (MAIN / ref).resolve()
     if path.exists():
         sources.append(path)
+sources.extend(component_sources)
 sources = sorted(dict.fromkeys(sources))
 objects = []
 results = []
 failed = False
 
 for source in sources + [HARNESS]:
-    obj = BUILD / f"{source.stem}.o"
+    relative = source.relative_to(ROOT)
+    safe_name = "__".join(relative.with_suffix("").parts) + ".o"
+    obj = BUILD / safe_name
     include_args = []
     for include_dir in [MOCK, MAIN, INCLUDE, *component_include_dirs]:
         include_args.extend(["-I", str(include_dir)])
@@ -55,7 +61,7 @@ for source in sources + [HARNESS]:
     run = subprocess.run(command, capture_output=True, text=True)
     results.append({
         "stage": "compile",
-        "file": str(source.relative_to(ROOT)),
+        "file": str(relative),
         "returncode": run.returncode,
         "stdout": run.stdout,
         "stderr": run.stderr,
