@@ -15,6 +15,7 @@ android {
         versionCode = 55
         versionName = "0.0.55"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
     }
 
     compileOptions {
