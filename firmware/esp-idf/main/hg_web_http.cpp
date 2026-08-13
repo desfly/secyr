@@ -98,14 +98,46 @@ esp_err_t WebHttp::index_get(httpd_req_t* request)
 
 esp_err_t WebHttp::css_get(httpd_req_t* request)
 {
-    static constexpr char kHiddenVisibilityFix[] = "\n[hidden]{display:none!important}\n";
+    // Keep the desktop source stylesheet untouched, but force a compact mobile
+    // layout in the firmware-served asset. This also guarantees the fix is in
+    // the flashed binary even when the browser previously cached /app.css.
+    static constexpr char kFirmwareCssFix[] = R"CSS(
+
+[hidden]{display:none!important}
+@media (max-width:760px){
+  html,body{max-width:100%;overflow-x:hidden}
+  .shell{display:block!important;min-height:100vh}
+  .sidebar{position:relative!important;top:auto!important;width:100%!important;height:auto!important;min-height:0!important;padding:10px 10px 12px!important;overflow:visible!important}
+  .brand{height:auto!important;min-height:34px!important;justify-content:flex-start!important;align-items:center!important;padding:0 8px!important}
+  .brand h1{font-size:24px!important;letter-spacing:-.5px!important}
+  .bruce{height:86px!important;margin:4px 0 8px!important;border-radius:10px!important}
+  .bruce img{object-fit:cover!important;object-position:center 32%!important}
+  .sidebar nav{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important;margin:0!important;padding:0!important}
+  .sidebar nav a{min-height:44px!important;margin:0!important;padding:10px 12px!important;border-radius:10px!important;font-size:15px!important;display:flex!important;align-items:center!important;gap:8px!important}
+  .side-foot{display:none!important}
+  .workspace{min-width:0!important;width:100%!important}
+  .workspace header{padding:14px 14px 10px!important;gap:8px!important;align-items:flex-start!important;flex-wrap:wrap!important}
+  .workspace header h2{font-size:24px!important;margin:0!important}
+  .workspace header p{margin:3px 0 0!important}
+  .header-status{width:100%!important;justify-content:space-between!important;gap:8px!important}
+  main{padding:12px!important}
+  .status-grid,.two-col{grid-template-columns:1fr!important;gap:10px!important}
+  .status-grid article,.panel{min-width:0!important}
+  .quick{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .cloud-fields{grid-template-columns:1fr!important}
+  .lan-device{grid-template-columns:1fr!important;gap:6px!important}
+  #networkPage .panel>div[style*="grid-template-columns:repeat(3"]{grid-template-columns:1fr!important}
+  #networkPage .panel>div[style*="grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto"]{grid-template-columns:1fr!important}
+  button,input,select{max-width:100%}
+}
+)CSS";
     return send_text_with_suffix(
         request,
         "text/css; charset=utf-8",
         app_css_start,
         app_css_end,
-        kHiddenVisibilityFix,
-        sizeof(kHiddenVisibilityFix) - 1U);
+        kFirmwareCssFix,
+        sizeof(kFirmwareCssFix) - 1U);
 }
 
 esp_err_t WebHttp::js_get(httpd_req_t* request)
