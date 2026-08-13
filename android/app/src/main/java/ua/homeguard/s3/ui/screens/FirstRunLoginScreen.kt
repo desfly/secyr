@@ -68,7 +68,7 @@ fun FirstRunLoginScreen(onContinue: (String, String) -> Unit) {
             keyboardOptions = KeyboardOptions(keyboardType = if (passwordVisible) KeyboardType.Text else KeyboardType.Password),
             trailingIcon = {
                 IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                    Text(if (passwordVisible) "Сховати" else "Показати")
+                    Text(if (passwordVisible) "🙈" else "👁")
                 }
             },
         )
