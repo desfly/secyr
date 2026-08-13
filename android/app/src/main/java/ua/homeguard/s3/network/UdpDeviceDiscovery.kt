@@ -70,7 +70,10 @@ class UdpDeviceDiscovery(private val scope: CoroutineScope) {
             }
         }
         val expiry = System.currentTimeMillis() - 30_000L
-        found.entries.removeIf { it.value.seenAtMs < expiry }
+        val expiredKeys = found.entries
+            .filter { it.value.seenAtMs < expiry }
+            .map { it.key }
+        expiredKeys.forEach(found::remove)
         _devices.value = found.values.sortedBy { it.deviceId }
     }
 
