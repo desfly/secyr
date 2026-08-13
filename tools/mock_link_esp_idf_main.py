@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "firmware" / "esp-idf" / "main"
 MOCK = ROOT / "tests" / "esp-idf-mock" / "include"
 INCLUDE = ROOT / "firmware" / "include"
+COMPONENTS = ROOT / "firmware" / "esp-idf" / "components"
 HARNESS = ROOT / "tests" / "esp-idf-mock" / "mock_main.cpp"
 BUILD = ROOT / "mock-link-build"
 REPORT = ROOT / "mock-link-report.json"
@@ -16,6 +17,10 @@ REPORT = ROOT / "mock-link-report.json"
 compiler = shutil.which("g++") or shutil.which("clang++")
 if not compiler:
     raise SystemExit("No host C++ compiler found")
+
+component_include_dirs = sorted(
+    path for path in COMPONENTS.glob("*/include") if path.is_dir()
+)
 
 if BUILD.exists():
     shutil.rmtree(BUILD)
@@ -35,14 +40,15 @@ failed = False
 
 for source in sources + [HARNESS]:
     obj = BUILD / f"{source.stem}.o"
+    include_args = []
+    for include_dir in [MOCK, MAIN, INCLUDE, *component_include_dirs]:
+        include_args.extend(["-I", str(include_dir)])
     command = [
         compiler,
         "-std=c++20",
         "-O0",
         "-g0",
-        "-I", str(MOCK),
-        "-I", str(MAIN),
-        "-I", str(INCLUDE),
+        *include_args,
         "-c", str(source),
         "-o", str(obj),
     ]
