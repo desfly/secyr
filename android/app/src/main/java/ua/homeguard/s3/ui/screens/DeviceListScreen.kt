@@ -108,7 +108,6 @@ fun DeviceListScreen(
                         "Додайте HomeGuard-S3 вручну або знайдіть його в локальній мережі.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    OutlinedButton(onClick = onAdd) { Text("Додати пристрій") }
                 }
             }
             return@Column
