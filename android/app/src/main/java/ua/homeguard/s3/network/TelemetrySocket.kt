@@ -8,6 +8,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import ua.homeguard.s3.model.ExtendedTelemetry
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
 
@@ -15,11 +16,13 @@ class TelemetrySocket {
     companion object { private const val MAX_EVENT_HISTORY = 256 }
 
     private val state = MutableStateFlow(SystemSnapshot())
+    private val extendedState = MutableStateFlow(ExtendedTelemetry())
     private val eventState = MutableStateFlow<List<SystemEventRecord>>(emptyList())
     private val liveEventState = MutableSharedFlow<SystemEventRecord>(extraBufferCapacity = 16)
     private var socket: WebSocket? = null
 
     fun snapshots(): Flow<SystemSnapshot> = state
+    fun extendedTelemetry(): Flow<ExtendedTelemetry> = extendedState
     fun events(): Flow<List<SystemEventRecord>> = eventState
     fun liveEvents(): Flow<SystemEventRecord> = liveEventState
 
@@ -56,6 +59,7 @@ class TelemetrySocket {
                         liveEventState.tryEmit(item)
                     } else {
                         state.value = JsonParsers.snapshot(json)
+                        extendedState.value = ExtendedTelemetryParser.parse(json)
                     }
                 }
             }

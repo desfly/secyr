@@ -29,7 +29,7 @@ class HttpDeviceApi(
     suspend fun login(actor: String, credential: String): AccessSession {
         val normalizedActor = actor.trim()
         require(normalizedActor.isNotEmpty()) { "User ID is required" }
-        require(credential.length in 4..12 && credential.all(Char::isDigit)) { "PIN must contain 4-12 digits" }
+        require(credential.isNotEmpty() && credential.length <= 128) { "Password is required" }
 
         val json = execute(
             "/api/v1/access/login",
@@ -37,7 +37,11 @@ class HttpDeviceApi(
             JSONObject().put("actor", normalizedActor).put("credential", credential),
         )
         if (!json.optBoolean("ok", false)) {
-            throw IOException("Login rejected: ${json.optString("reason", "unknown")}")
+            val rawReason = json.optString("reason", "unknown")
+            throw AccessLoginRejectedException(
+                reason = accessLoginFailureReason(rawReason),
+                message = "Login rejected: $rawReason",
+            )
         }
 
         val role = when (json.optString("role", "guest").lowercase()) {
