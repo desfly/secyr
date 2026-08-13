@@ -67,6 +67,7 @@ idf_component_register(
         "../../include"
     REQUIRES
         app_update
+        device_discovery
         driver
         esp_eth
         esp_event
