@@ -23,9 +23,11 @@ import ua.homeguard.s3.diagnostics.SystemDiagnosticsEvaluator
 import ua.homeguard.s3.events.EventLogExporter
 import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
+import ua.homeguard.s3.model.DeviceAccessState
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.RegisteredDevice
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.network.DeviceAccessVerifier
 import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
@@ -56,6 +58,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var session: DeviceSession
     private lateinit var commands: CommandController
     private lateinit var notifications: HomeGuardNotifications
+    private val accessVerifier = DeviceAccessVerifier()
 
     private val commandStatus = MutableStateFlow("Готово")
     private val backupStatus = MutableStateFlow("Backup/restore готовий")
@@ -63,6 +66,7 @@ class MainActivity : ComponentActivity() {
     private val operatorPin = MutableStateFlow("")
     private val accessSession = MutableStateFlow<AccessSession?>(null)
     private val route = MutableStateFlow(AppRoute.DEVICES)
+    private val accessChecksInFlight = mutableSetOf<String>()
 
     private var pendingExportText: String = ""
     private var pendingSettingsBackupText: String = ""
@@ -135,6 +139,7 @@ class MainActivity : ComponentActivity() {
 
         registry.migrateLegacy(settings.settings.value.deviceId, settings.settings.value.lastKnownLocalUrl)
         route.value = if (firstRunAuth.completed) AppRoute.DEVICES else AppRoute.LOGIN
+        if (firstRunAuth.username.isNotBlank()) operatorId.value = firstRunAuth.username
 
         notifications.createChannels()
         requestNotificationPermission()
@@ -149,6 +154,12 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             settings.settings.collect { value ->
                 registry.migrateLegacy(value.deviceId, value.lastKnownLocalUrl)
+            }
+        }
+
+        lifecycleScope.launch {
+            discovery.devices.collect { devices ->
+                if (firstRunAuth.completed) syncDiscoveredAccess(devices)
             }
         }
 
@@ -180,10 +191,11 @@ class MainActivity : ComponentActivity() {
 
             MaterialTheme {
                 when (currentRoute) {
-                    AppRoute.LOGIN -> FirstRunLoginScreen { username, _ ->
-                        firstRunAuth.remember(username)
+                    AppRoute.LOGIN -> FirstRunLoginScreen { username, password ->
+                        firstRunAuth.remember(username, password)
                         operatorId.value = username
                         route.value = AppRoute.DEVICES
+                        syncDiscoveredAccess(discovery.devices.value)
                     }
 
                     AppRoute.DEVICES -> DeviceListScreen(
@@ -267,41 +279,97 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun syncDiscoveredAccess(devices: List<DiscoveredDevice>) {
+        val username = firstRunAuth.username
+        val credential = firstRunAuth.credential
+        if (username.isBlank() || credential.isBlank()) return
+
+        devices.forEach { device ->
+            if (!accessChecksInFlight.add(device.deviceId)) return@forEach
+            lifecycleScope.launch {
+                try {
+                    accessVerifier.login(device, username, credential)
+                    val existing = registry.devices.value.firstOrNull { it.deviceId == device.deviceId }
+                    registry.upsert(
+                        RegisteredDevice(
+                            deviceId = device.deviceId,
+                            name = existing?.name ?: device.serviceName.ifBlank { "HomeGuard-S3" },
+                            lastKnownUrl = device.baseUrl,
+                            accessState = DeviceAccessState.ACTIVE,
+                            addedAtMs = existing?.addedAtMs ?: System.currentTimeMillis(),
+                        )
+                    )
+                } catch (error: Throwable) {
+                    if (isExplicitAccessRejection(error)) {
+                        registry.setAccess(device.deviceId, DeviceAccessState.REVOKED)
+                    }
+                } finally {
+                    accessChecksInFlight.remove(device.deviceId)
+                }
+            }
+        }
+    }
+
     private fun addDeviceById(name: String, deviceId: String) {
-        registry.upsert(RegisteredDevice(deviceId = deviceId, name = name))
-        route.value = AppRoute.DEVICES
+        val discovered = discovery.devices.value.firstOrNull { it.deviceId.equals(deviceId.trim(), ignoreCase = true) }
+        if (discovered != null) addDiscoveredDevice(name, discovered)
     }
 
     private fun addDeviceByIp(name: String, ip: String) {
-        val host = ip.removePrefix("http://").removePrefix("https://").substringBefore('/').substringBefore(':').trim()
+        val clean = ip.trim()
+        val host = clean.removePrefix("http://").removePrefix("https://").substringBefore('/').substringBefore(':').trim()
         if (host.isBlank()) return
         val discovered = discovery.devices.value.firstOrNull { it.host.equals(host, ignoreCase = true) }
         if (discovered != null) {
             addDiscoveredDevice(name, discovered)
             return
         }
-        registry.upsert(
-            RegisteredDevice(
-                deviceId = "ip:$host",
-                name = name,
-                lastKnownUrl = "http://$host",
-            )
-        )
-        route.value = AppRoute.DEVICES
+
+        val baseUrl = when {
+            clean.startsWith("http://") || clean.startsWith("https://") -> clean.trimEnd('/')
+            else -> "http://$host"
+        }
+        verifyAndAdd(name = name, deviceId = "ip:$host", baseUrl = baseUrl)
     }
 
     private fun addDiscoveredDevice(name: String, device: DiscoveredDevice) {
-        registry.upsert(
-            RegisteredDevice(
-                deviceId = device.deviceId,
-                name = name,
-                lastKnownUrl = device.baseUrl,
-            )
-        )
-        route.value = AppRoute.DEVICES
+        verifyAndAdd(name = name, deviceId = device.deviceId, baseUrl = device.baseUrl)
+    }
+
+    private fun verifyAndAdd(name: String, deviceId: String, baseUrl: String) {
+        val username = firstRunAuth.username
+        val credential = firstRunAuth.credential
+        if (username.isBlank() || credential.isBlank()) return
+
+        lifecycleScope.launch {
+            runCatching { accessVerifier.login(baseUrl, username, credential) }
+                .onSuccess {
+                    registry.upsert(
+                        RegisteredDevice(
+                            deviceId = deviceId,
+                            name = name,
+                            lastKnownUrl = baseUrl,
+                            accessState = DeviceAccessState.ACTIVE,
+                        )
+                    )
+                    route.value = AppRoute.DEVICES
+                }
+                .onFailure { error ->
+                    if (registry.devices.value.any { it.deviceId == deviceId } && isExplicitAccessRejection(error)) {
+                        registry.setAccess(deviceId, DeviceAccessState.REVOKED)
+                        route.value = AppRoute.DEVICES
+                    }
+                }
+        }
+    }
+
+    private fun isExplicitAccessRejection(error: Throwable): Boolean {
+        val message = error.message.orEmpty().lowercase()
+        return "login rejected" in message || "http 401" in message || "http 403" in message
     }
 
     private fun openRegisteredDevice(device: RegisteredDevice) {
+        if (device.accessState == DeviceAccessState.REVOKED) return
         lifecycleScope.launch {
             settings.update(
                 settings.settings.value.copy(
