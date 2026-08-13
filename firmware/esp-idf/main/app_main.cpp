@@ -20,6 +20,7 @@
 #include "device_discovery.hpp"
 #include "homeguard/access_control.hpp"
 #include "homeguard/boot_readiness.hpp"
+#include "homeguard/discovery.hpp"
 #include "homeguard/physical_output_runtime.hpp"
 #include "homeguard/system_model.hpp"
 #include "esp_check.h"
