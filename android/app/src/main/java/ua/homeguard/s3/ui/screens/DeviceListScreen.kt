@@ -12,11 +12,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,18 +39,39 @@ fun DeviceListScreen(
     onAdd: () -> Unit,
     onQuickView: (RegisteredDevice) -> Unit,
     onOpen: (RegisteredDevice) -> Unit,
+    onRename: (RegisteredDevice, String) -> Unit,
 ) {
     var expandedDeviceId by remember { mutableStateOf<String?>(null) }
+    var renameTarget by remember { mutableStateOf<RegisteredDevice?>(null) }
+    var renameValue by remember { mutableStateOf("") }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
+    renameTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text("Назва пристрою") },
+            text = {
+                OutlinedTextField(
+                    value = renameValue,
+                    onValueChange = { renameValue = it.take(48) },
+                    singleLine = true,
+                    label = { Text("Назва") },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = renameValue.isNotBlank(),
+                    onClick = {
+                        onRename(target, renameValue.trim())
+                        renameTarget = null
+                    },
+                ) { Text("Зберегти") }
+            },
+            dismissButton = { TextButton(onClick = { renameTarget = null }) { Text("Скасувати") } },
+        )
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column {
                 Text("HomeGuard-S3", style = MaterialTheme.typography.headlineSmall)
                 Text("Пристроїв: ${devices.size}", style = MaterialTheme.typography.bodyMedium)
@@ -56,7 +80,6 @@ fun DeviceListScreen(
         }
 
         Spacer(Modifier.height(16.dp))
-
         if (devices.isEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Зареєстрованих пристроїв немає")
@@ -70,23 +93,26 @@ fun DeviceListScreen(
                 val revoked = device.accessState == DeviceAccessState.REVOKED
                 val online = device.deviceId in onlineDeviceIds
                 Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .combinedClickable(
-                            onClick = {
-                                expandedDeviceId = if (expandedDeviceId == device.deviceId) null else device.deviceId
-                                onQuickView(device)
-                            },
-                            onDoubleClick = { onOpen(device) },
-                        )
+                    modifier = Modifier.fillMaxWidth().combinedClickable(
+                        onClick = {
+                            expandedDeviceId = if (expandedDeviceId == device.deviceId) null else device.deviceId
+                            onQuickView(device)
+                        },
+                        onDoubleClick = { onOpen(device) },
+                    )
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text(
-                            text = device.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = if (revoked) Color.Red else Color.Unspecified,
-                        )
-                        Spacer(Modifier.height(4.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(
+                                text = device.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (revoked) Color.Red else Color.Unspecified,
+                            )
+                            TextButton(onClick = {
+                                renameTarget = device
+                                renameValue = device.name
+                            }) { Text("Змінити") }
+                        }
                         Text(
                             when {
                                 revoked -> "Доступ відкликано"
@@ -95,15 +121,12 @@ fun DeviceListScreen(
                             },
                             style = MaterialTheme.typography.bodyMedium,
                         )
-
                         if (expandedDeviceId == device.deviceId) {
                             Spacer(Modifier.height(12.dp))
                             Text("Стан охорони: очікується телеметрія")
                             Text("Аварії: очікується телеметрія")
                             Spacer(Modifier.height(8.dp))
-                            OutlinedButton(onClick = { onOpen(device) }) {
-                                Text("Повний моніторинг")
-                            }
+                            OutlinedButton(onClick = { onOpen(device) }) { Text("Повний моніторинг") }
                         }
                     }
                 }
