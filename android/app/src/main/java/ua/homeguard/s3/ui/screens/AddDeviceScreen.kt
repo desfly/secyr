@@ -1,5 +1,10 @@
 package ua.homeguard.s3.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,12 +24,15 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import ua.homeguard.s3.model.DiscoveredDevice
 
 enum class AddDeviceMethod { ID, IP, NETWORK }
@@ -37,6 +45,26 @@ fun AddDeviceScreen(
     onAddDiscovered: (name: String, device: DiscoveredDevice) -> Unit,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val discoveryPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        Manifest.permission.NEARBY_WIFI_DEVICES
+    } else {
+        Manifest.permission.ACCESS_FINE_LOCATION
+    }
+    var permissionGranted by remember {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+                ContextCompat.checkSelfPermission(context, discoveryPermission) == PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        permissionGranted = granted
+    }
+
+    LaunchedEffect(discoveryPermission) {
+        if (!permissionGranted) permissionLauncher.launch(discoveryPermission)
+    }
+
     var method by remember { mutableStateOf(AddDeviceMethod.NETWORK) }
     var name by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
@@ -111,11 +139,24 @@ fun AddDeviceScreen(
             }
 
             AddDeviceMethod.NETWORK -> {
-                Text(
-                    "Знайдено: ${discoveredDevices.size}",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                if (discoveredDevices.isEmpty()) {
+                Text("Знайдено: ${discoveredDevices.size}", style = MaterialTheme.typography.titleMedium)
+                if (!permissionGranted) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text("Потрібен доступ до пристроїв поруч", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Дозвіл потрібен лише для пошуку HomeGuard-S3 у вашій Wi-Fi мережі.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            OutlinedButton(onClick = { permissionLauncher.launch(discoveryPermission) }) {
+                                Text("Дозволити")
+                            }
+                        }
+                    }
+                } else if (discoveredDevices.isEmpty()) {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(
                             modifier = Modifier.padding(12.dp),
