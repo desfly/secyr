@@ -1,6 +1,6 @@
 package ua.homeguard.s3.ui.screens
 
-import android.app.Activity
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,7 +28,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.BuildConfig
 import ua.homeguard.s3.model.DeviceAccessState
@@ -47,7 +46,7 @@ fun DeviceListScreen(
     onOpen: (RegisteredDevice) -> Unit,
     onRename: (RegisteredDevice, String) -> Unit,
 ) {
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
     var expandedDeviceId by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<RegisteredDevice?>(null) }
     var renameValue by remember { mutableStateOf("") }
