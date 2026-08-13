@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -97,7 +96,7 @@ fun AddDeviceScreen(
                 if (discoveredDevices.isEmpty()) {
                     Text("Пошук триває. Переконайтесь, що телефон і HomeGuard-S3 у тій самій мережі.")
                 } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f, fill = false)) {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(discoveredDevices, key = { it.deviceId }) { device ->
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(12.dp)) {
@@ -116,7 +115,6 @@ fun AddDeviceScreen(
             }
         }
 
-        Spacer(Modifier.weight(1f))
         OutlinedButton(onClick = onBack) { Text("Назад") }
     }
 }
