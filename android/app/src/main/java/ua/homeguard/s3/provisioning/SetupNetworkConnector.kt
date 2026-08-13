@@ -59,7 +59,9 @@ class BoundSetupNetwork(
     private val callback: ConnectivityManager.NetworkCallback
 ) : AutoCloseable {
     override fun close() {
-        connectivity.bindProcessToNetwork(null)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            connectivity.bindProcessToNetwork(null)
+        }
         runCatching { connectivity.unregisterNetworkCallback(callback) }
     }
 }
