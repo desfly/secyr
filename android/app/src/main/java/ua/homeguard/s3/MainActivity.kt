@@ -192,6 +192,7 @@ class MainActivity : ComponentActivity() {
                         onAdd = { route.value = AppRoute.ADD_DEVICE },
                         onQuickView = { },
                         onOpen = ::openRegisteredDevice,
+                        onRename = { device, name -> registry.rename(device.deviceId, name) },
                     )
 
                     AppRoute.ADD_DEVICE -> {
