@@ -4,7 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
-import android.net.NetworkInfo
+import android.net.NetworkCapabilities
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,26 +33,31 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.DiscoveredDevice
 
 enum class AddDeviceMethod { ID, IP, NETWORK }
 
 private enum class LocalNetworkState { WIFI, OTHER, OFFLINE }
 
-@Suppress("DEPRECATION")
 private fun localNetworkState(context: Context): LocalNetworkState {
     val manager = context.applicationContext
         .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
         ?: return LocalNetworkState.OFFLINE
-    val info: NetworkInfo = manager.activeNetworkInfo ?: return LocalNetworkState.OFFLINE
-    if (!info.isConnected) return LocalNetworkState.OFFLINE
-    return if (info.type == ConnectivityManager.TYPE_WIFI) LocalNetworkState.WIFI else LocalNetworkState.OTHER
+    val network = manager.activeNetwork ?: return LocalNetworkState.OFFLINE
+    val capabilities = manager.getNetworkCapabilities(network) ?: return LocalNetworkState.OFFLINE
+    return when {
+        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> LocalNetworkState.WIFI
+        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) -> LocalNetworkState.OTHER
+        else -> LocalNetworkState.OFFLINE
+    }
 }
 
 @Composable
@@ -61,9 +66,11 @@ fun AddDeviceScreen(
     onAddById: (name: String, deviceId: String) -> Unit,
     onAddByIp: (name: String, ip: String) -> Unit,
     onAddDiscovered: (name: String, device: DiscoveredDevice) -> Unit,
+    onRescan: suspend () -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val discoveryPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.NEARBY_WIFI_DEVICES
     } else {
@@ -91,9 +98,11 @@ fun AddDeviceScreen(
     val networkState = localNetworkState(context)
 
     fun startSearch() {
-        if (networkState == LocalNetworkState.WIFI && permissionGranted) {
-            searchProgress = 0f
-            searchRunning = true
+        if (networkState != LocalNetworkState.WIFI || !permissionGranted || searchRunning) return
+        searchProgress = 0f
+        searchRunning = true
+        scope.launch {
+            runCatching { onRescan() }
         }
     }
 
