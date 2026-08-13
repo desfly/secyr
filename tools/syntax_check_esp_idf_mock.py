@@ -6,12 +6,18 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "firmware" / "esp-idf" / "main"
+COMPONENTS = ROOT / "firmware" / "esp-idf" / "components"
 MOCK = ROOT / "tests" / "esp-idf-mock" / "include"
 INCLUDE = ROOT / "firmware" / "include"
 
 compiler = shutil.which("g++") or shutil.which("clang++")
 if not compiler:
     raise SystemExit("No C++ compiler found")
+
+include_dirs = [MOCK, MAIN, INCLUDE]
+if COMPONENTS.exists():
+    for component_include in sorted(COMPONENTS.glob("*/include")):
+        include_dirs.append(component_include)
 
 results = []
 failed = False
@@ -21,11 +27,11 @@ for source in sorted(MAIN.glob("*.cpp")):
         compiler,
         "-std=c++20",
         "-fsyntax-only",
-        "-I", str(MOCK),
-        "-I", str(MAIN),
-        "-I", str(INCLUDE),
-        str(source),
     ]
+    for include_dir in include_dirs:
+        command.extend(["-I", str(include_dir)])
+    command.append(str(source))
+
     run = subprocess.run(command, capture_output=True, text=True)
     item = {
         "file": source.name,
