@@ -20,10 +20,10 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.control.CommandController
-import ua.homeguard.s3.diagnostics.SystemDiagnosticsEvaluator
 import ua.homeguard.s3.events.EventLogExporter
 import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
+import ua.homeguard.s3.model.ExtendedTelemetry
 import ua.homeguard.s3.model.RegisteredDevice
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.network.DeviceEndpointResolver
@@ -39,7 +39,7 @@ import ua.homeguard.s3.storage.SettingsBackupCodec
 import ua.homeguard.s3.storage.SettingsStore
 import ua.homeguard.s3.storage.UserCredentialStore
 import ua.homeguard.s3.ui.screens.AddDeviceScreen
-import ua.homeguard.s3.ui.screens.DashboardScreen
+import ua.homeguard.s3.ui.screens.DeviceMonitorScreen
 import ua.homeguard.s3.ui.screens.FirstRunLoginScreen
 import ua.homeguard.s3.ui.screens.RegisteredDevicesScreen
 
@@ -146,20 +146,13 @@ class MainActivity : ComponentActivity() {
         session.start()
 
         setContent {
-            val appSettings by settings.settings.collectAsState()
             val foundDevices by discovery.devices.collectAsState()
             val savedCredentials by credentials.credentials.collectAsState()
             val devices by registeredDevices.devices.collectAsState()
-            val endpoint by resolver.endpoint.collectAsState()
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
-            val events by telemetry.events().collectAsState(initial = emptyList())
-            val commandMessage by commandStatus.collectAsState()
-            val maintenanceMessage by backupStatus.collectAsState()
+            val extended by telemetry.extendedTelemetry().collectAsState(initial = ExtendedTelemetry())
             val addMessage by enrollmentStatus.collectAsState()
             val addBusy by enrollmentBusy.collectAsState()
-            val currentOperator by operatorId.collectAsState()
-            val currentPassword by operatorPassword.collectAsState()
-            val currentAccessSession by accessSession.collectAsState()
 
             var rootPage by remember { mutableStateOf(RootPage.DEVICES) }
             var selectedDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
@@ -171,14 +164,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            val diagnostics = SystemDiagnosticsEvaluator.evaluate(
-                deviceId = appSettings.deviceId,
-                route = endpoint.path.name,
-                localDevices = foundDevices.size,
-                certificateSha256 = appSettings.localCertificateSha256,
-                snapshot = snapshot,
-                eventCount = events.size,
-            )
+            LaunchedEffect(selectedDevice?.deviceId, snapshot.sequence, extended.alarmCount) {
+                val selected = selectedDevice
+                if (selected != null && snapshot.sequence > 0L) {
+                    registeredDevices.updateTelemetry(
+                        deviceId = selected.deviceId,
+                        mode = snapshot.mode,
+                        alarmCount = extended.alarmCount,
+                    )
+                }
+            }
 
             MaterialTheme {
                 when {
@@ -200,7 +195,11 @@ class MainActivity : ComponentActivity() {
                             lifecycleScope.launch {
                                 runCatching { discovery.rescan() }
                                 enrollmentBusy.value = false
-                                enrollmentStatus.value = if (discovery.devices.value.isEmpty()) "HomeGuard у мережі не знайдено" else "Знайдено: ${discovery.devices.value.size}"
+                                enrollmentStatus.value = if (discovery.devices.value.isEmpty()) {
+                                    "HomeGuard у мережі не знайдено"
+                                } else {
+                                    "Знайдено: ${discovery.devices.value.size}"
+                                }
                             }
                         },
                         onAddDiscovered = { device, name ->
@@ -215,52 +214,14 @@ class MainActivity : ComponentActivity() {
                         onBack = { rootPage = RootPage.DEVICES },
                     )
 
-                    rootPage == RootPage.MONITOR && selectedDevice != null -> DashboardScreen(
-                        versionName = BuildConfig.VERSION_NAME,
-                        localDevices = foundDevices.size,
-                        route = endpoint.path.name,
-                        deviceId = selectedDevice!!.displayName,
+                    rootPage == RootPage.MONITOR && selectedDevice != null -> DeviceMonitorScreen(
+                        deviceName = selectedDevice!!.displayName,
                         snapshot = snapshot,
-                        events = events,
-                        diagnostics = diagnostics,
-                        backupStatus = maintenanceMessage,
-                        commandStatus = commandMessage,
-                        operatorId = currentOperator,
-                        operatorPin = currentPassword,
-                        accessSession = currentAccessSession,
-                        criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled,
-                        statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
-                        zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
-                        onOperatorIdChange = { },
-                        onOperatorPinChange = { },
-                        onLogin = ::loginOperator,
-                        onLogout = ::logoutOperator,
-                        onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
-                        onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } },
-                        onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } },
-                        onClearEventHistory = {
-                            eventHistory.clear()
-                            telemetry.clearEvents()
+                        extended = extended,
+                        onBack = {
+                            rootPage = RootPage.DEVICES
+                            selectedDevice = null
                         },
-                        onExportEvents = {
-                            pendingExportText = EventLogExporter.toCsv(events)
-                            exportLauncher.launch(EventLogExporter.suggestedFileName())
-                        },
-                        onShareEvents = {
-                            val payload = EventLogExporter.toCsv(events)
-                            val intent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/csv"
-                                putExtra(Intent.EXTRA_SUBJECT, "HomeGuard-S3 event log")
-                                putExtra(Intent.EXTRA_TEXT, payload)
-                            }
-                            startActivity(Intent.createChooser(intent, "Поділитися журналом"))
-                        },
-                        onExportSettings = {
-                            pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings)
-                            settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName())
-                        },
-                        onImportSettings = { settingsRestoreLauncher.launch("application/json") },
-                        onCommand = ::executeCommand,
                     )
 
                     else -> RegisteredDevicesScreen(
