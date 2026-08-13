@@ -10,10 +10,10 @@ android {
 
     defaultConfig {
         applicationId = "ua.homeguard.s3"
-        minSdk = 26
+        minSdk = 21
         targetSdk = 35
-        versionCode = 54
-        versionName = "0.0.54"
+        versionCode = 55
+        versionName = "0.0.55"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
