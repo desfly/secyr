@@ -30,8 +30,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -40,9 +40,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.DiscoveredDevice
+import ua.homeguard.s3.network.LocalDiscoveryProgress
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -102,6 +102,7 @@ fun AddDeviceScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val discoveryProgress by LocalDiscoveryProgress.state.collectAsState()
     val discoveryPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.NEARBY_WIFI_DEVICES
     } else {
@@ -124,16 +125,12 @@ fun AddDeviceScreen(
     var method by remember { mutableStateOf(AddDeviceMethod.NETWORK) }
     var name by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
-    var searchRunning by remember { mutableStateOf(false) }
-    var searchProgress by remember { mutableFloatStateOf(0f) }
     val networkState = localNetworkState(context)
 
     fun effectiveName(): String = name.trim().ifBlank { "HomeGuard-S3" }
 
     fun startSearch() {
-        if (networkState != LocalNetworkState.WIFI || !permissionGranted || searchRunning) return
-        searchProgress = 0f
-        searchRunning = true
+        if (networkState != LocalNetworkState.WIFI || !permissionGranted || discoveryProgress.running) return
         scope.launch { runCatching { onRescan() } }
     }
 
@@ -146,15 +143,6 @@ fun AddDeviceScreen(
                 if (permissionGranted) runCatching { onRescan() }
             }
         }
-    }
-
-    LaunchedEffect(searchRunning) {
-        if (!searchRunning) return@LaunchedEffect
-        repeat(20) { step ->
-            searchProgress = (step + 1) / 20f
-            delay(400L)
-        }
-        searchRunning = false
     }
 
     LaunchedEffect(method, permissionGranted, networkState) {
@@ -215,12 +203,20 @@ fun AddDeviceScreen(
                         Text("Для автоматичного пошуку підключіться до Wi-Fi", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
                     }
                 } else {
-                    if (searchRunning) {
-                        Text("Пошук пристроїв… ${(searchProgress * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
-                        LinearProgressIndicator(progress = { searchProgress }, modifier = Modifier.fillMaxWidth())
+                    if (discoveryProgress.running) {
+                        Text(
+                            "${discoveryProgress.phase} · ${(discoveryProgress.fraction * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        LinearProgressIndicator(
+                            progress = { discoveryProgress.fraction },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     } else {
                         Button(onClick = { startSearch() }) { Text(if (discoveredDevices.isEmpty()) "Шукати" else "Шукати знову") }
-                        if (discoveredDevices.isEmpty() && searchProgress >= 1f) Text("Пристроїв не знайдено", style = MaterialTheme.typography.bodyMedium)
+                        if (discoveredDevices.isEmpty() && discoveryProgress.fraction >= 1f) {
+                            Text("Пристроїв не знайдено", style = MaterialTheme.typography.bodyMedium)
+                        }
                     }
 
                     if (discoveredDevices.isNotEmpty()) {
