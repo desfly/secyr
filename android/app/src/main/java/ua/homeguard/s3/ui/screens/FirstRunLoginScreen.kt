@@ -24,29 +24,32 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import ua.homeguard.s3.BuildConfig
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
-fun FirstRunLoginScreen(
-    onContinue: (String, String) -> Unit,
-) {
+fun FirstRunLoginScreen(onContinue: (String, String) -> Unit) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+    val buildDate = remember {
+        SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(BuildConfig.BUILD_TIME))
+    }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("HomeGuard-S3", style = MaterialTheme.typography.headlineMedium)
+        Text("MyFist", style = MaterialTheme.typography.headlineMedium)
+        Spacer(Modifier.height(4.dp))
+        Text("Версія: ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
+        Text("Збірка: $buildDate", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(8.dp))
-        Text(
-            "Перший вхід",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Spacer(Modifier.height(24.dp))
+        Text("Перший вхід", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(20.dp))
         OutlinedTextField(
             modifier = Modifier.fillMaxWidth(),
             value = username,
@@ -62,12 +65,10 @@ fun FirstRunLoginScreen(
             label = { Text("Пароль") },
             singleLine = true,
             visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = if (passwordVisible) KeyboardType.Text else KeyboardType.Password,
-            ),
+            keyboardOptions = KeyboardOptions(keyboardType = if (passwordVisible) KeyboardType.Text else KeyboardType.Password),
             trailingIcon = {
                 IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                    Text(if (passwordVisible) "🙈" else "👁")
+                    Text(if (passwordVisible) "Сховати" else "Показати")
                 }
             },
         )
@@ -76,8 +77,6 @@ fun FirstRunLoginScreen(
             modifier = Modifier.fillMaxWidth(),
             enabled = username.isNotBlank() && password.isNotBlank(),
             onClick = { onContinue(username.trim(), password) },
-        ) {
-            Text("Продовжити")
-        }
+        ) { Text("Продовжити") }
     }
 }
