@@ -25,6 +25,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.model.RegisteredDevice
 import ua.homeguard.s3.model.RegisteredDeviceAccess
+import ua.homeguard.s3.model.SystemMode
 
 @Composable
 fun RegisteredDevicesScreen(
@@ -86,9 +87,15 @@ private fun DeviceCard(
                 Spacer(Modifier.height(10.dp))
                 if (device.accessRevoked) {
                     Text("Доступ відкликано адміністратором", color = MaterialTheme.colorScheme.error)
+                } else if (device.lastKnownMode == null || device.lastKnownAlarmCount == null) {
+                    Text("Охорона: немає актуальних даних")
+                    Text("Аварії: немає актуальних даних")
                 } else {
-                    Text("Охорона: —")
-                    Text("Аварії: —")
+                    Text("Охорона: ${modeLabel(device.lastKnownMode)}")
+                    Text(
+                        text = if (device.lastKnownAlarmCount > 0) "Аварії: ${device.lastKnownAlarmCount}" else "Аварії: немає",
+                        color = if (device.lastKnownAlarmCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                    )
                 }
             }
         }
@@ -101,4 +108,12 @@ private fun connectionLabel(access: RegisteredDeviceAccess): String = when (acce
     RegisteredDeviceAccess.CREDENTIALS_REJECTED -> "Потрібна повторна авторизація"
     RegisteredDeviceAccess.ACCESS_REVOKED -> "Доступ відкликано"
     RegisteredDeviceAccess.UNKNOWN -> "Перевірка зв’язку…"
+}
+
+private fun modeLabel(mode: SystemMode): String = when (mode) {
+    SystemMode.DISARMED -> "Знято"
+    SystemMode.ARMED_HOME -> "Охорона вдома"
+    SystemMode.ARMED_AWAY -> "Повна охорона"
+    SystemMode.ALARM -> "Тривога"
+    SystemMode.MAINTENANCE -> "Обслуговування"
 }
