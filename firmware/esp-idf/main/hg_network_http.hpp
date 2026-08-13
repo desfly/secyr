@@ -14,6 +14,13 @@ public:
     void set_access_control(AccessControl* access) { access_ = access; }
     esp_err_t register_handlers(httpd_handle_t server);
 
+    // Used by the authenticated configuration restore path. The credential is
+    // accepted as input and persisted through the existing validated NVS path;
+    // there is intentionally no corresponding secret-export API.
+    bool restore_credentials(const std::string& ssid, const std::string& password) const {
+        return save_credentials(ssid, password);
+    }
+
 private:
     static esp_err_t status_get(httpd_req_t* request);
     static esp_err_t scan_get(httpd_req_t* request);
