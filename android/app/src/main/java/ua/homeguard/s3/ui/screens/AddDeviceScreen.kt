@@ -1,7 +1,10 @@
 package ua.homeguard.s3.ui.screens
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkInfo
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,8 +37,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import ua.homeguard.s3.model.DiscoveredDevice
+import ua.homeguard.s3.model.DiscoverySource
 
 enum class AddDeviceMethod { ID, IP, NETWORK }
+
+private enum class LocalNetworkState { WIFI, OTHER, OFFLINE }
+
+@Suppress("DEPRECATION")
+private fun localNetworkState(context: Context): LocalNetworkState {
+    val manager = context.applicationContext
+        .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        ?: return LocalNetworkState.OFFLINE
+    val info: NetworkInfo = manager.activeNetworkInfo ?: return LocalNetworkState.OFFLINE
+    if (!info.isConnected) return LocalNetworkState.OFFLINE
+    return if (info.type == ConnectivityManager.TYPE_WIFI) LocalNetworkState.WIFI else LocalNetworkState.OTHER
+}
 
 @Composable
 fun AddDeviceScreen(
@@ -68,6 +84,9 @@ fun AddDeviceScreen(
     var method by remember { mutableStateOf(AddDeviceMethod.NETWORK) }
     var name by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
+    val networkState = localNetworkState(context)
+    val mdnsCount = discoveredDevices.count { it.source == DiscoverySource.MDNS }
+    val udpCount = discoveredDevices.count { it.source == DiscoverySource.UDP }
 
     Column(
         modifier = Modifier
@@ -140,6 +159,25 @@ fun AddDeviceScreen(
 
             AddDeviceMethod.NETWORK -> {
                 Text("Знайдено: ${discoveredDevices.size}", style = MaterialTheme.typography.titleMedium)
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            when (networkState) {
+                                LocalNetworkState.WIFI -> "Мережа: Wi-Fi • локальний пошук доступний"
+                                LocalNetworkState.OTHER -> "Мережа: не Wi-Fi • локальний пошук може нічого не знайти"
+                                LocalNetworkState.OFFLINE -> "Мережа: немає активного підключення"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            "Пошук: mDNS + UDP broadcast • mDNS: $mdnsCount • UDP: $udpCount",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
                 if (!permissionGranted) {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(
@@ -156,6 +194,19 @@ fun AddDeviceScreen(
                             }
                         }
                     }
+                } else if (networkState != LocalNetworkState.WIFI) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text("Для автоматичного пошуку підключіться до Wi-Fi", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Телефон і HomeGuard-S3 мають бути в одній локальній мережі. IP можна ввести вручну на вкладці IP.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
                 } else if (discoveredDevices.isEmpty()) {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(
@@ -164,7 +215,7 @@ fun AddDeviceScreen(
                         ) {
                             Text("Пошук у локальній мережі…", style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                "Телефон і HomeGuard-S3 мають бути в одній Wi-Fi мережі.",
+                                "Одночасно працюють mDNS і UDP broadcast. Список оновлюється автоматично.",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
@@ -185,6 +236,10 @@ fun AddDeviceScreen(
                                         style = MaterialTheme.typography.titleMedium,
                                     )
                                     Text("${device.host}:${device.port}", style = MaterialTheme.typography.bodySmall)
+                                    Text(
+                                        "Виявлено: ${if (device.source == DiscoverySource.MDNS) "mDNS" else "UDP"}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
                                     Spacer(Modifier.height(2.dp))
                                     Button(
                                         enabled = name.isNotBlank(),
