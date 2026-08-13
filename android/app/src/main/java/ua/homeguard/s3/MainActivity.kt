@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +24,7 @@ import ua.homeguard.s3.events.EventLogExporter
 import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
+import ua.homeguard.s3.model.RegisteredDevice
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
@@ -30,15 +32,23 @@ import ua.homeguard.s3.network.LocalDiscoveryCoordinator
 import ua.homeguard.s3.network.TelemetrySocket
 import ua.homeguard.s3.notifications.HomeGuardNotifications
 import ua.homeguard.s3.repository.ProvisioningCoordinator
+import ua.homeguard.s3.storage.DeviceRegistryStore
 import ua.homeguard.s3.storage.EventHistoryStore
+import ua.homeguard.s3.storage.FirstRunAuthStore
 import ua.homeguard.s3.storage.SettingsBackupCodec
 import ua.homeguard.s3.storage.SettingsStore
 import ua.homeguard.s3.ui.screens.DashboardScreen
+import ua.homeguard.s3.ui.screens.DeviceListScreen
+import ua.homeguard.s3.ui.screens.FirstRunLoginScreen
 import ua.homeguard.s3.ui.screens.ProvisioningScreen
+
+private enum class AppRoute { LOGIN, DEVICES, ADD_DEVICE, DASHBOARD }
 
 class MainActivity : ComponentActivity() {
     private lateinit var discovery: LocalDiscoveryCoordinator
     private lateinit var settings: SettingsStore
+    private lateinit var registry: DeviceRegistryStore
+    private lateinit var firstRunAuth: FirstRunAuthStore
     private lateinit var eventHistory: EventHistoryStore
     private lateinit var resolver: DeviceEndpointResolver
     private lateinit var provisioning: ProvisioningCoordinator
@@ -46,11 +56,14 @@ class MainActivity : ComponentActivity() {
     private lateinit var session: DeviceSession
     private lateinit var commands: CommandController
     private lateinit var notifications: HomeGuardNotifications
+
     private val commandStatus = MutableStateFlow("Готово")
     private val backupStatus = MutableStateFlow("Backup/restore готовий")
     private val operatorId = MutableStateFlow("admin")
     private val operatorPin = MutableStateFlow("")
     private val accessSession = MutableStateFlow<AccessSession?>(null)
+    private val route = MutableStateFlow(AppRoute.DEVICES)
+
     private var pendingExportText: String = ""
     private var pendingSettingsBackupText: String = ""
 
@@ -107,7 +120,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         settings = SettingsStore(this)
+        registry = DeviceRegistryStore(this)
+        firstRunAuth = FirstRunAuthStore(this)
         eventHistory = EventHistoryStore(this)
         discovery = LocalDiscoveryCoordinator(this, lifecycleScope)
         resolver = DeviceEndpointResolver(settings, discovery, lifecycleScope)
@@ -116,19 +132,34 @@ class MainActivity : ComponentActivity() {
         session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry)
         commands = CommandController(resolver.endpoint, settings)
         notifications = HomeGuardNotifications(this)
+
+        registry.migrateLegacy(settings.settings.value.deviceId, settings.settings.value.lastKnownLocalUrl)
+        route.value = if (firstRunAuth.completed) AppRoute.DEVICES else AppRoute.LOGIN
+
         notifications.createChannels()
         requestNotificationPermission()
+
         lifecycleScope.launch {
             telemetry.liveEvents().collect { event ->
                 eventHistory.append(event)
                 notifications.notify(event, settings.settings.value)
             }
         }
+
+        lifecycleScope.launch {
+            settings.settings.collect { value ->
+                registry.migrateLegacy(value.deviceId, value.lastKnownLocalUrl)
+            }
+        }
+
         discovery.start()
         session.start()
+
         setContent {
             val appSettings by settings.settings.collectAsState()
-            val devices by discovery.devices.collectAsState()
+            val discoveredDevices by discovery.devices.collectAsState()
+            val registeredDevices by registry.devices.collectAsState()
+            val currentRoute by route.collectAsState()
             val endpoint by resolver.endpoint.collectAsState()
             val provisioningState by provisioning.state.collectAsState()
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
@@ -138,84 +169,111 @@ class MainActivity : ComponentActivity() {
             val currentOperator by operatorId.collectAsState()
             val currentPin by operatorPin.collectAsState()
             val currentAccessSession by accessSession.collectAsState()
+
             val diagnostics = SystemDiagnosticsEvaluator.evaluate(
                 deviceId = appSettings.deviceId,
                 route = endpoint.path.name,
-                localDevices = devices.size,
+                localDevices = discoveredDevices.size,
                 certificateSha256 = appSettings.localCertificateSha256,
                 snapshot = snapshot,
                 eventCount = events.size,
             )
+
             MaterialTheme {
-                val provisioningActive = provisioningState.phase in setOf(
-                    ProvisioningPhase.CONNECTING_SETUP_AP,
-                    ProvisioningPhase.AUTHORIZING,
-                    ProvisioningPhase.APPLYING,
-                    ProvisioningPhase.WAITING_FOR_RESTART,
-                    ProvisioningPhase.DISCOVERING_LOCAL
-                )
-                if (appSettings.deviceId.isBlank() || provisioningActive) {
-                    ProvisioningScreen(
-                        state = provisioningState,
-                        onScan = ::requestQrScan,
-                        onProvision = provisioning::provision
+                when (currentRoute) {
+                    AppRoute.LOGIN -> FirstRunLoginScreen { username, _ ->
+                        firstRunAuth.remember(username)
+                        operatorId.value = username
+                        route.value = AppRoute.DEVICES
+                    }
+
+                    AppRoute.DEVICES -> DeviceListScreen(
+                        devices = registeredDevices,
+                        onlineDeviceIds = discoveredDevices.map { it.deviceId }.toSet(),
+                        onAdd = { route.value = AppRoute.ADD_DEVICE },
+                        onQuickView = { },
+                        onOpen = ::openRegisteredDevice,
                     )
-                } else {
-                    DashboardScreen(
-                        versionName = BuildConfig.VERSION_NAME,
-                        localDevices = devices.size,
-                        route = endpoint.path.name,
-                        deviceId = appSettings.deviceId,
-                        snapshot = snapshot,
-                        events = events,
-                        diagnostics = diagnostics,
-                        backupStatus = maintenanceMessage,
-                        commandStatus = commandMessage,
-                        operatorId = currentOperator,
-                        operatorPin = currentPin,
-                        accessSession = currentAccessSession,
-                        criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled,
-                        statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
-                        zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
-                        onOperatorIdChange = { value ->
-                            operatorId.value = value.take(23)
-                            accessSession.value = null
-                        },
-                        onOperatorPinChange = { value ->
-                            operatorPin.value = value.filter(Char::isDigit).take(12)
-                            accessSession.value = null
-                        },
-                        onLogin = ::loginOperator,
-                        onLogout = ::logoutOperator,
-                        onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
-                        onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } },
-                        onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } },
-                        onClearEventHistory = {
-                            eventHistory.clear()
-                            telemetry.clearEvents()
-                        },
-                        onExportEvents = {
-                            pendingExportText = EventLogExporter.toCsv(events)
-                            exportLauncher.launch(EventLogExporter.suggestedFileName())
-                        },
-                        onShareEvents = {
-                            val payload = EventLogExporter.toCsv(events)
-                            val intent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/csv"
-                                putExtra(Intent.EXTRA_SUBJECT, "HomeGuard-S3 event log")
-                                putExtra(Intent.EXTRA_TEXT, payload)
-                            }
-                            startActivity(Intent.createChooser(intent, "Поділитися журналом"))
-                        },
-                        onExportSettings = {
-                            pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings)
-                            settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName())
-                        },
-                        onImportSettings = { settingsRestoreLauncher.launch("application/json") },
-                        onCommand = ::executeCommand,
-                    )
+
+                    AppRoute.ADD_DEVICE -> {
+                        BackHandler { route.value = AppRoute.DEVICES }
+                        ProvisioningScreen(
+                            state = provisioningState,
+                            onScan = ::requestQrScan,
+                            onProvision = provisioning::provision,
+                        )
+                    }
+
+                    AppRoute.DASHBOARD -> {
+                        BackHandler { route.value = AppRoute.DEVICES }
+                        DashboardScreen(
+                            versionName = BuildConfig.VERSION_NAME,
+                            localDevices = discoveredDevices.size,
+                            route = endpoint.path.name,
+                            deviceId = appSettings.deviceId,
+                            snapshot = snapshot,
+                            events = events,
+                            diagnostics = diagnostics,
+                            backupStatus = maintenanceMessage,
+                            commandStatus = commandMessage,
+                            operatorId = currentOperator,
+                            operatorPin = currentPin,
+                            accessSession = currentAccessSession,
+                            criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled,
+                            statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
+                            zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
+                            onOperatorIdChange = { value ->
+                                operatorId.value = value.take(23)
+                                accessSession.value = null
+                            },
+                            onOperatorPinChange = { value ->
+                                operatorPin.value = value.filter(Char::isDigit).take(12)
+                                accessSession.value = null
+                            },
+                            onLogin = ::loginOperator,
+                            onLogout = ::logoutOperator,
+                            onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
+                            onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } },
+                            onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } },
+                            onClearEventHistory = {
+                                eventHistory.clear()
+                                telemetry.clearEvents()
+                            },
+                            onExportEvents = {
+                                pendingExportText = EventLogExporter.toCsv(events)
+                                exportLauncher.launch(EventLogExporter.suggestedFileName())
+                            },
+                            onShareEvents = {
+                                val payload = EventLogExporter.toCsv(events)
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/csv"
+                                    putExtra(Intent.EXTRA_SUBJECT, "HomeGuard-S3 event log")
+                                    putExtra(Intent.EXTRA_TEXT, payload)
+                                }
+                                startActivity(Intent.createChooser(intent, "Поділитися журналом"))
+                            },
+                            onExportSettings = {
+                                pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings)
+                                settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName())
+                            },
+                            onImportSettings = { settingsRestoreLauncher.launch("application/json") },
+                            onCommand = ::executeCommand,
+                        )
+                    }
                 }
             }
+        }
+    }
+
+    private fun openRegisteredDevice(device: RegisteredDevice) {
+        lifecycleScope.launch {
+            settings.update(
+                settings.settings.value.copy(
+                    deviceId = device.deviceId,
+                    lastKnownLocalUrl = device.lastKnownUrl,
+                )
+            )
+            route.value = AppRoute.DASHBOARD
         }
     }
 
