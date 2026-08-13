@@ -26,7 +26,7 @@ if BUILD.exists():
     shutil.rmtree(BUILD)
 BUILD.mkdir()
 
-# The host mock validates main translation units and their link contract.  ESP-IDF
+# The host mock validates main translation units and their link contract. ESP-IDF
 # component implementations are intentionally not compiled here because they depend on
 # the real ESP-IDF SDK headers/libraries (mDNS, lwIP, cJSON, MQTT, task WDT, etc.).
 # Provide a tiny link-only stub for the discovery service newly referenced by app_main.
@@ -47,7 +47,7 @@ discovery_stub.write_text(
 )
 
 cmake_text = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
-source_refs = re.findall(r'"([^"]+\\.cpp)"', cmake_text)
+source_refs = re.findall(r'"([^"]+\.cpp)"', cmake_text)
 sources = []
 for ref in source_refs:
     path = (MAIN / ref).resolve()
