@@ -4,6 +4,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -19,15 +22,13 @@ import java.net.NetworkInterface
 import java.net.SocketTimeoutException
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 
 class UdpDeviceDiscovery(private val scope: CoroutineScope) {
     companion object {
         const val PORT = 45678
         const val REQUEST = "HG_DISCOVER_V1"
     }
+
     private val found = ConcurrentHashMap<String, DiscoveredDevice>()
     private val _devices = MutableStateFlow<List<DiscoveredDevice>>(emptyList())
     val devices: StateFlow<List<DiscoveredDevice>> = _devices.asStateFlow()
@@ -43,7 +44,10 @@ class UdpDeviceDiscovery(private val scope: CoroutineScope) {
         }
     }
 
-    fun stop() { job?.cancel(); job = null }
+    fun stop() {
+        job?.cancel()
+        job = null
+    }
 
     suspend fun scanOnce(timeoutMs: Int = 1_200) = withContext(Dispatchers.IO) {
         DatagramSocket().use { socket ->
@@ -75,20 +79,20 @@ class UdpDeviceDiscovery(private val scope: CoroutineScope) {
         if (json.optString("protocol") != "homeguard-discovery-v1") return null
         val deviceId = json.optString("device_id")
         if (deviceId.isBlank()) return null
+        val host = packet.address.hostAddress?.substringBefore('%') ?: return null
         val transport = runCatching {
             Transport.valueOf(json.optString("transport", "none").uppercase())
         }.getOrDefault(Transport.NONE)
         return DiscoveredDevice(
             deviceId = deviceId,
             serviceName = json.optString("hostname", deviceId),
-            host = json.optString("hostname").takeIf { it.isNotBlank() }?.trimEnd('.')?.let { "$it.local" }
-                ?: packet.address.hostAddress?.substringBefore('%') ?: return null,
+            host = host,
             port = json.optInt("port", 443),
             secure = json.optBoolean("secure", true),
             apiVersion = json.optInt("api_version", 1),
             transport = transport,
             pairingRequired = json.optBoolean("pairing_required", false),
-            source = DiscoverySource.UDP
+            source = DiscoverySource.UDP,
         )
     }
 
