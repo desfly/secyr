@@ -12,8 +12,8 @@ android {
         applicationId = "ua.homeguard.s3"
         minSdk = 21
         targetSdk = 35
-        versionCode = 55
-        versionName = "0.0.55"
+        versionCode = 56
+        versionName = "0.0.56"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
     }
