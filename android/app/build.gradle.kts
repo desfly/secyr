@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -7,7 +9,7 @@ plugins {
 val stableDebugKeystoreFile = layout.buildDirectory.file("myfist-debug.keystore").get().asFile
 stableDebugKeystoreFile.parentFile.mkdirs()
 stableDebugKeystoreFile.writeBytes(
-    java.util.Base64.getMimeDecoder().decode(
+    Base64.getMimeDecoder().decode(
         rootProject.file("ci/myfist-debug.keystore.b64").readText().trim()
     )
 )
