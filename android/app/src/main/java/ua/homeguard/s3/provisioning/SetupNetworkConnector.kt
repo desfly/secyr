@@ -18,10 +18,11 @@ class SetupNetworkConnector(context: Context) {
         .getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
     suspend fun connect(ssid: String, password: String): BoundSetupNetwork {
-        require(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            "На Android 5–9 підключіться до Setup AP вручну"
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            connectAndroid10Plus(ssid, password)
+        } else {
+            throw UnsupportedOperationException("На Android 5–9 підключіться до Setup AP вручну")
         }
-        return connectAndroid10Plus(ssid, password)
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
