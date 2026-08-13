@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -41,11 +42,17 @@ fun AddDeviceScreen(
     var value by remember { mutableStateOf("") }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("Додати пристрій", style = MaterialTheme.typography.headlineSmall)
-        Text("Назву бачить користувач. Технічний ID у списку не показується.")
+        Text("Додати пристрій", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "Вкажіть свою назву. Технічний ID у списку не показується.",
+            style = MaterialTheme.typography.bodySmall,
+        )
 
         OutlinedTextField(
             value = name,
@@ -55,10 +62,22 @@ fun AddDeviceScreen(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = method == AddDeviceMethod.NETWORK, onClick = { method = AddDeviceMethod.NETWORK }, label = { Text("Мережа") })
-            FilterChip(selected = method == AddDeviceMethod.IP, onClick = { method = AddDeviceMethod.IP }, label = { Text("IP") })
-            FilterChip(selected = method == AddDeviceMethod.ID, onClick = { method = AddDeviceMethod.ID }, label = { Text("ID") })
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip(
+                selected = method == AddDeviceMethod.NETWORK,
+                onClick = { method = AddDeviceMethod.NETWORK },
+                label = { Text("Мережа") },
+            )
+            FilterChip(
+                selected = method == AddDeviceMethod.IP,
+                onClick = { method = AddDeviceMethod.IP },
+                label = { Text("IP") },
+            )
+            FilterChip(
+                selected = method == AddDeviceMethod.ID,
+                onClick = { method = AddDeviceMethod.ID },
+                label = { Text("ID") },
+            )
         }
 
         when (method) {
@@ -92,21 +111,44 @@ fun AddDeviceScreen(
             }
 
             AddDeviceMethod.NETWORK -> {
-                Text("Знайдено в локальній мережі: ${discoveredDevices.size}")
+                Text(
+                    "Знайдено: ${discoveredDevices.size}",
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 if (discoveredDevices.isEmpty()) {
-                    Text("Пошук триває. Переконайтесь, що телефон і HomeGuard-S3 у тій самій мережі.")
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text("Пошук у локальній мережі…", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Телефон і HomeGuard-S3 мають бути в одній Wi-Fi мережі.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
                 } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         items(discoveredDevices, key = { it.deviceId }) { device ->
                             Card(modifier = Modifier.fillMaxWidth()) {
-                                Column(Modifier.padding(12.dp)) {
-                                    Text(device.serviceName.ifBlank { "HomeGuard-S3" }, style = MaterialTheme.typography.titleMedium)
-                                    Text("${device.host}:${device.port}")
-                                    Spacer(Modifier.height(6.dp))
+                                Column(
+                                    Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Text(
+                                        device.serviceName.ifBlank { "HomeGuard-S3" },
+                                        style = MaterialTheme.typography.titleMedium,
+                                    )
+                                    Text("${device.host}:${device.port}", style = MaterialTheme.typography.bodySmall)
+                                    Spacer(Modifier.height(2.dp))
                                     Button(
                                         enabled = name.isNotBlank(),
                                         onClick = { onAddDiscovered(name.trim(), device) },
-                                    ) { Text("Додати як «${name.ifBlank { "…" }}»") }
+                                    ) { Text(if (name.isBlank()) "Введіть назву" else "Додати") }
                                 }
                             }
                         }
@@ -115,6 +157,7 @@ fun AddDeviceScreen(
             }
         }
 
+        Spacer(Modifier.height(2.dp))
         OutlinedButton(onClick = onBack) { Text("Назад") }
     }
 }
