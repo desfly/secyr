@@ -12,8 +12,8 @@ android {
         applicationId = "ua.homeguard.s3"
         minSdk = 26
         targetSdk = 35
-        versionCode = 54
-        versionName = "0.0.54"
+        versionCode = 55
+        versionName = "0.0.55"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -31,8 +31,13 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
+            // CI runners create a fresh debug signing key. A fixed .debug package
+            // can therefore collide with an older CI build already installed on
+            // the phone and Android reports the update as an invalid package.
+            // Use a one-off test package id for this hardware-test build so it
+            // installs alongside any previous MyFist build without signature clash.
+            applicationIdSuffix = ".test55"
+            versionNameSuffix = "-test55"
         }
         release {
             isMinifyEnabled = false
