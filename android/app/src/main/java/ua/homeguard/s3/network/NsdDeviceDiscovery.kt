@@ -27,7 +27,14 @@ class NsdDeviceDiscovery(context: Context) {
             val attributes = serviceInfo.attributes
             fun attribute(name: String): String? = attributes[name]?.toString(StandardCharsets.UTF_8)
             val deviceId = attribute("id") ?: serviceInfo.serviceName
-            val host = attribute("host") ?: serviceInfo.host?.hostName ?: return
+            // Prefer the address Android actually resolved from mDNS. The TXT "host"
+            // value is useful metadata, but handing a *.local name to the HTTP client
+            // makes discovery look successful while the subsequent connection can fail
+            // on devices/networks where .local resolution is not available to OkHttp.
+            val host = serviceInfo.host?.hostAddress
+                ?: attribute("host")
+                ?: serviceInfo.host?.hostName
+                ?: return
             val secure = attribute("tls") != "0"
             val apiVersion = attribute("api")?.toIntOrNull() ?: 1
             found[deviceId] = DiscoveredDevice(
