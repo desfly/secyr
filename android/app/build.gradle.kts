@@ -4,6 +4,14 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val stableDebugKeystoreFile = layout.buildDirectory.file("myfist-debug.keystore").get().asFile
+stableDebugKeystoreFile.parentFile.mkdirs()
+stableDebugKeystoreFile.writeBytes(
+    java.util.Base64.getMimeDecoder().decode(
+        rootProject.file("ci/myfist-debug.keystore.b64").readText().trim()
+    )
+)
+
 android {
     namespace = "ua.homeguard.s3"
     compileSdk = 35
@@ -12,10 +20,19 @@ android {
         applicationId = "ua.homeguard.s3"
         minSdk = 21
         targetSdk = 35
-        versionCode = 58
-        versionName = "0.0.58"
+        versionCode = 59
+        versionName = "0.0.59"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
+    }
+
+    signingConfigs {
+        create("stableDebug") {
+            storeFile = stableDebugKeystoreFile
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     compileOptions {
@@ -35,6 +52,7 @@ android {
             isMinifyEnabled = false
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            signingConfig = signingConfigs.getByName("stableDebug")
         }
         release {
             isMinifyEnabled = false
