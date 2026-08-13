@@ -12,11 +12,13 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 class SetupNetworkConnector(context: Context) {
-    private val connectivity = context.applicationContext.getSystemService(ConnectivityManager::class.java)
+    @Suppress("DEPRECATION")
+    private val connectivity = context.applicationContext
+        .getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
     suspend fun connect(ssid: String, password: String): BoundSetupNetwork {
         require(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            "На Android 8–9 підключіться до Setup AP вручну"
+            "На Android 5–9 підключіться до Setup AP вручну"
         }
         val specifier = WifiNetworkSpecifier.Builder().setSsid(ssid).setWpa2Passphrase(password).build()
         val request = NetworkRequest.Builder()
@@ -30,6 +32,7 @@ class SetupNetworkConnector(context: Context) {
                     connectivity.bindProcessToNetwork(network)
                     if (continuation.isActive) continuation.resume(BoundSetupNetwork(connectivity, network, this))
                 }
+
                 override fun onUnavailable() {
                     if (continuation.isActive) continuation.resumeWithException(IllegalStateException("Setup AP недоступна"))
                 }
