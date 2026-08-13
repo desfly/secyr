@@ -18,9 +18,12 @@
 #include "hg_access_time.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "homeguard/access_control.hpp"
+#include "homeguard/access_matrix_policy.hpp"
 #include "homeguard/boot_readiness.hpp"
 #include "homeguard/physical_output_runtime.hpp"
 #include "homeguard/system_model.hpp"
+#include "homeguard/user_output_access.hpp"
+#include "homeguard/user_zone_access.hpp"
 #include "esp_check.h"
 
 #include "esp_event.h"
@@ -53,6 +56,8 @@ homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::AccessHttp g_access_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
 homeguard::AccessControl g_access_control;
+homeguard::UserZoneAccess g_zone_access;
+homeguard::UserOutputAccess g_output_access;
 hg::HardwareVerificationRecord g_hardware_verification;
 hg::CommissioningPersistentState g_commissioning_state;
 hg::BootReadinessReport g_boot_readiness;
@@ -139,6 +144,13 @@ void initialize_system_model()
     g_system_model.add_output(3, hg::ModelOutputType::Valve);
 }
 
+void initialize_access_matrices()
+{
+    if (!homeguard::sync_default_access_matrices(g_access_control, g_system_model, g_zone_access, g_output_access)) {
+        ESP_LOGE(kTag, "Access matrix initialization failed; non-Admin control remains fail-closed");
+    }
+}
+
 void initialize_physical_outputs()
 {
     if (!g_physical_outputs.initialize(g_gpio_outputs, g_hardware_verification, g_boot_readiness)) {
@@ -162,10 +174,11 @@ esp_err_t start_http_server()
     ESP_RETURN_ON_ERROR(g_lan_http.register_handlers(g_http_server), kTag, "LAN discovery routes");
     ESP_RETURN_ON_ERROR(g_cloud_http.register_handlers(g_http_server, &g_cloud_link, &g_cloud_store, &g_access_control), kTag, "cloud routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
-    ESP_RETURN_ON_ERROR(g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus, &g_access_control), kTag, "system routes");
+    ESP_RETURN_ON_ERROR(g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus, &g_access_control, &g_zone_access), kTag, "system routes");
     g_output_http.set_access_control(&g_access_control);
+    g_output_http.set_output_access(&g_output_access);
     ESP_RETURN_ON_ERROR(g_output_http.register_handlers(g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus), kTag, "output routes");
-    ESP_RETURN_ON_ERROR(g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed), kTag, "access routes");
+    ESP_RETURN_ON_ERROR(g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed, &g_system_model, &g_zone_access, &g_output_access), kTag, "access routes");
     g_service_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_service_http.register_handlers(g_http_server, &g_commissioning_store, &g_hardware_verification, &g_commissioning_state, &g_boot_readiness, &g_system_bus), kTag, "service routes");
     return g_build_http.register_handlers(g_http_server);
@@ -194,6 +207,7 @@ extern "C" void app_main()
     }
 
     initialize_system_model();
+    initialize_access_matrices();
     g_cloud_link.set_command_runtime(&g_system_model, &g_system_bus, &g_access_control);
     if (cloud_identity_error == ESP_OK) restore_cloud_config();
     initialize_physical_outputs();

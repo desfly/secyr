@@ -2,6 +2,9 @@
 
 #include "hg_access_nvs.hpp"
 #include "homeguard/access_control.hpp"
+#include "homeguard/system_model.hpp"
+#include "homeguard/user_output_access.hpp"
+#include "homeguard/user_zone_access.hpp"
 #include "esp_err.h"
 #include "esp_http_server.h"
 
@@ -12,7 +15,10 @@ public:
     esp_err_t register_handlers(httpd_handle_t server,
                                 AccessControl* access,
                                 AccessNvsStore* store,
-                                bool bootstrap_allowed);
+                                bool bootstrap_allowed,
+                                hg::SystemModel* model,
+                                UserZoneAccess* zone_access,
+                                UserOutputAccess* output_access);
 
 private:
     static esp_err_t users_post(httpd_req_t* request);
@@ -22,6 +28,9 @@ private:
 
     AccessControl* access_{};
     AccessNvsStore* store_{};
+    hg::SystemModel* model_{};
+    UserZoneAccess* zone_access_{};
+    UserOutputAccess* output_access_{};
     bool bootstrap_allowed_{};
 };
 
