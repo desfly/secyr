@@ -10,10 +10,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -70,48 +70,71 @@ fun DeviceListScreen(
         )
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column {
-                Text("HomeGuard-S3", style = MaterialTheme.typography.headlineSmall)
-                Text("Пристроїв: ${devices.size}", style = MaterialTheme.typography.bodyMedium)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.padding(top = 6.dp)) {
+                Text("HomeGuard-S3", style = MaterialTheme.typography.titleLarge)
+                Text("Пристроїв: ${devices.size}", style = MaterialTheme.typography.bodySmall)
             }
-            Button(onClick = onAdd) { Text("Додати") }
+            TextButton(onClick = onAdd) { Text("+ Додати") }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(10.dp))
         if (devices.isEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Зареєстрованих пристроїв немає")
-                Button(onClick = onAdd) { Text("Додати пристрій") }
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Пристроїв поки немає", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Додайте HomeGuard-S3 вручну або знайдіть його в локальній мережі.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    OutlinedButton(onClick = onAdd) { Text("Додати пристрій") }
+                }
             }
             return@Column
         }
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(devices, key = { it.deviceId }) { device ->
                 val revoked = device.accessState == DeviceAccessState.REVOKED
                 val online = device.deviceId in onlineDeviceIds
                 Card(
-                    modifier = Modifier.fillMaxWidth().combinedClickable(
-                        onClick = {
-                            expandedDeviceId = if (expandedDeviceId == device.deviceId) null else device.deviceId
-                            onQuickView(device)
-                        },
-                        onDoubleClick = { onOpen(device) },
-                    )
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .combinedClickable(
+                            onClick = {
+                                expandedDeviceId = if (expandedDeviceId == device.deviceId) null else device.deviceId
+                                onQuickView(device)
+                            },
+                            onDoubleClick = { if (!revoked) onOpen(device) },
+                        ),
                 ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
                             Text(
                                 text = device.name,
                                 style = MaterialTheme.typography.titleMedium,
-                                color = if (revoked) Color.Red else Color.Unspecified,
+                                color = if (revoked) MaterialTheme.colorScheme.error else Color.Unspecified,
+                                modifier = Modifier.padding(top = 8.dp),
                             )
                             TextButton(onClick = {
                                 renameTarget = device
                                 renameValue = device.name
-                            }) { Text("Змінити") }
+                            }) { Text("Назва") }
                         }
                         Text(
                             when {
@@ -119,14 +142,17 @@ fun DeviceListScreen(
                                 online -> "На зв'язку"
                                 else -> "Немає зв'язку"
                             },
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (revoked) MaterialTheme.colorScheme.error else Color.Unspecified,
                         )
                         if (expandedDeviceId == device.deviceId) {
-                            Spacer(Modifier.height(12.dp))
-                            Text("Стан охорони: очікується телеметрія")
-                            Text("Аварії: очікується телеметрія")
                             Spacer(Modifier.height(8.dp))
-                            OutlinedButton(onClick = { onOpen(device) }) { Text("Повний моніторинг") }
+                            Text("Охорона: очікується телеметрія", style = MaterialTheme.typography.bodyMedium)
+                            Text("Аварії: очікується телеметрія", style = MaterialTheme.typography.bodyMedium)
+                            if (!revoked) {
+                                Spacer(Modifier.height(6.dp))
+                                OutlinedButton(onClick = { onOpen(device) }) { Text("Повний моніторинг") }
+                            }
                         }
                     }
                 }
