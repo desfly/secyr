@@ -25,6 +25,11 @@ jobs:
         run: |
           mkdir -p "$HOME/.android"
           base64 -d android/ci/myfist-debug.keystore.b64 > "$HOME/.android/debug.keystore"
+      - name: Set update-test version 0.0.60
+        run: |
+          sed -i 's/versionCode = 59/versionCode = 60/' android/app/build.gradle.kts
+          sed -i 's/versionName = "0.0.59"/versionName = "0.0.60"/' android/app/build.gradle.kts
+          grep -E 'version(Code|Name)' android/app/build.gradle.kts
       - name: Build
         working-directory: android
         run: gradle --no-daemon lintDebug testDebugUnitTest assembleDebug
