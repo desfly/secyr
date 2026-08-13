@@ -36,6 +36,8 @@ import ua.homeguard.s3.model.RegisteredDevice
 fun DeviceListScreen(
     devices: List<RegisteredDevice>,
     onlineDeviceIds: Set<String>,
+    versionName: String,
+    buildDate: String,
     onAdd: () -> Unit,
     onQuickView: (RegisteredDevice) -> Unit,
     onOpen: (RegisteredDevice) -> Unit,
@@ -81,7 +83,9 @@ fun DeviceListScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Column(modifier = Modifier.padding(top = 6.dp)) {
-                Text("HomeGuard-S3", style = MaterialTheme.typography.titleLarge)
+                Text("MyFist", style = MaterialTheme.typography.titleLarge)
+                Text("Версія: $versionName", style = MaterialTheme.typography.bodySmall)
+                Text("Збірка: $buildDate", style = MaterialTheme.typography.bodySmall)
                 Text("Пристроїв: ${devices.size}", style = MaterialTheme.typography.bodySmall)
             }
             TextButton(onClick = onAdd) { Text("+ Додати") }
