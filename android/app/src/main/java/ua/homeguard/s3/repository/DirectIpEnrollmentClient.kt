@@ -1,11 +1,12 @@
 package ua.homeguard.s3.repository
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import ua.homeguard.s3.model.AccessLoginFailureReason
 import ua.homeguard.s3.model.AccessLoginRejectedException
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.DiscoverySource
@@ -13,30 +14,38 @@ import ua.homeguard.s3.model.Transport
 import ua.homeguard.s3.model.accessLoginFailureReason
 import ua.homeguard.s3.storage.SavedUserCredentials
 import java.io.IOException
+import java.net.URI
+import java.util.concurrent.TimeUnit
 
 class DirectIpEnrollmentClient(
-    private val client: OkHttpClient = OkHttpClient(),
+    private val client: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
+        .writeTimeout(3, TimeUnit.SECONDS)
+        .build(),
 ) {
     suspend fun resolveAndAuthorize(
         rawAddress: String,
         credentials: SavedUserCredentials,
-    ): DiscoveredDevice {
+    ): DiscoveredDevice = withContext(Dispatchers.IO) {
         val address = normalizeAddress(rawAddress)
-        val attempts = candidateUrls(address)
         var lastError: Throwable? = null
 
-        for ((secure, baseUrl) in attempts) {
+        for ((secure, baseUrl) in candidateUrls(address)) {
             try {
                 val json = login(baseUrl, credentials)
+                val uri = URI(baseUrl)
+                val defaultPort = if (secure) 443 else 80
+                val port = if (uri.port > 0) uri.port else defaultPort
                 val deviceId = json.optString("deviceId")
                     .ifBlank { json.optString("device_id") }
-                    .ifBlank { "manual:${address.lowercase()}" }
-                val url = okhttp3.HttpUrl.get(baseUrl)
-                return DiscoveredDevice(
+                    .ifBlank { "manual:${uri.host.lowercase()}:$port" }
+
+                return@withContext DiscoveredDevice(
                     deviceId = deviceId,
                     serviceName = "HomeGuard",
-                    host = url.host,
-                    port = url.port,
+                    host = uri.host,
+                    port = port,
                     secure = secure,
                     apiVersion = json.optInt("apiVersion", 1),
                     transport = Transport.NONE,
@@ -63,6 +72,7 @@ class DirectIpEnrollmentClient(
             .header("Accept", "application/json")
             .post(body)
             .build()
+
         client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
