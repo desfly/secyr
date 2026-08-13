@@ -214,6 +214,7 @@ class MainActivity : ComponentActivity() {
                             onAddById = ::addDeviceById,
                             onAddByIp = ::addDeviceByIp,
                             onAddDiscovered = ::addDiscoveredDevice,
+                            onRescan = { discovery.rescan() },
                             onBack = { route.value = AppRoute.DEVICES },
                         )
                     }
