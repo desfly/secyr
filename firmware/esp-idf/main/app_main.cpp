@@ -17,6 +17,7 @@
 #include "hg_access_http.hpp"
 #include "hg_access_time.hpp"
 #include "hg_commissioning_nvs.hpp"
+#include "device_discovery.hpp"
 #include "homeguard/access_control.hpp"
 #include "homeguard/boot_readiness.hpp"
 #include "homeguard/physical_output_runtime.hpp"
@@ -30,6 +31,7 @@
 #include "nvs_flash.h"
 
 #include <algorithm>
+#include <string>
 
 namespace {
 
@@ -59,6 +61,7 @@ hg::BootReadinessReport g_boot_readiness;
 hg::PhysicalOutputRuntime g_physical_outputs;
 hg::SystemEventBus g_system_bus;
 hg::SystemModel g_system_model{g_system_bus};
+DeviceDiscoveryService g_device_discovery;
 httpd_handle_t g_http_server = nullptr;
 bool g_access_bootstrap_allowed = false;
 
@@ -204,6 +207,15 @@ extern "C" void app_main()
 
     const auto http_error = start_http_server();
     if (http_error != ESP_OK) ESP_LOGE(kTag, "HTTP server failed: %s", esp_err_to_name(http_error));
+
+    if (cloud_identity_error == ESP_OK) {
+        const std::string discovery_hostname = std::string{"homeguard-"} + g_cloud_link.device_id();
+        if (!g_device_discovery.begin(g_cloud_link.device_id(), discovery_hostname, 80, false)) {
+            ESP_LOGE(kTag, "Local device discovery failed to start");
+        } else {
+            ESP_LOGI(kTag, "Local device discovery started on UDP/%u and mDNS", hg::discovery_udp_port);
+        }
+    }
 
     const auto telemetry_error = g_telemetry.start(&g_hardware);
     if (telemetry_error != ESP_OK) ESP_LOGE(kTag, "Telemetry task failed: %s", esp_err_to_name(telemetry_error));
