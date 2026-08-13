@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -29,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -36,8 +38,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 import ua.homeguard.s3.model.DiscoveredDevice
-import ua.homeguard.s3.model.DiscoverySource
 
 enum class AddDeviceMethod { ID, IP, NETWORK }
 
@@ -84,9 +86,31 @@ fun AddDeviceScreen(
     var method by remember { mutableStateOf(AddDeviceMethod.NETWORK) }
     var name by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
+    var searchRunning by remember { mutableStateOf(false) }
+    var searchProgress by remember { mutableFloatStateOf(0f) }
     val networkState = localNetworkState(context)
-    val mdnsCount = discoveredDevices.count { it.source == DiscoverySource.MDNS }
-    val udpCount = discoveredDevices.count { it.source == DiscoverySource.UDP }
+
+    fun startSearch() {
+        if (networkState == LocalNetworkState.WIFI && permissionGranted) {
+            searchProgress = 0f
+            searchRunning = true
+        }
+    }
+
+    LaunchedEffect(searchRunning) {
+        if (!searchRunning) return@LaunchedEffect
+        repeat(20) { step ->
+            searchProgress = (step + 1) / 20f
+            delay(400L)
+        }
+        searchRunning = false
+    }
+
+    LaunchedEffect(method, permissionGranted, networkState) {
+        if (method == AddDeviceMethod.NETWORK && permissionGranted && networkState == LocalNetworkState.WIFI && discoveredDevices.isEmpty()) {
+            startSearch()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -159,25 +183,7 @@ fun AddDeviceScreen(
 
             AddDeviceMethod.NETWORK -> {
                 Text("Знайдено: ${discoveredDevices.size}", style = MaterialTheme.typography.titleMedium)
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Text(
-                            when (networkState) {
-                                LocalNetworkState.WIFI -> "Мережа: Wi-Fi • локальний пошук доступний"
-                                LocalNetworkState.OTHER -> "Мережа: не Wi-Fi • локальний пошук може нічого не знайти"
-                                LocalNetworkState.OFFLINE -> "Мережа: немає активного підключення"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Text(
-                            "Пошук: mDNS + UDP broadcast • mDNS: $mdnsCount • UDP: $udpCount",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
+
                 if (!permissionGranted) {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(
@@ -185,10 +191,6 @@ fun AddDeviceScreen(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             Text("Потрібен доступ до пристроїв поруч", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "Дозвіл потрібен лише для пошуку HomeGuard-S3 у вашій Wi-Fi мережі.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
                             OutlinedButton(onClick = { permissionLauncher.launch(discoveryPermission) }) {
                                 Text("Дозволити")
                             }
@@ -196,55 +198,50 @@ fun AddDeviceScreen(
                     }
                 } else if (networkState != LocalNetworkState.WIFI) {
                     Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
+                        Text(
+                            "Для автоматичного пошуку підключіться до Wi-Fi",
                             modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text("Для автоматичного пошуку підключіться до Wi-Fi", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "Телефон і HomeGuard-S3 мають бути в одній локальній мережі. IP можна ввести вручну на вкладці IP.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                } else if (discoveredDevices.isEmpty()) {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text("Пошук у локальній мережі…", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "Одночасно працюють mDNS і UDP broadcast. Список оновлюється автоматично.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
                     }
                 } else {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(discoveredDevices, key = { it.deviceId }) { device ->
-                            Card(modifier = Modifier.fillMaxWidth()) {
-                                Column(
-                                    Modifier.padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                                ) {
-                                    Text(
-                                        device.serviceName.ifBlank { "HomeGuard-S3" },
-                                        style = MaterialTheme.typography.titleMedium,
-                                    )
-                                    Text("${device.host}:${device.port}", style = MaterialTheme.typography.bodySmall)
-                                    Text(
-                                        "Виявлено: ${if (device.source == DiscoverySource.MDNS) "mDNS" else "UDP"}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                    Spacer(Modifier.height(2.dp))
-                                    Button(
-                                        enabled = name.isNotBlank(),
-                                        onClick = { onAddDiscovered(name.trim(), device) },
-                                    ) { Text(if (name.isBlank()) "Введіть назву" else "Додати") }
+                    if (searchRunning) {
+                        Text("Пошук пристроїв… ${(searchProgress * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
+                        LinearProgressIndicator(
+                            progress = searchProgress,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        Button(onClick = { startSearch() }) {
+                            Text(if (discoveredDevices.isEmpty()) "Шукати" else "Шукати знову")
+                        }
+                        if (discoveredDevices.isEmpty() && searchProgress >= 1f) {
+                            Text("Пристроїв не знайдено", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+
+                    if (discoveredDevices.isNotEmpty()) {
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            items(discoveredDevices, key = { it.deviceId }) { device ->
+                                Card(modifier = Modifier.fillMaxWidth()) {
+                                    Column(
+                                        Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                                    ) {
+                                        Text(
+                                            device.serviceName.ifBlank { "HomeGuard-S3" },
+                                            style = MaterialTheme.typography.titleMedium,
+                                        )
+                                        Text("${device.host}:${device.port}", style = MaterialTheme.typography.bodySmall)
+                                        Spacer(Modifier.height(2.dp))
+                                        Button(
+                                            enabled = name.isNotBlank(),
+                                            onClick = { onAddDiscovered(name.trim(), device) },
+                                        ) { Text(if (name.isBlank()) "Введіть назву" else "Додати") }
+                                    }
                                 }
                             }
                         }
