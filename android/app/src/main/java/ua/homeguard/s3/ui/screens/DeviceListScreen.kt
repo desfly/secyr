@@ -28,16 +28,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import ua.homeguard.s3.BuildConfig
 import ua.homeguard.s3.model.DeviceAccessState
 import ua.homeguard.s3.model.RegisteredDevice
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DeviceListScreen(
     devices: List<RegisteredDevice>,
     onlineDeviceIds: Set<String>,
-    versionName: String,
-    buildDate: String,
     onAdd: () -> Unit,
     onQuickView: (RegisteredDevice) -> Unit,
     onOpen: (RegisteredDevice) -> Unit,
@@ -46,6 +48,9 @@ fun DeviceListScreen(
     var expandedDeviceId by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<RegisteredDevice?>(null) }
     var renameValue by remember { mutableStateOf("") }
+    val buildDate = remember {
+        SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(BuildConfig.BUILD_TIME))
+    }
 
     renameTarget?.let { target ->
         AlertDialog(
@@ -84,7 +89,7 @@ fun DeviceListScreen(
         ) {
             Column(modifier = Modifier.padding(top = 6.dp)) {
                 Text("MyFist", style = MaterialTheme.typography.titleLarge)
-                Text("Версія: $versionName", style = MaterialTheme.typography.bodySmall)
+                Text("Версія: ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall)
                 Text("Збірка: $buildDate", style = MaterialTheme.typography.bodySmall)
                 Text("Пристроїв: ${devices.size}", style = MaterialTheme.typography.bodySmall)
             }
