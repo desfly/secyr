@@ -23,7 +23,7 @@ import ua.homeguard.s3.diagnostics.SystemDiagnosticsEvaluator
 import ua.homeguard.s3.events.EventLogExporter
 import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
-import ua.homeguard.s3.model.ProvisioningPhase
+import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.RegisteredDevice
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.network.DeviceEndpointResolver
@@ -37,10 +37,10 @@ import ua.homeguard.s3.storage.EventHistoryStore
 import ua.homeguard.s3.storage.FirstRunAuthStore
 import ua.homeguard.s3.storage.SettingsBackupCodec
 import ua.homeguard.s3.storage.SettingsStore
+import ua.homeguard.s3.ui.screens.AddDeviceScreen
 import ua.homeguard.s3.ui.screens.DashboardScreen
 import ua.homeguard.s3.ui.screens.DeviceListScreen
 import ua.homeguard.s3.ui.screens.FirstRunLoginScreen
-import ua.homeguard.s3.ui.screens.ProvisioningScreen
 
 private enum class AppRoute { LOGIN, DEVICES, ADD_DEVICE, DASHBOARD }
 
@@ -161,7 +161,6 @@ class MainActivity : ComponentActivity() {
             val registeredDevices by registry.devices.collectAsState()
             val currentRoute by route.collectAsState()
             val endpoint by resolver.endpoint.collectAsState()
-            val provisioningState by provisioning.state.collectAsState()
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
             val events by telemetry.events().collectAsState(initial = emptyList())
             val commandMessage by commandStatus.collectAsState()
@@ -197,10 +196,12 @@ class MainActivity : ComponentActivity() {
 
                     AppRoute.ADD_DEVICE -> {
                         BackHandler { route.value = AppRoute.DEVICES }
-                        ProvisioningScreen(
-                            state = provisioningState,
-                            onScan = ::requestQrScan,
-                            onProvision = provisioning::provision,
+                        AddDeviceScreen(
+                            discoveredDevices = discoveredDevices.filterNot { found -> registeredDevices.any { it.deviceId == found.deviceId } },
+                            onAddById = ::addDeviceById,
+                            onAddByIp = ::addDeviceByIp,
+                            onAddDiscovered = ::addDiscoveredDevice,
+                            onBack = { route.value = AppRoute.DEVICES },
                         )
                     }
 
@@ -263,6 +264,40 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun addDeviceById(name: String, deviceId: String) {
+        registry.upsert(RegisteredDevice(deviceId = deviceId, name = name))
+        route.value = AppRoute.DEVICES
+    }
+
+    private fun addDeviceByIp(name: String, ip: String) {
+        val host = ip.removePrefix("http://").removePrefix("https://").substringBefore('/').substringBefore(':').trim()
+        if (host.isBlank()) return
+        val discovered = discovery.devices.value.firstOrNull { it.host.equals(host, ignoreCase = true) }
+        if (discovered != null) {
+            addDiscoveredDevice(name, discovered)
+            return
+        }
+        registry.upsert(
+            RegisteredDevice(
+                deviceId = "ip:$host",
+                name = name,
+                lastKnownUrl = "http://$host",
+            )
+        )
+        route.value = AppRoute.DEVICES
+    }
+
+    private fun addDiscoveredDevice(name: String, device: DiscoveredDevice) {
+        registry.upsert(
+            RegisteredDevice(
+                deviceId = device.deviceId,
+                name = name,
+                lastKnownUrl = device.baseUrl,
+            )
+        )
+        route.value = AppRoute.DEVICES
     }
 
     private fun openRegisteredDevice(device: RegisteredDevice) {
