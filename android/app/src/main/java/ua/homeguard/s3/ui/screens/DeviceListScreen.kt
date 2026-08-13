@@ -1,5 +1,6 @@
 package ua.homeguard.s3.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.model.DeviceAccessState
 import ua.homeguard.s3.model.RegisteredDevice
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DeviceListScreen(
     devices: List<RegisteredDevice>,
