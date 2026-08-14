@@ -73,7 +73,7 @@ esp_err_t Pzem004t::read(Pzem004tReading* reading, std::uint8_t address)
         response[0] != address ||
         response[1] != kReadInputRegisters ||
         response[2] != 20) {
-        return ESP_ERR_INVALID_RESPONSE;
+        return ESP_FAIL;
     }
 
     const auto received_crc = static_cast<std::uint16_t>(response[23]) |
