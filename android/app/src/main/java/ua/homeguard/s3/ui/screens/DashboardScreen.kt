@@ -285,13 +285,25 @@ fun DashboardScreen(
         else items(filteredEvents.take(32), key = { it.sequence }) { event ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp)) {
-                    Text(event.event, style = MaterialTheme.typography.titleSmall)
-                    Text("#${event.sequence} · source ${event.sourceId} · value ${event.value}")
+                    Text(eventDisplayTitle(event), style = MaterialTheme.typography.titleSmall)
+                    Text(eventDisplayDetails(event))
                     Text("Категорія: ${EventLogFilterEngine.categoryOf(event).name}", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
     }
+}
+
+private fun eventDisplayTitle(event: SystemEventRecord): String = when {
+    event.event == "input.changed" && event.sourceId == 0 -> "Tamper"
+    event.event == "input.changed" && event.sourceId == 1 -> "Power Fail"
+    else -> event.event
+}
+
+private fun eventDisplayDetails(event: SystemEventRecord): String = when {
+    event.event == "input.changed" && event.sourceId in 0..1 ->
+        "#${event.sequence} · ${if (event.value == 0) "LOW" else "HIGH"}"
+    else -> "#${event.sequence} · source ${event.sourceId} · value ${event.value}"
 }
 
 @Composable
