@@ -61,6 +61,25 @@ class HttpDeviceApi(
         )
     }
 
+    suspend fun networkStatus(): JSONObject = execute(RuntimeApiContract.NETWORK_STATUS_PATH)
+
+    suspend fun configureWifi(ssid: String, password: String, actor: String, credential: String): JSONObject {
+        require(ssid.isNotBlank() && ssid.length <= 32) { "SSID is invalid" }
+        require(password.isEmpty() || password.length in 8..64) { "Wi-Fi password is invalid" }
+        val normalizedActor = actor.trim()
+        require(normalizedActor.isNotEmpty()) { "User ID is required" }
+        require(credential.length in 4..12 && credential.all(Char::isDigit)) { "PIN must contain 4-12 digits" }
+        return execute(
+            RuntimeApiContract.NETWORK_CONNECT_PATH,
+            "POST",
+            JSONObject()
+                .put("ssid", ssid)
+                .put("password", password)
+                .put("actor", normalizedActor)
+                .put("credential", credential),
+        )
+    }
+
     suspend fun telemetrySession(actor: String, credential: String): String {
         val json = execute(
             RuntimeApiContract.TELEMETRY_SESSION_PATH,
