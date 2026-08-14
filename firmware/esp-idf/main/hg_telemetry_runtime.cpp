@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <cstdint>
 #include <sstream>
 
 namespace homeguard::idf {
