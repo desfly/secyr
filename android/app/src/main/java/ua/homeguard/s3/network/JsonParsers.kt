@@ -24,6 +24,8 @@ internal object JsonParsers {
                     index = item.optInt("index", index),
                     value = item.optDouble("value", 0.0).toFloat(),
                     state = item.optString("state", "unknown"),
+                    unit = item.optString("unit", ""),
+                    valid = item.optBoolean("valid", !item.optString("state", "unknown").equals("sensor_fault", true)),
                 )
             }
         }.orEmpty()
