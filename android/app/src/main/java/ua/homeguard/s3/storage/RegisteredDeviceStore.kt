@@ -17,9 +17,20 @@ data class RegisteredDevice(
 )
 
 class RegisteredDeviceStore(context: Context) {
+    companion object {
+        @Volatile private var activeStore: RegisteredDeviceStore? = null
+
+        suspend fun markActiveAuthorization(deviceId: String, authorized: Boolean) {
+            if (deviceId.isBlank()) return
+            activeStore?.markAuthorization(deviceId, authorized)
+        }
+    }
+
     private val preferences = context.applicationContext.getSharedPreferences("homeguard_devices", Context.MODE_PRIVATE)
     private val _devices = MutableStateFlow(load())
     val devices: StateFlow<List<RegisteredDevice>> = _devices.asStateFlow()
+
+    init { activeStore = this }
 
     suspend fun addOrUpdate(device: DiscoveredDevice, requestedName: String? = null) {
         val current = _devices.value.toMutableList()
@@ -34,7 +45,7 @@ class RegisteredDeviceStore(context: Context) {
             name = displayName,
             baseUrl = device.baseUrl,
             lastSeenAtMs = device.seenAtMs,
-            authorized = true,
+            authorized = previous?.authorized ?: true,
         )
         if (index >= 0) current[index] = registered else current += registered
         persist(current)
@@ -49,7 +60,7 @@ class RegisteredDeviceStore(context: Context) {
             name = previous?.name ?: name,
             baseUrl = baseUrl,
             lastSeenAtMs = System.currentTimeMillis(),
-            authorized = true,
+            authorized = previous?.authorized ?: true,
         )
         if (index >= 0) current[index] = registered else current += registered
         persist(current)
@@ -62,6 +73,7 @@ class RegisteredDeviceStore(context: Context) {
     }
 
     suspend fun markAuthorization(deviceId: String, authorized: Boolean) {
+        if (_devices.value.none { it.deviceId == deviceId }) return
         persist(_devices.value.map { if (it.deviceId == deviceId) it.copy(authorized = authorized) else it })
     }
 
