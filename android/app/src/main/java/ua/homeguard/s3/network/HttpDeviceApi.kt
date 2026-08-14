@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import org.json.JSONArray
 import org.json.JSONObject
 import ua.homeguard.s3.model.*
 import java.io.IOException
@@ -83,11 +84,42 @@ class HttpDeviceApi(
     }
 
     override suspend fun diagnostics(): Diagnostics = JsonParsers.diagnostics(execute(LocalApiContract.HEALTH_PATH))
-    override suspend fun snapshot(): SystemSnapshot = JsonParsers.snapshot(execute(LocalApiContract.STATUS_PATH))
+
+    override suspend fun snapshot(): SystemSnapshot {
+        val status = execute(LocalApiContract.STATUS_PATH)
+        val zones = execute(LocalApiContract.ZONES_PATH).optJSONArray("zones") ?: JSONArray()
+        val outputs = execute(LocalApiContract.OUTPUTS_PATH).optJSONArray("outputs") ?: JSONArray()
+        val partitions = execute(LocalApiContract.PARTITIONS_PATH).optJSONArray("partitions") ?: JSONArray()
+
+        // The ESP-IDF system API exposes status counters and detailed resources on
+        // separate endpoints. Build one stable Android snapshot without requiring a
+        // firmware-side breaking API change.
+        status.put("zones", zones)
+        status.put("outputs", outputs)
+        status.put("mode", modeFromPartitions(partitions))
+        return JsonParsers.snapshot(status)
+    }
 
     override suspend fun challenge(type: CommandType): Long {
         val json = execute(LocalApiContract.CHALLENGE_PATH, "POST", JSONObject().put("command", type.name.lowercase()))
         return json.getLong("challenge")
+    }
+
+    private fun modeFromPartitions(partitions: JSONArray): String {
+        var armedHome = false
+        var armedAway = false
+        for (index in 0 until partitions.length()) {
+            when (partitions.optJSONObject(index)?.optString("armState", "disarmed")?.lowercase()) {
+                "alarm" -> return SystemMode.ALARM.name
+                "away" -> armedAway = true
+                "stay" -> armedHome = true
+            }
+        }
+        return when {
+            armedAway -> SystemMode.ARMED_AWAY.name
+            armedHome -> SystemMode.ARMED_HOME.name
+            else -> SystemMode.DISARMED.name
+        }
     }
 
     private suspend fun execute(path: String, method: String = "GET", json: JSONObject? = null): JSONObject {
