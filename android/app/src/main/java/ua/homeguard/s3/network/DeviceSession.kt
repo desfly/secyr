@@ -36,7 +36,7 @@ class DeviceSession(
             }
         }
         authorizationJob = scope.launch {
-            telemetry.connection().distinctUntilChanged().collect { state ->
+            telemetry.connection().collect { state ->
                 val deviceId = settings.settings.value.deviceId
                 when (state) {
                     TelemetryConnectionState.UNAUTHORIZED -> RegisteredDeviceStore.markActiveAuthorization(deviceId, false)
