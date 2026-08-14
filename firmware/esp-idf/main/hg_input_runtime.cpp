@@ -89,23 +89,24 @@ void InputRuntime::run()
 
             input.stable_high = input.candidate_high;
             input.candidate_count = 0;
-            const hg::SystemEvent event{
+            const auto now_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+            const hg::SystemEvent raw_event{
                 .type = hg::SystemEventType::InputChanged,
                 .source_id = input.source_id,
-                .timestamp_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000),
+                .timestamp_ms = now_ms,
                 .sequence = 0,
                 .value = input.stable_high ? 1 : 0,
             };
-            if (bus_->publish(event)) (void)bus_->dispatch_all();
+            if (bus_->publish(raw_event)) (void)bus_->dispatch_all();
 
             if (input.polarity != InputPolarity::Unknown) {
                 const bool active = input_is_active(input.polarity, input.stable_high);
                 const hg::SystemEvent logical_event{
                     .type = input.source_id == 0
                         ? hg::SystemEventType::Tamper
-                        : hg::SystemEventType::InputChanged,
+                        : hg::SystemEventType::PowerFail,
                     .source_id = input.source_id,
-                    .timestamp_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000),
+                    .timestamp_ms = now_ms,
                     .sequence = 0,
                     .value = active ? 1 : 0,
                 };
