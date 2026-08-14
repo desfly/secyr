@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import ua.homeguard.s3.model.DiscoveredDevice
@@ -53,6 +55,7 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
     val devices: StateFlow<List<DiscoveredDevice>> = _devices.asStateFlow()
     private val _status = MutableStateFlow(ScanStatus())
     val status: StateFlow<ScanStatus> = _status.asStateFlow()
+    private val scanMutex = Mutex()
     private var job: Job? = null
 
     fun start() {
@@ -78,99 +81,101 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
         job = null
     }
 
-    suspend fun scanOnce(timeoutMs: Int = 2_400) = withContext(Dispatchers.IO) {
-        val wifiNetwork = findWifiNetwork()
-        val networkLabel = describeNetwork(wifiNetwork)
-        val targets = broadcastAddresses(wifiNetwork).mapNotNull { it.hostAddress }.distinct()
-        _status.value = ScanStatus(
-            phase = "sending",
-            progress = 0.05f,
-            targets = targets,
-            network = networkLabel,
-            error = if (wifiNetwork == null) "Wi-Fi network not resolved; using default route" else "",
-        )
-
-        DatagramSocket().use { socket ->
-            socket.broadcast = true
-            socket.soTimeout = 120
-            if (wifiNetwork != null) {
-                runCatching { wifiNetwork.bindSocket(socket) }
-                    .onSuccess { Log.d(TAG, "Discovery socket bound to $networkLabel") }
-                    .onFailure { error ->
-                        Log.w(TAG, "Unable to bind discovery socket to $networkLabel", error)
-                        _status.value = _status.value.copy(
-                            error = "Wi-Fi bind failed: ${error.message ?: error.javaClass.simpleName}",
-                        )
-                    }
-            } else {
-                Log.w(TAG, "No Wi-Fi Network object found; UDP discovery uses default route")
-            }
-
-            val request = REQUEST.toByteArray(Charsets.UTF_8)
-            var sent = 0
-            var received = 0
-            var accepted = 0
-
-            targets.forEachIndexed { index, rawAddress ->
-                val address = InetAddress.getByName(rawAddress)
-                runCatching {
-                    socket.send(DatagramPacket(request, request.size, address, PORT))
-                    sent++
-                    Log.d(TAG, "Discovery request sent to ${address.hostAddress}:$PORT via $networkLabel")
-                }.onFailure { error ->
-                    Log.w(TAG, "Discovery send failed for ${address.hostAddress}:$PORT", error)
-                }
-                val sendProgress = 0.05f + 0.15f * ((index + 1).toFloat() / targets.size.coerceAtLeast(1))
-                _status.value = _status.value.copy(progress = sendProgress, sent = sent)
-            }
-
-            _status.value = _status.value.copy(phase = "listening", progress = 0.20f, sent = sent)
-            Log.d(TAG, "UDP discovery listening: sent=$sent targets=${targets.size} network=$networkLabel")
-
-            val startedAt = System.currentTimeMillis()
-            val deadline = startedAt + timeoutMs
-            val buffer = ByteArray(1024)
-            while (System.currentTimeMillis() < deadline) {
-                val elapsed = System.currentTimeMillis() - startedAt
-                val listenFraction = (elapsed.toFloat() / timeoutMs.coerceAtLeast(1)).coerceIn(0f, 1f)
-                _status.value = _status.value.copy(progress = 0.20f + 0.75f * listenFraction)
-
-                val packet = DatagramPacket(buffer, buffer.size)
-                try {
-                    socket.receive(packet)
-                    received++
-                    val responder = packet.address.hostAddress?.substringBefore('%').orEmpty()
-                    val parsed = runCatching { parse(packet) }
-                        .onFailure { error -> Log.w(TAG, "Invalid discovery reply from $responder", error) }
-                        .getOrNull()
-                    if (parsed != null) {
-                        accepted++
-                        found[parsed.deviceId] = parsed
-                        Log.i(TAG, "HomeGuard found: id=${parsed.deviceId} host=${parsed.host} port=${parsed.port}")
-                    }
-                    _status.value = _status.value.copy(
-                        received = received,
-                        accepted = accepted,
-                        lastResponder = responder,
-                    )
-                } catch (_: SocketTimeoutException) {
-                    // Timeout is expected; loop updates progress until the scan window closes.
-                }
-            }
-
-            Log.d(TAG, "UDP discovery complete: received=$received accepted=$accepted devices=${found.size} network=$networkLabel")
-            _status.value = _status.value.copy(
-                phase = "done",
-                progress = 1f,
-                sent = sent,
-                received = received,
-                accepted = accepted,
+    suspend fun scanOnce(timeoutMs: Int = 2_400) = scanMutex.withLock {
+        withContext(Dispatchers.IO) {
+            val wifiNetwork = findWifiNetwork()
+            val networkLabel = describeNetwork(wifiNetwork)
+            val targets = broadcastAddresses(wifiNetwork).mapNotNull { it.hostAddress }.distinct()
+            _status.value = ScanStatus(
+                phase = "sending",
+                progress = 0.05f,
+                targets = targets,
+                network = networkLabel,
+                error = if (wifiNetwork == null) "Wi-Fi network not resolved; using default route" else "",
             )
-        }
 
-        val expiry = System.currentTimeMillis() - 30_000L
-        found.entries.removeIf { it.value.seenAtMs < expiry }
-        _devices.value = found.values.sortedBy { it.deviceId }
+            DatagramSocket().use { socket ->
+                socket.broadcast = true
+                socket.soTimeout = 120
+                if (wifiNetwork != null) {
+                    runCatching { wifiNetwork.bindSocket(socket) }
+                        .onSuccess { Log.d(TAG, "Discovery socket bound to $networkLabel") }
+                        .onFailure { error ->
+                            Log.w(TAG, "Unable to bind discovery socket to $networkLabel", error)
+                            _status.value = _status.value.copy(
+                                error = "Wi-Fi bind failed: ${error.message ?: error.javaClass.simpleName}",
+                            )
+                        }
+                } else {
+                    Log.w(TAG, "No Wi-Fi Network object found; UDP discovery uses default route")
+                }
+
+                val request = REQUEST.toByteArray(Charsets.UTF_8)
+                var sent = 0
+                var received = 0
+                var accepted = 0
+
+                targets.forEachIndexed { index, rawAddress ->
+                    val address = InetAddress.getByName(rawAddress)
+                    runCatching {
+                        socket.send(DatagramPacket(request, request.size, address, PORT))
+                        sent++
+                        Log.d(TAG, "Discovery request sent to ${address.hostAddress}:$PORT via $networkLabel")
+                    }.onFailure { error ->
+                        Log.w(TAG, "Discovery send failed for ${address.hostAddress}:$PORT", error)
+                    }
+                    val sendProgress = 0.05f + 0.15f * ((index + 1).toFloat() / targets.size.coerceAtLeast(1))
+                    _status.value = _status.value.copy(progress = sendProgress, sent = sent)
+                }
+
+                _status.value = _status.value.copy(phase = "listening", progress = 0.20f, sent = sent)
+                Log.d(TAG, "UDP discovery listening: sent=$sent targets=${targets.size} network=$networkLabel")
+
+                val startedAt = System.currentTimeMillis()
+                val deadline = startedAt + timeoutMs
+                val buffer = ByteArray(1024)
+                while (System.currentTimeMillis() < deadline) {
+                    val elapsed = System.currentTimeMillis() - startedAt
+                    val listenFraction = (elapsed.toFloat() / timeoutMs.coerceAtLeast(1)).coerceIn(0f, 1f)
+                    _status.value = _status.value.copy(progress = 0.20f + 0.75f * listenFraction)
+
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    try {
+                        socket.receive(packet)
+                        received++
+                        val responder = packet.address.hostAddress?.substringBefore('%').orEmpty()
+                        val parsed = runCatching { parse(packet) }
+                            .onFailure { error -> Log.w(TAG, "Invalid discovery reply from $responder", error) }
+                            .getOrNull()
+                        if (parsed != null) {
+                            accepted++
+                            found[parsed.deviceId] = parsed
+                            Log.i(TAG, "HomeGuard found: id=${parsed.deviceId} host=${parsed.host} port=${parsed.port}")
+                        }
+                        _status.value = _status.value.copy(
+                            received = received,
+                            accepted = accepted,
+                            lastResponder = responder,
+                        )
+                    } catch (_: SocketTimeoutException) {
+                        // Timeout is expected; loop updates progress until the scan window closes.
+                    }
+                }
+
+                Log.d(TAG, "UDP discovery complete: received=$received accepted=$accepted devices=${found.size} network=$networkLabel")
+                _status.value = _status.value.copy(
+                    phase = "done",
+                    progress = 1f,
+                    sent = sent,
+                    received = received,
+                    accepted = accepted,
+                )
+            }
+
+            val expiry = System.currentTimeMillis() - 30_000L
+            found.entries.removeIf { it.value.seenAtMs < expiry }
+            _devices.value = found.values.sortedBy { it.deviceId }
+        }
     }
 
     private fun parse(packet: DatagramPacket): DiscoveredDevice? {
