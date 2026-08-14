@@ -34,8 +34,20 @@ class CommandController(
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
         val target = endpoint.value
         val appSettings = settings.settings.value
-        if (target.path == ControlPath.OFFLINE || target.apiBaseUrl.isBlank() || appSettings.apiToken.isBlank()) {
+        if (target.path == ControlPath.OFFLINE || target.apiBaseUrl.isBlank()) {
             return CommandReply(accepted = false, code = "offline")
+        }
+
+        // Cloud/provisioned command transport still requires the long-lived API token.
+        // A local controller added manually by IP is authenticated per command with
+        // actor + PIN, so it must not be rejected merely because no provisioning
+        // bearer token exists on the phone.
+        if (target.path == ControlPath.CLOUD && appSettings.apiToken.isBlank()) {
+            return CommandReply(accepted = false, code = "offline")
+        }
+        if (target.path != ControlPath.CLOUD && appSettings.apiToken.isBlank() &&
+            (actor.isBlank() || credential.isBlank())) {
+            return CommandReply(accepted = false, code = "authorization_required")
         }
 
         val api = createApi(target)
