@@ -16,6 +16,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,11 +40,18 @@ fun AddDeviceScreen(
     onProvisioning: () -> Unit,
 ) {
     var manualExpanded by remember { mutableStateOf(false) }
-    var manualAddress by remember { mutableStateOf("") }
+    var manualAddress by remember { mutableStateOf("192.168.4.1") }
     var manualDeviceId by remember { mutableStateOf("") }
     var manualName by remember { mutableStateOf("HomeGuard") }
+    var manualAddressTouched by remember { mutableStateOf(false) }
     val progress = scanStatus.progress.coerceIn(0f, 1f)
     val progressPercent = (progress * 100f).toInt()
+
+    LaunchedEffect(devices) {
+        if (!manualAddressTouched && devices.isNotEmpty()) {
+            manualAddress = devices.first().host
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -129,7 +137,14 @@ fun AddDeviceScreen(
             )
         } else {
             devices.forEach { device ->
-                OutlinedButton(onClick = { onUseDevice(device) }, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = {
+                        manualAddress = device.host
+                        manualAddressTouched = false
+                        onUseDevice(device)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(device.serviceName.ifBlank { "HomeGuard" }, style = MaterialTheme.typography.titleMedium)
                         Text(
@@ -155,9 +170,17 @@ fun AddDeviceScreen(
             )
             OutlinedTextField(
                 value = manualAddress,
-                onValueChange = { manualAddress = it.trim() },
+                onValueChange = {
+                    manualAddressTouched = true
+                    manualAddress = it.trim()
+                },
                 label = { Text("IP або IP:порт") },
-                supportingText = { Text("Наприклад: 192.168.4.1 або 192.168.1.25:8080") },
+                supportingText = {
+                    Text(
+                        if (devices.isNotEmpty()) "Автозаповнено з пошуку: ${devices.first().host}"
+                        else "За замовчуванням: 192.168.4.1"
+                    )
+                },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
