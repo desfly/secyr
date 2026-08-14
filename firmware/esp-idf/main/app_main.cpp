@@ -17,6 +17,8 @@
 #include "hg_access_http.hpp"
 #include "hg_access_time.hpp"
 #include "hg_commissioning_nvs.hpp"
+#include "nvs_config_store.hpp"
+#include "websocket_telemetry.hpp"
 #include "homeguard/access_control.hpp"
 #include "homeguard/boot_readiness.hpp"
 #include "homeguard/physical_output_runtime.hpp"
@@ -30,6 +32,7 @@
 #include "nvs_flash.h"
 
 #include <algorithm>
+#include <string>
 
 namespace {
 
@@ -52,6 +55,8 @@ homeguard::idf::GpioOutputBackend g_gpio_outputs;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::AccessHttp g_access_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
+NvsConfigStore g_provisioning_store;
+WebsocketTelemetry g_websocket_telemetry;
 homeguard::AccessControl g_access_control;
 hg::HardwareVerificationRecord g_hardware_verification;
 hg::CommissioningPersistentState g_commissioning_state;
@@ -171,6 +176,30 @@ esp_err_t start_http_server()
     return g_build_http.register_handlers(g_http_server);
 }
 
+void start_authenticated_telemetry_websocket()
+{
+    if (g_http_server == nullptr) return;
+
+    hg::ProvisioningPayload provisioning{};
+    if (!g_provisioning_store.load_provisioning(provisioning) || !provisioning.valid({})) {
+        provisioning.clear_secrets();
+        ESP_LOGW(kTag, "Provisioned local API token unavailable; telemetry websocket remains fail-closed");
+        return;
+    }
+
+    std::string token = std::move(provisioning.local_api_token);
+    provisioning.clear_secrets();
+    const bool started = g_websocket_telemetry.begin(g_http_server, token);
+    std::fill(token.begin(), token.end(), '\0');
+    token.clear();
+
+    if (!started) {
+        ESP_LOGE(kTag, "Authenticated telemetry websocket registration failed");
+        return;
+    }
+    ESP_LOGI(kTag, "Authenticated telemetry websocket ready at /ws/telemetry");
+}
+
 }  // namespace
 
 extern "C" void app_main()
@@ -203,7 +232,11 @@ extern "C" void app_main()
     else ESP_LOGI(kTag, "Hardware bootstrap completed");
 
     const auto http_error = start_http_server();
-    if (http_error != ESP_OK) ESP_LOGE(kTag, "HTTP server failed: %s", esp_err_to_name(http_error));
+    if (http_error != ESP_OK) {
+        ESP_LOGE(kTag, "HTTP server failed: %s", esp_err_to_name(http_error));
+    } else {
+        start_authenticated_telemetry_websocket();
+    }
 
     const auto telemetry_error = g_telemetry.start(&g_hardware);
     if (telemetry_error != ESP_OK) ESP_LOGE(kTag, "Telemetry task failed: %s", esp_err_to_name(telemetry_error));
