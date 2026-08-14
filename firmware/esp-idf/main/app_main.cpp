@@ -11,6 +11,7 @@
 #include "hg_system_http.hpp"
 #include "hg_inputs_http.hpp"
 #include "hg_input_runtime.hpp"
+#include "hg_input_nvs.hpp"
 #include "hg_service_http.hpp"
 #include "hg_output_http.hpp"
 #include "hg_gpio_output_backend.hpp"
@@ -53,6 +54,7 @@ homeguard::idf::BuildHttp g_build_http;
 homeguard::idf::SystemHttp g_system_http;
 homeguard::idf::InputsHttp g_inputs_http;
 homeguard::idf::InputRuntime g_input_runtime;
+homeguard::idf::InputNvsStore g_input_store;
 homeguard::idf::ServiceHttp g_service_http;
 homeguard::idf::OutputHttp g_output_http;
 homeguard::idf::GpioOutputBackend g_gpio_outputs;
@@ -171,7 +173,7 @@ esp_err_t start_http_server()
     ESP_RETURN_ON_ERROR(g_cloud_http.register_handlers(g_http_server, &g_cloud_link, &g_cloud_store, &g_access_control), kTag, "cloud routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus, &g_access_control), kTag, "system routes");
-    ESP_RETURN_ON_ERROR(g_inputs_http.register_handlers(g_http_server), kTag, "input routes");
+    ESP_RETURN_ON_ERROR(g_inputs_http.register_handlers(g_http_server, &g_input_runtime, &g_input_store, &g_access_control), kTag, "input routes");
     ESP_RETURN_ON_ERROR(g_telemetry.register_handlers(g_http_server), kTag, "telemetry routes");
     g_output_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_output_http.register_handlers(g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus), kTag, "output routes");
