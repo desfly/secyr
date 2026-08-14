@@ -29,14 +29,18 @@ class SettingsStore(context: Context) {
 
     suspend fun selectDevice(deviceId: String, confirmedLocalUrl: String? = null) {
         val current = settings.value
-        val switchingDevice = current.deviceId != deviceId
-        val localUrl = confirmedLocalUrl?.trimEnd('/')
-            ?: if (switchingDevice) "" else current.lastKnownLocalUrl
+        val selection = DeviceSelectionPolicy.select(
+            currentDeviceId = current.deviceId,
+            currentLocalUrl = current.lastKnownLocalUrl,
+            currentCertificateSha256 = current.localCertificateSha256,
+            nextDeviceId = deviceId,
+            confirmedLocalUrl = confirmedLocalUrl,
+        )
         update(
             current.copy(
-                deviceId = deviceId,
-                lastKnownLocalUrl = localUrl,
-                localCertificateSha256 = if (switchingDevice || localUrl.isBlank()) "" else current.localCertificateSha256,
+                deviceId = selection.deviceId,
+                lastKnownLocalUrl = selection.lastKnownLocalUrl,
+                localCertificateSha256 = selection.localCertificateSha256,
             ),
         )
     }
