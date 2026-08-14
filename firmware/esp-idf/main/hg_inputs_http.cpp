@@ -40,11 +40,11 @@ esp_err_t InputsHttp::inputs_get(httpd_req_t* request)
     out << "{\"inputs\":["
         << "{\"index\":0,\"name\":\"Tamper\",\"gpio\":"
         << static_cast<int>(homeguard::board::kTamper)
-        << ",\"active\":" << (tamper != 0 ? "true" : "false")
+        << ",\"rawHigh\":" << (tamper != 0 ? "true" : "false")
         << ",\"state\":\"" << (tamper != 0 ? "high" : "low") << "\"},"
         << "{\"index\":1,\"name\":\"Power Fail\",\"gpio\":"
         << static_cast<int>(homeguard::board::kPowerFail)
-        << ",\"active\":" << (power_fail != 0 ? "true" : "false")
+        << ",\"rawHigh\":" << (power_fail != 0 ? "true" : "false")
         << ",\"state\":\"" << (power_fail != 0 ? "high" : "low") << "\"}]}";
 
     const auto body = out.str();
