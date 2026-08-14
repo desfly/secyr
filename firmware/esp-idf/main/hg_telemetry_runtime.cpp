@@ -1,6 +1,7 @@
 #include "hg_telemetry_runtime.hpp"
 #include "hg_hardware_bootstrap.hpp"
 #include "hg_pzem004t.hpp"
+#include "hg_pressure_420ma.hpp"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -99,6 +100,26 @@ esp_err_t TelemetryRuntime::status_get(httpd_req_t* request)
     }
     out << ']';
 
+    out << ",\"pressures\":[";
+    bool pressure_comma = false;
+    if (current.pressure1_valid) {
+        out << "{\"index\":0,\"name\":\"Pressure 1\",\"bar\":"
+            << current.pressure1_bar
+            << ",\"currentMa\":" << current.pressure1_current_ma
+            << ",\"state\":\"normal\"}";
+        pressure_comma = true;
+    }
+    if (current.pressure2_valid) {
+        if (pressure_comma) {
+            out << ',';
+        }
+        out << "{\"index\":1,\"name\":\"Pressure 2\",\"bar\":"
+            << current.pressure2_bar
+            << ",\"currentMa\":" << current.pressure2_current_ma
+            << ",\"state\":\"normal\"}";
+    }
+    out << ']';
+
     out << ",\"electrical\":[";
     bool need_comma = false;
     if (current.battery_valid) {
@@ -135,6 +156,7 @@ esp_err_t TelemetryRuntime::status_get(httpd_req_t* request)
 void TelemetryRuntime::run()
 {
     Pzem004t pzem(&hardware_->rs485());
+    const Pressure420Config pressure_config{};
 
     while (true) {
         TelemetrySnapshot next{};
@@ -166,6 +188,22 @@ void TelemetryRuntime::run()
                 static_cast<double>(mains.power_w),
                 static_cast<double>(mains.frequency_hz),
                 static_cast<double>(mains.power_factor));
+        }
+
+        float pressure_mv = 0.0F;
+        if (hardware_->telemetry_adc().read_single_ended_mv(0, &pressure_mv) == ESP_OK) {
+            const auto pressure = decode_pressure_420ma(pressure_mv, pressure_config);
+            next.pressure1_valid = pressure.valid;
+            next.pressure1_bar = pressure.pressure_bar;
+            next.pressure1_current_ma = pressure.current_ma;
+        }
+
+        pressure_mv = 0.0F;
+        if (hardware_->telemetry_adc().read_single_ended_mv(1, &pressure_mv) == ESP_OK) {
+            const auto pressure = decode_pressure_420ma(pressure_mv, pressure_config);
+            next.pressure2_valid = pressure.valid;
+            next.pressure2_bar = pressure.pressure_bar;
+            next.pressure2_current_ma = pressure.current_ma;
         }
 
         float rtc_temperature = 0.0F;
