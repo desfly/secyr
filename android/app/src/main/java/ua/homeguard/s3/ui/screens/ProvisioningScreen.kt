@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -110,6 +111,7 @@ fun ProvisioningScreen(
 ) {
     var form by remember { mutableStateOf(ProvisioningForm()) }
     var manualAddress by remember { mutableStateOf("192.168.4.1") }
+    var manualAddressTouched by remember { mutableStateOf(false) }
     var wifiPasswordVisible by remember { mutableStateOf(false) }
     var cloudTokenVisible by remember { mutableStateOf(false) }
     val busy = state.phase in setOf(
@@ -120,6 +122,13 @@ fun ProvisioningScreen(
         ProvisioningPhase.DISCOVERING_LOCAL,
     )
     val manualAddressValid = normalizeLocalAddress(manualAddress) != null
+
+    LaunchedEffect(devices) {
+        if (!manualAddressTouched && devices.isNotEmpty()) {
+            val first = devices.first()
+            manualAddress = if (first.port == 80) first.host else "${first.host}:${first.port}"
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -227,7 +236,15 @@ fun ProvisioningScreen(
             if (scanStatus.error.isNotBlank()) Text("Діагностика: ${scanStatus.error}")
         }
         devices.forEach { device ->
-            OutlinedButton(onClick = { onUseDevice(device) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = {
+                    manualAddressTouched = false
+                    manualAddress = if (device.port == 80) device.host else "${device.host}:${device.port}"
+                    onUseDevice(device)
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Text("${device.serviceName.ifBlank { "HomeGuard-S3" }} · ${device.host}:${device.port}")
             }
         }
@@ -236,9 +253,17 @@ fun ProvisioningScreen(
         Text("Ручне підключення по IP")
         OutlinedTextField(
             value = manualAddress,
-            onValueChange = { manualAddress = it },
+            onValueChange = {
+                manualAddressTouched = true
+                manualAddress = it.trim()
+            },
             label = { Text("IP або IP:порт") },
-            supportingText = { Text("Наприклад: 192.168.4.1") },
+            supportingText = {
+                Text(
+                    if (devices.isNotEmpty()) "Автозаповнено зі знайденого HomeGuard"
+                    else "За замовчуванням: 192.168.4.1"
+                )
+            },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             modifier = Modifier.fillMaxWidth(),
