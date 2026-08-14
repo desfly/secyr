@@ -16,7 +16,9 @@ class DeviceEndpointResolver(
     scope: CoroutineScope
 ) {
     val endpoint: StateFlow<DeviceEndpoint> = combine(settings.settings, discovery.devices) { config, devices ->
-        val eligible = devices.filter { it.secure && it.apiVersion == 1 }
+        // Local emergency AP/LAN can legitimately expose HTTP. API version and device ID
+        // are the route-selection criteria; TLS pinning applies only when HTTPS is used.
+        val eligible = devices.filter { it.apiVersion == 1 }
         val local = eligible.firstOrNull { it.deviceId == config.deviceId }
             ?: if (config.deviceId.isBlank() && eligible.size == 1) eligible.first() else null
         when (selectControlPath(EndpointAvailability(
@@ -35,7 +37,7 @@ class DeviceEndpointResolver(
                     apiBaseUrl = selected.baseUrl,
                     websocketUrl = selected.baseUrl.replaceFirst("http", "ws") + LocalApiContract.TELEMETRY_PATH,
                     path = ControlPath.LOCAL,
-                    certificateSha256 = config.localCertificateSha256
+                    certificateSha256 = if (selected.secure) config.localCertificateSha256 else ""
                 )
             }
             ControlPath.LAST_KNOWN_LOCAL -> DeviceEndpoint(
@@ -43,7 +45,7 @@ class DeviceEndpointResolver(
                 apiBaseUrl = config.lastKnownLocalUrl.trimEnd('/'),
                 websocketUrl = config.lastKnownLocalUrl.replaceFirst("http", "ws").trimEnd('/') + LocalApiContract.TELEMETRY_PATH,
                 path = ControlPath.LAST_KNOWN_LOCAL,
-                certificateSha256 = config.localCertificateSha256
+                certificateSha256 = if (config.lastKnownLocalUrl.startsWith("https://", true)) config.localCertificateSha256 else ""
             )
             ControlPath.CLOUD -> {
                 val id = URLEncoder.encode(config.deviceId, Charsets.UTF_8.name())
