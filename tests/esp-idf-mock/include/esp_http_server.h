@@ -7,7 +7,7 @@ using ssize_t = std::ptrdiff_t;
 using httpd_handle_t = void*;
 struct httpd_req_t { void* user_ctx{}; std::size_t content_len{}; const char* mock_body{}; };
 using httpd_uri_func_t = esp_err_t(*)(httpd_req_t*);
-enum { HTTP_GET=0, HTTP_POST=1, HTTPD_500_INTERNAL_SERVER_ERROR=500, HTTPD_WS_TYPE_TEXT=1 };
+enum { HTTP_GET=0, HTTP_POST=1, HTTP_PUT=2, HTTPD_500_INTERNAL_SERVER_ERROR=500, HTTPD_WS_TYPE_TEXT=1 };
 struct httpd_uri_t { const char* uri; int method; httpd_uri_func_t handler; void* user_ctx; bool is_websocket=false; };
 struct httpd_ws_frame_t { int type{}; std::uint8_t* payload{}; std::size_t len{}; };
 struct httpd_config_t { int max_uri_handlers; int stack_size; bool lru_purge_enable; };
