@@ -161,7 +161,6 @@ void initialize_physical_outputs()
 esp_err_t start_http_server()
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.server_port = kLocalApiPort;
     config.max_uri_handlers = 48;
     config.stack_size = 8192;
     config.lru_purge_enable = true;
