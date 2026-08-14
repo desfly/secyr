@@ -148,8 +148,27 @@ void TelemetryRuntime::run()
             }
         }
 
+        // The telemetry ADS1115 is sampled directly. Until a pressure-sensor
+        // transfer function is configured, values are intentionally carried as
+        // millivolts rather than being mislabeled as bar/kPa.
         std::array<hg::PressureState, 2> pressures{};
-        pressures.fill(hg::PressureState::Disabled);
+        std::array<float, 2> pressure_values{};
+        std::array<bool, 2> pressure_valid{};
+        auto& analog_adc = hardware_->telemetry_adc();
+        for (std::size_t index = 0; index < pressures.size(); ++index) {
+            if (!analog_adc.ready()) {
+                pressures[index] = hg::PressureState::Disabled;
+                continue;
+            }
+            float millivolts = 0.0F;
+            if (analog_adc.read_single_ended_mv(static_cast<std::uint8_t>(index), &millivolts) == ESP_OK) {
+                pressure_values[index] = millivolts;
+                pressure_valid[index] = true;
+                pressures[index] = hg::PressureState::Normal;
+            } else {
+                pressures[index] = hg::PressureState::SensorFault;
+            }
+        }
 
         std::array<float, 8> temperatures{};
         std::array<bool, 8> temperature_valid{};
@@ -186,7 +205,9 @@ void TelemetryRuntime::run()
             battery.bus_voltage_v,
             battery.current_a,
             battery.power_w,
-            battery_valid);
+            battery_valid,
+            pressure_values,
+            pressure_valid);
 
         websocket_->publish(frame);
 
@@ -195,10 +216,12 @@ void TelemetryRuntime::run()
         }
 
         ESP_LOGD(kTag,
-                 "telemetry seq=%llu transport=%.*s temperatures=%u battery=%s",
+                 "telemetry seq=%llu transport=%.*s analog0=%.1fmV analog1=%.1fmV temperatures=%u battery=%s",
                  static_cast<unsigned long long>(frame.sequence),
                  static_cast<int>(hg::to_string(frame.transport).size()),
                  hg::to_string(frame.transport).data(),
+                 frame.pressure_values[0],
+                 frame.pressure_values[1],
                  static_cast<unsigned>(frame.temperature_count),
                  frame.battery_valid ? "ok" : "fault");
 
