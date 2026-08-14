@@ -23,8 +23,10 @@ internal object JsonParsers {
                 val item = array.getJSONObject(index)
                 PressureStatus(
                     index = item.optInt("index", index),
-                    value = item.optDouble("value", 0.0).toFloat(),
+                    value = item.optDouble("bar", item.optDouble("value", 0.0)).toFloat(),
                     state = item.optString("state", "unknown"),
+                    name = item.optString("name", "Pressure ${index + 1}"),
+                    currentMa = item.optDouble("currentMa", 0.0).toFloat(),
                 )
             }
         }.orEmpty()
@@ -81,6 +83,10 @@ internal object JsonParsers {
                     current = item.optDouble("current", 0.0).toFloat(),
                     power = item.optDouble("power", 0.0).toFloat(),
                     state = item.optString("state", "unknown"),
+                    energyWh = item.optLong("energyWh", 0L),
+                    frequencyHz = item.optDouble("frequencyHz", 0.0).toFloat(),
+                    powerFactor = item.optDouble("powerFactor", 0.0).toFloat(),
+                    alarm = item.optBoolean("alarm", false),
                 )
             }
         }.orEmpty()
