@@ -26,6 +26,7 @@ import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
+import ua.homeguard.s3.network.DiscoveryInputValidator
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
 import ua.homeguard.s3.network.TelemetrySocket
 import ua.homeguard.s3.notifications.HomeGuardNotifications
@@ -38,7 +39,6 @@ import ua.homeguard.s3.ui.screens.AddDeviceScreen
 import ua.homeguard.s3.ui.screens.DashboardScreen
 import ua.homeguard.s3.ui.screens.DeviceListScreen
 import ua.homeguard.s3.ui.screens.ProvisioningScreen
-import java.net.URI
 
 class MainActivity : ComponentActivity() {
     private lateinit var discovery: LocalDiscoveryCoordinator
@@ -281,7 +281,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun addManualDevice(name: String, rawAddress: String) {
-        val baseUrl = normalizeManualAddress(rawAddress)
+        val baseUrl = DiscoveryInputValidator.normalizeManualAddress(rawAddress)
         if (baseUrl == null) {
             commandStatus.value = "Некоректна адреса. Введіть IP або IP:порт"
             return
@@ -302,8 +302,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun addManualDeviceId(name: String, rawDeviceId: String) {
-        val deviceId = rawDeviceId.trim()
-        if (!Regex("[A-Za-z0-9._-]{3,64}").matches(deviceId)) {
+        val deviceId = DiscoveryInputValidator.normalizeDeviceId(rawDeviceId)
+        if (deviceId == null) {
             commandStatus.value = "Некоректний ID пристрою"
             return
         }
@@ -320,25 +320,6 @@ class MainActivity : ComponentActivity() {
             deviceListOpen.value = true
             discovery.rescan()
         }
-    }
-
-    private fun normalizeManualAddress(rawAddress: String): String? {
-        val clean = rawAddress.trim().trimEnd('/')
-        if (clean.isBlank() || clean.any(Char::isWhitespace)) return null
-        val candidate = if (clean.startsWith("http://", true) || clean.startsWith("https://", true)) clean else "http://$clean"
-        return runCatching {
-            val uri = URI(candidate)
-            val host = uri.host?.trim().orEmpty()
-            val port = uri.port
-            require(host.isNotBlank())
-            require(port == -1 || port in 1..65535)
-            require(uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null)
-            val path = uri.path.orEmpty()
-            require(path.isBlank() || path == "/")
-            val scheme = uri.scheme.lowercase()
-            require(scheme == "http" || scheme == "https")
-            "$scheme://$host${if (port == -1) "" else ":$port"}"
-        }.getOrNull()
     }
 
     private fun loginOperator() {
