@@ -25,6 +25,7 @@ private:
     std::string port_txt_;
     uint16_t api_port_{443};
     bool secure_{true};
+    bool mdns_started_{false};
     std::atomic<bool> running_{false};
     std::atomic<hg::Transport> transport_{hg::Transport::None};
     int socket_{-1};
