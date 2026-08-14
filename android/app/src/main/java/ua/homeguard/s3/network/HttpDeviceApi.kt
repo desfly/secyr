@@ -21,11 +21,7 @@ class HttpDeviceApi(
     private val runtimeV1: Boolean = false,
 ) : DeviceApi {
     private val root = baseUrl.trimEnd('/')
-    private val client: OkHttpClient
-
-    init {
-        client = PinnedTlsClientFactory.create(certificatePin)
-    }
+    private val client: OkHttpClient = PinnedTlsClientFactory.create(certificatePin)
 
     suspend fun login(actor: String, credential: String): AccessSession {
         val normalizedActor = actor.trim()
@@ -79,11 +75,12 @@ class HttpDeviceApi(
         }
     }
 
-    override suspend fun command(command: DeviceCommand): CommandReply {
-        if (runtimeV1) return runtimeCommand(command)
+    override suspend fun command(command: DeviceCommand): CommandReply =
+        if (runtimeV1) runtimeCommand(command) else legacyCommand(command)
 
+    private suspend fun legacyCommand(command: DeviceCommand): CommandReply {
         val body = JSONObject()
-            .put("requestId", LocalApiContract.requestId(command.requestId))
+            .put("requestId", LegacyApiContract.requestId(command.requestId))
             .put("issuedAtMs", command.issuedAtMs.toString())
             .put("command", command.type.name.lowercase())
             .apply {
@@ -91,11 +88,11 @@ class HttpDeviceApi(
                 if (command.actor.isNotBlank()) put("actor", command.actor)
                 if (command.credential.isNotBlank()) put("credential", command.credential)
             }
-        val json = execute(LocalApiContract.COMMAND_PATH, "POST", body)
+        val json = execute(LegacyApiContract.COMMAND_PATH, "POST", body)
         return CommandReply(
             accepted = json.optBoolean("accepted", false),
             duplicate = json.optBoolean("duplicate", false),
-            code = json.optString("code", "unknown")
+            code = json.optString("code", "unknown"),
         )
     }
 
@@ -126,12 +123,13 @@ class HttpDeviceApi(
                 .put("credential", credential),
         )
         val accepted = json.optBoolean("ok", false)
-        return CommandReply(accepted = accepted, code = if (accepted) "accepted" else json.optString("reason", "rejected"))
+        return CommandReply(
+            accepted = accepted,
+            code = if (accepted) "accepted" else json.optString("reason", "rejected"),
+        )
     }
 
     private suspend fun runtimeValveCommand(active: Boolean, actor: String, credential: String): CommandReply {
-        // The current controller model reserves outputs 2 and 3 for the two valves.
-        // Both must apply successfully for the aggregate Android command to be accepted.
         for (outputId in 2..3) {
             val json = execute(
                 "/api/v1/system/output-command",
@@ -150,11 +148,18 @@ class HttpDeviceApi(
         return CommandReply(true, code = "accepted")
     }
 
-    override suspend fun diagnostics(): Diagnostics = JsonParsers.diagnostics(execute(LocalApiContract.HEALTH_PATH))
-    override suspend fun snapshot(): SystemSnapshot = JsonParsers.snapshot(execute(LocalApiContract.STATUS_PATH))
+    override suspend fun diagnostics(): Diagnostics =
+        JsonParsers.diagnostics(execute(LegacyApiContract.HEALTH_PATH))
+
+    override suspend fun snapshot(): SystemSnapshot =
+        JsonParsers.snapshot(execute(LegacyApiContract.STATUS_PATH))
 
     override suspend fun challenge(type: CommandType): Long {
-        val json = execute(LocalApiContract.CHALLENGE_PATH, "POST", JSONObject().put("command", type.name.lowercase()))
+        val json = execute(
+            LegacyApiContract.CHALLENGE_PATH,
+            "POST",
+            JSONObject().put("command", type.name.lowercase()),
+        )
         return json.getLong("challenge")
     }
 
@@ -182,6 +187,7 @@ class HttpDeviceApi(
             override fun onFailure(call: Call, error: IOException) {
                 if (continuation.isActive) continuation.resumeWithException(error)
             }
+
             override fun onResponse(call: Call, response: Response) {
                 continuation.resume(response)
             }
