@@ -6,5 +6,8 @@ object RuntimeApiContract {
     const val TELEMETRY_SESSION_PATH = "/api/v1/telemetry/session"
     const val SECURITY_COMMAND_PATH = "/api/v1/system/security-command"
     const val OUTPUT_COMMAND_PATH = "/api/v1/system/output-command"
+    const val NETWORK_STATUS_PATH = "/api/v1/network/status"
+    const val NETWORK_SCAN_PATH = "/api/v1/network/scan"
+    const val NETWORK_CONNECT_PATH = "/api/v1/network/connect"
     const val TELEMETRY_PATH = "/ws/telemetry"
 }
