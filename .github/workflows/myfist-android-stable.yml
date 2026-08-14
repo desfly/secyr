@@ -25,14 +25,28 @@ jobs:
         run: |
           mkdir -p "$HOME/.android"
           base64 -d android/ci/myfist-debug.keystore.b64 > "$HOME/.android/debug.keystore"
-      - name: Set update-test version 0.0.60
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey \
+            | grep -E 'SHA256:|Alias name:'
+      - name: Set monotonic update-test version
+        shell: bash
         run: |
-          sed -i 's/versionCode = 59/versionCode = 60/' android/app/build.gradle.kts
-          sed -i 's/versionName = "0.0.59"/versionName = "0.0.60"/' android/app/build.gradle.kts
+          set -euo pipefail
+          VERSION_CODE=$((60000 + GITHUB_RUN_NUMBER))
+          VERSION_NAME="0.0.${VERSION_CODE}"
+          sed -Ei "s/versionCode = [0-9]+/versionCode = ${VERSION_CODE}/" android/app/build.gradle.kts
+          sed -Ei "s/versionName = \"[^\"]+\"/versionName = \"${VERSION_NAME}\"/" android/app/build.gradle.kts
+          echo "MyFist versionCode=${VERSION_CODE} versionName=${VERSION_NAME}"
           grep -E 'version(Code|Name)' android/app/build.gradle.kts
       - name: Build
         working-directory: android
         run: gradle --no-daemon lintDebug testDebugUnitTest assembleDebug
+      - name: Verify APK signature and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -n 1
       - name: Prepare APK
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/MyFist.apk
