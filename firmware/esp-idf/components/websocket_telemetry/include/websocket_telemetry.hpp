@@ -1,13 +1,11 @@
 #pragma once
 #include "homeguard/local_api.hpp"
 #include "homeguard/telemetry.hpp"
+#include "esp_http_server.h"
 #include <array>
 #include <mutex>
 #include <string>
 #include <string_view>
-
-struct httpd_req;
-using httpd_req_t = httpd_req;
 
 class WebsocketTelemetry {
 public:
