@@ -98,6 +98,7 @@ class HttpDeviceApi(
         status.put("outputs", outputs)
         status.put("mode", modeFromPartitions(partitions))
         status.put("temperatures", telemetry.optJSONArray("temperatures") ?: JSONArray())
+        status.put("pressures", telemetry.optJSONArray("pressures") ?: JSONArray())
         status.put("electrical", telemetry.optJSONArray("electrical") ?: JSONArray())
         if (status.optLong("uptimeMs", 0L) == 0L) {
             status.put("uptimeMs", telemetry.optLong("sampledAtMs", 0L))
