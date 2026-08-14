@@ -38,10 +38,6 @@ class CommandController(
             return CommandReply(accepted = false, code = "offline")
         }
 
-        // Cloud/provisioned command transport still requires the long-lived API token.
-        // A local controller added manually by IP is authenticated per command with
-        // actor + PIN, so it must not be rejected merely because no provisioning
-        // bearer token exists on the phone.
         if (target.path == ControlPath.CLOUD && appSettings.apiToken.isBlank()) {
             return CommandReply(accepted = false, code = "offline")
         }
@@ -51,7 +47,10 @@ class CommandController(
         }
 
         val api = createApi(target)
-        val challenge = if (requiresChallenge(type)) api.challenge(type) else null
+        // The active local HTTP runtime authenticates every command with actor + PIN
+        // and does not expose the obsolete /api/challenge endpoint. Keep challenge
+        // flow only for the legacy/cloud command transport.
+        val challenge = if (target.path == ControlPath.CLOUD && requiresChallenge(type)) api.challenge(type) else null
         val command = DeviceCommand(
             requestId = requestIds.incrementAndGet(),
             issuedAtMs = System.currentTimeMillis(),
@@ -64,11 +63,13 @@ class CommandController(
     }
 
     private fun createApi(target: DeviceEndpoint): HttpDeviceApi {
+        val localRuntime = target.path != ControlPath.CLOUD
         val pin = if (target.path == ControlPath.CLOUD) "" else target.certificateSha256
         return HttpDeviceApi(
             baseUrl = target.apiBaseUrl,
             tokenProvider = { settings.settings.value.apiToken },
             certificatePin = pin,
+            runtimeV1 = localRuntime,
         )
     }
 
