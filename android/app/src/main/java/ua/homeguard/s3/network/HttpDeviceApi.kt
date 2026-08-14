@@ -93,8 +93,6 @@ class HttpDeviceApi(
         val partitions = execute(LocalApiContract.PARTITIONS_PATH).optJSONArray("partitions") ?: JSONArray()
         val telemetry = execute(LocalApiContract.TELEMETRY_STATUS_PATH)
 
-        // ESP-IDF exposes detailed resources independently. Assemble a stable
-        // Android snapshot while keeping every firmware endpoint small and focused.
         status.put("zones", zones)
         status.put("inputs", inputs)
         status.put("outputs", outputs)
@@ -112,6 +110,31 @@ class HttpDeviceApi(
         val json = execute(LocalApiContract.CHALLENGE_PATH, "POST", JSONObject().put("command", type.name.lowercase()))
         return json.getLong("challenge")
     }
+
+    override suspend fun inputPolarity(): InputPolarityConfig = parseInputPolarity(
+        execute(LocalApiContract.INPUT_POLARITY_PATH)
+    )
+
+    override suspend fun configureInputPolarity(
+        config: InputPolarityConfig,
+        actor: String,
+        credential: String,
+    ): InputPolarityConfig {
+        val normalizedActor = actor.trim()
+        require(normalizedActor.isNotEmpty()) { "Admin ID is required" }
+        require(credential.length in 4..12) { "Admin PIN must contain 4-12 characters" }
+        val body = JSONObject()
+            .put("actor", normalizedActor)
+            .put("credential", credential)
+            .put("tamper", config.tamper.wireValue)
+            .put("powerFail", config.powerFail.wireValue)
+        return parseInputPolarity(execute(LocalApiContract.INPUT_POLARITY_PATH, "PUT", body))
+    }
+
+    private fun parseInputPolarity(json: JSONObject): InputPolarityConfig = InputPolarityConfig(
+        tamper = InputPolarity.fromWire(json.optString("tamper", "unknown")),
+        powerFail = InputPolarity.fromWire(json.optString("powerFail", "unknown")),
+    )
 
     private fun modeFromPartitions(partitions: JSONArray): String {
         var armedHome = false
@@ -132,13 +155,17 @@ class HttpDeviceApi(
 
     private suspend fun execute(path: String, method: String = "GET", json: JSONObject? = null): JSONObject {
         val mediaType = "application/json; charset=utf-8".toMediaType()
+        val requestBody = (json ?: JSONObject()).toString().toRequestBody(mediaType)
         val request = Request.Builder()
             .url(root + path)
             .header("Accept", "application/json")
             .apply {
                 val token = tokenProvider()
                 if (token.isNotBlank()) header("Authorization", "Bearer $token")
-                if (method == "POST") post((json ?: JSONObject()).toString().toRequestBody(mediaType))
+                when (method) {
+                    "POST" -> post(requestBody)
+                    "PUT" -> put(requestBody)
+                }
             }
             .build()
         return client.newCall(request).await().use { response ->
