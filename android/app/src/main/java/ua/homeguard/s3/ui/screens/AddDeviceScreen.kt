@@ -1,14 +1,10 @@
 package ua.homeguard.s3.ui.screens
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.NetworkInfo
 import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,7 +35,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.network.LocalDiscoveryProgress
@@ -103,25 +98,6 @@ fun AddDeviceScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val discoveryProgress by LocalDiscoveryProgress.state.collectAsState()
-    val discoveryPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        Manifest.permission.NEARBY_WIFI_DEVICES
-    } else {
-        Manifest.permission.ACCESS_FINE_LOCATION
-    }
-    var permissionGranted by remember {
-        mutableStateOf(
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
-                ContextCompat.checkSelfPermission(context, discoveryPermission) == PackageManager.PERMISSION_GRANTED,
-        )
-    }
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        permissionGranted = granted
-    }
-
-    LaunchedEffect(discoveryPermission) {
-        if (!permissionGranted) permissionLauncher.launch(discoveryPermission)
-    }
-
     var method by remember { mutableStateOf(AddDeviceMethod.NETWORK) }
     var name by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
@@ -130,23 +106,23 @@ fun AddDeviceScreen(
     fun effectiveName(): String = name.trim().ifBlank { "HomeGuard-S3" }
 
     fun startSearch() {
-        if (networkState != LocalNetworkState.WIFI || !permissionGranted || discoveryProgress.running) return
+        if (networkState != LocalNetworkState.WIFI || discoveryProgress.running) return
         scope.launch { runCatching { onRescan() } }
     }
 
-    LaunchedEffect(networkState, permissionGranted) {
+    LaunchedEffect(networkState) {
         if (networkState == LocalNetworkState.WIFI) {
             val gateway = setupGatewayFor(localIpv4Address())
             if (gateway != null) {
                 value = gateway
                 method = AddDeviceMethod.IP
-                if (permissionGranted) runCatching { onRescan() }
+                runCatching { onRescan() }
             }
         }
     }
 
-    LaunchedEffect(method, permissionGranted, networkState) {
-        if (method == AddDeviceMethod.NETWORK && permissionGranted && networkState == LocalNetworkState.WIFI && discoveredDevices.isEmpty()) {
+    LaunchedEffect(method, networkState) {
+        if (method == AddDeviceMethod.NETWORK && networkState == LocalNetworkState.WIFI && discoveredDevices.isEmpty()) {
             startSearch()
         }
     }
@@ -191,14 +167,7 @@ fun AddDeviceScreen(
 
             AddDeviceMethod.NETWORK -> {
                 Text("Знайдено: ${discoveredDevices.size}", style = MaterialTheme.typography.titleMedium)
-                if (!permissionGranted) {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Потрібен доступ до пристроїв поруч", style = MaterialTheme.typography.bodyMedium)
-                            OutlinedButton(onClick = { permissionLauncher.launch(discoveryPermission) }) { Text("Дозволити") }
-                        }
-                    }
-                } else if (networkState != LocalNetworkState.WIFI) {
+                if (networkState != LocalNetworkState.WIFI) {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Text("Для автоматичного пошуку підключіться до Wi-Fi", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
                     }
