@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <sstream>
+#include <thread>
 
 namespace homeguard::idf {
 
@@ -58,7 +59,7 @@ esp_err_t TelemetryRuntime::register_handlers(httpd_handle_t server)
 TelemetrySnapshot TelemetryRuntime::snapshot() const
 {
     while (lock_.test_and_set(std::memory_order_acquire)) {
-        taskYIELD();
+        std::this_thread::yield();
     }
     const auto copy = snapshot_;
     lock_.clear(std::memory_order_release);
@@ -68,7 +69,7 @@ TelemetrySnapshot TelemetryRuntime::snapshot() const
 void TelemetryRuntime::publish(const TelemetrySnapshot& snapshot)
 {
     while (lock_.test_and_set(std::memory_order_acquire)) {
-        taskYIELD();
+        std::this_thread::yield();
     }
     snapshot_ = snapshot;
     lock_.clear(std::memory_order_release);
