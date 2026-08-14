@@ -208,6 +208,9 @@ class MainActivity : ComponentActivity() {
                             addDeviceOpen.value = true
                             lifecycleScope.launch { discovery.rescan() }
                         },
+                        onRenameDevice = { device, newName ->
+                            lifecycleScope.launch { registeredDevices.rename(device.deviceId, newName) }
+                        },
                         onOpenDevice = { device ->
                             lifecycleScope.launch {
                                 settings.update(settings.settings.value.copy(
@@ -235,6 +238,7 @@ class MainActivity : ComponentActivity() {
                         criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled,
                         statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
                         zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
+                        onBackToDevices = { deviceListOpen.value = true },
                         onAddDevice = {
                             deviceListOpen.value = true
                             addDeviceOpen.value = true
