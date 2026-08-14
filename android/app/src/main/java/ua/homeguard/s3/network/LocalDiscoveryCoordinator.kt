@@ -12,8 +12,9 @@ import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.DiscoverySource
 
 class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineScope) {
-    private val nsd = NsdDeviceDiscovery(context.applicationContext)
-    private val udp = UdpDeviceDiscovery(scope)
+    private val appContext = context.applicationContext
+    private val nsd = NsdDeviceDiscovery(appContext)
+    private val udp = UdpDeviceDiscovery(appContext, scope)
     private val _isScanning = MutableStateFlow(false)
 
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
