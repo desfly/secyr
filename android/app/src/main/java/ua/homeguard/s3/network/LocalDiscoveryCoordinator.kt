@@ -24,9 +24,12 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         (mdns + fallback)
             .groupBy { it.deviceId }
             .mapNotNull { (_, candidates) ->
-                candidates.maxWithOrNull(compareBy<DiscoveredDevice> {
-                    if (it.source == DiscoverySource.MDNS) 1 else 0
-                }.thenBy { it.seenAtMs })
+                // Prefer the freshest endpoint first. mDNS remains the tie-breaker only
+                // when both discovery paths observed the same device at effectively the
+                // same time. This prevents an older cached mDNS address from masking a
+                // newer UDP response after Wi-Fi roam, DHCP change, or controller reboot.
+                candidates.maxWithOrNull(compareBy<DiscoveredDevice> { it.seenAtMs }
+                    .thenBy { if (it.source == DiscoverySource.MDNS) 1 else 0 })
             }
             .sortedBy { it.deviceId }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
