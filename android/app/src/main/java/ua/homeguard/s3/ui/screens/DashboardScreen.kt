@@ -211,7 +211,7 @@ fun DashboardScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(temperature.name.ifBlank { "Датчик ${temperature.index + 1}" })
-                    Text("${temperature.value} °C · ${temperature.state}")
+                    Text("${temperature.celsius} °C · ${temperature.state}")
                 }
             }
         }
