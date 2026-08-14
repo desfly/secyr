@@ -24,4 +24,7 @@ class RoutedDeviceApi(
     override suspend fun diagnostics() = current().diagnostics()
     override suspend fun snapshot() = current().snapshot()
     override suspend fun challenge(type: CommandType) = current().challenge(type)
+    override suspend fun inputPolarity() = current().inputPolarity()
+    override suspend fun configureInputPolarity(config: InputPolarityConfig, actor: String, credential: String) =
+        current().configureInputPolarity(config, actor, credential)
 }
