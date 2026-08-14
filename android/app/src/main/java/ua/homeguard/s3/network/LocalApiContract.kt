@@ -4,6 +4,7 @@ object LocalApiContract {
     const val STATUS_PATH = "/api/v1/system/status"
     const val ZONES_PATH = "/api/v1/system/zones"
     const val INPUTS_PATH = "/api/v1/system/inputs"
+    const val INPUT_POLARITY_PATH = "/api/v1/system/inputs/polarity"
     const val OUTPUTS_PATH = "/api/v1/system/outputs"
     const val PARTITIONS_PATH = "/api/v1/system/partitions"
     const val TELEMETRY_STATUS_PATH = "/api/v1/telemetry/status"
