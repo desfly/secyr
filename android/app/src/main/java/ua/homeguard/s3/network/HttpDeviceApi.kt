@@ -154,7 +154,7 @@ class HttpDeviceApi(
     override suspend fun snapshot(): SystemSnapshot =
         JsonParsers.snapshot(execute(LegacyApiContract.STATUS_PATH))
 
-    override suspend fun challenge(type: CommandType): Long {
+    suspend fun challenge(type: CommandType): Long {
         val json = execute(
             LegacyApiContract.CHALLENGE_PATH,
             "POST",
