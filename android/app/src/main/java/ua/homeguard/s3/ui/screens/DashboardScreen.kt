@@ -51,6 +51,7 @@ fun DashboardScreen(
     criticalNotificationsEnabled: Boolean,
     statusNotificationsEnabled: Boolean,
     zoneNotificationsEnabled: Boolean,
+    onBackToDevices: () -> Unit,
     onAddDevice: () -> Unit,
     onOperatorIdChange: (String) -> Unit,
     onOperatorPinChange: (String) -> Unit,
@@ -82,9 +83,7 @@ fun DashboardScreen(
             onDismissRequest = { pendingDangerousCommand = null },
             title = { Text("Підтвердіть команду") },
             text = { Text("Виконати ${command.name}? Контролер повторно перевірить PIN, роль та challenge.") },
-            confirmButton = {
-                TextButton(enabled = canCommand(command), onClick = { pendingDangerousCommand = null; onCommand(command) }) { Text("Виконати") }
-            },
+            confirmButton = { TextButton(enabled = canCommand(command), onClick = { pendingDangerousCommand = null; onCommand(command) }) { Text("Виконати") } },
             dismissButton = { TextButton(onClick = { pendingDangerousCommand = null }) { Text("Скасувати") } },
         )
     }
@@ -101,21 +100,15 @@ fun DashboardScreen(
 
     LazyColumn(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Text("HomeGuard-S3 $versionName", style = MaterialTheme.typography.headlineMedium)
-            Text("Канал: $route · знайдено локально: $localDevices")
-            Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                Text("+ Додати пристрій")
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                OutlinedButton(onClick = onBackToDevices) { Text("← Пристрої") }
+                Text("HomeGuard-S3 $versionName", style = MaterialTheme.typography.headlineSmall)
             }
+            Text("Канал: $route · знайдено локально: $localDevices")
+            Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("+ Додати пристрій") }
         }
 
-        item {
-            MaintenancePanel(
-                diagnostics = diagnostics,
-                backupStatus = backupStatus,
-                onExportSettings = onExportSettings,
-                onImportSettings = onImportSettings,
-            )
-        }
+        item { MaintenancePanel(diagnostics = diagnostics, backupStatus = backupStatus, onExportSettings = onExportSettings, onImportSettings = onImportSettings) }
 
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
