@@ -57,17 +57,21 @@ esp_err_t TelemetryRuntime::register_handlers(httpd_handle_t server)
 
 TelemetrySnapshot TelemetryRuntime::snapshot() const
 {
-    portENTER_CRITICAL(&lock_);
+    while (lock_.test_and_set(std::memory_order_acquire)) {
+        taskYIELD();
+    }
     const auto copy = snapshot_;
-    portEXIT_CRITICAL(&lock_);
+    lock_.clear(std::memory_order_release);
     return copy;
 }
 
 void TelemetryRuntime::publish(const TelemetrySnapshot& snapshot)
 {
-    portENTER_CRITICAL(&lock_);
+    while (lock_.test_and_set(std::memory_order_acquire)) {
+        taskYIELD();
+    }
     snapshot_ = snapshot;
-    portEXIT_CRITICAL(&lock_);
+    lock_.clear(std::memory_order_release);
 }
 
 void TelemetryRuntime::task_entry(void* context)
