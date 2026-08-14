@@ -18,6 +18,14 @@ std::string salt_hex(const std::array<std::uint8_t, 16>& salt) {
     return out;
 }
 
+void append_digest_hex(std::string& out, const hg::Sha256Digest& digest) {
+    static constexpr char digits[] = "0123456789abcdef";
+    for (const auto byte : digest) {
+        out.push_back(digits[(byte >> 4U) & 0x0fU]);
+        out.push_back(digits[byte & 0x0fU]);
+    }
+}
+
 bool terminated(const auto& text) {
     return std::find(text.begin(), text.end(), '\0') != text.end();
 }
@@ -34,18 +42,22 @@ hg::Sha256Digest AccessControl::derive_pin_digest(
     std::string_view user_id,
     std::string_view pin,
     const std::array<std::uint8_t, 16>& salt) {
-    std::string material{"HomeGuard-S3|PIN|"};
+    const auto salt_text = salt_hex(salt);
+    std::string material;
+    material.reserve(128U);
+    material.append("HomeGuard-S3|PIN|");
     material.append(user_id);
     material.push_back('|');
-    material.append(salt_hex(salt));
+    material.append(salt_text);
     material.push_back('|');
     material.append(pin);
 
     auto digest = hg::sha256(material);
     for (std::uint32_t round = 1; round < 4096U; ++round) {
-        material = hg::sha256_hex(digest);
+        material.clear();
+        append_digest_hex(material, digest);
         material.append(user_id);
-        material.append(salt_hex(salt));
+        material.append(salt_text);
         digest = hg::sha256(material);
     }
     return digest;
