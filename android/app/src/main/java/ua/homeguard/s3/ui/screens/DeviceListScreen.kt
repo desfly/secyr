@@ -160,8 +160,19 @@ fun DeviceListScreen(
                         )
                         if (expandedDeviceId == device.deviceId) {
                             Spacer(Modifier.height(8.dp))
-                            Text("Охорона: очікується телеметрія", style = MaterialTheme.typography.bodyMedium)
-                            Text("Аварії: очікується телеметрія", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Зв'язок: ${if (online) "онлайн" else "офлайн"}",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                "Доступ: ${if (revoked) "відкликано адміністратором" else "активний"}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (revoked) MaterialTheme.colorScheme.error else Color.Unspecified,
+                            )
+                            Text(
+                                if (online && !revoked) "Охорона / аварії: завантаження телеметрії…" else "Охорона / аварії: недоступно без зв'язку",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
                             if (!revoked) {
                                 Spacer(Modifier.height(6.dp))
                                 OutlinedButton(onClick = { onOpen(device) }) { Text("Повний моніторинг") }
