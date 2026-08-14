@@ -24,6 +24,10 @@ class RegisteredDeviceStore(context: Context) {
             if (deviceId.isBlank()) return
             activeStore?.markAuthorization(deviceId, authorized)
         }
+
+        suspend fun reconcileActiveManual(manualDeviceId: String, discovered: DiscoveredDevice): Boolean {
+            return activeStore?.reconcileManual(manualDeviceId, discovered) ?: false
+        }
     }
 
     private val preferences = context.applicationContext.getSharedPreferences("homeguard_devices", Context.MODE_PRIVATE)
@@ -87,7 +91,7 @@ class RegisteredDeviceStore(context: Context) {
 
         if (realIndex >= 0) {
             current[realIndex] = merged
-            current.removeAt(if (manualIndex > realIndex) manualIndex else manualIndex)
+            current.removeAt(manualIndex)
         } else {
             current[manualIndex] = merged
         }
