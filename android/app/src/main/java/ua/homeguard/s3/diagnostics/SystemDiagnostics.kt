@@ -24,11 +24,31 @@ object SystemDiagnosticsEvaluator {
         certificateSha256: String,
         snapshot: SystemSnapshot,
         eventCount: Int,
+        scanPhase: String = "idle",
+        scanNetwork: String = "",
+        scanTargets: List<String> = emptyList(),
+        scanSent: Int = 0,
+        scanReceived: Int = 0,
+        scanAccepted: Int = 0,
+        scanLastResponder: String = "",
+        scanError: String = "",
     ): SystemDiagnostics {
+        val targetDetail = if (scanTargets.isEmpty()) "немає" else scanTargets.joinToString(limit = 3, truncated = "…")
+        val scanDetail = buildString {
+            append(scanPhase)
+            if (scanNetwork.isNotBlank()) append(" · ").append(scanNetwork)
+            append(" · tx ").append(scanSent)
+            append(" / rx ").append(scanReceived)
+            append(" / ok ").append(scanAccepted)
+            if (scanLastResponder.isNotBlank()) append(" · last ").append(scanLastResponder)
+            if (scanError.isNotBlank()) append(" · ").append(scanError)
+        }
         val connection = listOf(
             DiagnosticItem("Device ID", deviceId.isNotBlank(), if (deviceId.isBlank()) "не задано" else deviceId),
             DiagnosticItem("Маршрут", route != "OFFLINE", route),
             DiagnosticItem("Локальне виявлення", localDevices > 0 || route == "CLOUD", "знайдено: $localDevices"),
+            DiagnosticItem("LAN scan", scanError.isBlank(), scanDetail),
+            DiagnosticItem("Broadcast targets", scanTargets.isNotEmpty() || scanPhase == "idle" || route == "CLOUD", targetDetail),
             DiagnosticItem("TLS fingerprint", certificateSha256.isNotBlank() || route == "CLOUD", if (certificateSha256.isBlank()) "не задано" else "налаштовано"),
             DiagnosticItem("Телеметрія", snapshot.sequence > 0, "sequence ${snapshot.sequence}"),
         )
