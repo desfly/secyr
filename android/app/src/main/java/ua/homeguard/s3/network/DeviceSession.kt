@@ -24,7 +24,8 @@ class DeviceSession(
         if (job != null) return
         job = scope.launch {
             combine(endpointProvider, settings.settings) { endpoint, appSettings ->
-                SessionTarget(endpoint, appSettings.apiToken)
+                val token = appSettings.telemetryToken.ifBlank { appSettings.apiToken }
+                SessionTarget(endpoint, token)
             }.distinctUntilChanged().collect { target: SessionTarget ->
                 val endpoint = target.endpoint
                 if (endpoint.path == ControlPath.OFFLINE || endpoint.websocketUrl.isBlank() || target.token.isBlank()) {
