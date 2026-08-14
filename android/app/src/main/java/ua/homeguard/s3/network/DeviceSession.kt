@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceEndpoint
+import ua.homeguard.s3.storage.RegisteredDeviceStore
 import ua.homeguard.s3.storage.SettingsStore
 
 class DeviceSession(
@@ -17,6 +18,7 @@ class DeviceSession(
     private val telemetry: TelemetrySocket
 ) {
     private var job: Job? = null
+    private var authorizationJob: Job? = null
 
     fun start() {
         if (job != null) return
@@ -33,11 +35,23 @@ class DeviceSession(
                 }
             }
         }
+        authorizationJob = scope.launch {
+            telemetry.connection().distinctUntilChanged().collect { state ->
+                val deviceId = settings.settings.value.deviceId
+                when (state) {
+                    TelemetryConnectionState.UNAUTHORIZED -> RegisteredDeviceStore.markActiveAuthorization(deviceId, false)
+                    TelemetryConnectionState.CONNECTED -> RegisteredDeviceStore.markActiveAuthorization(deviceId, true)
+                    else -> Unit
+                }
+            }
+        }
     }
 
     fun stop() {
         job?.cancel()
+        authorizationJob?.cancel()
         job = null
+        authorizationJob = null
         telemetry.disconnect()
     }
 
