@@ -6,6 +6,7 @@ plugins {
 
 val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
 val appVersionCode = ciRunNumber?.plus(1000) ?: 56
+val persistentDebugKeystore = file(System.getProperty("user.home") + "/.android/debug.keystore")
 
 android {
     namespace = "ua.homeguard.s3"
@@ -31,9 +32,22 @@ android {
         buildConfig = true
     }
 
+    signingConfigs {
+        getByName("debug") {
+            // CI creates/restores this keystore before Gradle runs. Pin the debug
+            // signing config to that exact file so every MyFist test APK is signed
+            // by the same certificate instead of an AGP-generated runner key.
+            storeFile = persistentDebugKeystore
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
             // Keep one stable hardware-test package id. CI restores the same debug
             // keystore between runs and gives every workflow build a higher versionCode.
             applicationIdSuffix = ".test55"
