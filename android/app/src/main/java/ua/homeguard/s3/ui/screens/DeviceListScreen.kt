@@ -9,10 +9,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,10 +37,38 @@ fun DeviceListScreen(
     activeDeviceId: String,
     snapshot: SystemSnapshot,
     onAddDevice: () -> Unit,
+    onRenameDevice: (RegisteredDevice, String) -> Unit,
     onOpenDevice: (RegisteredDevice) -> Unit,
 ) {
     var expandedId by remember { mutableStateOf<String?>(null) }
+    var renameDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
+    var renameText by remember { mutableStateOf("") }
     val onlineIds = discovered.mapTo(hashSetOf()) { it.deviceId }
+
+    renameDevice?.let { device ->
+        AlertDialog(
+            onDismissRequest = { renameDevice = null },
+            title = { Text("Перейменувати пристрій") },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it.take(40) },
+                    singleLine = true,
+                    label = { Text("Назва") },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = renameText.trim().isNotBlank(),
+                    onClick = {
+                        onRenameDevice(device, renameText.trim())
+                        renameDevice = null
+                    },
+                ) { Text("Зберегти") }
+            },
+            dismissButton = { TextButton(onClick = { renameDevice = null }) { Text("Скасувати") } },
+        )
+    }
 
     LazyColumn(
         modifier = Modifier.padding(16.dp),
@@ -47,6 +79,7 @@ fun DeviceListScreen(
                 Column {
                     Text("HomeGuard-S3", style = MaterialTheme.typography.headlineMedium)
                     Text("Пристрої: ${devices.size}")
+                    Text("Стани оновлюються автоматично", style = MaterialTheme.typography.bodySmall)
                 }
                 Button(onClick = onAddDevice) { Text("+ Додати") }
             }
@@ -82,9 +115,7 @@ fun DeviceListScreen(
                             Text(if (online) "● online" else "○ offline")
                         }
 
-                        if (!device.authorized) {
-                            Text("Авторизацію втрачено", color = MaterialTheme.colorScheme.error)
-                        }
+                        if (!device.authorized) Text("Авторизацію втрачено", color = MaterialTheme.colorScheme.error)
 
                         if (expanded) {
                             if (device.deviceId == activeDeviceId) {
@@ -92,11 +123,17 @@ fun DeviceListScreen(
                                 Text("Стан: ${snapshot.health.name}")
                                 val alarmCount = snapshot.zones.count { it.state.contains("alarm", true) || it.state.contains("open", true) }
                                 Text("Активні аварії / зони: $alarmCount")
-                                Text("Подвійне торкання — повний моніторинг", style = MaterialTheme.typography.bodySmall)
                             } else {
                                 Text(if (online) "Контролер доступний у локальній мережі" else "Контролер зараз недоступний")
-                                Text("Подвійне торкання — відкрити пристрій", style = MaterialTheme.typography.bodySmall)
                             }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = {
+                                    renameText = device.name
+                                    renameDevice = device
+                                }) { Text("Перейменувати") }
+                                Button(onClick = { onOpenDevice(device) }) { Text("Відкрити") }
+                            }
+                            Text("Подвійне торкання також відкриває повний моніторинг", style = MaterialTheme.typography.bodySmall)
                         } else {
                             Text("Торкніться для короткого стану · двічі для моніторингу", style = MaterialTheme.typography.bodySmall)
                         }
