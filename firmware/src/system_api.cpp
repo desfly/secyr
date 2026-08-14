@@ -52,6 +52,7 @@ std::string_view system_event_type_name(SystemEventType type) {
         case SystemEventType::OutputOff: return "output.off";
         case SystemEventType::Armed: return "partition.armed";
         case SystemEventType::Disarmed: return "partition.disarmed";
+        case SystemEventType::InputChanged: return "input.changed";
         default: return "config.changed";
     }
 }
