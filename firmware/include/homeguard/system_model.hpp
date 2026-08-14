@@ -13,7 +13,7 @@ enum class ModelSensorType : std::uint8_t { Digital, Temperature, Pressure, Curr
 enum class ModelOutputType : std::uint8_t { Relay, Siren, Valve, Light };
 enum class PartitionArmState : std::uint8_t { Disarmed, Stay, Away, Alarm };
 enum class SystemEventType : std::uint8_t {
-    ZoneOpen, ZoneClosed, Alarm, Tamper, SensorOffline, BatteryLow,
+    ZoneOpen, ZoneClosed, Alarm, Tamper, PowerFail, SensorOffline, BatteryLow,
     OutputOn, OutputOff, Armed, Disarmed, InputChanged, ConfigChanged,
 };
 
