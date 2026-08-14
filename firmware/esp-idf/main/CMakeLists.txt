@@ -36,6 +36,7 @@ idf_component_register(
         "hg_system_http.cpp"
         "hg_inputs_http.cpp"
         "hg_input_runtime.cpp"
+        "hg_input_nvs.cpp"
         "hg_service_http.cpp"
         "hg_output_http.cpp"
         "hg_gpio_output_backend.cpp"
