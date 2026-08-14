@@ -35,6 +35,7 @@ import ua.homeguard.s3.model.ProvisioningForm
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.ProvisioningUiState
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
+import ua.homeguard.s3.network.UdpDeviceDiscovery
 import ua.homeguard.s3.storage.SettingsStore
 import java.net.URI
 
@@ -50,6 +51,7 @@ fun ProvisioningScreen(
     val localSettings = remember(context) { SettingsStore(context) }
     val devices by discovery.devices.collectAsState()
     val isScanning by discovery.isScanning.collectAsState()
+    val scanStatus by discovery.scanStatus.collectAsState()
 
     DisposableEffect(discovery) {
         discovery.start()
@@ -81,6 +83,7 @@ fun ProvisioningScreen(
         state = state,
         devices = devices,
         isScanningNetwork = isScanning,
+        scanStatus = scanStatus,
         onScanQr = onScan,
         onDiscover = { scope.launch { discovery.rescan() } },
         onUseDevice = { device ->
@@ -99,6 +102,7 @@ fun ProvisioningScreen(
     state: ProvisioningUiState,
     devices: List<DiscoveredDevice>,
     isScanningNetwork: Boolean,
+    scanStatus: UdpDeviceDiscovery.ScanStatus,
     onScanQr: () -> Unit,
     onDiscover: () -> Unit,
     onUseDevice: (DiscoveredDevice) -> Unit,
@@ -136,10 +140,19 @@ fun ProvisioningScreen(
         if (isScanningNetwork) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CircularProgressIndicator()
-                Text("Виконується реальний UDP/mDNS пошук HomeGuard-S3")
+                Text("UDP/mDNS: ${scanStatus.phase} · ${(scanStatus.progress * 100f).toInt().coerceIn(0, 100)}%")
             }
         } else {
             Text("Знайдено пристроїв: ${devices.size}")
+        }
+
+        if (scanStatus.phase != "idle") {
+            val targetText = scanStatus.targets.joinToString(limit = 3, truncated = "…")
+            Text("Мережа: ${scanStatus.network.ifBlank { "невідомо" }}")
+            Text("UDP: надіслано ${scanStatus.sent} · отримано ${scanStatus.received} · прийнято ${scanStatus.accepted}")
+            if (targetText.isNotBlank()) Text("Broadcast: $targetText")
+            if (scanStatus.lastResponder.isNotBlank()) Text("Остання відповідь: ${scanStatus.lastResponder}")
+            if (scanStatus.error.isNotBlank()) Text("Діагностика: ${scanStatus.error}")
         }
 
         devices.forEach { device ->
