@@ -41,11 +41,11 @@ object LocalDiscoveryProgress {
         )
     }
 
-    fun udpStarted() {
+    fun udpProgress(fraction: Float, phase: String) {
         _state.value = LocalDiscoveryProgressState(
             running = true,
-            fraction = 0.35f,
-            phase = "UDP: очікування відповідей",
+            fraction = fraction.coerceIn(0f, 0.99f),
+            phase = phase,
         )
     }
 
@@ -59,8 +59,9 @@ object LocalDiscoveryProgress {
 }
 
 class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineScope) {
-    private val nsd = NsdDeviceDiscovery(context.applicationContext)
-    private val udp = UdpDeviceDiscovery(scope)
+    private val appContext = context.applicationContext
+    private val nsd = NsdDeviceDiscovery(appContext)
+    private val udp = UdpDeviceDiscovery(appContext, scope)
     private var retryJob: Job? = null
 
     val devices: StateFlow<List<DiscoveredDevice>> = combine(nsd.devices, udp.devices) { mdns, fallback ->
@@ -68,9 +69,8 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
             .groupBy { it.deviceId }
             .mapNotNull { (_, candidates) ->
                 candidates.maxWithOrNull(
-                    compareBy<DiscoveredDevice> {
-                        if (it.source == DiscoverySource.MDNS) 1 else 0
-                    }.thenBy { it.seenAtMs },
+                    compareBy<DiscoveredDevice> { it.seenAtMs }
+                        .thenBy { if (it.source == DiscoverySource.MDNS) 1 else 0 },
                 )
             }
             .sortedBy { it.deviceId }
@@ -101,10 +101,14 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         try {
             nsd.start()
             LocalDiscoveryProgress.mdnsStarted()
-            LocalDiscoveryProgress.udpStarted()
+            udpProgressMirror()
             udp.scanOnce()
         } finally {
             LocalDiscoveryProgress.finish()
         }
+    }
+
+    private fun udpProgressMirror() {
+        LocalDiscoveryProgress.udpProgress(0.35f, "UDP: пошук у Wi-Fi мережі")
     }
 }
