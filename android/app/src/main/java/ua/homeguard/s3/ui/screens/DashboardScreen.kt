@@ -216,13 +216,15 @@ fun DashboardScreen(
             }
         }
 
-        item { Text("Тиск / аналогові канали", style = MaterialTheme.typography.titleLarge) }
-        if (snapshot.pressures.isEmpty()) item { Text("Немає даних") }
+        item { Text("Тиск", style = MaterialTheme.typography.titleLarge) }
+        if (snapshot.pressures.isEmpty()) item { Text("Немає даних датчиків тиску") }
         else items(snapshot.pressures, key = { it.index }) { pressure ->
             Card(modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Канал ${pressure.index + 1}")
-                    Text("${pressure.value} · ${pressure.state}")
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(pressure.name.ifBlank { "Датчик ${pressure.index + 1}" }, style = MaterialTheme.typography.titleMedium)
+                    StatusRow("Тиск", "${pressure.value} bar")
+                    StatusRow("Петля 4–20 mA", "${pressure.currentMa} mA")
+                    Text("Стан: ${pressure.state}", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -236,6 +238,14 @@ fun DashboardScreen(
                     StatusRow("Напруга", "${channel.voltage} V")
                     StatusRow("Струм", "${channel.current} A")
                     StatusRow("Потужність", "${channel.power} W")
+                    if (channel.energyWh > 0f || channel.frequencyHz > 0f || channel.powerFactor > 0f) {
+                        StatusRow("Енергія", "${channel.energyWh / 1000f} kWh")
+                        StatusRow("Частота", "${channel.frequencyHz} Hz")
+                        StatusRow("Power factor", "${channel.powerFactor}")
+                    }
+                    if (channel.alarm) {
+                        Text("АВАРІЯ PZEM", style = MaterialTheme.typography.titleSmall)
+                    }
                     Text("Стан: ${channel.state}", style = MaterialTheme.typography.bodySmall)
                 }
             }
