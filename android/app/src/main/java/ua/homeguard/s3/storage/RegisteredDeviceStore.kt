@@ -28,6 +28,10 @@ class RegisteredDeviceStore(context: Context) {
         suspend fun reconcileActiveManual(manualDeviceId: String, discovered: DiscoveredDevice): Boolean {
             return activeStore?.reconcileManual(manualDeviceId, discovered) ?: false
         }
+
+        suspend fun refreshActiveDiscovered(discovered: DiscoveredDevice): Boolean {
+            return activeStore?.refreshDiscovered(discovered) ?: false
+        }
     }
 
     private val preferences = context.applicationContext.getSharedPreferences("homeguard_devices", Context.MODE_PRIVATE)
@@ -96,6 +100,24 @@ class RegisteredDeviceStore(context: Context) {
             current[manualIndex] = merged
         }
         persist(current.distinctBy { it.deviceId })
+        return true
+    }
+
+    suspend fun refreshDiscovered(discovered: DiscoveredDevice): Boolean {
+        val current = _devices.value.toMutableList()
+        val index = current.indexOfFirst { it.deviceId == discovered.deviceId }
+        if (index < 0) return false
+
+        val previous = current[index]
+        val normalizedOld = previous.baseUrl.trimEnd('/')
+        val normalizedNew = discovered.baseUrl.trimEnd('/')
+        if (normalizedOld == normalizedNew && previous.lastSeenAtMs == discovered.seenAtMs) return false
+
+        current[index] = previous.copy(
+            baseUrl = discovered.baseUrl,
+            lastSeenAtMs = discovered.seenAtMs,
+        )
+        persist(current)
         return true
     }
 
