@@ -13,10 +13,21 @@ class HardwareBootstrap;
 
 struct TelemetrySnapshot {
     std::uint64_t sampled_at_ms{0};
+
     bool battery_valid{false};
     float battery_voltage_v{0.0F};
     float battery_current_a{0.0F};
     float battery_power_w{0.0F};
+
+    bool mains_valid{false};
+    float mains_voltage_v{0.0F};
+    float mains_current_a{0.0F};
+    float mains_power_w{0.0F};
+    std::uint32_t mains_energy_wh{0};
+    float mains_frequency_hz{0.0F};
+    float mains_power_factor{0.0F};
+    bool mains_alarm{false};
+
     bool rtc_temperature_valid{false};
     float rtc_temperature_c{0.0F};
 };
