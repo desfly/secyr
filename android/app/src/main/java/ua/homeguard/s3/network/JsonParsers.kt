@@ -50,19 +50,21 @@ internal object JsonParsers {
         array?.let {
             (0 until it.length()).map { index ->
                 val item = it.getJSONObject(index)
+                val rawState = item.optString("state", "")
+                val rawHigh = if (item.has("rawHigh")) item.optBoolean("rawHigh", false) else item.optBoolean("active", item.optBoolean("value", false))
                 DigitalChannelStatus(
                     index = item.optInt("index", index),
                     name = item.optString("name", "$fallbackName ${index + 1}"),
-                    active = item.optBoolean("active", item.optBoolean("value", false)),
-                    state = item.optString("state", if (item.optBoolean("active", false)) "active" else "inactive"),
+                    active = rawHigh,
+                    state = rawState.ifBlank { if (rawHigh) "high" else "low" },
                 )
             }
         }.orEmpty()
 
     private fun temperatures(array: JSONArray?): List<TemperatureStatus> =
         array?.let {
-            (0 until it.length()).map { index ->
-                val item = it.getJSONObject(index)
+            (0 until array.length()).map { index ->
+                val item = array.getJSONObject(index)
                 TemperatureStatus(
                     index = item.optInt("index", index),
                     name = item.optString("name", "Temperature ${index + 1}"),
@@ -74,8 +76,8 @@ internal object JsonParsers {
 
     private fun electrical(array: JSONArray?): List<ElectricalStatus> =
         array?.let {
-            (0 until it.length()).map { index ->
-                val item = it.getJSONObject(index)
+            (0 until array.length()).map { index ->
+                val item = array.getJSONObject(index)
                 ElectricalStatus(
                     index = item.optInt("index", index),
                     name = item.optString("name", "Electrical ${index + 1}"),
