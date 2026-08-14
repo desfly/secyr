@@ -25,7 +25,7 @@ fun BruceBrand(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Image(
-            painter = painterResource(R.drawable.ic_myfist),
+            painter = painterResource(R.drawable.bruce_launcher),
             contentDescription = "Bruce",
             modifier = Modifier.size(88.dp),
         )
