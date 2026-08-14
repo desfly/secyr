@@ -17,7 +17,8 @@ import kotlin.coroutines.resumeWithException
 class HttpDeviceApi(
     baseUrl: String,
     private val tokenProvider: () -> String,
-    certificatePin: String = ""
+    certificatePin: String = "",
+    private val runtimeV1: Boolean = false,
 ) : DeviceApi {
     private val root = baseUrl.trimEnd('/')
     private val client: OkHttpClient
@@ -79,6 +80,8 @@ class HttpDeviceApi(
     }
 
     override suspend fun command(command: DeviceCommand): CommandReply {
+        if (runtimeV1) return runtimeCommand(command)
+
         val body = JSONObject()
             .put("requestId", LocalApiContract.requestId(command.requestId))
             .put("issuedAtMs", command.issuedAtMs.toString())
@@ -94,6 +97,57 @@ class HttpDeviceApi(
             duplicate = json.optBoolean("duplicate", false),
             code = json.optString("code", "unknown")
         )
+    }
+
+    private suspend fun runtimeCommand(command: DeviceCommand): CommandReply {
+        val actor = command.actor.trim()
+        val credential = command.credential
+        if (actor.isBlank() || credential.isBlank()) {
+            return CommandReply(false, code = "authorization_required")
+        }
+
+        return when (command.type) {
+            CommandType.ARM_HOME -> runtimeSecurityCommand("security.arm_home", actor, credential)
+            CommandType.ARM_AWAY -> runtimeSecurityCommand("security.arm_away", actor, credential)
+            CommandType.DISARM -> runtimeSecurityCommand("security.disarm", actor, credential)
+            CommandType.OPEN_VALVES -> runtimeValveCommand(true, actor, credential)
+            CommandType.CLOSE_VALVES -> runtimeValveCommand(false, actor, credential)
+            else -> CommandReply(false, code = "runtime_command_not_wired")
+        }
+    }
+
+    private suspend fun runtimeSecurityCommand(command: String, actor: String, credential: String): CommandReply {
+        val json = execute(
+            "/api/v1/system/security-command",
+            "POST",
+            JSONObject()
+                .put("command", command)
+                .put("actor", actor)
+                .put("credential", credential),
+        )
+        val accepted = json.optBoolean("ok", false)
+        return CommandReply(accepted = accepted, code = if (accepted) "accepted" else json.optString("reason", "rejected"))
+    }
+
+    private suspend fun runtimeValveCommand(active: Boolean, actor: String, credential: String): CommandReply {
+        // The current controller model reserves outputs 2 and 3 for the two valves.
+        // Both must apply successfully for the aggregate Android command to be accepted.
+        for (outputId in 2..3) {
+            val json = execute(
+                "/api/v1/system/output-command",
+                "POST",
+                JSONObject()
+                    .put("outputId", outputId)
+                    .put("active", active)
+                    .put("alarmActive", false)
+                    .put("actor", actor)
+                    .put("credential", credential),
+            )
+            if (!json.optBoolean("ok", false)) {
+                return CommandReply(false, code = json.optString("reason", json.optString("status", "rejected")))
+            }
+        }
+        return CommandReply(true, code = "accepted")
     }
 
     override suspend fun diagnostics(): Diagnostics = JsonParsers.diagnostics(execute(LocalApiContract.HEALTH_PATH))
