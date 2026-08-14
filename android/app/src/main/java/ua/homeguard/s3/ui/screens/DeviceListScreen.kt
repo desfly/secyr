@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,6 +33,8 @@ import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.BuildConfig
 import ua.homeguard.s3.model.DeviceAccessState
 import ua.homeguard.s3.model.RegisteredDevice
+import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.network.HttpDeviceApi
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -122,12 +125,29 @@ fun DeviceListScreen(
             items(devices, key = { it.deviceId }) { device ->
                 val revoked = device.accessState == DeviceAccessState.REVOKED
                 val online = device.deviceId in onlineDeviceIds
+                var quickSnapshot by remember(device.deviceId) { mutableStateOf<SystemSnapshot?>(null) }
+                var quickError by remember(device.deviceId) { mutableStateOf<String?>(null) }
+                val expanded = expandedDeviceId == device.deviceId
+
+                if (expanded) {
+                    LaunchedEffect(device.deviceId, device.lastKnownUrl, online, revoked) {
+                        quickSnapshot = null
+                        quickError = null
+                        if (online && !revoked && device.lastKnownUrl.isNotBlank()) {
+                            runCatching {
+                                HttpDeviceApi(device.lastKnownUrl, tokenProvider = { "" }).snapshot()
+                            }.onSuccess { quickSnapshot = it }
+                                .onFailure { quickError = it.message ?: "status unavailable" }
+                        }
+                    }
+                }
+
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .combinedClickable(
                             onClick = {
-                                expandedDeviceId = if (expandedDeviceId == device.deviceId) null else device.deviceId
+                                expandedDeviceId = if (expanded) null else device.deviceId
                                 onQuickView(device)
                             },
                             onDoubleClick = { if (!revoked) onOpen(device) },
@@ -158,21 +178,23 @@ fun DeviceListScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = if (revoked) MaterialTheme.colorScheme.error else Color.Unspecified,
                         )
-                        if (expandedDeviceId == device.deviceId) {
+                        if (expanded) {
                             Spacer(Modifier.height(8.dp))
-                            Text(
-                                "Зв'язок: ${if (online) "онлайн" else "офлайн"}",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
+                            Text("Зв'язок: ${if (online) "онлайн" else "офлайн"}", style = MaterialTheme.typography.bodyMedium)
                             Text(
                                 "Доступ: ${if (revoked) "відкликано адміністратором" else "активний"}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = if (revoked) MaterialTheme.colorScheme.error else Color.Unspecified,
                             )
-                            Text(
-                                if (online && !revoked) "Охорона / аварії: завантаження телеметрії…" else "Охорона / аварії: недоступно без зв'язку",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
+                            when {
+                                revoked || !online -> Text("Охорона / аварії: недоступно без зв'язку", style = MaterialTheme.typography.bodyMedium)
+                                quickSnapshot != null -> {
+                                    Text("Охорона: ${quickSnapshot!!.mode.name}", style = MaterialTheme.typography.bodyMedium)
+                                    Text("Стан / аварії: ${quickSnapshot!!.health.name}", style = MaterialTheme.typography.bodyMedium)
+                                }
+                                quickError != null -> Text("Охорона / аварії: помилка ${quickError}", style = MaterialTheme.typography.bodyMedium)
+                                else -> Text("Охорона / аварії: завантаження…", style = MaterialTheme.typography.bodyMedium)
+                            }
                             if (!revoked) {
                                 Spacer(Modifier.height(6.dp))
                                 OutlinedButton(onClick = { onOpen(device) }) { Text("Повний моніторинг") }
