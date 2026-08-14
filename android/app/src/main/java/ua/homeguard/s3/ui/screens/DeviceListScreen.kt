@@ -21,14 +21,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.storage.RegisteredDevice
+import ua.homeguard.s3.storage.RegisteredDeviceStore
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -44,6 +47,8 @@ fun DeviceListScreen(
     var expandedId by remember { mutableStateOf<String?>(null) }
     var renameDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
     var renameText by remember { mutableStateOf("") }
+    var deleteDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
+    val scope = rememberCoroutineScope()
     val onlineIds = discovered.mapTo(hashSetOf()) { it.deviceId }
 
     renameDevice?.let { device ->
@@ -69,6 +74,26 @@ fun DeviceListScreen(
                 ) { Text("Зберегти") }
             },
             dismissButton = { TextButton(onClick = { renameDevice = null }) { Text("Скасувати") } },
+        )
+    }
+
+    deleteDevice?.let { device ->
+        AlertDialog(
+            onDismissRequest = { deleteDevice = null },
+            title = { Text("Видалити пристрій?") },
+            text = { Text("«${device.name}» буде видалено зі списку цього телефону. Сам контролер HomeGuard не скидається і не видаляється з мережі.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            RegisteredDeviceStore.removeActive(device.deviceId)
+                            if (expandedId == device.deviceId) expandedId = null
+                            deleteDevice = null
+                        }
+                    },
+                ) { Text("Видалити", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deleteDevice = null }) { Text("Скасувати") } },
         )
     }
 
@@ -179,6 +204,10 @@ fun DeviceListScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Перейменувати") }
                             Button(onClick = { onOpenDevice(device) }, modifier = Modifier.fillMaxWidth()) { Text("Відкрити") }
+                            OutlinedButton(
+                                onClick = { deleteDevice = device },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Видалити зі списку", color = MaterialTheme.colorScheme.error) }
                             Text("Подвійне торкання також відкриває повний моніторинг", style = MaterialTheme.typography.bodySmall)
                         } else {
                             Text("Торкніться для короткого стану · двічі для моніторингу", style = MaterialTheme.typography.bodySmall)
