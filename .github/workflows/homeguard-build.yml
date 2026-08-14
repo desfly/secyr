@@ -193,6 +193,11 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+      - name: Restore stable Android debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: homeguard-android-debug-keystore-v1
       - name: Test Android access policy and build debug APK
         working-directory: android
         run: gradle --no-daemon --stacktrace testDebugUnitTest assembleDebug
