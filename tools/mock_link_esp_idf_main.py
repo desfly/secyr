@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "firmware" / "esp-idf" / "main"
 MOCK = ROOT / "tests" / "esp-idf-mock" / "include"
 INCLUDE = ROOT / "firmware" / "include"
+CORE_SRC = ROOT / "firmware" / "src"
 COMPONENTS = ROOT / "firmware" / "esp-idf" / "components"
 HARNESS = ROOT / "tests" / "esp-idf-mock" / "mock_main.cpp"
 BUILD = ROOT / "mock-link-build"
@@ -27,20 +28,39 @@ if COMPONENTS.exists():
     for include_dir in sorted(COMPONENTS.glob("*/include")):
         component_include_args.extend(["-I", str(include_dir)])
 
-cmake_text = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
-source_refs = re.findall(r'"([^"]+\.cpp)"', cmake_text)
 sources = []
-for ref in source_refs:
-    path = (MAIN / ref).resolve()
+
+def add_cmake_sources(cmake_path: Path, base_dir: Path) -> None:
+    if not cmake_path.exists():
+        return
+    cmake_text = cmake_path.read_text(encoding="utf-8")
+    for ref in re.findall(r'"([^"]+\.cpp)"', cmake_text):
+        path = (base_dir / ref).resolve()
+        if path.exists():
+            sources.append(path)
+
+add_cmake_sources(MAIN / "CMakeLists.txt", MAIN)
+
+# Link the implementations of ESP-IDF components that app_main directly uses.
+for component_name in ("nvs_config_store", "websocket_telemetry"):
+    component_dir = COMPONENTS / component_name
+    add_cmake_sources(component_dir / "CMakeLists.txt", component_dir)
+
+# These core implementations back the live telemetry path but are not all
+# listed as main component sources because ESP-IDF normally gets them through
+# the homeguard_core component dependency.
+for filename in ("provisioning.cpp", "health_monitor.cpp", "telemetry.cpp"):
+    path = CORE_SRC / filename
     if path.exists():
-        sources.append(path)
+        sources.append(path.resolve())
+
 sources = sorted(dict.fromkeys(sources))
 objects = []
 results = []
 failed = False
 
-for source in sources + [HARNESS]:
-    obj = BUILD / f"{source.stem}.o"
+for index, source in enumerate(sources + [HARNESS]):
+    obj = BUILD / f"{index:03d}_{source.stem}.o"
     command = [
         compiler,
         "-std=c++20",
