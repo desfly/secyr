@@ -167,6 +167,7 @@ esp_err_t start_http_server()
     ESP_RETURN_ON_ERROR(g_cloud_http.register_handlers(g_http_server, &g_cloud_link, &g_cloud_store, &g_access_control), kTag, "cloud routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus, &g_access_control), kTag, "system routes");
+    ESP_RETURN_ON_ERROR(g_telemetry.register_handlers(g_http_server), kTag, "telemetry routes");
     g_output_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_output_http.register_handlers(g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus), kTag, "output routes");
     ESP_RETURN_ON_ERROR(g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed), kTag, "access routes");
