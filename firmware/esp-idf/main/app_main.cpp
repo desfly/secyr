@@ -13,6 +13,7 @@
 #include "hg_output_http.hpp"
 #include "hg_gpio_output_backend.hpp"
 #include "hg_telemetry_runtime.hpp"
+#include "hg_telemetry_session_http.hpp"
 #include "hg_access_nvs.hpp"
 #include "hg_access_http.hpp"
 #include "hg_access_time.hpp"
@@ -44,6 +45,7 @@ constexpr std::uint16_t kLocalApiPort = 80;
 
 homeguard::idf::HardwareBootstrap g_hardware;
 homeguard::idf::TelemetryRuntime g_telemetry;
+homeguard::idf::TelemetrySessionHttp g_telemetry_session_http;
 homeguard::idf::WebHttp g_web_http;
 homeguard::idf::NetworkHttp g_network_http;
 homeguard::idf::LanHttp g_lan_http;
@@ -176,6 +178,7 @@ esp_err_t start_http_server()
     g_output_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_output_http.register_handlers(g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus), kTag, "output routes");
     ESP_RETURN_ON_ERROR(g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed), kTag, "access routes");
+    ESP_RETURN_ON_ERROR(g_telemetry_session_http.register_handlers(g_http_server, &g_access_control, &g_websocket_telemetry), kTag, "telemetry session route");
     g_service_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_service_http.register_handlers(g_http_server, &g_commissioning_store, &g_hardware_verification, &g_commissioning_state, &g_boot_readiness, &g_system_bus), kTag, "service routes");
     return g_build_http.register_handlers(g_http_server);
