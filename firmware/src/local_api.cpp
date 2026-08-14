@@ -119,8 +119,10 @@ std::string telemetry_json(const TelemetryFrame& frame) {
     out << "],\"pressures\":[";
     for (size_t index = 0; index < frame.pressures.size(); ++index) {
         if (index != 0U) out << ',';
-        out << "{\"index\":" << index << ",\"value\":0.0,\"state\":\""
-            << pressure_name(frame.pressures[index]) << "\"}";
+        out << "{\"index\":" << index
+            << ",\"value\":" << frame.pressure_values[index]
+            << ",\"unit\":\"mV\",\"valid\":" << (frame.pressure_valid[index] ? "true" : "false")
+            << ",\"state\":\"" << pressure_name(frame.pressures[index]) << "\"}";
     }
     out << "],\"temperatures\":[";
     const auto temperature_count = std::min<size_t>(frame.temperature_count, frame.temperatures_c.size());
