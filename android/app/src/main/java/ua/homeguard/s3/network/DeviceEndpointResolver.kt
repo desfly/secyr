@@ -44,7 +44,10 @@ class DeviceEndpointResolver(
                 ?.let(EndpointUrlBuilder::normalizeBaseUrl)
                 .orEmpty()
             if (discoveredUrl != rememberedUrl) {
-                scope.launch { settings.remember(directLocal) }
+                scope.launch {
+                    RegisteredDeviceStore.refreshActiveDiscovered(directLocal)
+                    settings.remember(directLocal)
+                }
             }
         }
 
