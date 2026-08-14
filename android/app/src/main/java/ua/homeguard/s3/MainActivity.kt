@@ -38,6 +38,7 @@ import ua.homeguard.s3.ui.screens.AddDeviceScreen
 import ua.homeguard.s3.ui.screens.DashboardScreen
 import ua.homeguard.s3.ui.screens.DeviceListScreen
 import ua.homeguard.s3.ui.screens.ProvisioningScreen
+import java.net.URI
 
 class MainActivity : ComponentActivity() {
     private lateinit var discovery: LocalDiscoveryCoordinator
@@ -178,7 +179,7 @@ class MainActivity : ComponentActivity() {
                 )
 
                 when {
-                    showAddDevice && appSettings.deviceId.isNotBlank() -> AddDeviceScreen(
+                    showAddDevice || (appSettings.deviceId.isBlank() && !provisioningActive) -> AddDeviceScreen(
                         devices = devices,
                         isScanning = isScanning,
                         scanStatus = scanStatus,
@@ -193,8 +194,10 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onUseManualAddress = { name, address -> addManualDevice(name, address) },
+                        onUseDeviceId = { name, deviceId -> addManualDeviceId(name, deviceId) },
+                        onProvisioning = ::requestQrScan,
                     )
-                    appSettings.deviceId.isBlank() || provisioningActive -> ProvisioningScreen(
+                    provisioningActive -> ProvisioningScreen(
                         state = provisioningState,
                         onScan = ::requestQrScan,
                         onProvision = provisioning::provision,
@@ -278,19 +281,64 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun addManualDevice(name: String, rawAddress: String) {
-        val clean = rawAddress.trim().trimEnd('/')
-        if (clean.isBlank() || clean.any(Char::isWhitespace)) {
-            commandStatus.value = "Некоректна IP-адреса"
+        val baseUrl = normalizeManualAddress(rawAddress)
+        if (baseUrl == null) {
+            commandStatus.value = "Некоректна адреса. Введіть IP або IP:порт"
             return
         }
-        val baseUrl = if (clean.startsWith("http://", true) || clean.startsWith("https://", true)) clean else "http://$clean"
         val deviceId = "manual-${baseUrl.lowercase().hashCode().toUInt().toString(16)}"
         lifecycleScope.launch {
             registeredDevices.addManual(deviceId = deviceId, baseUrl = baseUrl, name = name)
-            settings.update(settings.settings.value.copy(deviceId = deviceId, lastKnownLocalUrl = baseUrl, localCertificateSha256 = ""))
+            settings.update(
+                settings.settings.value.copy(
+                    deviceId = deviceId,
+                    lastKnownLocalUrl = baseUrl,
+                    localCertificateSha256 = "",
+                ),
+            )
             addDeviceOpen.value = false
             deviceListOpen.value = true
         }
+    }
+
+    private fun addManualDeviceId(name: String, rawDeviceId: String) {
+        val deviceId = rawDeviceId.trim()
+        if (!Regex("[A-Za-z0-9._-]{3,64}").matches(deviceId)) {
+            commandStatus.value = "Некоректний ID пристрою"
+            return
+        }
+        lifecycleScope.launch {
+            registeredDevices.addManual(deviceId = deviceId, baseUrl = "", name = name)
+            settings.update(
+                settings.settings.value.copy(
+                    deviceId = deviceId,
+                    lastKnownLocalUrl = "",
+                    localCertificateSha256 = "",
+                ),
+            )
+            addDeviceOpen.value = false
+            deviceListOpen.value = true
+            discovery.rescan()
+        }
+    }
+
+    private fun normalizeManualAddress(rawAddress: String): String? {
+        val clean = rawAddress.trim().trimEnd('/')
+        if (clean.isBlank() || clean.any(Char::isWhitespace)) return null
+        val candidate = if (clean.startsWith("http://", true) || clean.startsWith("https://", true)) clean else "http://$clean"
+        return runCatching {
+            val uri = URI(candidate)
+            val host = uri.host?.trim().orEmpty()
+            val port = uri.port
+            require(host.isNotBlank())
+            require(port == -1 || port in 1..65535)
+            require(uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null)
+            val path = uri.path.orEmpty()
+            require(path.isBlank() || path == "/")
+            val scheme = uri.scheme.lowercase()
+            require(scheme == "http" || scheme == "https")
+            "$scheme://$host${if (port == -1) "" else ":$port"}"
+        }.getOrNull()
     }
 
     private fun loginOperator() {
