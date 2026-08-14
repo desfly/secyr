@@ -2,6 +2,7 @@
 #include "hg_access_time.hpp"
 
 #include "esp_wifi.h"
+#include "nvs.h"
 
 #include <algorithm>
 #include <cctype>
