@@ -1,5 +1,9 @@
 package ua.homeguard.s3.network
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,7 +28,7 @@ import java.net.SocketTimeoutException
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
-class UdpDeviceDiscovery(private val scope: CoroutineScope) {
+class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
     data class ScanStatus(
         val phase: String = "idle",
         val progress: Float = 0f,
@@ -33,6 +37,7 @@ class UdpDeviceDiscovery(private val scope: CoroutineScope) {
         val received: Int = 0,
         val accepted: Int = 0,
         val lastResponder: String = "",
+        val network: String = "",
         val error: String = "",
     )
 
@@ -42,6 +47,7 @@ class UdpDeviceDiscovery(private val scope: CoroutineScope) {
         private const val TAG = "HomeGuardDiscovery"
     }
 
+    private val connectivity = context.applicationContext.getSystemService(ConnectivityManager::class.java)
     private val found = ConcurrentHashMap<String, DiscoveredDevice>()
     private val _devices = MutableStateFlow<List<DiscoveredDevice>>(emptyList())
     val devices: StateFlow<List<DiscoveredDevice>> = _devices.asStateFlow()
@@ -74,11 +80,32 @@ class UdpDeviceDiscovery(private val scope: CoroutineScope) {
 
     suspend fun scanOnce(timeoutMs: Int = 2_400) = withContext(Dispatchers.IO) {
         val targets = broadcastAddresses().mapNotNull { it.hostAddress }.distinct()
-        _status.value = ScanStatus(phase = "sending", progress = 0.05f, targets = targets)
+        val wifiNetwork = findWifiNetwork()
+        val networkLabel = describeNetwork(wifiNetwork)
+        _status.value = ScanStatus(
+            phase = "sending",
+            progress = 0.05f,
+            targets = targets,
+            network = networkLabel,
+            error = if (wifiNetwork == null) "Wi-Fi network not resolved; using default route" else "",
+        )
 
         DatagramSocket().use { socket ->
             socket.broadcast = true
             socket.soTimeout = 120
+            if (wifiNetwork != null) {
+                runCatching { wifiNetwork.bindSocket(socket) }
+                    .onSuccess { Log.d(TAG, "Discovery socket bound to $networkLabel") }
+                    .onFailure { error ->
+                        Log.w(TAG, "Unable to bind discovery socket to $networkLabel", error)
+                        _status.value = _status.value.copy(
+                            error = "Wi-Fi bind failed: ${error.message ?: error.javaClass.simpleName}",
+                        )
+                    }
+            } else {
+                Log.w(TAG, "No Wi-Fi Network object found; UDP discovery uses default route")
+            }
+
             val request = REQUEST.toByteArray(Charsets.UTF_8)
             var sent = 0
             var received = 0
@@ -89,7 +116,7 @@ class UdpDeviceDiscovery(private val scope: CoroutineScope) {
                 runCatching {
                     socket.send(DatagramPacket(request, request.size, address, PORT))
                     sent++
-                    Log.d(TAG, "Discovery request sent to ${address.hostAddress}:$PORT")
+                    Log.d(TAG, "Discovery request sent to ${address.hostAddress}:$PORT via $networkLabel")
                 }.onFailure { error ->
                     Log.w(TAG, "Discovery send failed for ${address.hostAddress}:$PORT", error)
                 }
@@ -98,7 +125,7 @@ class UdpDeviceDiscovery(private val scope: CoroutineScope) {
             }
 
             _status.value = _status.value.copy(phase = "listening", progress = 0.20f, sent = sent)
-            Log.d(TAG, "UDP discovery listening: sent=$sent targets=${targets.size}")
+            Log.d(TAG, "UDP discovery listening: sent=$sent targets=${targets.size} network=$networkLabel")
 
             val startedAt = System.currentTimeMillis()
             val deadline = startedAt + timeoutMs
@@ -131,7 +158,7 @@ class UdpDeviceDiscovery(private val scope: CoroutineScope) {
                 }
             }
 
-            Log.d(TAG, "UDP discovery complete: received=$received accepted=$accepted devices=${found.size}")
+            Log.d(TAG, "UDP discovery complete: received=$received accepted=$accepted devices=${found.size} network=$networkLabel")
             _status.value = _status.value.copy(
                 phase = "done",
                 progress = 1f,
@@ -167,6 +194,20 @@ class UdpDeviceDiscovery(private val scope: CoroutineScope) {
             pairingRequired = json.optBoolean("pairing_required", false),
             source = DiscoverySource.UDP
         )
+    }
+
+    private fun findWifiNetwork(): Network? = runCatching {
+        connectivity.allNetworks.firstOrNull { network ->
+            connectivity.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        }
+    }.onFailure { error ->
+        Log.w(TAG, "Unable to resolve Wi-Fi Network", error)
+    }.getOrNull()
+
+    private fun describeNetwork(network: Network?): String {
+        if (network == null) return "default-route"
+        val interfaceName = runCatching { connectivity.getLinkProperties(network)?.interfaceName }.getOrNull()
+        return if (interfaceName.isNullOrBlank()) "wifi" else "wifi:$interfaceName"
     }
 
     private fun broadcastAddresses(): Set<InetAddress> {
