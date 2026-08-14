@@ -28,6 +28,13 @@ struct TelemetrySnapshot {
     float mains_power_factor{0.0F};
     bool mains_alarm{false};
 
+    bool pressure1_valid{false};
+    float pressure1_bar{0.0F};
+    float pressure1_current_ma{0.0F};
+    bool pressure2_valid{false};
+    float pressure2_bar{0.0F};
+    float pressure2_current_ma{0.0F};
+
     bool rtc_temperature_valid{false};
     float rtc_temperature_c{0.0F};
 };
