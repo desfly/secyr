@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <ctime>
 
 namespace homeguard::idf {
