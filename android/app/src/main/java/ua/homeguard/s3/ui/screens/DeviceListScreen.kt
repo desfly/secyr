@@ -125,6 +125,12 @@ fun DeviceListScreen(
                                 val abnormalPressures = snapshot.pressures.count {
                                     !it.state.equals("ok", true) && !it.state.equals("normal", true) && !it.state.equals("unknown", true)
                                 }
+                                val abnormalTemperatures = snapshot.temperatures.count {
+                                    !it.state.equals("ok", true) && !it.state.equals("normal", true) && !it.state.equals("unknown", true)
+                                }
+                                val abnormalPower = snapshot.powerChannels.count {
+                                    !it.state.equals("ok", true) && !it.state.equals("normal", true) && !it.state.equals("unknown", true)
+                                }
                                 val alarmActive = problemZones.isNotEmpty() || snapshot.health.name.contains("alarm", true) || snapshot.health.name.contains("critical", true)
 
                                 StatusLine("Охорона", snapshot.mode.name)
@@ -134,6 +140,15 @@ fun DeviceListScreen(
                                 StatusLine("Проблемні зони", "${problemZones.size} / ${snapshot.zones.size}")
                                 if (snapshot.pressures.isNotEmpty()) {
                                     StatusLine("Тиски", if (abnormalPressures == 0) "норма (${snapshot.pressures.size})" else "проблем: $abnormalPressures")
+                                }
+                                if (snapshot.temperatures.isNotEmpty()) {
+                                    val primary = snapshot.temperatures.first()
+                                    StatusLine("Температура", "%.1f °C%s".format(primary.celsius, if (abnormalTemperatures > 0) " · проблем: $abnormalTemperatures" else ""))
+                                }
+                                if (snapshot.powerChannels.isNotEmpty()) {
+                                    val primary = snapshot.powerChannels.first()
+                                    StatusLine("Живлення", "%.2f V · %.2f A · %.1f W".format(primary.voltage, primary.current, primary.power))
+                                    if (abnormalPower > 0) StatusLine("Живлення стан", "проблем: $abnormalPower")
                                 }
                                 if (problemZones.isNotEmpty()) {
                                     Text(
