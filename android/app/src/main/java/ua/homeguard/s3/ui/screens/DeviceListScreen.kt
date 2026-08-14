@@ -32,6 +32,7 @@ import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.storage.RegisteredDevice
 import ua.homeguard.s3.storage.RegisteredDeviceStore
+import ua.homeguard.s3.ui.components.BruceBrand
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -106,7 +107,7 @@ fun DeviceListScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text("HomeGuard-S3", style = MaterialTheme.typography.headlineSmall)
+                BruceBrand(showTitle = true)
                 Text("Пристрої: ${devices.size}", style = MaterialTheme.typography.titleMedium)
                 Text("Стани оновлюються автоматично", style = MaterialTheme.typography.bodySmall)
                 Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати") }
