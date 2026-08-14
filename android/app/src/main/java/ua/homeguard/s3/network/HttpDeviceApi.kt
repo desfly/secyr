@@ -29,7 +29,7 @@ class HttpDeviceApi(
         require(credential.length in 4..12 && credential.all(Char::isDigit)) { "PIN must contain 4-12 digits" }
 
         val json = execute(
-            "/api/v1/access/login",
+            RuntimeApiContract.ACCESS_LOGIN_PATH,
             "POST",
             JSONObject().put("actor", normalizedActor).put("credential", credential),
         )
@@ -63,7 +63,7 @@ class HttpDeviceApi(
 
     suspend fun telemetrySession(actor: String, credential: String): String {
         val json = execute(
-            "/api/v1/telemetry/session",
+            RuntimeApiContract.TELEMETRY_SESSION_PATH,
             "POST",
             JSONObject().put("actor", actor.trim()).put("credential", credential),
         )
@@ -115,7 +115,7 @@ class HttpDeviceApi(
 
     private suspend fun runtimeSecurityCommand(command: String, actor: String, credential: String): CommandReply {
         val json = execute(
-            "/api/v1/system/security-command",
+            RuntimeApiContract.SECURITY_COMMAND_PATH,
             "POST",
             JSONObject()
                 .put("command", command)
@@ -132,7 +132,7 @@ class HttpDeviceApi(
     private suspend fun runtimeValveCommand(active: Boolean, actor: String, credential: String): CommandReply {
         for (outputId in 2..3) {
             val json = execute(
-                "/api/v1/system/output-command",
+                RuntimeApiContract.OUTPUT_COMMAND_PATH,
                 "POST",
                 JSONObject()
                     .put("outputId", outputId)
