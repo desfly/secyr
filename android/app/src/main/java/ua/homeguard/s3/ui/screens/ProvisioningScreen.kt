@@ -42,6 +42,7 @@ import java.net.URI
 @Composable
 fun ProvisioningScreen(
     state: ProvisioningUiState,
+    onBack: () -> Unit,
     onScan: () -> Unit,
     onProvision: (ProvisioningForm) -> Unit,
 ) {
@@ -68,13 +69,7 @@ fun ProvisioningScreen(
             else -> 80
         }
         scope.launch {
-            localSettings.update(
-                localSettings.settings.value.copy(
-                    deviceId = "manual-${host.lowercase()}-$port",
-                    lastKnownLocalUrl = endpoint,
-                    localCertificateSha256 = "",
-                )
-            )
+            localSettings.selectDevice("manual-${host.lowercase()}-$port", endpoint)
             (context as? Activity)?.recreate()
         }
     }
@@ -84,6 +79,7 @@ fun ProvisioningScreen(
         devices = devices,
         isScanningNetwork = isScanning,
         scanStatus = scanStatus,
+        onBack = onBack,
         onScanQr = onScan,
         onDiscover = { scope.launch { discovery.rescan() } },
         onUseDevice = { device ->
@@ -103,6 +99,7 @@ fun ProvisioningScreen(
     devices: List<DiscoveredDevice>,
     isScanningNetwork: Boolean,
     scanStatus: UdpDeviceDiscovery.ScanStatus,
+    onBack: () -> Unit,
     onScanQr: () -> Unit,
     onDiscover: () -> Unit,
     onUseDevice: (DiscoveredDevice) -> Unit,
@@ -127,15 +124,81 @@ fun ProvisioningScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("HomeGuard-S3 — підключення")
-        Text("Знайдіть контролер у локальній мережі або введіть його IP-адресу вручну.")
+        OutlinedButton(onClick = onBack, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            Text("← Назад")
+        }
+        Text("Підключити HomeGuard до Wi-Fi")
+        Text("1. Ідентифікуйте новий контролер через QR. 2. Введіть домашню Wi-Fi мережу та пароль. 3. Передайте налаштування і дочекайтеся появи HomeGuard у LAN.")
 
+        HorizontalDivider()
+        Text("Крок 1 — вибрати новий HomeGuard")
+        OutlinedButton(onClick = onScanQr, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            Text("Сканувати QR HomeGuard")
+        }
+        state.qr?.let {
+            Text("Пристрій: ${it.deviceId}")
+            Text("Setup AP: ${it.setupSsid}")
+        }
+
+        HorizontalDivider()
+        Text("Крок 2 — домашня Wi-Fi мережа")
+        OutlinedTextField(
+            form.wifiSsid,
+            { form = form.copy(wifiSsid = it) },
+            label = { Text("Назва Wi-Fi (SSID)") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            form.wifiPassword,
+            { form = form.copy(wifiPassword = it) },
+            label = { Text("Пароль Wi-Fi") },
+            modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        )
+        OutlinedTextField(
+            form.ownerLabel,
+            { form = form.copy(ownerLabel = it) },
+            label = { Text("Назва пристрою/об’єкта") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        HorizontalDivider()
+        Text("Крок 3 — Internet/Cloud")
+        Text("Ці поля потрібні лише якщо для цього HomeGuard увімкнено віддалений доступ.")
+        OutlinedTextField(
+            form.cloudEndpoint,
+            { form = form.copy(cloudEndpoint = it) },
+            label = { Text("MQTTS адреса хмари — необов’язково") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            form.cloudClaimToken,
+            { form = form.copy(cloudClaimToken = it) },
+            label = { Text("Одноразовий cloud claim token") },
+            modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        Button(
+            onClick = { onProvision(form) },
+            enabled = state.qr != null && form.wifiSsid.isNotBlank() && !busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Передати Wi-Fi налаштування в HomeGuard")
+        }
+        Text(state.message)
+        if (state.error.isNotBlank()) Text("Помилка: ${state.error}")
+        if (state.localUrl.isNotBlank()) Text("Локальна адреса: ${state.localUrl}")
+        if (busy) CircularProgressIndicator()
+
+        HorizontalDivider()
+        Text("Якщо HomeGuard уже підключений до Wi-Fi")
         Button(
             onClick = onDiscover,
             enabled = !isScanningNetwork && !busy,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(if (isScanningNetwork) "Пошук у мережі…" else "Пошук у мережі")
+            Text(if (isScanningNetwork) "Пошук у мережі…" else "Знайти у локальній мережі")
         }
         if (isScanningNetwork) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -145,29 +208,18 @@ fun ProvisioningScreen(
         } else {
             Text("Знайдено пристроїв: ${devices.size}")
         }
-
         if (scanStatus.phase != "idle") {
-            val targetText = scanStatus.targets.joinToString(limit = 3, truncated = "…")
-            Text("Мережа: ${scanStatus.network.ifBlank { "невідомо" }}")
             Text("UDP: надіслано ${scanStatus.sent} · отримано ${scanStatus.received} · прийнято ${scanStatus.accepted}")
-            if (targetText.isNotBlank()) Text("Broadcast: $targetText")
-            if (scanStatus.lastResponder.isNotBlank()) Text("Остання відповідь: ${scanStatus.lastResponder}")
             if (scanStatus.error.isNotBlank()) Text("Діагностика: ${scanStatus.error}")
         }
-
         devices.forEach { device ->
-            OutlinedButton(
-                onClick = { onUseDevice(device) },
-                enabled = !busy,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                val transport = if (device.secure) "HTTPS" else "HTTP"
-                Text("${device.serviceName.ifBlank { "HomeGuard-S3" }} · ${device.host}:${device.port} · $transport")
+            OutlinedButton(onClick = { onUseDevice(device) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                Text("${device.serviceName.ifBlank { "HomeGuard-S3" }} · ${device.host}:${device.port}")
             }
         }
 
         HorizontalDivider()
-        Text("Підключення по IP")
+        Text("Ручне підключення по IP")
         OutlinedTextField(
             value = manualAddress,
             onValueChange = { manualAddress = it },
@@ -184,60 +236,6 @@ fun ProvisioningScreen(
         ) {
             Text("Підключити по IP")
         }
-
-        HorizontalDivider()
-        Text("Перше налаштування через QR")
-        Text(state.message)
-        if (state.error.isNotBlank()) Text("Помилка: ${state.error}")
-        if (state.localUrl.isNotBlank()) Text("Локальна адреса: ${state.localUrl}")
-        OutlinedButton(onClick = onScanQr, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-            Text("Сканувати QR на пристрої")
-        }
-        state.qr?.let {
-            Text("Пристрій: ${it.deviceId}")
-            Text("Setup AP: ${it.setupSsid}")
-        }
-        OutlinedTextField(
-            form.wifiSsid,
-            { form = form.copy(wifiSsid = it) },
-            label = { Text("Домашня Wi-Fi мережа") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            form.wifiPassword,
-            { form = form.copy(wifiPassword = it) },
-            label = { Text("Пароль домашнього Wi-Fi") },
-            modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        )
-        OutlinedTextField(
-            form.ownerLabel,
-            { form = form.copy(ownerLabel = it) },
-            label = { Text("Назва об’єкта") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            form.cloudEndpoint,
-            { form = form.copy(cloudEndpoint = it) },
-            label = { Text("MQTTS адреса хмари — необов’язково") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            form.cloudClaimToken,
-            { form = form.copy(cloudClaimToken = it) },
-            label = { Text("Одноразовий cloud claim token") },
-            modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
-        )
-        Button(
-            onClick = { onProvision(form) },
-            enabled = state.qr != null && !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Прив’язати HomeGuard-S3")
-        }
-        if (busy) CircularProgressIndicator()
     }
 }
 
