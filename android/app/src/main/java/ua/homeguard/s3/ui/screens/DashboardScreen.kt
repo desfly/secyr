@@ -82,10 +82,7 @@ fun DashboardScreen(
             title = { Text("Підтвердіть команду") },
             text = { Text("Виконати ${command.name}? Контролер повторно перевірить PIN, роль та challenge.") },
             confirmButton = {
-                TextButton(
-                    enabled = canCommand(command),
-                    onClick = { pendingDangerousCommand = null; onCommand(command) },
-                ) { Text("Виконати") }
+                TextButton(enabled = canCommand(command), onClick = { pendingDangerousCommand = null; onCommand(command) }) { Text("Виконати") }
             },
             dismissButton = { TextButton(onClick = { pendingDangerousCommand = null }) { Text("Скасувати") } },
         )
@@ -109,47 +106,21 @@ fun DashboardScreen(
         }
 
         item {
-            MaintenancePanel(
-                diagnostics = diagnostics,
-                backupStatus = backupStatus,
-                onExportSettings = onExportSettings,
-                onImportSettings = onImportSettings,
-            )
+            MaintenancePanel(diagnostics = diagnostics, backupStatus = backupStatus, onExportSettings = onExportSettings, onImportSettings = onImportSettings)
         }
 
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Оператор", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(
-                        value = operatorId,
-                        onValueChange = onOperatorIdChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !authenticated,
-                        singleLine = true,
-                        label = { Text("ID користувача") },
-                    )
-                    OutlinedTextField(
-                        value = operatorPin,
-                        onValueChange = { value -> if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value) },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !authenticated,
-                        singleLine = true,
-                        label = { Text("PIN") },
-                        visualTransformation = PasswordVisualTransformation(),
-                    )
+                    OutlinedTextField(value = operatorId, onValueChange = onOperatorIdChange, modifier = Modifier.fillMaxWidth(), enabled = !authenticated, singleLine = true, label = { Text("ID користувача") })
+                    OutlinedTextField(value = operatorPin, onValueChange = { value -> if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value) }, modifier = Modifier.fillMaxWidth(), enabled = !authenticated, singleLine = true, label = { Text("PIN") }, visualTransformation = PasswordVisualTransformation())
                     if (accessSession == null) {
                         Text(if (credentialsReady) "Готово до входу" else "Введіть ID та PIN 4–12 цифр")
                         Button(enabled = credentialsReady, onClick = onLogin) { Text("Увійти") }
                     } else {
                         Text("${accessSession.name} · роль ${accessSession.role.name.lowercase()}")
-                        Text(
-                            when (accessSession.role.name) {
-                                "ADMIN" -> "Повний доступ до керування"
-                                "USER" -> "Моніторинг, охорона та клапани"
-                                else -> "Тільки моніторинг"
-                            }
-                        )
+                        Text(when (accessSession.role.name) { "ADMIN" -> "Повний доступ до керування"; "USER" -> "Моніторинг, охорона та клапани"; else -> "Тільки моніторинг" })
                         OutlinedButton(onClick = onLogout) { Text("Вийти") }
                     }
                     Text("PIN зберігається тільки в оперативній пам’яті застосунку.")
@@ -201,6 +172,75 @@ fun DashboardScreen(
             }
         }
 
+        item { Text("Зони", style = MaterialTheme.typography.titleLarge) }
+        if (snapshot.zones.isEmpty()) item { Text("Очікування живих даних зон…") }
+        else items(snapshot.zones, key = { it.index }) { zone ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column { Text(zone.name, style = MaterialTheme.typography.titleMedium); Text(if (zone.enabled) "Активна" else "Вимкнена") }
+                    Text(zone.state.uppercase())
+                }
+            }
+        }
+
+        item { Text("Входи", style = MaterialTheme.typography.titleLarge) }
+        if (snapshot.inputs.isEmpty()) item { Text("Немає даних входів") }
+        else items(snapshot.inputs, key = { it.index }) { input ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(input.name.ifBlank { "Вхід ${input.index + 1}" })
+                    Text(input.state.uppercase())
+                }
+            }
+        }
+
+        item { Text("Виходи", style = MaterialTheme.typography.titleLarge) }
+        if (snapshot.outputs.isEmpty()) item { Text("Немає даних виходів") }
+        else items(snapshot.outputs, key = { it.index }) { output ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(output.name.ifBlank { "Вихід ${output.index + 1}" })
+                    Text(output.state.uppercase())
+                }
+            }
+        }
+
+        item { Text("Температури", style = MaterialTheme.typography.titleLarge) }
+        if (snapshot.temperatures.isEmpty()) item { Text("Немає даних температур") }
+        else items(snapshot.temperatures, key = { it.index }) { temperature ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(temperature.name.ifBlank { "Датчик ${temperature.index + 1}" })
+                    Text("${temperature.value} °C · ${temperature.state}")
+                }
+            }
+        }
+
+        item { Text("Тиск / аналогові канали", style = MaterialTheme.typography.titleLarge) }
+        if (snapshot.pressures.isEmpty()) item { Text("Немає даних") }
+        else items(snapshot.pressures, key = { it.index }) { pressure ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Канал ${pressure.index + 1}")
+                    Text("${pressure.value} · ${pressure.state}")
+                }
+            }
+        }
+
+        item { Text("Електроживлення", style = MaterialTheme.typography.titleLarge) }
+        if (snapshot.electrical.isEmpty()) item { Text("Немає даних напруги/струму/потужності") }
+        else items(snapshot.electrical, key = { it.index }) { channel ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(channel.name.ifBlank { "Канал ${channel.index + 1}" }, style = MaterialTheme.typography.titleMedium)
+                    StatusRow("Напруга", "${channel.voltage} V")
+                    StatusRow("Струм", "${channel.current} A")
+                    StatusRow("Потужність", "${channel.power} W")
+                    Text("Стан: ${channel.state}", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -238,28 +278,6 @@ fun DashboardScreen(
                     Text(event.event, style = MaterialTheme.typography.titleSmall)
                     Text("#${event.sequence} · source ${event.sourceId} · value ${event.value}")
                     Text("Категорія: ${EventLogFilterEngine.categoryOf(event).name}", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-
-        item { Text("Зони", style = MaterialTheme.typography.titleLarge) }
-        if (snapshot.zones.isEmpty()) item { Text("Очікування живих даних зон…") }
-        else items(snapshot.zones, key = { it.index }) { zone ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column { Text(zone.name, style = MaterialTheme.typography.titleMedium); Text(if (zone.enabled) "Активна" else "Вимкнена") }
-                    Text(zone.state.uppercase())
-                }
-            }
-        }
-
-        item { Text("Тиск / аналогові канали", style = MaterialTheme.typography.titleLarge) }
-        if (snapshot.pressures.isEmpty()) item { Text("Немає даних") }
-        else items(snapshot.pressures, key = { it.index }) { pressure ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Канал ${pressure.index + 1}")
-                    Text("${pressure.value} · ${pressure.state}")
                 }
             }
         }
