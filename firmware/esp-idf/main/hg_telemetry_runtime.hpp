@@ -3,6 +3,7 @@
 #include "esp_err.h"
 #include "esp_http_server.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/portmacro.h"
 
 #include <cstdint>
 
