@@ -32,6 +32,11 @@ class RegisteredDeviceStore(context: Context) {
         suspend fun refreshActiveDiscovered(discovered: DiscoveredDevice): Boolean {
             return activeStore?.refreshDiscovered(discovered) ?: false
         }
+
+        suspend fun removeActive(deviceId: String): Boolean {
+            if (deviceId.isBlank()) return false
+            return activeStore?.remove(deviceId) ?: false
+        }
     }
 
     private val preferences = context.applicationContext.getSharedPreferences("homeguard_devices", Context.MODE_PRIVATE)
@@ -125,6 +130,13 @@ class RegisteredDeviceStore(context: Context) {
         val clean = name.trim().take(40)
         if (clean.isBlank()) return
         persist(_devices.value.map { if (it.deviceId == deviceId) it.copy(name = clean) else it })
+    }
+
+    suspend fun remove(deviceId: String): Boolean {
+        val updated = _devices.value.filterNot { it.deviceId == deviceId }
+        if (updated.size == _devices.value.size) return false
+        persist(updated)
+        return true
     }
 
     suspend fun markAuthorization(deviceId: String, authorized: Boolean) {
