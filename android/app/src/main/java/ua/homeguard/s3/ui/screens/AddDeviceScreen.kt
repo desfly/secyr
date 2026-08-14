@@ -35,9 +35,12 @@ fun AddDeviceScreen(
     onRescan: () -> Unit,
     onUseDevice: (DiscoveredDevice) -> Unit,
     onUseManualAddress: (String, String) -> Unit,
+    onUseDeviceId: (String, String) -> Unit,
+    onProvisioning: () -> Unit,
 ) {
     var manualExpanded by remember { mutableStateOf(false) }
     var manualAddress by remember { mutableStateOf("") }
+    var manualDeviceId by remember { mutableStateOf("") }
     var manualName by remember { mutableStateOf("HomeGuard") }
     val progress = scanStatus.progress.coerceIn(0f, 1f)
     val progressPercent = (progress * 100f).toInt()
@@ -137,7 +140,7 @@ fun AddDeviceScreen(
                 value = manualAddress,
                 onValueChange = { manualAddress = it.trim() },
                 label = { Text("IP або IP:порт") },
-                supportingText = { Text("Наприклад: 192.168.4.1") },
+                supportingText = { Text("Наприклад: 192.168.4.1 або 192.168.1.25:8080") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -146,11 +149,30 @@ fun AddDeviceScreen(
                 onClick = { onUseManualAddress(manualName.trim().ifBlank { "HomeGuard" }, manualAddress) },
                 enabled = manualAddress.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Додати") }
+            ) { Text("Додати за IP") }
+
+            Text("або", style = MaterialTheme.typography.bodyMedium)
+            OutlinedTextField(
+                value = manualDeviceId,
+                onValueChange = { manualDeviceId = it.trim().take(64) },
+                label = { Text("ID пристрою") },
+                supportingText = { Text("Для пошуку цього HomeGuard у LAN або через Internet/Cloud") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = { onUseDeviceId(manualName.trim().ifBlank { "HomeGuard" }, manualDeviceId) },
+                enabled = manualDeviceId.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Знайти за ID") }
+        }
+
+        OutlinedButton(onClick = onProvisioning, modifier = Modifier.fillMaxWidth()) {
+            Text("Налаштувати новий HomeGuard через QR")
         }
 
         Text(
-            "ID пристрою у списку користувачу не показується.",
+            "Після додавання ID у списку показується вибрана назва пристрою, а не технічний ID.",
             style = MaterialTheme.typography.bodySmall,
         )
     }
