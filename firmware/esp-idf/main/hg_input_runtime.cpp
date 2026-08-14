@@ -35,7 +35,7 @@ esp_err_t InputRuntime::start(hg::SystemEventBus* bus)
     InputPolarityConfig persisted{};
     const InputNvsStore store;
     const auto load_error = store.load(persisted);
-    polarity_ = load_error == ESP_OK ? persisted : InputPolarityConfig{};
+    set_polarity(load_error == ESP_OK ? persisted : InputPolarityConfig{});
 
     gpio_config_t config{};
     config.pin_bit_mask =
@@ -59,14 +59,16 @@ void InputRuntime::task_entry(void* context)
 
 void InputRuntime::run()
 {
+    const auto initial = polarity();
     std::array<DebouncedInput, 2> inputs{{
-        {homeguard::board::kTamper, 0, polarity_.tamper},
-        {homeguard::board::kPowerFail, 1, polarity_.power_fail},
+        {homeguard::board::kTamper, 0, initial.tamper},
+        {homeguard::board::kPowerFail, 1, initial.power_fail},
     }};
 
     while (true) {
-        inputs[0].polarity = polarity_.tamper;
-        inputs[1].polarity = polarity_.power_fail;
+        const auto current = polarity();
+        inputs[0].polarity = current.tamper;
+        inputs[1].polarity = current.power_fail;
 
         for (auto& input : inputs) {
             const bool raw_high = gpio_get_level(input.gpio) != 0;
