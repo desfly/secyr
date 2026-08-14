@@ -198,9 +198,9 @@ class MainActivity : ComponentActivity() {
                         scanStatus = scanStatus,
                         onBack = { addDeviceOpen.value = false },
                         onRescan = { lifecycleScope.launch { discovery.rescan() } },
-                        onUseDevice = { device ->
+                        onUseDevice = { device, name ->
                             lifecycleScope.launch {
-                                registeredDevices.addOrUpdate(device)
+                                registeredDevices.addOrUpdate(device, requestedName = name)
                                 settings.remember(device)
                                 addDeviceOpen.value = false
                                 deviceListOpen.value = true

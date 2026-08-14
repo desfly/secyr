@@ -34,7 +34,7 @@ fun AddDeviceScreen(
     scanStatus: UdpDeviceDiscovery.ScanStatus,
     onBack: () -> Unit,
     onRescan: () -> Unit,
-    onUseDevice: (DiscoveredDevice) -> Unit,
+    onUseDevice: (DiscoveredDevice, String) -> Unit,
     onUseManualAddress: (String, String) -> Unit,
     onUseDeviceId: (String, String) -> Unit,
     onProvisioning: () -> Unit,
@@ -44,6 +44,7 @@ fun AddDeviceScreen(
     var manualDeviceId by remember { mutableStateOf("") }
     var manualName by remember { mutableStateOf("HomeGuard") }
     var manualAddressTouched by remember { mutableStateOf(false) }
+    var selectedDiscoveredDevice by remember { mutableStateOf<DiscoveredDevice?>(null) }
     val progress = scanStatus.progress.coerceIn(0f, 1f)
     val progressPercent = (progress * 100f).toInt()
 
@@ -139,9 +140,10 @@ fun AddDeviceScreen(
             devices.forEach { device ->
                 OutlinedButton(
                     onClick = {
+                        selectedDiscoveredDevice = device
                         manualAddress = device.host
                         manualAddressTouched = false
-                        onUseDevice(device)
+                        manualExpanded = true
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -185,6 +187,16 @@ fun AddDeviceScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            selectedDiscoveredDevice?.let { selected ->
+                Button(
+                    onClick = { onUseDevice(selected, manualName.trim().ifBlank { selected.serviceName.ifBlank { "HomeGuard" } }) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Додати знайдений пристрій") }
+                Text(
+                    "Знайдено: ${selected.host}:${selected.port}. Назву можна змінити перед додаванням.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             Button(
                 onClick = { onUseManualAddress(manualName.trim().ifBlank { "HomeGuard" }, manualAddress) },
                 enabled = manualAddress.isNotBlank(),
