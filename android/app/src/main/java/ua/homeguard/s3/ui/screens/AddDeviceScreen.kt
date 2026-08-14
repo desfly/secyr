@@ -54,9 +54,26 @@ fun AddDeviceScreen(
     ) {
         OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("← Назад") }
         Text("Додати пристрій", style = MaterialTheme.typography.headlineSmall)
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Новий HomeGuard", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Підключіть контролер до домашньої Wi‑Fi мережі прямо із застосунку.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Button(onClick = onProvisioning, modifier = Modifier.fillMaxWidth()) {
+                    Text("Підключити новий HomeGuard до Wi‑Fi")
+                }
+            }
+        }
+
         Text("Пошук у локальній мережі", style = MaterialTheme.typography.titleMedium)
         Text(
-            "HomeGuard і телефон мають бути в одній Wi‑Fi мережі.",
+            "Якщо HomeGuard уже підключений до Wi‑Fi, телефон і контролер мають бути в одній мережі.",
             style = MaterialTheme.typography.bodyMedium,
         )
 
@@ -165,10 +182,6 @@ fun AddDeviceScreen(
                 enabled = manualDeviceId.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Знайти за ID") }
-        }
-
-        OutlinedButton(onClick = onProvisioning, modifier = Modifier.fillMaxWidth()) {
-            Text("Налаштувати новий HomeGuard через QR")
         }
 
         Text(
