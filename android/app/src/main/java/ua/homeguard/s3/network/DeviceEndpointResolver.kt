@@ -37,6 +37,17 @@ class DeviceEndpointResolver(
             }
         }
 
+        if (directLocal != null) {
+            val discoveredUrl = EndpointUrlBuilder.normalizeBaseUrl(directLocal.baseUrl)
+            val rememberedUrl = config.lastKnownLocalUrl
+                .takeIf { it.isNotBlank() }
+                ?.let(EndpointUrlBuilder::normalizeBaseUrl)
+                .orEmpty()
+            if (discoveredUrl != rememberedUrl) {
+                scope.launch { settings.remember(directLocal) }
+            }
+        }
+
         when (selectControlPath(
             EndpointAvailability(
                 hasDeviceId = config.deviceId.isNotBlank() || local != null,
