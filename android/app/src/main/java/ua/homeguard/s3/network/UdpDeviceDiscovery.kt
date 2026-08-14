@@ -47,7 +47,11 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
         private const val TAG = "HomeGuardDiscovery"
     }
 
-    private val connectivity = context.applicationContext.getSystemService(ConnectivityManager::class.java)
+    // Use the API-1 service lookup form because MyFist still supports Android 5.0 (API 21).
+    // Context#getSystemService(Class) is API 23+ and was making lint fail even though the
+    // discovery implementation itself is otherwise compatible with API 21.
+    private val connectivity = context.applicationContext
+        .getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val found = ConcurrentHashMap<String, DiscoveredDevice>()
     private val _devices = MutableStateFlow<List<DiscoveredDevice>>(emptyList())
     val devices: StateFlow<List<DiscoveredDevice>> = _devices.asStateFlow()
