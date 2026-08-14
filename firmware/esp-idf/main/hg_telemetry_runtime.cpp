@@ -20,7 +20,7 @@ namespace homeguard::idf {
 namespace {
 
 constexpr const char* kTag = "hg_telemetry";
-constexpr TickType_t kTelemetryPeriod = pdMS_TO_TICKS(5000);
+constexpr TickType_t kTelemetryPeriod = pdMS_TO_TICKS(1000);
 
 hg::HealthState module_health(homeguard::HardwareModuleState state)
 {
@@ -190,7 +190,7 @@ void TelemetryRuntime::run()
 
         websocket_->publish(frame);
 
-        if ((++cycles % 12U) == 0U) {
+        if ((++cycles % 60U) == 0U) {
             hardware_->storage().refresh_space();
         }
 
