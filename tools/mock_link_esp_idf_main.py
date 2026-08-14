@@ -42,7 +42,9 @@ def add_cmake_sources(cmake_path: Path, base_dir: Path) -> None:
 add_cmake_sources(MAIN / "CMakeLists.txt", MAIN)
 
 # Link the implementations of ESP-IDF components that app_main directly uses.
-for component_name in ("nvs_config_store", "websocket_telemetry"):
+# Keep this aligned with the component objects instantiated from app_main.cpp;
+# otherwise syntax checks can pass while the host mock fails at final link.
+for component_name in ("nvs_config_store", "websocket_telemetry", "device_discovery"):
     component_dir = COMPONENTS / component_name
     add_cmake_sources(component_dir / "CMakeLists.txt", component_dir)
 
