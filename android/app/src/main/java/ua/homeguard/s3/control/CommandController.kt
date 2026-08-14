@@ -18,7 +18,14 @@ class CommandController(
     private val requestIds = AtomicLong(System.currentTimeMillis())
 
     suspend fun login(actor: String, credential: String): AccessSession {
-        return requireOnlineApi().login(actor, credential)
+        val target = endpoint.value
+        require(target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank()) {
+            "controller offline"
+        }
+        // Local access/login authenticates the operator by ID + PIN and intentionally
+        // does not require a pre-existing provisioning bearer token. Requiring the
+        // token here created a deadlock for controllers added manually by IP.
+        return createApi(target).login(actor, credential)
     }
 
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
