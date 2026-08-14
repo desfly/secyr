@@ -57,6 +57,7 @@ class MainActivity : ComponentActivity() {
     private val operatorPin = MutableStateFlow("")
     private val accessSession = MutableStateFlow<AccessSession?>(null)
     private val addDeviceOpen = MutableStateFlow(false)
+    private val provisioningOpen = MutableStateFlow(false)
     private val deviceListOpen = MutableStateFlow(true)
     private var pendingExportText: String = ""
     private var pendingSettingsBackupText: String = ""
@@ -150,6 +151,7 @@ class MainActivity : ComponentActivity() {
             val currentPin by operatorPin.collectAsState()
             val currentAccessSession by accessSession.collectAsState()
             val showAddDevice by addDeviceOpen.collectAsState()
+            val showProvisioning by provisioningOpen.collectAsState()
             val showDeviceList by deviceListOpen.collectAsState()
 
             val diagnostics = SystemDiagnosticsEvaluator.evaluate(
@@ -179,7 +181,18 @@ class MainActivity : ComponentActivity() {
                 )
 
                 when {
-                    showAddDevice || (appSettings.deviceId.isBlank() && !provisioningActive) -> AddDeviceScreen(
+                    showProvisioning || provisioningActive -> ProvisioningScreen(
+                        state = provisioningState,
+                        onBack = {
+                            if (!provisioningActive) {
+                                provisioningOpen.value = false
+                                addDeviceOpen.value = true
+                            }
+                        },
+                        onScan = ::requestQrScan,
+                        onProvision = provisioning::provision,
+                    )
+                    showAddDevice || appSettings.deviceId.isBlank() -> AddDeviceScreen(
                         devices = devices,
                         isScanning = isScanning,
                         scanStatus = scanStatus,
@@ -195,12 +208,10 @@ class MainActivity : ComponentActivity() {
                         },
                         onUseManualAddress = { name, address -> addManualDevice(name, address) },
                         onUseDeviceId = { name, deviceId -> addManualDeviceId(name, deviceId) },
-                        onProvisioning = ::requestQrScan,
-                    )
-                    provisioningActive -> ProvisioningScreen(
-                        state = provisioningState,
-                        onScan = ::requestQrScan,
-                        onProvision = provisioning::provision,
+                        onProvisioning = {
+                            addDeviceOpen.value = false
+                            provisioningOpen.value = true
+                        },
                     )
                     showDeviceList -> DeviceListScreen(
                         devices = registered,
@@ -216,11 +227,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onOpenDevice = { device ->
                             lifecycleScope.launch {
-                                settings.update(settings.settings.value.copy(
-                                    deviceId = device.deviceId,
-                                    lastKnownLocalUrl = device.baseUrl,
-                                    localCertificateSha256 = "",
-                                ))
+                                settings.selectDevice(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() })
                                 deviceListOpen.value = false
                             }
                         },
@@ -289,13 +296,7 @@ class MainActivity : ComponentActivity() {
         val deviceId = "manual-${baseUrl.lowercase().hashCode().toUInt().toString(16)}"
         lifecycleScope.launch {
             registeredDevices.addManual(deviceId = deviceId, baseUrl = baseUrl, name = name)
-            settings.update(
-                settings.settings.value.copy(
-                    deviceId = deviceId,
-                    lastKnownLocalUrl = baseUrl,
-                    localCertificateSha256 = "",
-                ),
-            )
+            settings.selectDevice(deviceId, baseUrl)
             addDeviceOpen.value = false
             deviceListOpen.value = true
         }
@@ -309,13 +310,7 @@ class MainActivity : ComponentActivity() {
         }
         lifecycleScope.launch {
             registeredDevices.addManual(deviceId = deviceId, baseUrl = "", name = name)
-            settings.update(
-                settings.settings.value.copy(
-                    deviceId = deviceId,
-                    lastKnownLocalUrl = "",
-                    localCertificateSha256 = "",
-                ),
-            )
+            settings.selectDevice(deviceId)
             addDeviceOpen.value = false
             deviceListOpen.value = true
             discovery.rescan()
