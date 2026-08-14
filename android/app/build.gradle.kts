@@ -4,6 +4,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+val appVersionCode = ciRunNumber?.plus(1000) ?: 56
+
 android {
     namespace = "ua.homeguard.s3"
     compileSdk = 35
@@ -12,8 +15,8 @@ android {
         applicationId = "ua.homeguard.s3"
         minSdk = 26
         targetSdk = 35
-        versionCode = 55
-        versionName = "0.0.55"
+        versionCode = appVersionCode
+        versionName = "0.0.$appVersionCode"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -31,11 +34,8 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
-            // CI runners create a fresh debug signing key. A fixed .debug package
-            // can therefore collide with an older CI build already installed on
-            // the phone and Android reports the update as an invalid package.
-            // Use a one-off test package id for this hardware-test build so it
-            // installs alongside any previous MyFist build without signature clash.
+            // Keep one stable hardware-test package id. CI restores the same debug
+            // keystore between runs and gives every workflow build a higher versionCode.
             applicationIdSuffix = ".test55"
             versionNameSuffix = "-test55"
         }
