@@ -1,0 +1,62 @@
+name: Apply Android PIN visibility fix
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - .github/workflows/android-fix-pin-visibility.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add show-hide PIN control
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("android/app/src/main/java/ua/homeguard/s3/ui/screens/DashboardScreen.kt")
+          text = path.read_text(encoding="utf-8")
+
+          old_import = "import androidx.compose.ui.text.input.PasswordVisualTransformation\n"
+          new_import = old_import + "import androidx.compose.ui.text.input.VisualTransformation\n"
+          if "import androidx.compose.ui.text.input.VisualTransformation" not in text:
+              if old_import not in text:
+                  raise SystemExit("PasswordVisualTransformation import not found")
+              text = text.replace(old_import, new_import, 1)
+
+          state_anchor = '    var eventSourceText by remember { mutableStateOf("") }\n'
+          state_line = '    var pinVisible by remember { mutableStateOf(false) }\n'
+          if state_line not in text:
+              if state_anchor not in text:
+                  raise SystemExit("state anchor not found")
+              text = text.replace(state_anchor, state_anchor + state_line, 1)
+
+          old_field = '                    OutlinedTextField(value = operatorPin, onValueChange = { value -> if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value) }, modifier = Modifier.fillMaxWidth(), enabled = !authenticated, singleLine = true, label = { Text("PIN") }, visualTransformation = PasswordVisualTransformation())\n'
+          new_field = '''                    OutlinedTextField(\n                        value = operatorPin,\n                        onValueChange = { value -> if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value) },\n                        modifier = Modifier.fillMaxWidth(),\n                        enabled = !authenticated,\n                        singleLine = true,\n                        label = { Text("PIN") },\n                        visualTransformation = if (pinVisible) VisualTransformation.None else PasswordVisualTransformation(),\n                        trailingIcon = {\n                            TextButton(onClick = { pinVisible = !pinVisible }, enabled = !authenticated) {\n                                Text(if (pinVisible) "Сховати" else "Показати")\n                            }\n                        },\n                    )\n'''
+          if 'Text(if (pinVisible) "Сховати" else "Показати")' not in text:
+              if old_field not in text:
+                  raise SystemExit("PIN field anchor not found")
+              text = text.replace(old_field, new_field, 1)
+
+          path.write_text(text, encoding="utf-8")
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "PIN visibility fix already present"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/src/main/java/ua/homeguard/s3/ui/screens/DashboardScreen.kt
+          git commit -m "android: add PIN show hide control"
+          git push origin HEAD:main
