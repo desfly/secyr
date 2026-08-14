@@ -1,5 +1,6 @@
 #include "homeguard/local_api.hpp"
 #include "homeguard/pressure.hpp"
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <sstream>
@@ -120,6 +121,21 @@ std::string telemetry_json(const TelemetryFrame& frame) {
         if (index != 0U) out << ',';
         out << "{\"index\":" << index << ",\"value\":0.0,\"state\":\""
             << pressure_name(frame.pressures[index]) << "\"}";
+    }
+    out << "],\"temperatures\":[";
+    const auto temperature_count = std::min<size_t>(frame.temperature_count, frame.temperatures_c.size());
+    for (size_t index = 0; index < temperature_count; ++index) {
+        if (index != 0U) out << ',';
+        out << "{\"index\":" << index << ",\"name\":\"Temperature " << (index + 1U)
+            << "\",\"celsius\":" << frame.temperatures_c[index]
+            << ",\"state\":\"" << (frame.temperature_valid[index] ? "ok" : "sensor_fault") << "\"}";
+    }
+    out << "],\"powerChannels\":[";
+    if (frame.battery_valid) {
+        out << "{\"index\":0,\"name\":\"Battery\",\"voltage\":" << frame.battery_voltage_v
+            << ",\"current\":" << frame.battery_current_a
+            << ",\"power\":" << frame.battery_power_w
+            << ",\"state\":\"ok\"}";
     }
     out << "]}";
     return out.str();
