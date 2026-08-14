@@ -46,6 +46,7 @@ std::string_view system_event_type_name(SystemEventType type) {
         case SystemEventType::ZoneClosed: return "zone.closed";
         case SystemEventType::Alarm: return "alarm";
         case SystemEventType::Tamper: return "tamper";
+        case SystemEventType::PowerFail: return "power.fail";
         case SystemEventType::SensorOffline: return "sensor.offline";
         case SystemEventType::BatteryLow: return "battery.low";
         case SystemEventType::OutputOn: return "output.on";
