@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.SystemSnapshot
@@ -55,6 +56,7 @@ fun DeviceListScreen(
                     onValueChange = { renameText = it.take(40) },
                     singleLine = true,
                     label = { Text("Назва") },
+                    modifier = Modifier.fillMaxWidth(),
                 )
             },
             confirmButton = {
@@ -71,27 +73,28 @@ fun DeviceListScreen(
     }
 
     LazyColumn(
-        modifier = Modifier.padding(16.dp),
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column {
-                    Text("HomeGuard-S3", style = MaterialTheme.typography.headlineMedium)
-                    Text("Пристрої: ${devices.size}")
-                    Text("Стани оновлюються автоматично", style = MaterialTheme.typography.bodySmall)
-                }
-                Button(onClick = onAddDevice) { Text("+ Додати") }
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text("HomeGuard-S3", style = MaterialTheme.typography.headlineSmall)
+                Text("Пристрої: ${devices.size}", style = MaterialTheme.typography.titleMedium)
+                Text("Стани оновлюються автоматично", style = MaterialTheme.typography.bodySmall)
+                Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати") }
             }
         }
 
         if (devices.isEmpty()) {
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Пристроїв ще немає", style = MaterialTheme.typography.titleMedium)
                         Text("Додайте HomeGuard через пошук у мережі або вручну.")
-                        Button(onClick = onAddDevice) { Text("+ Додати пристрій") }
+                        Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати пристрій") }
                     }
                 }
             }
@@ -109,13 +112,17 @@ fun DeviceListScreen(
                             onDoubleClick = { onOpenDevice(device) },
                         )
                 ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(device.name, style = MaterialTheme.typography.titleLarge, color = titleColor)
-                            Text(if (online) "● online" else "○ offline")
-                        }
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text(device.name, style = MaterialTheme.typography.titleMedium, color = titleColor)
+                        Text(
+                            if (online) "● online" else "○ offline",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
 
-                        if (!device.authorized) Text("Авторизацію втрачено", color = MaterialTheme.colorScheme.error)
+                        if (!device.authorized) {
+                            Text("Авторизацію втрачено", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
 
                         if (expanded) {
                             if (device.deviceId == activeDeviceId) {
@@ -158,15 +165,20 @@ fun DeviceListScreen(
                                     )
                                 }
                             } else {
-                                Text(if (online) "Контролер доступний у локальній мережі" else "Контролер зараз недоступний")
+                                Text(
+                                    if (online) "Контролер доступний у локальній мережі" else "Контролер зараз недоступний",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = {
+
+                            OutlinedButton(
+                                onClick = {
                                     renameText = device.name
                                     renameDevice = device
-                                }) { Text("Перейменувати") }
-                                Button(onClick = { onOpenDevice(device) }) { Text("Відкрити") }
-                            }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Перейменувати") }
+                            Button(onClick = { onOpenDevice(device) }, modifier = Modifier.fillMaxWidth()) { Text("Відкрити") }
                             Text("Подвійне торкання також відкриває повний моніторинг", style = MaterialTheme.typography.bodySmall)
                         } else {
                             Text("Торкніться для короткого стану · двічі для моніторингу", style = MaterialTheme.typography.bodySmall)
@@ -180,8 +192,16 @@ fun DeviceListScreen(
 
 @Composable
 private fun StatusLine(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label)
-        Text(value)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(
+            value,
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.End,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
