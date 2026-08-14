@@ -36,6 +36,7 @@ import ua.homeguard.s3.storage.SettingsBackupCodec
 import ua.homeguard.s3.storage.SettingsStore
 import ua.homeguard.s3.ui.screens.AddDeviceScreen
 import ua.homeguard.s3.ui.screens.DashboardScreen
+import ua.homeguard.s3.ui.screens.DeviceListScreen
 import ua.homeguard.s3.ui.screens.ProvisioningScreen
 
 class MainActivity : ComponentActivity() {
@@ -55,6 +56,7 @@ class MainActivity : ComponentActivity() {
     private val operatorPin = MutableStateFlow("")
     private val accessSession = MutableStateFlow<AccessSession?>(null)
     private val addDeviceOpen = MutableStateFlow(false)
+    private val deviceListOpen = MutableStateFlow(true)
     private var pendingExportText: String = ""
     private var pendingSettingsBackupText: String = ""
 
@@ -134,6 +136,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val appSettings by settings.settings.collectAsState()
             val devices by discovery.devices.collectAsState()
+            val registered by registeredDevices.devices.collectAsState()
             val isScanning by discovery.isScanning.collectAsState()
             val scanStatus by discovery.scanStatus.collectAsState()
             val endpoint by resolver.endpoint.collectAsState()
@@ -146,6 +149,7 @@ class MainActivity : ComponentActivity() {
             val currentPin by operatorPin.collectAsState()
             val currentAccessSession by accessSession.collectAsState()
             val showAddDevice by addDeviceOpen.collectAsState()
+            val showDeviceList by deviceListOpen.collectAsState()
 
             val diagnostics = SystemDiagnosticsEvaluator.evaluate(
                 deviceId = appSettings.deviceId,
@@ -185,6 +189,7 @@ class MainActivity : ComponentActivity() {
                                 registeredDevices.addOrUpdate(device)
                                 settings.remember(device)
                                 addDeviceOpen.value = false
+                                deviceListOpen.value = true
                             }
                         },
                         onUseManualAddress = { name, address -> addManualDevice(name, address) },
@@ -193,6 +198,26 @@ class MainActivity : ComponentActivity() {
                         state = provisioningState,
                         onScan = ::requestQrScan,
                         onProvision = provisioning::provision,
+                    )
+                    showDeviceList -> DeviceListScreen(
+                        devices = registered,
+                        discovered = devices,
+                        activeDeviceId = appSettings.deviceId,
+                        snapshot = snapshot,
+                        onAddDevice = {
+                            addDeviceOpen.value = true
+                            lifecycleScope.launch { discovery.rescan() }
+                        },
+                        onOpenDevice = { device ->
+                            lifecycleScope.launch {
+                                settings.update(settings.settings.value.copy(
+                                    deviceId = device.deviceId,
+                                    lastKnownLocalUrl = device.baseUrl,
+                                    localCertificateSha256 = "",
+                                ))
+                                deviceListOpen.value = false
+                            }
+                        },
                     )
                     else -> DashboardScreen(
                         versionName = BuildConfig.VERSION_NAME,
@@ -211,6 +236,7 @@ class MainActivity : ComponentActivity() {
                         statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
                         zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
                         onAddDevice = {
+                            deviceListOpen.value = true
                             addDeviceOpen.value = true
                             lifecycleScope.launch { discovery.rescan() }
                         },
@@ -259,6 +285,7 @@ class MainActivity : ComponentActivity() {
             registeredDevices.addManual(deviceId = deviceId, baseUrl = baseUrl, name = name)
             settings.update(settings.settings.value.copy(deviceId = deviceId, lastKnownLocalUrl = baseUrl, localCertificateSha256 = ""))
             addDeviceOpen.value = false
+            deviceListOpen.value = true
         }
     }
 
