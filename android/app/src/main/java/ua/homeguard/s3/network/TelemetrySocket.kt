@@ -54,6 +54,7 @@ class TelemetrySocket {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (socket === webSocket) connectionState.value = TelemetryConnectionState.CONNECTED
             }
+
             override fun onMessage(webSocket: WebSocket, text: String) {
                 if (socket === webSocket) connectionState.value = TelemetryConnectionState.CONNECTED
                 runCatching {
@@ -65,19 +66,33 @@ class TelemetrySocket {
                         )
                         eventState.value = (listOf(item) + eventState.value).distinctBy { it.sequence }.take(MAX_EVENT_HISTORY)
                         liveEventState.tryEmit(item)
-                    } else state.value = JsonParsers.snapshot(json)
+                    } else {
+                        state.value = JsonParsers.snapshot(json)
+                    }
                 }
             }
+
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (socket === webSocket) {
                     socket = null
-                    connectionState.value = if (response?.code == 401 || response?.code == 403) TelemetryConnectionState.UNAUTHORIZED else TelemetryConnectionState.OFFLINE
+                    state.value = SystemSnapshot()
+                    connectionState.value = if (response?.code == 401 || response?.code == 403) {
+                        TelemetryConnectionState.UNAUTHORIZED
+                    } else {
+                        TelemetryConnectionState.OFFLINE
+                    }
                 }
             }
+
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (socket === webSocket) {
                     socket = null
-                    connectionState.value = if (code == 1008 || reason.contains("unauthor", true) || reason.contains("forbidden", true)) TelemetryConnectionState.UNAUTHORIZED else TelemetryConnectionState.OFFLINE
+                    state.value = SystemSnapshot()
+                    connectionState.value = if (code == 1008 || reason.contains("unauthor", true) || reason.contains("forbidden", true)) {
+                        TelemetryConnectionState.UNAUTHORIZED
+                    } else {
+                        TelemetryConnectionState.OFFLINE
+                    }
                 }
             }
         })
@@ -86,6 +101,7 @@ class TelemetrySocket {
     fun disconnect() {
         socket?.close(1000, "client disconnect")
         socket = null
+        state.value = SystemSnapshot()
         connectionState.value = TelemetryConnectionState.IDLE
     }
 }
