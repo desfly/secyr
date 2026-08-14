@@ -20,6 +20,7 @@ public:
 private:
     static esp_err_t status_get(httpd_req_t* request);
     static esp_err_t zones_get(httpd_req_t* request);
+    static esp_err_t inputs_get(httpd_req_t* request);
     static esp_err_t outputs_get(httpd_req_t* request);
     static esp_err_t partitions_get(httpd_req_t* request);
     static esp_err_t events_get(httpd_req_t* request);
