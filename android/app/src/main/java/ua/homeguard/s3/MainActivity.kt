@@ -225,6 +225,16 @@ class MainActivity : ComponentActivity() {
                         onRenameDevice = { device, newName ->
                             lifecycleScope.launch { registeredDevices.rename(device.deviceId, newName) }
                         },
+                        onDeleteDevice = { device ->
+                            lifecycleScope.launch {
+                                registeredDevices.remove(device.deviceId)
+                                if (settings.settings.value.deviceId == device.deviceId) {
+                                    settings.selectDevice("")
+                                    accessSession.value = null
+                                    operatorPin.value = ""
+                                }
+                            }
+                        },
                         onOpenDevice = { device ->
                             lifecycleScope.launch {
                                 settings.selectDevice(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() })

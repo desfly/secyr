@@ -21,17 +21,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.storage.RegisteredDevice
-import ua.homeguard.s3.storage.RegisteredDeviceStore
 import ua.homeguard.s3.ui.components.BruceBrand
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -43,13 +40,13 @@ fun DeviceListScreen(
     snapshot: SystemSnapshot,
     onAddDevice: () -> Unit,
     onRenameDevice: (RegisteredDevice, String) -> Unit,
+    onDeleteDevice: (RegisteredDevice) -> Unit,
     onOpenDevice: (RegisteredDevice) -> Unit,
 ) {
     var expandedId by remember { mutableStateOf<String?>(null) }
     var renameDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
     var renameText by remember { mutableStateOf("") }
     var deleteDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
-    val scope = rememberCoroutineScope()
     val onlineIds = discovered.mapTo(hashSetOf()) { it.deviceId }
 
     renameDevice?.let { device ->
@@ -86,11 +83,9 @@ fun DeviceListScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        scope.launch {
-                            RegisteredDeviceStore.removeActive(device.deviceId)
-                            if (expandedId == device.deviceId) expandedId = null
-                            deleteDevice = null
-                        }
+                        onDeleteDevice(device)
+                        if (expandedId == device.deviceId) expandedId = null
+                        deleteDevice = null
                     },
                 ) { Text("Видалити", color = MaterialTheme.colorScheme.error) }
             },
