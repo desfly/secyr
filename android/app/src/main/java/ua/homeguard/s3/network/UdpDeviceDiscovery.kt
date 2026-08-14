@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,9 +48,6 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
         private const val TAG = "HomeGuardDiscovery"
     }
 
-    // Use the API-1 service lookup form because MyFist still supports Android 5.0 (API 21).
-    // Context#getSystemService(Class) is API 23+ and was making lint fail even though the
-    // discovery implementation itself is otherwise compatible with API 21.
     private val connectivity = context.applicationContext
         .getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val found = ConcurrentHashMap<String, DiscoveredDevice>()
@@ -97,7 +95,7 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
         DatagramSocket().use { socket ->
             socket.broadcast = true
             socket.soTimeout = 120
-            if (wifiNetwork != null) {
+            if (wifiNetwork != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
                 runCatching { wifiNetwork.bindSocket(socket) }
                     .onSuccess { Log.d(TAG, "Discovery socket bound to $networkLabel") }
                     .onFailure { error ->
@@ -106,6 +104,8 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
                             error = "Wi-Fi bind failed: ${error.message ?: error.javaClass.simpleName}",
                         )
                     }
+            } else if (wifiNetwork != null) {
+                Log.d(TAG, "API 21: Network.bindSocket unavailable; discovery uses default route")
             } else {
                 Log.w(TAG, "No Wi-Fi Network object found; UDP discovery uses default route")
             }
