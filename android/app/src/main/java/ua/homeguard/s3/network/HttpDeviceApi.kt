@@ -90,13 +90,18 @@ class HttpDeviceApi(
         val zones = execute(LocalApiContract.ZONES_PATH).optJSONArray("zones") ?: JSONArray()
         val outputs = execute(LocalApiContract.OUTPUTS_PATH).optJSONArray("outputs") ?: JSONArray()
         val partitions = execute(LocalApiContract.PARTITIONS_PATH).optJSONArray("partitions") ?: JSONArray()
+        val telemetry = execute(LocalApiContract.TELEMETRY_STATUS_PATH)
 
-        // The ESP-IDF system API exposes status counters and detailed resources on
-        // separate endpoints. Build one stable Android snapshot without requiring a
-        // firmware-side breaking API change.
+        // ESP-IDF exposes detailed resources independently. Assemble a stable
+        // Android snapshot while keeping every firmware endpoint small and focused.
         status.put("zones", zones)
         status.put("outputs", outputs)
         status.put("mode", modeFromPartitions(partitions))
+        status.put("temperatures", telemetry.optJSONArray("temperatures") ?: JSONArray())
+        status.put("electrical", telemetry.optJSONArray("electrical") ?: JSONArray())
+        if (status.optLong("uptimeMs", 0L) == 0L) {
+            status.put("uptimeMs", telemetry.optLong("sampledAtMs", 0L))
+        }
         return JsonParsers.snapshot(status)
     }
 
