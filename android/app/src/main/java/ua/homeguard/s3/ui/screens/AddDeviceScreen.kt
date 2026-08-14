@@ -2,7 +2,6 @@ package ua.homeguard.s3.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -46,32 +45,27 @@ fun AddDeviceScreen(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            OutlinedButton(onClick = onBack) { Text("← Назад") }
-            Text("Додати пристрій", style = MaterialTheme.typography.headlineSmall)
-        }
-
+        OutlinedButton(onClick = onBack) { Text("← Назад") }
+        Text("Додати пристрій", style = MaterialTheme.typography.headlineMedium)
         Text("Пошук пристроїв у локальній мережі", style = MaterialTheme.typography.titleLarge)
         Text("Переконайтеся, що HomeGuard увімкнений і підключений до цієї Wi-Fi мережі.")
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column {
-                        Text(if (isScanning) "Пошук пристроїв…" else if (scanStatus.phase == "done") "Пошук завершено" else "Готово до пошуку", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            when (scanStatus.phase) {
-                                "sending" -> "Надсилаємо запити"
-                                "listening" -> "Слухаємо відповіді"
-                                "done" -> "Результати оновлено"
-                                "error" -> "Помилка пошуку"
-                                else -> "UDP + mDNS"
-                            }
-                        )
+                Text(
+                    if (isScanning) "Пошук пристроїв…" else if (scanStatus.phase == "done") "Пошук завершено" else "Готово до пошуку",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    when (scanStatus.phase) {
+                        "sending" -> "Надсилаємо запити"
+                        "listening" -> "Слухаємо відповіді"
+                        "done" -> "Результати оновлено"
+                        "error" -> "Помилка пошуку"
+                        else -> "UDP + mDNS"
                     }
-                    Text("${(progress * 100f).toInt()}%", style = MaterialTheme.typography.headlineMedium)
-                }
-
+                )
+                Text("${(progress * 100f).toInt()}%", style = MaterialTheme.typography.headlineSmall)
                 LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
                 Text("Надіслано ${scanStatus.sent} · отримано ${scanStatus.received} · прийнято ${scanStatus.accepted}")
                 if (scanStatus.network.isNotBlank()) Text("Мережа: ${scanStatus.network}")
