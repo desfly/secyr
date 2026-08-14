@@ -16,6 +16,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -28,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.DiscoveredDevice
@@ -108,6 +110,8 @@ fun ProvisioningScreen(
 ) {
     var form by remember { mutableStateOf(ProvisioningForm()) }
     var manualAddress by remember { mutableStateOf("192.168.4.1") }
+    var wifiPasswordVisible by remember { mutableStateOf(false) }
+    var cloudTokenVisible by remember { mutableStateOf(false) }
     val busy = state.phase in setOf(
         ProvisioningPhase.CONNECTING_SETUP_AP,
         ProvisioningPhase.AUTHORIZING,
@@ -153,7 +157,12 @@ fun ProvisioningScreen(
             { form = form.copy(wifiPassword = it) },
             label = { Text("Пароль Wi-Fi") },
             modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation = if (wifiPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                TextButton(onClick = { wifiPasswordVisible = !wifiPasswordVisible }) {
+                    Text(if (wifiPasswordVisible) "Сховати" else "Показати")
+                }
+            },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         )
         OutlinedTextField(
@@ -177,7 +186,12 @@ fun ProvisioningScreen(
             { form = form.copy(cloudClaimToken = it) },
             label = { Text("Одноразовий cloud claim token") },
             modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation = if (cloudTokenVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                TextButton(onClick = { cloudTokenVisible = !cloudTokenVisible }) {
+                    Text(if (cloudTokenVisible) "Сховати" else "Показати")
+                }
+            },
         )
         Button(
             onClick = { onProvision(form) },
