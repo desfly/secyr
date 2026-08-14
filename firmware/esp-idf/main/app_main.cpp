@@ -17,6 +17,7 @@
 #include "hg_access_http.hpp"
 #include "hg_access_time.hpp"
 #include "hg_commissioning_nvs.hpp"
+#include "device_discovery.hpp"
 #include "nvs_config_store.hpp"
 #include "websocket_telemetry.hpp"
 #include "homeguard/access_control.hpp"
@@ -32,11 +33,13 @@
 #include "nvs_flash.h"
 
 #include <algorithm>
+#include <cctype>
 #include <string>
 
 namespace {
 
 constexpr const char* kTag = "homeguard_main";
+constexpr std::uint16_t kLocalApiPort = 80;
 
 homeguard::idf::HardwareBootstrap g_hardware;
 homeguard::idf::TelemetryRuntime g_telemetry;
@@ -57,6 +60,7 @@ homeguard::idf::AccessHttp g_access_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
 NvsConfigStore g_provisioning_store;
 WebsocketTelemetry g_websocket_telemetry;
+DeviceDiscoveryService g_device_discovery;
 homeguard::AccessControl g_access_control;
 hg::HardwareVerificationRecord g_hardware_verification;
 hg::CommissioningPersistentState g_commissioning_state;
@@ -156,6 +160,7 @@ void initialize_physical_outputs()
 esp_err_t start_http_server()
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.server_port = kLocalApiPort;
     config.max_uri_handlers = 48;
     config.stack_size = 8192;
     config.lru_purge_enable = true;
@@ -200,6 +205,29 @@ void start_authenticated_telemetry_websocket()
     ESP_LOGI(kTag, "Authenticated telemetry websocket ready at /ws/telemetry");
 }
 
+void start_device_discovery()
+{
+    if (g_cloud_link.device_id() == nullptr || g_cloud_link.device_id()[0] == '\0') {
+        ESP_LOGW(kTag, "Device identity unavailable; LAN discovery responder not started");
+        return;
+    }
+
+    std::string device_id = g_cloud_link.device_id();
+    std::string suffix = device_id;
+    const auto dash = suffix.find_last_of('-');
+    if (dash != std::string::npos && dash + 1U < suffix.size()) suffix.erase(0, dash + 1U);
+    std::transform(suffix.begin(), suffix.end(), suffix.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    const std::string hostname = "homeguard-" + suffix;
+
+    if (!g_device_discovery.begin(device_id, hostname, kLocalApiPort, false)) {
+        ESP_LOGE(kTag, "LAN discovery responder failed to start");
+        return;
+    }
+    ESP_LOGI(kTag, "LAN discovery responder ready: UDP/45678 -> http://%s.local:%u", hostname.c_str(), kLocalApiPort);
+}
+
 }  // namespace
 
 extern "C" void app_main()
@@ -236,6 +264,7 @@ extern "C" void app_main()
         ESP_LOGE(kTag, "HTTP server failed: %s", esp_err_to_name(http_error));
     } else {
         start_authenticated_telemetry_websocket();
+        if (cloud_identity_error == ESP_OK) start_device_discovery();
     }
 
     const auto telemetry_error = g_telemetry.start(&g_hardware, &g_websocket_telemetry, &g_system_model);
