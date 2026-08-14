@@ -88,6 +88,7 @@ class HttpDeviceApi(
     override suspend fun snapshot(): SystemSnapshot {
         val status = execute(LocalApiContract.STATUS_PATH)
         val zones = execute(LocalApiContract.ZONES_PATH).optJSONArray("zones") ?: JSONArray()
+        val inputs = execute(LocalApiContract.INPUTS_PATH).optJSONArray("inputs") ?: JSONArray()
         val outputs = execute(LocalApiContract.OUTPUTS_PATH).optJSONArray("outputs") ?: JSONArray()
         val partitions = execute(LocalApiContract.PARTITIONS_PATH).optJSONArray("partitions") ?: JSONArray()
         val telemetry = execute(LocalApiContract.TELEMETRY_STATUS_PATH)
@@ -95,6 +96,7 @@ class HttpDeviceApi(
         // ESP-IDF exposes detailed resources independently. Assemble a stable
         // Android snapshot while keeping every firmware endpoint small and focused.
         status.put("zones", zones)
+        status.put("inputs", inputs)
         status.put("outputs", outputs)
         status.put("mode", modeFromPartitions(partitions))
         status.put("temperatures", telemetry.optJSONArray("temperatures") ?: JSONArray())
