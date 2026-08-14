@@ -66,6 +66,35 @@ class RegisteredDeviceStore(context: Context) {
         persist(current)
     }
 
+    suspend fun reconcileManual(manualDeviceId: String, discovered: DiscoveredDevice): Boolean {
+        if (!manualDeviceId.startsWith("manual-") || discovered.deviceId.isBlank()) return false
+        val normalizedDiscoveredUrl = discovered.baseUrl.trimEnd('/')
+        val current = _devices.value.toMutableList()
+        val manualIndex = current.indexOfFirst {
+            it.deviceId == manualDeviceId && it.baseUrl.trimEnd('/') == normalizedDiscoveredUrl
+        }
+        if (manualIndex < 0) return false
+
+        val manual = current[manualIndex]
+        val realIndex = current.indexOfFirst { it.deviceId == discovered.deviceId }
+        val merged = RegisteredDevice(
+            deviceId = discovered.deviceId,
+            name = manual.name,
+            baseUrl = discovered.baseUrl,
+            lastSeenAtMs = discovered.seenAtMs,
+            authorized = if (realIndex >= 0) current[realIndex].authorized else manual.authorized,
+        )
+
+        if (realIndex >= 0) {
+            current[realIndex] = merged
+            current.removeAt(if (manualIndex > realIndex) manualIndex else manualIndex)
+        } else {
+            current[manualIndex] = merged
+        }
+        persist(current.distinctBy { it.deviceId })
+        return true
+    }
+
     suspend fun rename(deviceId: String, name: String) {
         val clean = name.trim().take(40)
         if (clean.isBlank()) return
