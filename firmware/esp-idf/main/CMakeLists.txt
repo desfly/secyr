@@ -30,6 +30,7 @@ idf_component_register(
         "hg_rs485.cpp"
         "hg_hardware_bootstrap.cpp"
         "hg_telemetry_runtime.cpp"
+        "hg_telemetry_session_http.cpp"
         "hg_infrastructure_http.cpp"
         "hg_system_http.cpp"
         "hg_service_http.cpp"
