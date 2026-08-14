@@ -3,8 +3,8 @@
 #include "esp_err.h"
 #include "esp_http_server.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/portmacro.h"
 
+#include <atomic>
 #include <cstdint>
 
 namespace homeguard::idf {
@@ -34,7 +34,7 @@ private:
     void publish(const TelemetrySnapshot& snapshot);
 
     HardwareBootstrap* hardware_{nullptr};
-    mutable portMUX_TYPE lock_ = portMUX_INITIALIZER_UNLOCKED;
+    mutable std::atomic_flag lock_ = ATOMIC_FLAG_INIT;
     TelemetrySnapshot snapshot_{};
 };
 
