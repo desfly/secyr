@@ -49,7 +49,7 @@ for component_name in ("nvs_config_store", "websocket_telemetry"):
 # These core implementations back the live telemetry path but are not all
 # listed as main component sources because ESP-IDF normally gets them through
 # the homeguard_core component dependency.
-for filename in ("provisioning.cpp", "health_monitor.cpp", "telemetry.cpp"):
+for filename in ("provisioning.cpp", "health_monitor.cpp", "telemetry.cpp", "local_api.cpp"):
     path = CORE_SRC / filename
     if path.exists():
         sources.append(path.resolve())
