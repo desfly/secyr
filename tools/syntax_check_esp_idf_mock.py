@@ -5,9 +5,13 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-MAIN = ROOT / "firmware" / "esp-idf" / "main"
+ESP_IDF = ROOT / "firmware" / "esp-idf"
+MAIN = ESP_IDF / "main"
 MOCK = ROOT / "tests" / "esp-idf-mock" / "include"
 INCLUDE = ROOT / "firmware" / "include"
+COMPONENT_INCLUDE_DIRS = sorted(
+    path for path in (ESP_IDF / "components").glob("*/include") if path.is_dir()
+)
 
 compiler = shutil.which("g++") or shutil.which("clang++")
 if not compiler:
@@ -24,8 +28,11 @@ for source in sorted(MAIN.glob("*.cpp")):
         "-I", str(MOCK),
         "-I", str(MAIN),
         "-I", str(INCLUDE),
-        str(source),
     ]
+    for include_dir in COMPONENT_INCLUDE_DIRS:
+        command.extend(["-I", str(include_dir)])
+    command.append(str(source))
+
     run = subprocess.run(command, capture_output=True, text=True)
     item = {
         "file": source.name,
