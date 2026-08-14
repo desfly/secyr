@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "firmware" / "esp-idf" / "main"
 MOCK = ROOT / "tests" / "esp-idf-mock" / "include"
 INCLUDE = ROOT / "firmware" / "include"
+COMPONENTS = ROOT / "firmware" / "esp-idf" / "components"
 HARNESS = ROOT / "tests" / "esp-idf-mock" / "mock_main.cpp"
 BUILD = ROOT / "mock-link-build"
 REPORT = ROOT / "mock-link-report.json"
@@ -20,6 +21,11 @@ if not compiler:
 if BUILD.exists():
     shutil.rmtree(BUILD)
 BUILD.mkdir()
+
+component_include_args = []
+if COMPONENTS.exists():
+    for include_dir in sorted(COMPONENTS.glob("*/include")):
+        component_include_args.extend(["-I", str(include_dir)])
 
 cmake_text = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
 source_refs = re.findall(r'"([^"]+\.cpp)"', cmake_text)
@@ -43,6 +49,7 @@ for source in sources + [HARNESS]:
         "-I", str(MOCK),
         "-I", str(MAIN),
         "-I", str(INCLUDE),
+        *component_include_args,
         "-c", str(source),
         "-o", str(obj),
     ]
