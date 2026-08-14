@@ -18,6 +18,7 @@ constexpr std::uint8_t kStableSamples = 3;
 struct DebouncedInput {
     gpio_num_t gpio;
     std::uint16_t source_id;
+    InputPolarity polarity;
     bool initialized{};
     bool stable_high{};
     bool candidate_high{};
@@ -53,11 +54,14 @@ void InputRuntime::task_entry(void* context)
 void InputRuntime::run()
 {
     std::array<DebouncedInput, 2> inputs{{
-        {homeguard::board::kTamper, 0},
-        {homeguard::board::kPowerFail, 1},
+        {homeguard::board::kTamper, 0, polarity_.tamper},
+        {homeguard::board::kPowerFail, 1, polarity_.power_fail},
     }};
 
     while (true) {
+        inputs[0].polarity = polarity_.tamper;
+        inputs[1].polarity = polarity_.power_fail;
+
         for (auto& input : inputs) {
             const bool raw_high = gpio_get_level(input.gpio) != 0;
             if (!input.initialized) {
@@ -93,6 +97,20 @@ void InputRuntime::run()
                 .value = input.stable_high ? 1 : 0,
             };
             if (bus_->publish(event)) (void)bus_->dispatch_all();
+
+            if (input.polarity != InputPolarity::Unknown) {
+                const bool active = input_is_active(input.polarity, input.stable_high);
+                const hg::SystemEvent logical_event{
+                    .type = input.source_id == 0
+                        ? hg::SystemEventType::Tamper
+                        : hg::SystemEventType::InputChanged,
+                    .source_id = input.source_id,
+                    .timestamp_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000),
+                    .sequence = 0,
+                    .value = active ? 1 : 0,
+                };
+                if (bus_->publish(logical_event)) (void)bus_->dispatch_all();
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(kPollMs));
     }
