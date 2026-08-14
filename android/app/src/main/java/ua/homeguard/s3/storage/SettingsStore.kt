@@ -11,20 +11,38 @@ class SettingsStore(context: Context) {
     val settings = MutableStateFlow(load())
 
     suspend fun update(value: AppSettings) {
+        val current = settings.value
+        val normalized = if (current.deviceId != value.deviceId) {
+            val selection = DeviceSelectionPolicy.select(
+                currentDeviceId = current.deviceId,
+                currentLocalUrl = current.lastKnownLocalUrl,
+                currentCertificateSha256 = current.localCertificateSha256,
+                nextDeviceId = value.deviceId,
+                confirmedLocalUrl = value.lastKnownLocalUrl.takeIf { it.isNotBlank() },
+            )
+            value.copy(
+                deviceId = selection.deviceId,
+                lastKnownLocalUrl = selection.lastKnownLocalUrl,
+                localCertificateSha256 = selection.localCertificateSha256,
+            )
+        } else {
+            value
+        }
+
         preferences.edit()
-            .putString("device_id", value.deviceId)
-            .putBoolean("auto_reconnect", value.autoReconnect)
-            .putBoolean("remote_access", value.remoteAccessEnabled)
-            .putString("cloud_base_url", value.cloudBaseUrl)
-            .putString("last_local_url", value.lastKnownLocalUrl)
-            .putString("local_cert_sha256", value.localCertificateSha256)
-            .putBoolean("notifications_critical", value.criticalNotificationsEnabled)
-            .putBoolean("notifications_status", value.statusNotificationsEnabled)
-            .putBoolean("notifications_zones", value.zoneNotificationsEnabled)
+            .putString("device_id", normalized.deviceId)
+            .putBoolean("auto_reconnect", normalized.autoReconnect)
+            .putBoolean("remote_access", normalized.remoteAccessEnabled)
+            .putString("cloud_base_url", normalized.cloudBaseUrl)
+            .putString("last_local_url", normalized.lastKnownLocalUrl)
+            .putString("local_cert_sha256", normalized.localCertificateSha256)
+            .putBoolean("notifications_critical", normalized.criticalNotificationsEnabled)
+            .putBoolean("notifications_status", normalized.statusNotificationsEnabled)
+            .putBoolean("notifications_zones", normalized.zoneNotificationsEnabled)
             .apply()
-        secure.put("api_token", value.apiToken)
-        secure.put("telemetry_token", value.telemetryToken)
-        settings.emit(value)
+        secure.put("api_token", normalized.apiToken)
+        secure.put("telemetry_token", normalized.telemetryToken)
+        settings.emit(normalized)
     }
 
     suspend fun selectDevice(deviceId: String, confirmedLocalUrl: String? = null) {
