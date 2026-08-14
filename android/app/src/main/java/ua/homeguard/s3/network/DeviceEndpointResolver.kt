@@ -16,8 +16,6 @@ class DeviceEndpointResolver(
     scope: CoroutineScope
 ) {
     val endpoint: StateFlow<DeviceEndpoint> = combine(settings.settings, discovery.devices) { config, devices ->
-        // Local emergency AP/LAN can legitimately expose HTTP. API version and device ID
-        // are the route-selection criteria; TLS pinning applies only when HTTPS is used.
         val eligible = devices.filter { it.apiVersion == 1 }
         val local = eligible.firstOrNull { it.deviceId == config.deviceId }
             ?: if (config.deviceId.isBlank() && eligible.size == 1) eligible.first() else null
@@ -35,7 +33,7 @@ class DeviceEndpointResolver(
                 DeviceEndpoint(
                     deviceId = selected.deviceId,
                     apiBaseUrl = selected.baseUrl,
-                    websocketUrl = selected.baseUrl.replaceFirst("http", "ws") + LocalApiContract.TELEMETRY_PATH,
+                    websocketUrl = selected.baseUrl.replaceFirst("http", "ws") + RuntimeApiContract.TELEMETRY_PATH,
                     path = ControlPath.LOCAL,
                     certificateSha256 = if (selected.secure) config.localCertificateSha256 else ""
                 )
@@ -43,14 +41,14 @@ class DeviceEndpointResolver(
             ControlPath.LAST_KNOWN_LOCAL -> DeviceEndpoint(
                 deviceId = config.deviceId,
                 apiBaseUrl = config.lastKnownLocalUrl.trimEnd('/'),
-                websocketUrl = config.lastKnownLocalUrl.replaceFirst("http", "ws").trimEnd('/') + LocalApiContract.TELEMETRY_PATH,
+                websocketUrl = config.lastKnownLocalUrl.replaceFirst("http", "ws").trimEnd('/') + RuntimeApiContract.TELEMETRY_PATH,
                 path = ControlPath.LAST_KNOWN_LOCAL,
                 certificateSha256 = if (config.lastKnownLocalUrl.startsWith("https://", true)) config.localCertificateSha256 else ""
             )
             ControlPath.CLOUD -> {
                 val id = URLEncoder.encode(config.deviceId, Charsets.UTF_8.name())
                 val base = config.cloudBaseUrl.trimEnd('/') + "/v1/devices/$id"
-                DeviceEndpoint(config.deviceId, base, base.replaceFirst("http", "ws") + LocalApiContract.TELEMETRY_PATH, ControlPath.CLOUD)
+                DeviceEndpoint(config.deviceId, base, base.replaceFirst("http", "ws") + RuntimeApiContract.TELEMETRY_PATH, ControlPath.CLOUD)
             }
             ControlPath.OFFLINE -> DeviceEndpoint(config.deviceId, "", "", ControlPath.OFFLINE)
         }
