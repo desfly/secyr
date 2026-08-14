@@ -40,20 +40,32 @@ fun AddDeviceScreen(
     var manualAddress by remember { mutableStateOf("") }
     var manualName by remember { mutableStateOf("HomeGuard") }
     val progress = scanStatus.progress.coerceIn(0f, 1f)
+    val progressPercent = (progress * 100f).toInt()
 
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        OutlinedButton(onClick = onBack) { Text("← Назад") }
-        Text("Додати пристрій", style = MaterialTheme.typography.headlineMedium)
-        Text("Пошук пристроїв у локальній мережі", style = MaterialTheme.typography.titleLarge)
-        Text("Переконайтеся, що HomeGuard увімкнений і підключений до цієї Wi-Fi мережі.")
+        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("← Назад") }
+        Text("Додати пристрій", style = MaterialTheme.typography.headlineSmall)
+        Text("Пошук у локальній мережі", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "HomeGuard і телефон мають бути в одній Wi‑Fi мережі.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
 
         Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text(
-                    if (isScanning) "Пошук пристроїв…" else if (scanStatus.phase == "done") "Пошук завершено" else "Готово до пошуку",
+                    if (isScanning) "Пошук пристроїв…"
+                    else if (scanStatus.phase == "done") "Пошук завершено"
+                    else "Готово до пошуку",
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(
@@ -63,13 +75,25 @@ fun AddDeviceScreen(
                         "done" -> "Результати оновлено"
                         "error" -> "Помилка пошуку"
                         else -> "UDP + mDNS"
-                    }
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
                 )
-                Text("${(progress * 100f).toInt()}%", style = MaterialTheme.typography.headlineSmall)
+                Text("Прогрес: $progressPercent%", style = MaterialTheme.typography.titleSmall)
                 LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                Text("Надіслано ${scanStatus.sent} · отримано ${scanStatus.received} · прийнято ${scanStatus.accepted}")
-                if (scanStatus.network.isNotBlank()) Text("Мережа: ${scanStatus.network}")
-                if (scanStatus.error.isNotBlank()) Text("Діагностика: ${scanStatus.error}")
+
+                Text("Надіслано: ${scanStatus.sent}", style = MaterialTheme.typography.bodySmall)
+                Text("Отримано: ${scanStatus.received}", style = MaterialTheme.typography.bodySmall)
+                Text("Прийнято: ${scanStatus.accepted}", style = MaterialTheme.typography.bodySmall)
+                if (scanStatus.network.isNotBlank()) {
+                    Text("Мережа: ${scanStatus.network}", style = MaterialTheme.typography.bodySmall)
+                }
+                if (scanStatus.error.isNotBlank()) {
+                    Text(
+                        "Діагностика: ${scanStatus.error}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
 
                 Button(onClick = onRescan, enabled = !isScanning, modifier = Modifier.fillMaxWidth()) {
                     Text(if (isScanning) "Пошук виконується…" else "Шукати знову")
@@ -77,15 +101,21 @@ fun AddDeviceScreen(
             }
         }
 
-        Text("Знайдені пристрої", style = MaterialTheme.typography.titleLarge)
+        Text("Знайдені пристрої", style = MaterialTheme.typography.titleMedium)
         if (devices.isEmpty()) {
-            Text(if (isScanning) "Очікуємо відповіді HomeGuard…" else "Пристроїв поки не знайдено")
+            Text(
+                if (isScanning) "Очікуємо відповіді HomeGuard…" else "Пристроїв поки не знайдено",
+                style = MaterialTheme.typography.bodyMedium,
+            )
         } else {
             devices.forEach { device ->
                 OutlinedButton(onClick = { onUseDevice(device) }, modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(device.serviceName.ifBlank { "HomeGuard" }, style = MaterialTheme.typography.titleMedium)
-                        Text("${device.host}:${device.port} · ${if (device.secure) "HTTPS" else "HTTP"}")
+                        Text(
+                            "${device.host}:${device.port} · ${if (device.secure) "HTTPS" else "HTTP"}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
             }
@@ -107,7 +137,7 @@ fun AddDeviceScreen(
                 value = manualAddress,
                 onValueChange = { manualAddress = it.trim() },
                 label = { Text("IP або IP:порт") },
-                supportingText = { Text("Наприклад: 192.168.1.45") },
+                supportingText = { Text("Наприклад: 192.168.4.1") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -119,6 +149,9 @@ fun AddDeviceScreen(
             ) { Text("Додати") }
         }
 
-        Text("ID пристрою у списку користувачу не показується.", style = MaterialTheme.typography.bodySmall)
+        Text(
+            "ID пристрою у списку користувачу не показується.",
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
