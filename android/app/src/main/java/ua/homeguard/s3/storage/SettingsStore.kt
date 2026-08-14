@@ -27,8 +27,22 @@ class SettingsStore(context: Context) {
         settings.emit(value)
     }
 
+    suspend fun selectDevice(deviceId: String, confirmedLocalUrl: String? = null) {
+        val current = settings.value
+        val switchingDevice = current.deviceId != deviceId
+        val localUrl = confirmedLocalUrl?.trimEnd('/')
+            ?: if (switchingDevice) "" else current.lastKnownLocalUrl
+        update(
+            current.copy(
+                deviceId = deviceId,
+                lastKnownLocalUrl = localUrl,
+                localCertificateSha256 = if (switchingDevice || localUrl.isBlank()) "" else current.localCertificateSha256,
+            ),
+        )
+    }
+
     suspend fun remember(device: DiscoveredDevice) {
-        update(settings.value.copy(deviceId = device.deviceId, lastKnownLocalUrl = device.baseUrl))
+        selectDevice(device.deviceId, device.baseUrl)
     }
 
     private fun load() = AppSettings(
