@@ -1,3 +1,3 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@drawable/ic_myfist" />
+    <item android:drawable="@drawable/bruce_launcher" />
 </layer-list>
