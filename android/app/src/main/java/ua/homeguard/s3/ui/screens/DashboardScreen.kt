@@ -51,6 +51,7 @@ fun DashboardScreen(
     criticalNotificationsEnabled: Boolean,
     statusNotificationsEnabled: Boolean,
     zoneNotificationsEnabled: Boolean,
+    onAddDevice: () -> Unit,
     onOperatorIdChange: (String) -> Unit,
     onOperatorPinChange: (String) -> Unit,
     onLogin: () -> Unit,
@@ -82,10 +83,7 @@ fun DashboardScreen(
             title = { Text("Підтвердіть команду") },
             text = { Text("Виконати ${command.name}? Контролер повторно перевірить PIN, роль та challenge.") },
             confirmButton = {
-                TextButton(
-                    enabled = canCommand(command),
-                    onClick = { pendingDangerousCommand = null; onCommand(command) },
-                ) { Text("Виконати") }
+                TextButton(enabled = canCommand(command), onClick = { pendingDangerousCommand = null; onCommand(command) }) { Text("Виконати") }
             },
             dismissButton = { TextButton(onClick = { pendingDangerousCommand = null }) { Text("Скасувати") } },
         )
@@ -104,8 +102,10 @@ fun DashboardScreen(
     LazyColumn(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Text("HomeGuard-S3 $versionName", style = MaterialTheme.typography.headlineMedium)
-            Text("Пристрій: $deviceId")
             Text("Канал: $route · знайдено локально: $localDevices")
+            Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                Text("+ Додати пристрій")
+            }
         }
 
         item {
@@ -121,35 +121,14 @@ fun DashboardScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Оператор", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(
-                        value = operatorId,
-                        onValueChange = onOperatorIdChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !authenticated,
-                        singleLine = true,
-                        label = { Text("ID користувача") },
-                    )
-                    OutlinedTextField(
-                        value = operatorPin,
-                        onValueChange = { value -> if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value) },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !authenticated,
-                        singleLine = true,
-                        label = { Text("PIN") },
-                        visualTransformation = PasswordVisualTransformation(),
-                    )
+                    OutlinedTextField(value = operatorId, onValueChange = onOperatorIdChange, modifier = Modifier.fillMaxWidth(), enabled = !authenticated, singleLine = true, label = { Text("ID користувача") })
+                    OutlinedTextField(value = operatorPin, onValueChange = { value -> if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value) }, modifier = Modifier.fillMaxWidth(), enabled = !authenticated, singleLine = true, label = { Text("PIN") }, visualTransformation = PasswordVisualTransformation())
                     if (accessSession == null) {
                         Text(if (credentialsReady) "Готово до входу" else "Введіть ID та PIN 4–12 цифр")
                         Button(enabled = credentialsReady, onClick = onLogin) { Text("Увійти") }
                     } else {
                         Text("${accessSession.name} · роль ${accessSession.role.name.lowercase()}")
-                        Text(
-                            when (accessSession.role.name) {
-                                "ADMIN" -> "Повний доступ до керування"
-                                "USER" -> "Моніторинг, охорона та клапани"
-                                else -> "Тільки моніторинг"
-                            }
-                        )
+                        Text(when (accessSession.role.name) { "ADMIN" -> "Повний доступ до керування"; "USER" -> "Моніторинг, охорона та клапани"; else -> "Тільки моніторинг" })
                         OutlinedButton(onClick = onLogout) { Text("Вийти") }
                     }
                     Text("PIN зберігається тільки в оперативній пам’яті застосунку.")
@@ -222,9 +201,7 @@ fun DashboardScreen(
                         OutlinedButton(enabled = events.isNotEmpty(), onClick = onShareEvents) { Text("Поділитися") }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (eventCategory != EventLogCategory.ALL || eventQuery.isNotBlank() || eventSourceText.isNotBlank()) {
-                            OutlinedButton(onClick = { eventCategory = EventLogCategory.ALL; eventQuery = ""; eventSourceText = "" }) { Text("Скинути фільтри") }
-                        }
+                        if (eventCategory != EventLogCategory.ALL || eventQuery.isNotBlank() || eventSourceText.isNotBlank()) OutlinedButton(onClick = { eventCategory = EventLogCategory.ALL; eventQuery = ""; eventSourceText = "" }) { Text("Скинути фільтри") }
                         OutlinedButton(enabled = events.isNotEmpty(), onClick = { confirmClearHistory = true }) { Text("Очистити журнал") }
                     }
                 }
@@ -268,8 +245,7 @@ fun DashboardScreen(
 
 @Composable
 private fun EventCategoryButton(label: String, category: EventLogCategory, selected: EventLogCategory, onSelect: (EventLogCategory) -> Unit) {
-    if (category == selected) Button(onClick = { onSelect(category) }) { Text(label) }
-    else OutlinedButton(onClick = { onSelect(category) }) { Text(label) }
+    if (category == selected) Button(onClick = { onSelect(category) }) { Text(label) } else OutlinedButton(onClick = { onSelect(category) }) { Text(label) }
 }
 
 @Composable
