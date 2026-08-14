@@ -64,6 +64,20 @@ class HttpDeviceApi(
         )
     }
 
+    suspend fun telemetrySession(actor: String, credential: String): String {
+        val json = execute(
+            "/api/v1/telemetry/session",
+            "POST",
+            JSONObject().put("actor", actor.trim()).put("credential", credential),
+        )
+        if (!json.optBoolean("ok", false)) {
+            throw IOException("Telemetry login rejected: ${json.optString("reason", "unknown")}")
+        }
+        return json.optString("telemetryToken", "").also {
+            if (it.length < 32) throw IOException("Telemetry session token missing")
+        }
+    }
+
     override suspend fun command(command: DeviceCommand): CommandReply {
         val body = JSONObject()
             .put("requestId", LocalApiContract.requestId(command.requestId))
