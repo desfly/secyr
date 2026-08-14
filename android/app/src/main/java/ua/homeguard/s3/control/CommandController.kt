@@ -22,10 +22,13 @@ class CommandController(
         require(target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank()) {
             "controller offline"
         }
-        // Local access/login authenticates the operator by ID + PIN and intentionally
-        // does not require a pre-existing provisioning bearer token. Requiring the
-        // token here created a deadlock for controllers added manually by IP.
-        return createApi(target).login(actor, credential)
+        val api = createApi(target)
+        val session = api.login(actor, credential)
+        if (target.path != ControlPath.CLOUD) {
+            val telemetryToken = api.telemetrySession(actor, credential)
+            settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
+        }
+        return session
     }
 
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
@@ -46,15 +49,6 @@ class CommandController(
             credential = credential,
         )
         return api.command(command)
-    }
-
-    private fun requireOnlineApi(): HttpDeviceApi {
-        val target = endpoint.value
-        val appSettings = settings.settings.value
-        require(target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank() && appSettings.apiToken.isNotBlank()) {
-            "controller offline"
-        }
-        return createApi(target)
     }
 
     private fun createApi(target: DeviceEndpoint): HttpDeviceApi {
