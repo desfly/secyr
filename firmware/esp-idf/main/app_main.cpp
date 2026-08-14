@@ -10,6 +10,7 @@
 #include "hg_infrastructure_http.hpp"
 #include "hg_system_http.hpp"
 #include "hg_inputs_http.hpp"
+#include "hg_input_runtime.hpp"
 #include "hg_service_http.hpp"
 #include "hg_output_http.hpp"
 #include "hg_gpio_output_backend.hpp"
@@ -51,6 +52,7 @@ homeguard::idf::InfrastructureHttp g_http_api;
 homeguard::idf::BuildHttp g_build_http;
 homeguard::idf::SystemHttp g_system_http;
 homeguard::idf::InputsHttp g_inputs_http;
+homeguard::idf::InputRuntime g_input_runtime;
 homeguard::idf::ServiceHttp g_service_http;
 homeguard::idf::OutputHttp g_output_http;
 homeguard::idf::GpioOutputBackend g_gpio_outputs;
@@ -211,7 +213,13 @@ extern "C" void app_main()
     else ESP_LOGI(kTag, "Hardware bootstrap completed");
 
     const auto http_error = start_http_server();
-    if (http_error != ESP_OK) ESP_LOGE(kTag, "HTTP server failed: %s", esp_err_to_name(http_error));
+    if (http_error != ESP_OK) {
+        ESP_LOGE(kTag, "HTTP server failed: %s", esp_err_to_name(http_error));
+    } else {
+        const auto input_error = g_input_runtime.start(&g_system_bus);
+        if (input_error != ESP_OK) ESP_LOGE(kTag, "Input runtime failed: %s", esp_err_to_name(input_error));
+        else ESP_LOGI(kTag, "Debounced input event runtime started");
+    }
 
     if (cloud_identity_error == ESP_OK) {
         const std::string discovery_hostname = std::string{"homeguard-"} + g_cloud_link.device_id();
