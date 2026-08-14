@@ -12,20 +12,50 @@ internal object JsonParsers {
                     index = item.optInt("index", index),
                     name = item.optString("name", "Zone ${index + 1}"),
                     state = item.optString("state", "unknown"),
-                    enabled = item.optBoolean("enabled", true)
+                    enabled = item.optBoolean("enabled", true),
                 )
             }
         }.orEmpty()
+
         val pressures = json.optJSONArray("pressures")?.let { array ->
             (0 until array.length()).map { index ->
                 val item = array.getJSONObject(index)
                 PressureStatus(
                     index = item.optInt("index", index),
                     value = item.optDouble("value", 0.0).toFloat(),
-                    state = item.optString("state", "unknown")
+                    state = item.optString("state", "unknown"),
                 )
             }
         }.orEmpty()
+
+        val temperatures = json.optJSONArray("temperatures")?.let { array ->
+            (0 until array.length()).map { index ->
+                val item = array.getJSONObject(index)
+                TemperatureStatus(
+                    index = item.optInt("index", index),
+                    name = item.optString("name", "Temperature ${index + 1}"),
+                    celsius = item.optDouble("celsius", item.optDouble("value", 0.0)).toFloat(),
+                    state = item.optString("state", "unknown"),
+                )
+            }
+        }.orEmpty()
+
+        val powerChannels = json.optJSONArray("powerChannels")?.let { array ->
+            (0 until array.length()).map { index ->
+                val item = array.getJSONObject(index)
+                val voltage = item.optDouble("voltage", 0.0).toFloat()
+                val current = item.optDouble("current", 0.0).toFloat()
+                PowerChannelStatus(
+                    index = item.optInt("index", index),
+                    name = item.optString("name", "Power ${index + 1}"),
+                    voltage = voltage,
+                    current = current,
+                    power = item.optDouble("power", (voltage * current).toDouble()).toFloat(),
+                    state = item.optString("state", "unknown"),
+                )
+            }
+        }.orEmpty()
+
         return SystemSnapshot(
             sequence = json.optLong("sequence", 0),
             uptimeMs = json.optLong("uptimeMs", 0),
@@ -33,7 +63,9 @@ internal object JsonParsers {
             transport = enumValue(json.optString("transport"), Transport.NONE),
             health = enumValue(json.optString("health"), HealthState.UNKNOWN),
             zones = zones,
-            pressures = pressures
+            pressures = pressures,
+            temperatures = temperatures,
+            powerChannels = powerChannels,
         )
     }
 
@@ -46,7 +78,7 @@ internal object JsonParsers {
                     title = item.optString("title", item.optString("id", "component")),
                     state = enumValue(item.optString("state"), HealthState.UNKNOWN),
                     changedAtMs = item.optLong("changedAtMs", 0),
-                    failures = item.optInt("failures", 0)
+                    failures = item.optInt("failures", 0),
                 )
             }
         }.orEmpty()
@@ -56,7 +88,7 @@ internal object JsonParsers {
             failedCount = json.optInt("failedCount", 0),
             degradedCount = json.optInt("degradedCount", 0),
             components = components,
-            queuedCommands = json.optInt("queuedCommands", 0)
+            queuedCommands = json.optInt("queuedCommands", 0),
         )
     }
 
