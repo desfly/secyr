@@ -136,6 +136,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val appSettings by settings.settings.collectAsState()
             val devices by discovery.devices.collectAsState()
+            val scanStatus by discovery.scanStatus.collectAsState()
             val endpoint by resolver.endpoint.collectAsState()
             val provisioningState by provisioning.state.collectAsState()
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
@@ -152,6 +153,14 @@ class MainActivity : ComponentActivity() {
                 certificateSha256 = appSettings.localCertificateSha256,
                 snapshot = snapshot,
                 eventCount = events.size,
+                scanPhase = scanStatus.phase,
+                scanNetwork = scanStatus.network,
+                scanTargets = scanStatus.targets,
+                scanSent = scanStatus.sent,
+                scanReceived = scanStatus.received,
+                scanAccepted = scanStatus.accepted,
+                scanLastResponder = scanStatus.lastResponder,
+                scanError = scanStatus.error,
             )
             MaterialTheme {
                 val provisioningActive = provisioningState.phase in setOf(
