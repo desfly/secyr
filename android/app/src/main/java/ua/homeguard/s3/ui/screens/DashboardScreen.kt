@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.diagnostics.SystemDiagnostics
@@ -73,6 +74,7 @@ fun DashboardScreen(
     var eventCategory by remember { mutableStateOf(EventLogCategory.ALL) }
     var eventQuery by remember { mutableStateOf("") }
     var eventSourceText by remember { mutableStateOf("") }
+    var pinVisible by remember { mutableStateOf(false) }
     val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12 && operatorPin.all(Char::isDigit)
     val authenticated = accessSession != null
     val canCommand: (CommandType) -> Boolean = { command -> accessSession?.allows(command) == true }
@@ -132,7 +134,20 @@ fun DashboardScreen(
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Оператор", style = MaterialTheme.typography.titleMedium)
                     OutlinedTextField(value = operatorId, onValueChange = onOperatorIdChange, modifier = Modifier.fillMaxWidth(), enabled = !authenticated, singleLine = true, label = { Text("ID користувача") })
-                    OutlinedTextField(value = operatorPin, onValueChange = { value -> if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value) }, modifier = Modifier.fillMaxWidth(), enabled = !authenticated, singleLine = true, label = { Text("PIN") }, visualTransformation = PasswordVisualTransformation())
+                    OutlinedTextField(
+                        value = operatorPin,
+                        onValueChange = { value -> if (value.length <= 12 && value.all(Char::isDigit)) onOperatorPinChange(value) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !authenticated,
+                        singleLine = true,
+                        label = { Text("PIN") },
+                        visualTransformation = if (pinVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            TextButton(onClick = { pinVisible = !pinVisible }, enabled = !authenticated) {
+                                Text(if (pinVisible) "Сховати" else "Показати")
+                            }
+                        },
+                    )
                     if (accessSession == null) {
                         Text(if (credentialsReady) "Готово до входу" else "Введіть ID та PIN 4–12 цифр", style = MaterialTheme.typography.bodySmall)
                         Button(enabled = credentialsReady, onClick = onLogin, modifier = Modifier.fillMaxWidth()) { Text("Увійти") }
