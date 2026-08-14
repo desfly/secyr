@@ -14,7 +14,7 @@ enum class ModelOutputType : std::uint8_t { Relay, Siren, Valve, Light };
 enum class PartitionArmState : std::uint8_t { Disarmed, Stay, Away, Alarm };
 enum class SystemEventType : std::uint8_t {
     ZoneOpen, ZoneClosed, Alarm, Tamper, SensorOffline, BatteryLow,
-    OutputOn, OutputOff, Armed, Disarmed, ConfigChanged,
+    OutputOn, OutputOff, Armed, Disarmed, InputChanged, ConfigChanged,
 };
 
 struct SystemEvent {
