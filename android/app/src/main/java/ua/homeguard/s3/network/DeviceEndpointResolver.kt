@@ -5,8 +5,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceEndpoint
+import ua.homeguard.s3.storage.RegisteredDeviceStore
 import ua.homeguard.s3.storage.SettingsStore
 
 class DeviceEndpointResolver(
@@ -16,8 +18,24 @@ class DeviceEndpointResolver(
 ) {
     val endpoint: StateFlow<DeviceEndpoint> = combine(settings.settings, discovery.devices) { config, devices ->
         val eligible = devices.filter { it.apiVersion == 1 }
-        val local = eligible.firstOrNull { it.deviceId == config.deviceId }
+        val directLocal = eligible.firstOrNull { it.deviceId == config.deviceId }
+        val manualLocal = if (config.deviceId.startsWith("manual-") && config.lastKnownLocalUrl.isNotBlank()) {
+            val expected = EndpointUrlBuilder.normalizeBaseUrl(config.lastKnownLocalUrl)
+            eligible.firstOrNull { EndpointUrlBuilder.normalizeBaseUrl(it.baseUrl) == expected }
+        } else {
+            null
+        }
+        val local = directLocal
+            ?: manualLocal
             ?: if (config.deviceId.isBlank() && eligible.size == 1) eligible.first() else null
+
+        if (manualLocal != null) {
+            scope.launch {
+                if (RegisteredDeviceStore.reconcileActiveManual(config.deviceId, manualLocal)) {
+                    settings.remember(manualLocal)
+                }
+            }
+        }
 
         when (selectControlPath(
             EndpointAvailability(
