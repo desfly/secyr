@@ -78,6 +78,8 @@ idf_component_register(
         mqtt
         nvs_flash
         sdmmc
+        nvs_config_store
+        websocket_telemetry
     EMBED_TXTFILES
         "web/index.html"
         "web/app.css"
