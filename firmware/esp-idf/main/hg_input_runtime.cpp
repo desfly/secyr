@@ -1,4 +1,5 @@
 #include "hg_input_runtime.hpp"
+#include "hg_input_nvs.hpp"
 #include "hg_board_hw678.hpp"
 
 #include "driver/gpio.h"
@@ -30,6 +31,11 @@ esp_err_t InputRuntime::start(hg::SystemEventBus* bus)
 {
     if (bus == nullptr) return ESP_ERR_INVALID_ARG;
     bus_ = bus;
+
+    InputPolarityConfig persisted{};
+    const InputNvsStore store;
+    const auto load_error = store.load(persisted);
+    polarity_ = load_error == ESP_OK ? persisted : InputPolarityConfig{};
 
     gpio_config_t config{};
     config.pin_bit_mask =
