@@ -31,14 +31,17 @@ import ua.homeguard.s3.network.TelemetrySocket
 import ua.homeguard.s3.notifications.HomeGuardNotifications
 import ua.homeguard.s3.repository.ProvisioningCoordinator
 import ua.homeguard.s3.storage.EventHistoryStore
+import ua.homeguard.s3.storage.RegisteredDeviceStore
 import ua.homeguard.s3.storage.SettingsBackupCodec
 import ua.homeguard.s3.storage.SettingsStore
+import ua.homeguard.s3.ui.screens.AddDeviceScreen
 import ua.homeguard.s3.ui.screens.DashboardScreen
 import ua.homeguard.s3.ui.screens.ProvisioningScreen
 
 class MainActivity : ComponentActivity() {
     private lateinit var discovery: LocalDiscoveryCoordinator
     private lateinit var settings: SettingsStore
+    private lateinit var registeredDevices: RegisteredDeviceStore
     private lateinit var eventHistory: EventHistoryStore
     private lateinit var resolver: DeviceEndpointResolver
     private lateinit var provisioning: ProvisioningCoordinator
@@ -51,14 +54,13 @@ class MainActivity : ComponentActivity() {
     private val operatorId = MutableStateFlow("admin")
     private val operatorPin = MutableStateFlow("")
     private val accessSession = MutableStateFlow<AccessSession?>(null)
+    private val addDeviceOpen = MutableStateFlow(false)
     private var pendingExportText: String = ""
     private var pendingSettingsBackupText: String = ""
 
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null && pendingExportText.isNotEmpty()) {
-            runCatching {
-                contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(pendingExportText) }
-            }
+            runCatching { contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(pendingExportText) } }
         }
         pendingExportText = ""
     }
@@ -93,20 +95,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val qrScanner = registerForActivityResult(ScanContract()) { result ->
-        result.contents?.let(provisioning::acceptQr)
-    }
+    private val qrScanner = registerForActivityResult(ScanContract()) { result -> result.contents?.let(provisioning::acceptQr) }
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if (requiredProvisioningPermissions().all { permission ->
-                ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
-            }) launchQrScanner()
+        if (requiredProvisioningPermissions().all { permission -> ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED }) launchQrScanner()
     }
 
     private val localNetworkPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted && ::discovery.isInitialized) {
-            lifecycleScope.launch { discovery.rescan() }
-        }
+        if (granted && ::discovery.isInitialized) lifecycleScope.launch { discovery.rescan() }
         requestNotificationPermission()
     }
 
@@ -115,6 +111,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = SettingsStore(this)
+        registeredDevices = RegisteredDeviceStore(this)
         eventHistory = EventHistoryStore(this)
         discovery = LocalDiscoveryCoordinator(this, lifecycleScope)
         resolver = DeviceEndpointResolver(settings, discovery, lifecycleScope)
@@ -133,9 +130,11 @@ class MainActivity : ComponentActivity() {
         }
         discovery.start()
         session.start()
+
         setContent {
             val appSettings by settings.settings.collectAsState()
             val devices by discovery.devices.collectAsState()
+            val isScanning by discovery.isScanning.collectAsState()
             val scanStatus by discovery.scanStatus.collectAsState()
             val endpoint by resolver.endpoint.collectAsState()
             val provisioningState by provisioning.state.collectAsState()
@@ -146,6 +145,8 @@ class MainActivity : ComponentActivity() {
             val currentOperator by operatorId.collectAsState()
             val currentPin by operatorPin.collectAsState()
             val currentAccessSession by accessSession.collectAsState()
+            val showAddDevice by addDeviceOpen.collectAsState()
+
             val diagnostics = SystemDiagnosticsEvaluator.evaluate(
                 deviceId = appSettings.deviceId,
                 route = endpoint.path.name,
@@ -162,22 +163,38 @@ class MainActivity : ComponentActivity() {
                 scanLastResponder = scanStatus.lastResponder,
                 scanError = scanStatus.error,
             )
+
             MaterialTheme {
                 val provisioningActive = provisioningState.phase in setOf(
                     ProvisioningPhase.CONNECTING_SETUP_AP,
                     ProvisioningPhase.AUTHORIZING,
                     ProvisioningPhase.APPLYING,
                     ProvisioningPhase.WAITING_FOR_RESTART,
-                    ProvisioningPhase.DISCOVERING_LOCAL
+                    ProvisioningPhase.DISCOVERING_LOCAL,
                 )
-                if (appSettings.deviceId.isBlank() || provisioningActive) {
-                    ProvisioningScreen(
+
+                when {
+                    showAddDevice && appSettings.deviceId.isNotBlank() -> AddDeviceScreen(
+                        devices = devices,
+                        isScanning = isScanning,
+                        scanStatus = scanStatus,
+                        onBack = { addDeviceOpen.value = false },
+                        onRescan = { lifecycleScope.launch { discovery.rescan() } },
+                        onUseDevice = { device ->
+                            lifecycleScope.launch {
+                                registeredDevices.addOrUpdate(device)
+                                settings.remember(device)
+                                addDeviceOpen.value = false
+                            }
+                        },
+                        onUseManualAddress = { name, address -> addManualDevice(name, address) },
+                    )
+                    appSettings.deviceId.isBlank() || provisioningActive -> ProvisioningScreen(
                         state = provisioningState,
                         onScan = ::requestQrScan,
-                        onProvision = provisioning::provision
+                        onProvision = provisioning::provision,
                     )
-                } else {
-                    DashboardScreen(
+                    else -> DashboardScreen(
                         versionName = BuildConfig.VERSION_NAME,
                         localDevices = devices.size,
                         route = endpoint.path.name,
@@ -193,23 +210,18 @@ class MainActivity : ComponentActivity() {
                         criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled,
                         statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
                         zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
-                        onOperatorIdChange = { value ->
-                            operatorId.value = value.take(23)
-                            accessSession.value = null
+                        onAddDevice = {
+                            addDeviceOpen.value = true
+                            lifecycleScope.launch { discovery.rescan() }
                         },
-                        onOperatorPinChange = { value ->
-                            operatorPin.value = value.filter(Char::isDigit).take(12)
-                            accessSession.value = null
-                        },
+                        onOperatorIdChange = { value -> operatorId.value = value.take(23); accessSession.value = null },
+                        onOperatorPinChange = { value -> operatorPin.value = value.filter(Char::isDigit).take(12); accessSession.value = null },
                         onLogin = ::loginOperator,
                         onLogout = ::logoutOperator,
                         onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
                         onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } },
                         onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } },
-                        onClearEventHistory = {
-                            eventHistory.clear()
-                            telemetry.clearEvents()
-                        },
+                        onClearEventHistory = { eventHistory.clear(); telemetry.clearEvents() },
                         onExportEvents = {
                             pendingExportText = EventLogExporter.toCsv(events)
                             exportLauncher.launch(EventLogExporter.suggestedFileName())
@@ -235,6 +247,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun addManualDevice(name: String, rawAddress: String) {
+        val clean = rawAddress.trim().trimEnd('/')
+        if (clean.isBlank() || clean.any(Char::isWhitespace)) {
+            commandStatus.value = "Некоректна IP-адреса"
+            return
+        }
+        val baseUrl = if (clean.startsWith("http://", true) || clean.startsWith("https://", true)) clean else "http://$clean"
+        val deviceId = "manual-${baseUrl.lowercase().hashCode().toUInt().toString(16)}"
+        lifecycleScope.launch {
+            registeredDevices.addManual(deviceId = deviceId, baseUrl = baseUrl, name = name)
+            settings.update(settings.settings.value.copy(deviceId = deviceId, lastKnownLocalUrl = baseUrl, localCertificateSha256 = ""))
+            addDeviceOpen.value = false
+        }
+    }
+
     private fun loginOperator() {
         val actor = operatorId.value.trim()
         val credential = operatorPin.value
@@ -243,7 +270,6 @@ class MainActivity : ComponentActivity() {
             accessSession.value = null
             return
         }
-
         lifecycleScope.launch {
             commandStatus.value = "Перевірка доступу…"
             val result = runCatching { commands.login(actor, credential) }
@@ -280,7 +306,6 @@ class MainActivity : ComponentActivity() {
             commandStatus.value = "PIN сеансу відсутній — увійдіть знову"
             return
         }
-
         lifecycleScope.launch {
             commandStatus.value = "Виконується: ${type.name}…"
             val result = runCatching { commands.execute(type, actor, credential) }
@@ -288,10 +313,7 @@ class MainActivity : ComponentActivity() {
                 onSuccess = { reply ->
                     if (reply.accepted || reply.duplicate) "OK: ${reply.code}"
                     else {
-                        if (reply.code.contains("unauthorized", ignoreCase = true) ||
-                            reply.code.contains("credential", ignoreCase = true) ||
-                            reply.code.contains("rate", ignoreCase = true)
-                        ) accessSession.value = null
+                        if (reply.code.contains("unauthorized", true) || reply.code.contains("credential", true) || reply.code.contains("rate", true)) accessSession.value = null
                         "Відхилено: ${reply.code}"
                     }
                 },
@@ -301,25 +323,19 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestLocalNetworkPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
-                localNetworkPermissionLauncher.launch(Manifest.permission.NEARBY_WIFI_DEVICES)
-                return
-            }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
+            localNetworkPermissionLauncher.launch(Manifest.permission.NEARBY_WIFI_DEVICES)
+            return
         }
         requestNotificationPermission()
     }
 
     private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private fun requestQrScan() {
-        val missing = requiredProvisioningPermissions().filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
+        val missing = requiredProvisioningPermissions().filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isEmpty()) launchQrScanner() else permissionLauncher.launch(missing.toTypedArray())
     }
 
@@ -329,8 +345,7 @@ class MainActivity : ComponentActivity() {
 
     private fun requiredProvisioningPermissions(): List<String> = buildList {
         add(Manifest.permission.CAMERA)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.NEARBY_WIFI_DEVICES)
-        else add(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.NEARBY_WIFI_DEVICES) else add(Manifest.permission.ACCESS_FINE_LOCATION)
     }
 
     override fun onDestroy() {
