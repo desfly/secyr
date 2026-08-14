@@ -28,6 +28,7 @@ idf_component_register(
         "hg_w5500.cpp"
         "hg_onewire_runtime.cpp"
         "hg_rs485.cpp"
+        "hg_pzem004t.cpp"
         "hg_hardware_bootstrap.cpp"
         "hg_telemetry_runtime.cpp"
         "hg_infrastructure_http.cpp"
