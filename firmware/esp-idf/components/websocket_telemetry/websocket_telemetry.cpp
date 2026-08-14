@@ -1,6 +1,7 @@
 #include "websocket_telemetry.hpp"
 #include "esp_https_server.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include <array>
 #include <new>
 #include <string>
@@ -28,14 +29,34 @@ bool WebsocketTelemetry::begin(void* server_handle, std::string_view local_api_t
         stop();
         return false;
     }
-    ESP_LOGI(tag, "authenticated WSS telemetry registered");
+    ESP_LOGI(tag, "authenticated telemetry websocket registered");
     return true;
+}
+
+std::string WebsocketTelemetry::issue_session_token() {
+    std::array<std::uint8_t, 32> random{};
+    esp_fill_random(random.data(), random.size());
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string raw;
+    raw.resize(random.size() * 2U);
+    for (std::size_t i = 0; i < random.size(); ++i) {
+        raw[i * 2U] = hex[(random[i] >> 4U) & 0x0fU];
+        raw[i * 2U + 1U] = hex[random[i] & 0x0fU];
+    }
+    {
+        std::scoped_lock lock(mutex_);
+        session_tokens_[next_session_token_].reset(raw);
+        next_session_token_ = (next_session_token_ + 1U) % session_tokens_.size();
+    }
+    return raw;
 }
 
 void WebsocketTelemetry::stop() {
     std::scoped_lock lock(mutex_);
     clients_.fill(-1);
     token_.clear();
+    for (auto& session : session_tokens_) session.clear();
+    next_session_token_ = 0U;
     server_ = nullptr;
 }
 
@@ -44,7 +65,13 @@ bool WebsocketTelemetry::authorize(httpd_req_t* request) const {
     if (length == 0U || length > 320U) return false;
     std::array<char, 321> value{};
     if (httpd_req_get_hdr_value_str(request, "Authorization", value.data(), length + 1U) != ESP_OK) return false;
-    return token_.authorized(std::string_view(value.data(), length));
+    const std::string_view authorization(value.data(), length);
+    std::scoped_lock lock(mutex_);
+    if (token_.authorized(authorization)) return true;
+    for (const auto& session : session_tokens_) {
+        if (session.configured() && session.authorized(authorization)) return true;
+    }
+    return false;
 }
 
 void WebsocketTelemetry::add_client(int fd) {
@@ -127,7 +154,6 @@ void WebsocketTelemetry::publish(const hg::TelemetryFrame& frame) {
         work->clients = clients_;
         work->payload = hg::telemetry_json(frame);
     }
-    // HTTPS server APIs are not thread-safe; execute the send inside the HTTP server task.
     if (httpd_queue_work(static_cast<httpd_handle_t>(handle), &WebsocketTelemetry::broadcast_work_entry, work) != ESP_OK) {
         delete work;
         ESP_LOGW(tag, "telemetry broadcast queue is full");
