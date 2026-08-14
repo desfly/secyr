@@ -23,6 +23,7 @@ class SettingsStore(context: Context) {
             .putBoolean("notifications_zones", value.zoneNotificationsEnabled)
             .apply()
         secure.put("api_token", value.apiToken)
+        secure.put("telemetry_token", value.telemetryToken)
         settings.emit(value)
     }
 
@@ -33,6 +34,7 @@ class SettingsStore(context: Context) {
     private fun load() = AppSettings(
         deviceId = preferences.getString("device_id", "").orEmpty(),
         apiToken = secure.get("api_token"),
+        telemetryToken = secure.get("telemetry_token"),
         autoReconnect = preferences.getBoolean("auto_reconnect", true),
         remoteAccessEnabled = preferences.getBoolean("remote_access", false),
         cloudBaseUrl = preferences.getString("cloud_base_url", "").orEmpty(),
