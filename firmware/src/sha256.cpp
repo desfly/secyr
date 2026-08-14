@@ -1,9 +1,9 @@
 #include "homeguard/sha256.hpp"
+
 #include <array>
-#include <cstring>
-#include <iomanip>
-#include <sstream>
-#include <vector>
+#include <cstddef>
+#include <cstdint>
+#include <string>
 
 namespace hg {
 namespace {
@@ -17,51 +17,81 @@ constexpr std::array<uint32_t, 64> k{
     0x19a4c116U,0x1e376c08U,0x2748774cU,0x34b0bcb5U,0x391c0cb3U,0x4ed8aa4aU,0x5b9cca4fU,0x682e6ff3U,
     0x748f82eeU,0x78a5636fU,0x84c87814U,0x8cc70208U,0x90befffaU,0xa4506cebU,0xbef9a3f7U,0xc67178f2U
 };
-constexpr uint32_t rotr(uint32_t value, uint32_t bits) { return (value >> bits) | (value << (32U - bits)); }
+
+constexpr uint32_t rotr(uint32_t value, uint32_t bits) {
+    return (value >> bits) | (value << (32U - bits));
+}
+
+void compress_block(std::array<uint32_t, 8>& h, const uint8_t* block) {
+    std::array<uint32_t, 64> w{};
+    for (size_t i = 0; i < 16U; ++i) {
+        const size_t p = i * 4U;
+        w[i] = (static_cast<uint32_t>(block[p]) << 24U) |
+               (static_cast<uint32_t>(block[p + 1U]) << 16U) |
+               (static_cast<uint32_t>(block[p + 2U]) << 8U) |
+               static_cast<uint32_t>(block[p + 3U]);
+    }
+    for (size_t i = 16U; i < 64U; ++i) {
+        const uint32_t s0 = rotr(w[i - 15U], 7U) ^ rotr(w[i - 15U], 18U) ^ (w[i - 15U] >> 3U);
+        const uint32_t s1 = rotr(w[i - 2U], 17U) ^ rotr(w[i - 2U], 19U) ^ (w[i - 2U] >> 10U);
+        w[i] = w[i - 16U] + s0 + w[i - 7U] + s1;
+    }
+
+    uint32_t a = h[0], b = h[1], c = h[2], d = h[3];
+    uint32_t e = h[4], f = h[5], g = h[6], hh = h[7];
+    for (size_t i = 0; i < 64U; ++i) {
+        const uint32_t s1 = rotr(e, 6U) ^ rotr(e, 11U) ^ rotr(e, 25U);
+        const uint32_t ch = (e & f) ^ ((~e) & g);
+        const uint32_t temp1 = hh + s1 + ch + k[i] + w[i];
+        const uint32_t s0 = rotr(a, 2U) ^ rotr(a, 13U) ^ rotr(a, 22U);
+        const uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+        const uint32_t temp2 = s0 + maj;
+        hh = g; g = f; f = e; e = d + temp1; d = c; c = b; b = a; a = temp1 + temp2;
+    }
+
+    h[0] += a; h[1] += b; h[2] += c; h[3] += d;
+    h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+}
 }
 
 Sha256Digest sha256(std::span<const std::byte> data) {
-    const uint64_t bit_length = static_cast<uint64_t>(data.size()) * 8U;
-    size_t padded = data.size() + 1U;
-    while ((padded % 64U) != 56U) ++padded;
-    std::vector<uint8_t> message(padded + 8U, 0U);
-    for (size_t i = 0; i < data.size(); ++i) message[i] = static_cast<uint8_t>(data[i]);
-    message[data.size()] = 0x80U;
-    for (size_t i = 0; i < 8U; ++i) message[padded + i] = static_cast<uint8_t>(bit_length >> (56U - 8U * i));
+    std::array<uint32_t, 8> h{
+        0x6a09e667U,0xbb67ae85U,0x3c6ef372U,0xa54ff53aU,
+        0x510e527fU,0x9b05688cU,0x1f83d9abU,0x5be0cd19U
+    };
 
-    std::array<uint32_t, 8> h{0x6a09e667U,0xbb67ae85U,0x3c6ef372U,0xa54ff53aU,0x510e527fU,0x9b05688cU,0x1f83d9abU,0x5be0cd19U};
-    std::array<uint32_t, 64> w{};
-    for (size_t offset = 0; offset < message.size(); offset += 64U) {
-        for (size_t i = 0; i < 16U; ++i) {
-            const size_t p = offset + i * 4U;
-            w[i] = (static_cast<uint32_t>(message[p]) << 24U) |
-                   (static_cast<uint32_t>(message[p + 1U]) << 16U) |
-                   (static_cast<uint32_t>(message[p + 2U]) << 8U) |
-                   static_cast<uint32_t>(message[p + 3U]);
+    std::array<uint8_t, 64> block{};
+    size_t offset = 0;
+    while (data.size() - offset >= block.size()) {
+        for (size_t i = 0; i < block.size(); ++i) {
+            block[i] = static_cast<uint8_t>(data[offset + i]);
         }
-        for (size_t i = 16U; i < 64U; ++i) {
-            const uint32_t s0 = rotr(w[i - 15U], 7U) ^ rotr(w[i - 15U], 18U) ^ (w[i - 15U] >> 3U);
-            const uint32_t s1 = rotr(w[i - 2U], 17U) ^ rotr(w[i - 2U], 19U) ^ (w[i - 2U] >> 10U);
-            w[i] = w[i - 16U] + s0 + w[i - 7U] + s1;
-        }
-        uint32_t a=h[0],b=h[1],c=h[2],d=h[3],e=h[4],f=h[5],g=h[6],hh=h[7];
-        for (size_t i = 0; i < 64U; ++i) {
-            const uint32_t s1 = rotr(e,6U) ^ rotr(e,11U) ^ rotr(e,25U);
-            const uint32_t ch = (e & f) ^ ((~e) & g);
-            const uint32_t temp1 = hh + s1 + ch + k[i] + w[i];
-            const uint32_t s0 = rotr(a,2U) ^ rotr(a,13U) ^ rotr(a,22U);
-            const uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
-            const uint32_t temp2 = s0 + maj;
-            hh=g; g=f; f=e; e=d+temp1; d=c; c=b; b=a; a=temp1+temp2;
-        }
-        h[0]+=a; h[1]+=b; h[2]+=c; h[3]+=d; h[4]+=e; h[5]+=f; h[6]+=g; h[7]+=hh;
+        compress_block(h, block.data());
+        offset += block.size();
     }
+
+    std::array<uint8_t, 128> tail{};
+    const size_t remaining = data.size() - offset;
+    for (size_t i = 0; i < remaining; ++i) {
+        tail[i] = static_cast<uint8_t>(data[offset + i]);
+    }
+    tail[remaining] = 0x80U;
+
+    const size_t padded_size = remaining < 56U ? 64U : 128U;
+    const uint64_t bit_length = static_cast<uint64_t>(data.size()) * 8U;
+    for (size_t i = 0; i < 8U; ++i) {
+        tail[padded_size - 8U + i] = static_cast<uint8_t>(bit_length >> (56U - 8U * i));
+    }
+
+    compress_block(h, tail.data());
+    if (padded_size == 128U) compress_block(h, tail.data() + 64U);
+
     Sha256Digest digest{};
     for (size_t i = 0; i < h.size(); ++i) {
-        digest[i*4U]=static_cast<uint8_t>(h[i]>>24U);
-        digest[i*4U+1U]=static_cast<uint8_t>(h[i]>>16U);
-        digest[i*4U+2U]=static_cast<uint8_t>(h[i]>>8U);
-        digest[i*4U+3U]=static_cast<uint8_t>(h[i]);
+        digest[i * 4U] = static_cast<uint8_t>(h[i] >> 24U);
+        digest[i * 4U + 1U] = static_cast<uint8_t>(h[i] >> 16U);
+        digest[i * 4U + 2U] = static_cast<uint8_t>(h[i] >> 8U);
+        digest[i * 4U + 3U] = static_cast<uint8_t>(h[i]);
     }
     return digest;
 }
@@ -72,14 +102,19 @@ Sha256Digest sha256(std::string_view text) {
 
 bool constant_time_equal(const Sha256Digest& lhs, const Sha256Digest& rhs) {
     uint8_t difference = 0;
-    for (size_t i = 0; i < lhs.size(); ++i) difference |= static_cast<uint8_t>(lhs[i] ^ rhs[i]);
+    for (size_t i = 0; i < lhs.size(); ++i) {
+        difference |= static_cast<uint8_t>(lhs[i] ^ rhs[i]);
+    }
     return difference == 0;
 }
 
 std::string sha256_hex(const Sha256Digest& digest) {
-    std::ostringstream output;
-    output << std::hex << std::setfill('0');
-    for (const auto byte : digest) output << std::setw(2) << static_cast<unsigned>(byte);
-    return output.str();
+    static constexpr char digits[] = "0123456789abcdef";
+    std::string out(digest.size() * 2U, '0');
+    for (size_t i = 0; i < digest.size(); ++i) {
+        out[i * 2U] = digits[(digest[i] >> 4U) & 0x0fU];
+        out[i * 2U + 1U] = digits[digest[i] & 0x0fU];
+    }
+    return out;
 }
 }
