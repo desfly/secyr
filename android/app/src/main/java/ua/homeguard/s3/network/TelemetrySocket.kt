@@ -12,11 +12,15 @@ import okhttp3.WebSocketListener
 import org.json.JSONObject
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
+import java.util.concurrent.TimeUnit
 
 enum class TelemetryConnectionState { IDLE, CONNECTING, CONNECTED, UNAUTHORIZED, OFFLINE }
 
 class TelemetrySocket {
-    companion object { private const val MAX_EVENT_HISTORY = 256 }
+    companion object {
+        private const val MAX_EVENT_HISTORY = 256
+        private const val HEARTBEAT_SECONDS = 5L
+    }
 
     private val state = MutableStateFlow(SystemSnapshot())
     private val eventState = MutableStateFlow<List<SystemEventRecord>>(emptyList())
@@ -40,6 +44,9 @@ class TelemetrySocket {
         if (url.isBlank()) return
         connectionState.value = TelemetryConnectionState.CONNECTING
         val client = PinnedTlsClientFactory.create(certificateSha256, 0)
+            .newBuilder()
+            .pingInterval(HEARTBEAT_SECONDS, TimeUnit.SECONDS)
+            .build()
         val request = Request.Builder().url(url).apply {
             if (token.isNotBlank()) header("Authorization", "Bearer $token")
         }.build()
@@ -48,6 +55,7 @@ class TelemetrySocket {
                 if (socket === webSocket) connectionState.value = TelemetryConnectionState.CONNECTED
             }
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (socket === webSocket) connectionState.value = TelemetryConnectionState.CONNECTED
                 runCatching {
                     val json = JSONObject(text)
                     if (json.has("event")) {
