@@ -22,6 +22,14 @@ std::string_view output_type_name(ModelOutputType type) {
         default: return "relay";
     }
 }
+std::string_view output_name(ModelOutputType type, std::size_t index) {
+    switch (type) {
+        case ModelOutputType::Siren: return "Siren";
+        case ModelOutputType::Valve: return index == 1U ? "Valve 1" : "Valve 2";
+        case ModelOutputType::Light: return "Light";
+        default: return "Relay";
+    }
+}
 std::string_view arm_state_name(PartitionArmState state) {
     switch (state) {
         case PartitionArmState::Stay: return "stay";
@@ -66,7 +74,9 @@ std::string system_zones_json(const SystemModel& model) {
     for (std::size_t i = 0; i < model.zone_count(); ++i) {
         if (i != 0U) out << ',';
         const auto* z = model.zone_at(i);
-        out << "{\"id\":" << z->id << ",\"name\":\"" << z->name.data()
+        out << "{\"index\":" << i
+            << ",\"id\":" << z->id
+            << ",\"name\":\"" << z->name.data()
             << "\",\"state\":\"" << zone_state_name(z->state)
             << "\",\"enabled\":" << (z->enabled ? "true" : "false")
             << ",\"bypassed\":" << (z->bypassed ? "true" : "false")
@@ -82,9 +92,13 @@ std::string system_outputs_json(const SystemModel& model) {
     for (std::size_t i = 0; i < model.output_count(); ++i) {
         if (i != 0U) out << ',';
         const auto* item = model.output_at(i);
-        out << "{\"id\":" << item->id << ",\"type\":\"" << output_type_name(item->type)
+        out << "{\"index\":" << i
+            << ",\"id\":" << item->id
+            << ",\"name\":\"" << output_name(item->type, i)
+            << "\",\"type\":\"" << output_type_name(item->type)
             << "\",\"active\":" << (item->active ? "true" : "false")
-            << ",\"timeoutMs\":" << item->timeout_ms << '}';
+            << ",\"state\":\"" << (item->active ? "on" : "off")
+            << "\",\"timeoutMs\":" << item->timeout_ms << '}';
     }
     out << "]}";
     return out.str();
