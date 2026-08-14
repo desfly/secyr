@@ -79,9 +79,9 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
     }
 
     suspend fun scanOnce(timeoutMs: Int = 2_400) = withContext(Dispatchers.IO) {
-        val targets = broadcastAddresses().mapNotNull { it.hostAddress }.distinct()
         val wifiNetwork = findWifiNetwork()
         val networkLabel = describeNetwork(wifiNetwork)
+        val targets = broadcastAddresses(wifiNetwork).mapNotNull { it.hostAddress }.distinct()
         _status.value = ScanStatus(
             phase = "sending",
             progress = 0.05f,
@@ -210,11 +210,17 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
         return if (interfaceName.isNullOrBlank()) "wifi" else "wifi:$interfaceName"
     }
 
-    private fun broadcastAddresses(): Set<InetAddress> {
+    private fun broadcastAddresses(network: Network?): Set<InetAddress> {
         val addresses = linkedSetOf<InetAddress>()
         runCatching {
-            Collections.list(NetworkInterface.getNetworkInterfaces())
-                .filter { it.isUp && !it.isLoopback }
+            val wifiInterfaceName = network?.let { connectivity.getLinkProperties(it)?.interfaceName }
+            val interfaces = if (!wifiInterfaceName.isNullOrBlank()) {
+                listOfNotNull(NetworkInterface.getByName(wifiInterfaceName))
+            } else {
+                Collections.list(NetworkInterface.getNetworkInterfaces())
+                    .filter { it.isUp && !it.isLoopback }
+            }
+            interfaces
                 .flatMap { it.interfaceAddresses }
                 .mapNotNull { it.broadcast }
                 .filterIsInstance<Inet4Address>()
@@ -223,6 +229,8 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
             Log.w(TAG, "Unable to enumerate LAN broadcast addresses", error)
             _status.value = _status.value.copy(error = error.message ?: error.javaClass.simpleName)
         }
+        // Limited broadcast remains a fallback for access points that do not expose
+        // a subnet broadcast address through NetworkInterface.
         addresses += InetAddress.getByName("255.255.255.255")
         return addresses
     }
