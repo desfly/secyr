@@ -15,6 +15,8 @@ data class PressureStatus(
     val index: Int,
     val value: Float,
     val state: String,
+    val name: String = "",
+    val currentMa: Float = 0.0F,
 )
 
 data class DigitalChannelStatus(
@@ -38,6 +40,10 @@ data class ElectricalStatus(
     val current: Float,
     val power: Float,
     val state: String,
+    val energyWh: Long = 0L,
+    val frequencyHz: Float = 0.0F,
+    val powerFactor: Float = 0.0F,
+    val alarm: Boolean = false,
 )
 
 data class SystemSnapshot(
