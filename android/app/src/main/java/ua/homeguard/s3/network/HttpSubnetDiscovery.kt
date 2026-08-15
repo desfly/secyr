@@ -28,7 +28,11 @@ class HttpSubnetDiscovery(context: Context) {
         private const val TAG = "HomeGuardHttpScan"
         private const val CONNECT_TIMEOUT_MS = 220
         private const val READ_TIMEOUT_MS = 320
+        private const val SETUP_CONNECT_TIMEOUT_MS = 1_200
+        private const val SETUP_READ_TIMEOUT_MS = 1_500
         private const val MAX_PARALLEL = 32
+        private const val SETUP_PREFIX = "192.168.4"
+        private const val SETUP_CONTROLLER_IP = "192.168.4.1"
     }
 
     private val connectivity = context.applicationContext.getSystemService(ConnectivityManager::class.java)
@@ -44,26 +48,46 @@ class HttpSubnetDiscovery(context: Context) {
             ?.firstOrNull { !it.isLoopbackAddress && !it.isLinkLocalAddress }
             ?: return@withContext
 
-        // HomeGuard installations are expected on a normal home LAN. Scan the local /24
-        // as a deterministic fallback when multicast/broadcast is filtered by Android/AP.
         val bytes = local.address
         val prefix = "${bytes[0].toInt() and 0xff}.${bytes[1].toInt() and 0xff}.${bytes[2].toInt() and 0xff}"
         val ownHost = bytes[3].toInt() and 0xff
-        val semaphore = Semaphore(MAX_PARALLEL)
 
+        // When the phone is connected directly to the HomeGuard setup AP, the
+        // controller address is deterministic. Probe it first with realistic ESP
+        // timeouts instead of relying on the aggressive /24 LAN sweep timings.
+        val setupDevice = if (prefix == SETUP_PREFIX && ownHost != 1) {
+            probe(
+                network = network,
+                ip = SETUP_CONTROLLER_IP,
+                connectTimeoutMs = SETUP_CONNECT_TIMEOUT_MS,
+                readTimeoutMs = SETUP_READ_TIMEOUT_MS,
+            )
+        } else {
+            null
+        }
+
+        val semaphore = Semaphore(MAX_PARALLEL)
         val found = coroutineScope {
             (1..254)
                 .filter { it != ownHost }
+                .filterNot { prefix == SETUP_PREFIX && it == 1 }
                 .map { host ->
                     async(Dispatchers.IO) {
-                        semaphore.withPermit { probe(network, "$prefix.$host") }
+                        semaphore.withPermit {
+                            probe(
+                                network = network,
+                                ip = "$prefix.$host",
+                                connectTimeoutMs = CONNECT_TIMEOUT_MS,
+                                readTimeoutMs = READ_TIMEOUT_MS,
+                            )
+                        }
                     }
                 }
                 .awaitAll()
                 .filterNotNull()
         }
 
-        _devices.value = found
+        _devices.value = (listOfNotNull(setupDevice) + found)
             .associateBy { it.deviceId }
             .values
             .sortedBy { it.deviceId }
@@ -76,13 +100,18 @@ class HttpSubnetDiscovery(context: Context) {
         }
     }.getOrNull()
 
-    private fun probe(network: Network, ip: String): DiscoveredDevice? {
+    private fun probe(
+        network: Network,
+        ip: String,
+        connectTimeoutMs: Int,
+        readTimeoutMs: Int,
+    ): DiscoveredDevice? {
         var connection: HttpURLConnection? = null
         return try {
             connection = network.openConnection(URL("http://$ip/api/v1/cloud/status")) as HttpURLConnection
             connection.requestMethod = "GET"
-            connection.connectTimeout = CONNECT_TIMEOUT_MS
-            connection.readTimeout = READ_TIMEOUT_MS
+            connection.connectTimeout = connectTimeoutMs
+            connection.readTimeout = readTimeoutMs
             connection.useCaches = false
             connection.instanceFollowRedirects = false
             if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
