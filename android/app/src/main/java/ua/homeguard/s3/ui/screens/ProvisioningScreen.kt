@@ -37,6 +37,8 @@ import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.ProvisioningForm
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.ProvisioningUiState
+import ua.homeguard.s3.network.HomeGuardWifiNetwork
+import ua.homeguard.s3.network.HomeGuardWifiScanner
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
 import ua.homeguard.s3.network.UdpDeviceDiscovery
 import ua.homeguard.s3.storage.SettingsStore
@@ -109,11 +111,15 @@ fun ProvisioningScreen(
     onUseManualIp: (String) -> Unit,
     onProvision: (ProvisioningForm) -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     var form by remember { mutableStateOf(ProvisioningForm()) }
     var manualAddress by remember { mutableStateOf("192.168.4.1") }
     var manualAddressTouched by remember { mutableStateOf(false) }
     var wifiPasswordVisible by remember { mutableStateOf(false) }
     var cloudTokenVisible by remember { mutableStateOf(false) }
+    var wifiScanBusy by remember { mutableStateOf(false) }
+    var wifiScanError by remember { mutableStateOf("") }
+    var wifiNetworks by remember { mutableStateOf(emptyList<HomeGuardWifiNetwork>()) }
     val busy = state.phase in setOf(
         ProvisioningPhase.CONNECTING_SETUP_AP,
         ProvisioningPhase.AUTHORIZING,
@@ -130,6 +136,24 @@ fun ProvisioningScreen(
         }
     }
 
+    fun scanWifiOnHomeGuard() {
+        if (!manualAddressValid || wifiScanBusy) return
+        scope.launch {
+            wifiScanBusy = true
+            wifiScanError = ""
+            runCatching { HomeGuardWifiScanner.scan(manualAddress) }
+                .onSuccess { networks ->
+                    wifiNetworks = networks
+                    if (networks.isEmpty()) wifiScanError = "HomeGuard не знайшов Wi-Fi мереж"
+                }
+                .onFailure { error ->
+                    wifiNetworks = emptyList()
+                    wifiScanError = error.message ?: "Не вдалося запустити сканування на HomeGuard"
+                }
+            wifiScanBusy = false
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -141,7 +165,7 @@ fun ProvisioningScreen(
             Text("← Назад")
         }
         Text("Підключити HomeGuard до Wi-Fi")
-        Text("1. Ідентифікуйте новий контролер через QR. 2. Введіть домашню Wi-Fi мережу та пароль. 3. Передайте налаштування і дочекайтеся появи HomeGuard у LAN.")
+        Text("1. Ідентифікуйте новий контролер через QR. 2. Виберіть домашню Wi-Fi мережу зі скану HomeGuard або введіть SSID вручну. 3. Передайте налаштування і дочекайтеся появи HomeGuard у LAN.")
 
         HorizontalDivider()
         Text("Крок 1 — вибрати новий HomeGuard")
@@ -155,6 +179,30 @@ fun ProvisioningScreen(
 
         HorizontalDivider()
         Text("Крок 2 — домашня Wi-Fi мережа")
+        OutlinedButton(
+            onClick = ::scanWifiOnHomeGuard,
+            enabled = manualAddressValid && !busy && !wifiScanBusy,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (wifiScanBusy) "HomeGuard сканує Wi-Fi…" else "Сканувати Wi-Fi через HomeGuard")
+        }
+        Text("Сканування виконує ESP32-S3 за адресою ${normalizeLocalAddress(manualAddress) ?: manualAddress}.")
+        if (wifiScanBusy) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CircularProgressIndicator()
+                Text("Очікування результатів сканування ESP…")
+            }
+        }
+        if (wifiScanError.isNotBlank()) Text("Wi-Fi scan: $wifiScanError")
+        wifiNetworks.forEach { network ->
+            OutlinedButton(
+                onClick = { form = form.copy(wifiSsid = network.ssid) },
+                enabled = !busy && !wifiScanBusy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("${network.ssid} · ${network.rssi} dBm")
+            }
+        }
         OutlinedTextField(
             form.wifiSsid,
             { form = form.copy(wifiSsid = it) },
