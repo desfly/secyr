@@ -44,7 +44,6 @@ class HttpSubnetDiscovery(context: Context) {
     }
 
     suspend fun scanOnce() = withContext(Dispatchers.IO) {
-        // A manual rescan must describe this scan, not keep stale devices from an older network.
         _devices.value = emptyList()
 
         val network = findWifiNetwork() ?: return@withContext
@@ -59,8 +58,6 @@ class HttpSubnetDiscovery(context: Context) {
         val prefix = "${bytes[0].toInt() and 0xff}.${bytes[1].toInt() and 0xff}.${bytes[2].toInt() and 0xff}"
         val ownHost = bytes[3].toInt() and 0xff
 
-        // Setup AP is deterministic: the controller is always 192.168.4.1.
-        // Probe it first and do not hammer the remaining /24 if it answers.
         if (prefix == SETUP_PREFIX && ownHost != 1) {
             val setupDevice = probe(
                 network = network,
@@ -75,8 +72,6 @@ class HttpSubnetDiscovery(context: Context) {
             }
         }
 
-        // Keep the fallback bounded. 32 simultaneous probes made discovery noisy on phones
-        // and could overlap badly with the controller Web UI and UDP discovery traffic.
         val semaphore = Semaphore(MAX_PARALLEL)
         val found = coroutineScope {
             (1..254)
@@ -128,8 +123,15 @@ class HttpSubnetDiscovery(context: Context) {
         if (cloud?.optBoolean("ok", false) == true) {
             val deviceId = cloud.optString("deviceId").trim()
             if (deviceId.startsWith("HG-") && deviceId.length >= 5) {
-                Log.i(TAG, "HomeGuard HTTP fallback found: id=$deviceId ip=$ip")
-                return discovered(deviceId, ip)
+                val configured = cloud.optBoolean("configured", false)
+                val connected = cloud.optBoolean("connected", false)
+                Log.i(TAG, "HomeGuard HTTP fallback found: id=$deviceId ip=$ip cloudConfigured=$configured cloudConnected=$connected")
+                return discovered(
+                    deviceId = deviceId,
+                    ip = ip,
+                    cloudConfigured = configured,
+                    cloudConnected = connected,
+                )
             }
         }
 
@@ -180,6 +182,8 @@ class HttpSubnetDiscovery(context: Context) {
         deviceId: String,
         ip: String,
         serviceName: String = deviceId,
+        cloudConfigured: Boolean? = null,
+        cloudConnected: Boolean? = null,
     ) = DiscoveredDevice(
         deviceId = deviceId,
         serviceName = serviceName,
@@ -190,5 +194,7 @@ class HttpSubnetDiscovery(context: Context) {
         transport = Transport.NONE,
         pairingRequired = false,
         source = DiscoverySource.HTTP,
+        cloudConfigured = cloudConfigured,
+        cloudConnected = cloudConnected,
     )
 }
