@@ -4,7 +4,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 udp = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/UdpDeviceDiscovery.kt").read_text(encoding="utf-8")
 nsd = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/NsdDeviceDiscovery.kt").read_text(encoding="utf-8")
+http = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/HttpSubnetDiscovery.kt").read_text(encoding="utf-8")
 coordinator = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/LocalDiscoveryCoordinator.kt").read_text(encoding="utf-8")
+models = (ROOT / "android/app/src/main/java/ua/homeguard/s3/model/ConnectivityModels.kt").read_text(encoding="utf-8")
 
 checks = {
     "UDP discovery port": "const val PORT = 45678" in udp,
@@ -18,7 +20,11 @@ checks = {
     "mDNS concrete IP preference": "info.host?.hostAddress" in nsd,
     "mDNS independent resolver": "private fun resolve(serviceInfo: NsdServiceInfo)" in nsd and "val listener = object : NsdManager.ResolveListener" in nsd,
     "mDNS shared resolver removed": "private val resolveListener" not in nsd,
-    "Coordinator combines UDP+mDNS": "combine(nsd.devices, udp.devices)" in coordinator,
+    "HTTP subnet discovery source": "class HttpSubnetDiscovery" in http,
+    "HTTP HomeGuard identity endpoint": '"/api/v1/cloud/status"' in http,
+    "HTTP discovery source model": "enum class DiscoverySource { MDNS, UDP, HTTP }" in models,
+    "Coordinator combines mDNS+UDP+HTTP": "combine(nsd.devices, udp.devices, http.devices)" in coordinator,
+    "Coordinator triggers HTTP fallback": "http.scanOnce()" in coordinator,
     "Coordinator exposes scan status": "val scanStatus" in coordinator and "udp.status" in coordinator,
 }
 
