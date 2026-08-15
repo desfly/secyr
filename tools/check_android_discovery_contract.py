@@ -32,10 +32,12 @@ checks = {
     "Coordinator triggers HTTP fallback": "http.scanOnce()" in coordinator,
     "Coordinator exposes scan status": "val scanStatus" in coordinator and "udp.status" in coordinator,
 
-    # Product rule: the app opens on the device list. Adding is an explicit action,
-    # even when the list is empty; the empty-state card owns the Add action.
+    # Cemented product rule: the app always opens on the device list and the
+    # unfinished add-device flow is hidden for now, even when the list is empty.
     "Device list is primary screen": "private val deviceListOpen = MutableStateFlow(true)" in main_activity,
     "Fresh app does not force Add screen": "showAddDevice || appSettings.deviceId.isBlank()" not in main_activity and "showAddDevice -> AddDeviceScreen(" in main_activity,
+    "Add action hidden from main list": 'Text("+ Додати")' not in list_screen and 'Text("+ Додати пристрій")' not in list_screen,
+    "Empty list does not expose add action": "Додавання пристроїв тимчасово сховане" in list_screen,
     "Operator ID is not forced to admin": 'private val operatorId = MutableStateFlow("")' in main_activity,
     "Bruce header stays compact": "Modifier.size(56.dp)" in bruce_brand,
 
@@ -47,6 +49,7 @@ checks = {
     "Manual ID save requires name": "enabled = nameValid && manualDeviceId.isNotBlank()" in add_screen,
     "Store rejects unnamed new discovery": "if (displayName.isBlank()) return" in store and "device.serviceName.takeIf" not in store,
     "Manual store has no generated default name": 'suspend fun addManual(deviceId: String, baseUrl: String, name: String = "")' in store,
+    "Legacy service names are not shown as user names": "isLegacyGeneratedName" in list_screen and 'clean.equals("HomeGuard-S3", ignoreCase = true)' in list_screen and '"Без назви"' in list_screen,
 
     # Product rule: technical identity/address is hidden from the normal device card.
     # It is available only through the explicit Properties dialog.
