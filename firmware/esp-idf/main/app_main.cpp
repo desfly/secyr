@@ -165,6 +165,7 @@ esp_err_t start_http_server()
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 48;
+    config.max_open_sockets = 10;
     config.stack_size = 16384;
     config.lru_purge_enable = true;
 
