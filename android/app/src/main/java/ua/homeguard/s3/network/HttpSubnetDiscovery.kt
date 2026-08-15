@@ -52,15 +52,13 @@ class HttpSubnetDiscovery(context: Context) {
         val prefix = "${bytes[0].toInt() and 0xff}.${bytes[1].toInt() and 0xff}.${bytes[2].toInt() and 0xff}"
         val ownHost = bytes[3].toInt() and 0xff
 
-        // When the phone is connected directly to the HomeGuard setup AP, the
-        // controller address is deterministic. Probe it first with realistic ESP
-        // timeouts instead of relying on the aggressive /24 LAN sweep timings.
         val setupDevice = if (prefix == SETUP_PREFIX && ownHost != 1) {
             probe(
                 network = network,
                 ip = SETUP_CONTROLLER_IP,
                 connectTimeoutMs = SETUP_CONNECT_TIMEOUT_MS,
                 readTimeoutMs = SETUP_READ_TIMEOUT_MS,
+                allowSetupFallback = true,
             )
         } else {
             null
@@ -79,6 +77,7 @@ class HttpSubnetDiscovery(context: Context) {
                                 ip = "$prefix.$host",
                                 connectTimeoutMs = CONNECT_TIMEOUT_MS,
                                 readTimeoutMs = READ_TIMEOUT_MS,
+                                allowSetupFallback = false,
                             )
                         }
                     }
@@ -88,7 +87,7 @@ class HttpSubnetDiscovery(context: Context) {
         }
 
         _devices.value = (listOfNotNull(setupDevice) + found)
-            .associateBy { it.deviceId }
+            .associateBy { it.baseUrl.trimEnd('/').lowercase() }
             .values
             .sortedBy { it.deviceId }
     }
@@ -105,39 +104,77 @@ class HttpSubnetDiscovery(context: Context) {
         ip: String,
         connectTimeoutMs: Int,
         readTimeoutMs: Int,
+        allowSetupFallback: Boolean,
     ): DiscoveredDevice? {
+        val cloud = readJson(
+            network = network,
+            url = "http://$ip/api/v1/cloud/status",
+            connectTimeoutMs = connectTimeoutMs,
+            readTimeoutMs = readTimeoutMs,
+        )
+        if (cloud?.optBoolean("ok", false) == true) {
+            val deviceId = cloud.optString("deviceId").trim()
+            if (deviceId.startsWith("HG-") && deviceId.length >= 5) {
+                Log.i(TAG, "HomeGuard HTTP fallback found: id=$deviceId ip=$ip")
+                return discovered(deviceId, ip)
+            }
+        }
+
+        if (!allowSetupFallback) return null
+
+        val networkStatus = readJson(
+            network = network,
+            url = "http://$ip/api/v1/network/status",
+            connectTimeoutMs = connectTimeoutMs,
+            readTimeoutMs = readTimeoutMs,
+        ) ?: return null
+        if (!networkStatus.optBoolean("ok", false)) return null
+
+        val apSsid = networkStatus.optString("apSsid").trim()
+        if (!apSsid.startsWith("HomeGuard-S3", ignoreCase = true)) return null
+
+        val temporaryId = "setup-$ip-80"
+        Log.i(TAG, "HomeGuard setup HTTP fallback found: id=$temporaryId ip=$ip ap=$apSsid")
+        return discovered(temporaryId, ip, serviceName = apSsid.ifBlank { "HomeGuard-S3" })
+    }
+
+    private fun readJson(
+        network: Network,
+        url: String,
+        connectTimeoutMs: Int,
+        readTimeoutMs: Int,
+    ): JSONObject? {
         var connection: HttpURLConnection? = null
         return try {
-            connection = network.openConnection(URL("http://$ip/api/v1/cloud/status")) as HttpURLConnection
+            connection = network.openConnection(URL(url)) as HttpURLConnection
             connection.requestMethod = "GET"
             connection.connectTimeout = connectTimeoutMs
             connection.readTimeout = readTimeoutMs
             connection.useCaches = false
             connection.instanceFollowRedirects = false
             if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
-
             val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            val json = JSONObject(body)
-            if (!json.optBoolean("ok", false)) return null
-            val deviceId = json.optString("deviceId")
-            if (!deviceId.startsWith("HG-") || deviceId.length < 5) return null
-
-            Log.i(TAG, "HomeGuard HTTP fallback found: id=$deviceId ip=$ip")
-            DiscoveredDevice(
-                deviceId = deviceId,
-                serviceName = deviceId,
-                host = ip,
-                port = 80,
-                secure = false,
-                apiVersion = 1,
-                transport = Transport.NONE,
-                pairingRequired = false,
-                source = DiscoverySource.HTTP,
-            )
+            JSONObject(body)
         } catch (_: Exception) {
             null
         } finally {
             connection?.disconnect()
         }
     }
+
+    private fun discovered(
+        deviceId: String,
+        ip: String,
+        serviceName: String = deviceId,
+    ) = DiscoveredDevice(
+        deviceId = deviceId,
+        serviceName = serviceName,
+        host = ip,
+        port = 80,
+        secure = false,
+        apiVersion = 1,
+        transport = Transport.NONE,
+        pairingRequired = false,
+        source = DiscoverySource.HTTP,
+    )
 }
