@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+
+    <path
+        android:fillColor="#0B1F3A"
+        android:pathData="M32,3 L55,11 L55,29 C55,43 46,54 32,61 C18,54 9,43 9,29 L9,11 Z" />
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#25D9FF"
+        android:strokeWidth="3"
+        android:strokeLineJoin="round"
+        android:pathData="M32,4.5 L53.5,12 L53.5,29 C53.5,42 45.2,52.3 32,59.2 C18.8,52.3 10.5,42 10.5,29 L10.5,12 Z" />
+
+    <path
+        android:fillColor="#F5FAFF"
+        android:pathData="M20,31 L32,21 L44,31 L41,34 L32,26.5 L23,34 Z" />
+
+    <path
+        android:fillColor="#DCEEFF"
+        android:pathData="M23,33 L32,25.5 L41,33 L41,45 L35.5,45 L35.5,37.5 L28.5,37.5 L28.5,45 L23,45 Z" />
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#25D9FF"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:pathData="M24,18 C28.5,13.5 35.5,13.5 40,18" />
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#25D9FF"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:pathData="M27.5,21.5 C30,19 34,19 36.5,21.5" />
+
+    <path
+        android:fillColor="#25D9FF"
+        android:pathData="M32,23.3 m-1.7,0 a1.7,1.7 0,1 0,3.4 0 a1.7,1.7 0,1 0,-3.4 0" />
+
+    <path
+        android:fillColor="#0A84FF"
+        android:pathData="M29,40 L35,40 L35,47 L29,47 Z" />
+
+    <path
+        android:fillColor="#34D058"
+        android:pathData="M16,49 m-2,0 a2,2 0,1 0,4 0 a2,2 0,1 0,-4 0" />
+
+    <path
+        android:fillColor="#34D058"
+        android:pathData="M32,53 m-2,0 a2,2 0,1 0,4 0 a2,2 0,1 0,-4 0" />
+
+    <path
+        android:fillColor="#25D9FF"
+        android:pathData="M48,49 m-2,0 a2,2 0,1 0,4 0 a2,2 0,1 0,-4 0" />
+</vector>
