@@ -53,14 +53,15 @@ class RegisteredDeviceStore(context: Context) {
                 (endpoint.isNotBlank() && normalizeEndpoint(it.baseUrl) == endpoint)
         }
         val exact = matching.firstOrNull { it.deviceId.equals(device.deviceId, ignoreCase = true) }
-        val previous = exact ?: matching.maxByOrNull { it.lastSeenAtMs }
+        val named = matching.firstOrNull { !isGeneratedName(it.name) }
+        val previous = named ?: exact ?: matching.maxByOrNull { it.lastSeenAtMs }
         val requested = requestedName?.trim()?.take(40).orEmpty()
         val displayName = requested.ifBlank { previous?.name.orEmpty() }
 
         // A new controller is never persisted under a generated service name, device ID,
         // or IP address. The owner must assign a visible name first. Existing records keep
-        // their previously assigned name during discovery refresh/reconciliation.
-        if (displayName.isBlank()) return
+        // their owner-assigned name during discovery refresh/reconciliation.
+        if (displayName.isBlank() || isGeneratedName(displayName)) return
 
         val registered = RegisteredDevice(
             deviceId = device.deviceId,
@@ -88,7 +89,11 @@ class RegisteredDeviceStore(context: Context) {
         val index = if (idIndex >= 0) idIndex else endpointIndex
         val previous = current.getOrNull(index)
         val requested = name.trim().take(40)
-        val displayName = previous?.name ?: requested
+        val displayName = when {
+            requested.isNotBlank() && !isGeneratedName(requested) -> requested
+            previous != null && !isGeneratedName(previous.name) -> previous.name
+            else -> ""
+        }
         if (displayName.isBlank()) return
 
         val registered = RegisteredDevice(
@@ -110,10 +115,16 @@ class RegisteredDeviceStore(context: Context) {
             it.deviceId == manualDeviceId && normalizeEndpoint(it.baseUrl) == endpoint
         } ?: return false
         val real = current.firstOrNull { it.deviceId.equals(discovered.deviceId, ignoreCase = true) }
+        val ownerName = when {
+            !isGeneratedName(manual.name) -> manual.name
+            real != null && !isGeneratedName(real.name) -> real.name
+            else -> ""
+        }
+        if (ownerName.isBlank()) return false
 
         val merged = RegisteredDevice(
             deviceId = discovered.deviceId,
-            name = manual.name,
+            name = ownerName,
             baseUrl = discovered.baseUrl,
             lastSeenAtMs = discovered.seenAtMs,
             authorized = real?.authorized ?: manual.authorized,
@@ -139,7 +150,10 @@ class RegisteredDeviceStore(context: Context) {
         if (matching.isEmpty()) return false
 
         val exact = matching.firstOrNull { it.deviceId.equals(discovered.deviceId, ignoreCase = true) }
-        val previous = exact ?: matching.maxByOrNull { it.lastSeenAtMs } ?: return false
+        val named = matching.firstOrNull { !isGeneratedName(it.name) }
+        val previous = named ?: exact ?: matching.maxByOrNull { it.lastSeenAtMs } ?: return false
+        if (isGeneratedName(previous.name)) return false
+
         val updated = RegisteredDevice(
             deviceId = discovered.deviceId,
             name = previous.name,
@@ -162,7 +176,7 @@ class RegisteredDeviceStore(context: Context) {
 
     suspend fun rename(deviceId: String, name: String) {
         val clean = name.trim().take(40)
-        if (clean.isBlank()) return
+        if (clean.isBlank() || isGeneratedName(clean)) return
         persist(_devices.value.map { if (it.deviceId == deviceId) it.copy(name = clean) else it })
     }
 
@@ -191,7 +205,7 @@ class RegisteredDeviceStore(context: Context) {
             })
         }
         preferences.edit().putString("devices", json.toString()).apply()
-        _devices.emit(clean.sortedBy { it.name.lowercase() })
+        _devices.emit(clean.sortedBy { visibleSortName(it.name) })
     }
 
     private fun load(): List<RegisteredDevice> = runCatching {
@@ -205,7 +219,7 @@ class RegisteredDeviceStore(context: Context) {
                 add(
                     RegisteredDevice(
                         deviceId = id,
-                        name = item.optString("name", "HomeGuard"),
+                        name = item.optString("name", ""),
                         baseUrl = item.optString("base_url"),
                         lastSeenAtMs = item.optLong("last_seen_at_ms"),
                         authorized = item.optBoolean("authorized", true),
@@ -213,21 +227,43 @@ class RegisteredDeviceStore(context: Context) {
                 )
             }
         }
-        deduplicate(loaded).sortedBy { it.name.lowercase() }
+        deduplicate(loaded).sortedBy { visibleSortName(it.name) }
     }.getOrDefault(emptyList())
 
     private fun deduplicate(value: List<RegisteredDevice>): List<RegisteredDevice> {
         val result = mutableListOf<RegisteredDevice>()
         value.sortedByDescending { it.lastSeenAtMs }.forEach { candidate ->
             val endpoint = normalizeEndpoint(candidate.baseUrl)
-            val duplicate = result.any { existing ->
+            val duplicateIndex = result.indexOfFirst { existing ->
                 existing.deviceId.equals(candidate.deviceId, ignoreCase = true) ||
                     (endpoint.isNotBlank() && normalizeEndpoint(existing.baseUrl) == endpoint)
             }
-            if (!duplicate) result += candidate
+            if (duplicateIndex < 0) {
+                result += candidate
+                return@forEach
+            }
+
+            val existing = result[duplicateIndex]
+            val ownerName = when {
+                !isGeneratedName(existing.name) -> existing.name
+                !isGeneratedName(candidate.name) -> candidate.name
+                else -> ""
+            }
+            val latest = if (existing.lastSeenAtMs >= candidate.lastSeenAtMs) existing else candidate
+            result[duplicateIndex] = latest.copy(name = ownerName)
         }
         return result
     }
+
+    private fun isGeneratedName(value: String): Boolean {
+        val clean = value.trim()
+        return clean.isBlank() ||
+            clean.equals("HomeGuard", ignoreCase = true) ||
+            clean.equals("HomeGuard-S3", ignoreCase = true)
+    }
+
+    private fun visibleSortName(value: String): String =
+        if (isGeneratedName(value)) "~" else value.trim().lowercase()
 
     private fun normalizeEndpoint(value: String): String = value.trim().trimEnd('/').lowercase()
 }
