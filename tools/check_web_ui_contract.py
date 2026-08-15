@@ -135,8 +135,8 @@ require("networkActor" in js and "networkCredential" in js,
         "Wi-Fi page does not request administrator credentials")
 require("JSON.stringify({ ssid, password, actor, credential })" in js,
         "Wi-Fi connect does not send administrator credentials")
-require(re.search(r'authorize\s*\(actor,\s*credential,\s*"network\.configure"\)', network) is not None,
-        "Wi-Fi configuration is not protected by access control")
+require(re.search(r'authorize\s*\(actor,\s*credential,\s*"system\.network\.configure"\)', network) is not None,
+        "Wi-Fi configuration is not protected by system.network.configure access control")
 require("g_network_http.set_access_control(&g_access_control)" in app_main,
         "NetworkHttp access-control injection missing from app_main")
 require("rssi" in network, "Wi-Fi scan/status backend does not expose RSSI")
