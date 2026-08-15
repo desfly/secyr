@@ -47,45 +47,100 @@ object HomeGuardWifiScanner {
 
     private fun rawHttpGet(host: String, port: Int, path: String): String {
         Socket().use { socket ->
-            socket.soTimeout = 25_000
+            socket.soTimeout = 8_000
             socket.connect(InetSocketAddress(host, port), 5_000)
 
             val request = buildString {
                 append("GET ").append(path).append(" HTTP/1.0\r\n")
                 append("Host: ").append(host)
                 if (port != 80) append(':').append(port)
-                append("\r\n")
-                append("Accept: application/json\r\n")
-                append("Connection: close\r\n")
-                append("\r\n")
+                append("\r\nAccept: application/json\r\nConnection: close\r\n\r\n")
             }
             socket.getOutputStream().apply {
                 write(request.toByteArray(StandardCharsets.US_ASCII))
                 flush()
             }
 
-            val bytes = ByteArrayOutputStream()
-            val buffer = ByteArray(4096)
             val input = socket.getInputStream()
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                if (count > 0) bytes.write(buffer, 0, count)
+            val headerBytes = ByteArrayOutputStream()
+            var state = 0
+            while (state < 4) {
+                val value = input.read()
+                if (value < 0) error("HomeGuard закрив з’єднання до HTTP-заголовків")
+                headerBytes.write(value)
+                state = when {
+                    state == 0 && value == '\r'.code -> 1
+                    state == 1 && value == '\n'.code -> 2
+                    state == 2 && value == '\r'.code -> 3
+                    state == 3 && value == '\n'.code -> 4
+                    value == '\r'.code -> 1
+                    else -> 0
+                }
+                if (headerBytes.size() > 16_384) error("Завеликі HTTP-заголовки HomeGuard")
             }
 
-            val response = bytes.toString(StandardCharsets.UTF_8.name())
-            val separator = response.indexOf("\r\n\r\n")
-            if (separator < 0) error("HomeGuard повернув некоректну HTTP-відповідь")
-
-            val header = response.substring(0, separator)
+            val header = headerBytes.toString(StandardCharsets.ISO_8859_1.name())
             val statusLine = header.lineSequence().firstOrNull().orEmpty()
             val statusCode = statusLine.split(' ').getOrNull(1)?.toIntOrNull()
                 ?: error("HomeGuard повернув некоректний HTTP-статус")
             if (statusCode !in 200..299) error("HomeGuard повернув HTTP $statusCode")
 
-            val body = response.substring(separator + 4).trim()
-            if (body.isEmpty()) error("HomeGuard повернув порожній результат Wi-Fi scan")
-            return body
+            val contentLength = header.lineSequence()
+                .firstOrNull { it.startsWith("Content-Length:", ignoreCase = true) }
+                ?.substringAfter(':')?.trim()?.toIntOrNull()
+
+            val bodyBytes = ByteArrayOutputStream()
+            if (contentLength != null && contentLength >= 0) {
+                val buffer = ByteArray(2048)
+                var remaining = contentLength
+                while (remaining > 0) {
+                    val count = input.read(buffer, 0, minOf(buffer.size, remaining))
+                    if (count < 0) error("HomeGuard передав неповний Wi-Fi scan")
+                    if (count > 0) {
+                        bodyBytes.write(buffer, 0, count)
+                        remaining -= count
+                    }
+                }
+            } else {
+                val buffer = ByteArray(2048)
+                var jsonStarted = false
+                var depth = 0
+                var inString = false
+                var escaped = false
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    for (i in 0 until count) {
+                        val b = buffer[i]
+                        bodyBytes.write(b.toInt())
+                        val ch = b.toInt().toChar()
+                        if (!jsonStarted) {
+                            if (ch == '{') { jsonStarted = true; depth = 1 }
+                            continue
+                        }
+                        if (inString) {
+                            if (escaped) escaped = false
+                            else if (ch == '\\') escaped = true
+                            else if (ch == '"') inString = false
+                        } else {
+                            when (ch) {
+                                '"' -> inString = true
+                                '{', '[' -> depth++
+                                '}', ']' -> depth--
+                            }
+                        }
+                        if (jsonStarted && depth == 0) break
+                    }
+                    if (jsonStarted && depth == 0) break
+                    if (bodyBytes.size() > 256_000) error("Завелика відповідь Wi-Fi scan")
+                }
+            }
+
+            val rawBody = bodyBytes.toString(StandardCharsets.UTF_8.name()).trim()
+            val start = rawBody.indexOf('{')
+            val end = rawBody.lastIndexOf('}')
+            if (start < 0 || end < start) error("HomeGuard не повернув JSON Wi-Fi scan")
+            return rawBody.substring(start, end + 1)
         }
     }
 
