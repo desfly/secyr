@@ -34,6 +34,7 @@ def text(path: Path) -> str:
 html = text(WEB / "index.html")
 css = text(WEB / "app.css")
 js = text(WEB / "app.js")
+access_session = text(WEB / "access-session.js")
 cmake = text(MAIN / "CMakeLists.txt")
 web_http = text(MAIN / "hg_web_http.cpp")
 network = text(MAIN / "hg_network_http.cpp")
@@ -44,9 +45,9 @@ app_main = text(MAIN / "app_main.cpp")
 build_info = text(MAIN / "hg_build_info.cpp")
 access_core = text(CORE / "access_control.cpp")
 
-for asset in ("web/index.html", "web/app.css", "web/app.js", "web/bruce.jpg"):
+for asset in ("web/index.html", "web/app.css", "web/app.js", "web/access-session.js", "web/bruce.jpg"):
     require(asset in cmake, f"CMake does not embed/copy {asset}")
-for route in ('"/"', '"/index.html"', '"/app.css"', '"/app.js"', '"/bruce.jpg"'):
+for route in ('"/"', '"/index.html"', '"/app.css"', '"/app.js"', '"/access-session.js"', '"/bruce.jpg"'):
     require(route in web_http, f"WebHttp route missing: {route}")
 for header in ("Cache-Control", "no-store", "Pragma", "Expires"):
     require(header in web_http, f"WebHttp cache prevention missing: {header}")
@@ -77,6 +78,22 @@ for needle in (
     'document.documentElement.dataset.homeguardUi = "ready"',
 ):
     require(needle in js, f"app.js contract missing: {needle}")
+
+# Mobile Web UI regression gate. On phones Bruce must remain visible and the
+# menu must expand in normal document flow below him, never as an overlay.
+for needle in (
+    "ensureMobileNavigation",
+    "mobileMenuToggle",
+    "mobile-menu-open",
+    "object-fit:contain!important",
+    "enforceSingleSidebarActive",
+    'attributeFilter: ["class"]',
+):
+    require(needle in access_session, f"mobile/access-session Web UI contract missing: {needle}")
+require('.sidebar nav{display:none!important' in access_session,
+        "mobile sidebar menu is not collapsed by default")
+require('.sidebar.mobile-menu-open nav{display:grid!important' in access_session,
+        "mobile sidebar menu does not expand in flow")
 
 require("sendSecurityCommand" in js and "JSON.stringify({ command, actor, credential })" in js,
         "security buttons are not posting command + operator credentials")
@@ -171,6 +188,7 @@ if errors:
 
 print("Web UI contract PASS")
 print(f" - DOM ids checked: {len(required_ids)}")
+print(" - mobile menu: Bruce remains visible; menu expands below; one active item")
 print(" - quick security buttons -> authorized firmware route: 4")
 print(" - live valve buttons -> authorized firmware route: present")
 print(" - first Admin bootstrap: factory-fresh NVS only; corruption stays fail-closed")
