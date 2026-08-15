@@ -51,6 +51,78 @@
     });
   }
 
+  function ensureMobileNavigation() {
+    const sidebar = document.querySelector(".sidebar");
+    const bruce = document.querySelector(".sidebar .bruce");
+    const nav = document.querySelector(".sidebar nav");
+    if (!sidebar || !bruce || !nav) return;
+
+    if (!document.querySelector("#homeguardMobileNavStyle")) {
+      const style = document.createElement("style");
+      style.id = "homeguardMobileNavStyle";
+      style.textContent = `
+        .mobile-menu-toggle{display:none}
+        @media (max-width:760px){
+          .sidebar{position:relative!important;height:auto!important;min-height:0!important;overflow:visible!important}
+          .sidebar .brand{justify-content:center!important}
+          .sidebar .bruce{height:150px!important;margin:4px 10px 8px!important;overflow:hidden!important}
+          .sidebar .bruce img{width:100%!important;height:100%!important;object-fit:contain!important;object-position:center center!important}
+          .mobile-menu-toggle{display:flex!important;width:100%!important;min-height:44px!important;margin:0 0 8px!important;padding:10px 14px!important;align-items:center!important;justify-content:space-between!important;border:1px solid rgba(255,255,255,.22)!important;border-radius:10px!important;background:rgba(255,255,255,.08)!important;color:#fff!important;font:inherit!important;font-weight:700!important}
+          .sidebar nav{display:none!important;position:static!important;width:100%!important;max-height:none!important;overflow:visible!important;margin:0!important;padding:0!important;z-index:auto!important}
+          .sidebar.mobile-menu-open nav{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important}
+          .sidebar nav a{min-width:0!important}
+          .sidebar .side-foot{display:none!important}
+        }
+        @media (max-width:430px){
+          .sidebar.mobile-menu-open nav{grid-template-columns:1fr!important}
+          .sidebar .bruce{height:132px!important}
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    if (!document.querySelector("#mobileMenuToggle")) {
+      const toggle = document.createElement("button");
+      toggle.id = "mobileMenuToggle";
+      toggle.type = "button";
+      toggle.className = "mobile-menu-toggle";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.setAttribute("aria-controls", "homeguardSidebarNav");
+      toggle.innerHTML = "<span>☰ Меню</span><span aria-hidden=\"true\">⌄</span>";
+      nav.id = nav.id || "homeguardSidebarNav";
+      bruce.insertAdjacentElement("afterend", toggle);
+      toggle.addEventListener("click", () => {
+        const open = !sidebar.classList.contains("mobile-menu-open");
+        sidebar.classList.toggle("mobile-menu-open", open);
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+        toggle.lastElementChild.textContent = open ? "⌃" : "⌄";
+      });
+    }
+
+    nav.querySelectorAll("a").forEach(link => {
+      if (link.dataset.mobileCloseBound === "1") return;
+      link.dataset.mobileCloseBound = "1";
+      link.addEventListener("click", () => {
+        if (window.matchMedia("(max-width:760px)").matches) {
+          sidebar.classList.remove("mobile-menu-open");
+          const toggle = document.querySelector("#mobileMenuToggle");
+          if (toggle) {
+            toggle.setAttribute("aria-expanded", "false");
+            if (toggle.lastElementChild) toggle.lastElementChild.textContent = "⌄";
+          }
+        }
+      });
+    });
+
+    window.addEventListener("resize", () => {
+      if (!window.matchMedia("(max-width:760px)").matches) {
+        sidebar.classList.remove("mobile-menu-open");
+        const toggle = document.querySelector("#mobileMenuToggle");
+        if (toggle) toggle.setAttribute("aria-expanded", "false");
+      }
+    }, { passive: true });
+  }
+
   function commandAllowed(command) {
     if (!session) return false;
     const caps = session.capabilities || {};
@@ -197,25 +269,28 @@
     const links = [...document.querySelectorAll(".sidebar nav a")];
     if (!links.length) return;
     const hash = window.location.hash || "#overview";
+    const matching = links.filter(link => link.getAttribute("href") === hash);
     const activeLinks = links.filter(link => link.classList.contains("active"));
     let preferred = null;
+
     if (lastSidebarLink && lastSidebarLink.isConnected && lastSidebarLink.getAttribute("href") === hash) {
       preferred = lastSidebarLink;
+    } else if (matching.length) {
+      preferred = matching[0];
     } else if (activeLinks.length) {
       preferred = activeLinks[0];
     } else {
-      preferred = links.find(link => link.getAttribute("href") === hash) || links[0];
+      preferred = links[0];
     }
+
     links.forEach(link => {
       const shouldBeActive = link === preferred;
-      if (link.classList.contains("active") !== shouldBeActive) link.classList.toggle("active", shouldBeActive);
+      if (link.classList.contains("active") !== shouldBeActive) {
+        link.classList.toggle("active", shouldBeActive);
+      }
     });
   }
 
-  // Backend authorization is still authoritative. The capture boundary also
-  // blocks stale/transient UI states (for example app.js re-enabling buttons
-  // in finally blocks) so a forbidden command cannot even be dispatched by
-  // the browser between role-refresh cycles.
   document.addEventListener("click", event => {
     const protectedControl = event.target.closest?.("[data-command],[data-output-id],#wifiConnect,#accessLoad,#accessSave");
     if (!protectedControl) return;
@@ -231,9 +306,6 @@
     syncCredentialFields();
   }, true);
 
-  // Wi-Fi picker: after choosing an SSID, fold the long scan result list and
-  // leave one clear confirmation line while the existing app.js handler moves
-  // focus into the password field.
   document.addEventListener("click", event => {
     const network = event.target.closest?.(".wifi-network[data-ssid]");
     if (!network) return;
@@ -246,16 +318,17 @@
     }, 0);
   });
 
-  // Several menu entries intentionally open the same dashboard section. Keep
-  // only the item the operator actually pressed highlighted instead of lighting
-  // both entries that share one hash target.
   document.addEventListener("click", event => {
     const link = event.target.closest?.(".sidebar nav a");
     if (!link) return;
     lastSidebarLink = link;
+    queueMicrotask(enforceSingleSidebarActive);
     setTimeout(enforceSingleSidebarActive, 0);
   });
-  window.addEventListener("hashchange", () => setTimeout(enforceSingleSidebarActive, 0));
+  window.addEventListener("hashchange", () => {
+    queueMicrotask(enforceSingleSidebarActive);
+    setTimeout(enforceSingleSidebarActive, 0);
+  });
 
   const observer = new MutationObserver(() => {
     if (mutationQueued) return;
@@ -264,14 +337,16 @@
       mutationQueued = false;
       applyRoleUi();
       hideRawBuildInfo();
+      enforceSingleSidebarActive();
     });
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
 
   ensureSessionUi();
+  ensureMobileNavigation();
   hideRawBuildInfo();
   applyRoleUi();
-  setTimeout(enforceSingleSidebarActive, 0);
+  enforceSingleSidebarActive();
   setInterval(() => {
     applyRoleUi();
     hideRawBuildInfo();
