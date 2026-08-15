@@ -30,6 +30,7 @@
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "esp_netif.h"
 #include "nvs_flash.h"
 
@@ -235,6 +236,7 @@ void start_device_discovery()
 
 extern "C" void app_main()
 {
+    esp_log_set_vprintf(esp_rom_vprintf);
     ESP_ERROR_CHECK(initialize_nvs());
     g_access_control.set_auth_clock(&homeguard::idf::access_now_ms);
     restore_access_control();
