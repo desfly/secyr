@@ -7,6 +7,8 @@ nsd = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/NsdDeviceDiscov
 http = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/HttpSubnetDiscovery.kt").read_text(encoding="utf-8")
 coordinator = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/LocalDiscoveryCoordinator.kt").read_text(encoding="utf-8")
 models = (ROOT / "android/app/src/main/java/ua/homeguard/s3/model/ConnectivityModels.kt").read_text(encoding="utf-8")
+add_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/AddDeviceScreen.kt").read_text(encoding="utf-8")
+list_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/DeviceListScreen.kt").read_text(encoding="utf-8")
 
 checks = {
     "UDP discovery port": "const val PORT = 45678" in udp,
@@ -26,6 +28,21 @@ checks = {
     "Coordinator combines mDNS+UDP+HTTP": "combine(nsd.devices, udp.devices, http.devices)" in coordinator,
     "Coordinator triggers HTTP fallback": "http.scanOnce()" in coordinator,
     "Coordinator exposes scan status": "val scanStatus" in coordinator and "udp.status" in coordinator,
+
+    # Product rule: a controller must receive a user-visible name before it can be saved.
+    "Device name starts empty": 'var deviceName by remember { mutableStateOf("") }' in add_screen,
+    "Device name is required": 'label = { Text("Назва пристрою *") }' in add_screen and "val nameValid = cleanName.isNotBlank()" in add_screen,
+    "Found device save requires name": "onUseDevice(selected, cleanName)" in add_screen and "enabled = nameValid" in add_screen,
+    "Manual IP save requires name": "enabled = nameValid && manualAddress.isNotBlank()" in add_screen,
+    "Manual ID save requires name": "enabled = nameValid && manualDeviceId.isNotBlank()" in add_screen,
+
+    # Product rule: technical identity/address is hidden from the normal device card.
+    # It is available only through the explicit Properties dialog.
+    "Device cards hide raw endpoint": "Text(device.baseUrl" not in list_screen,
+    "Device cards hide technical channel strip": "LinkIndicator(" not in list_screen,
+    "Properties exposes ID": 'StatusLine("ID", device.deviceId)' in list_screen,
+    "Properties exposes endpoint": 'StatusLine("Адреса", device.baseUrl.ifBlank { "—" })' in list_screen,
+    "Properties action exists": 'Text("Властивості")' in list_screen,
 }
 
 failed = [name for name, ok in checks.items() if not ok]
