@@ -13,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -223,8 +224,8 @@ fun ProvisioningScreen(
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = if (wifiPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
-                TextButton(onClick = { wifiPasswordVisible = !wifiPasswordVisible }) {
-                    Text(if (wifiPasswordVisible) "🙈" else "👁")
+                IconButton(onClick = { wifiPasswordVisible = !wifiPasswordVisible }) {
+                    Text("👁")
                 }
             },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
