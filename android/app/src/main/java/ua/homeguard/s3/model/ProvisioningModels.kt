@@ -15,7 +15,10 @@ data class ProvisioningForm(
     val wifiPassword: String = "",
     val ownerLabel: String = "",
     val cloudEndpoint: String = "",
-    val cloudClaimToken: String = ""
+    val cloudClaimToken: String = "",
+    val setupAddress: String = "192.168.4.1",
+    val actor: String = "admin",
+    val credential: String = ""
 )
 
 enum class ProvisioningPhase {
@@ -25,7 +28,7 @@ enum class ProvisioningPhase {
 data class ProvisioningUiState(
     val phase: ProvisioningPhase = ProvisioningPhase.IDLE,
     val qr: ProvisioningQrData? = null,
-    val message: String = "Відскануйте QR-код HomeGuard-S3",
+    val message: String = "Виберіть HomeGuard або відскануйте QR-код",
     val error: String = "",
     val localUrl: String = ""
 )
