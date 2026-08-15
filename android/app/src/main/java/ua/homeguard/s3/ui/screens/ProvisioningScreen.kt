@@ -34,6 +34,8 @@ import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.ProvisioningForm
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.ProvisioningUiState
+import ua.homeguard.s3.network.HomeGuardWifiNetwork
+import ua.homeguard.s3.network.HomeGuardWifiScanner
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
 import ua.homeguard.s3.network.UdpDeviceDiscovery
 import ua.homeguard.s3.storage.SettingsStore
@@ -109,8 +111,12 @@ fun ProvisioningScreen(
     onUseManualIp: (String) -> Unit,
     onProvision: (ProvisioningForm) -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     var form by remember { mutableStateOf(ProvisioningForm()) }
     var manualAddress by remember { mutableStateOf("192.168.4.1") }
+    var wifiScanBusy by remember { mutableStateOf(false) }
+    var wifiScanError by remember { mutableStateOf("") }
+    var wifiNetworks by remember { mutableStateOf(emptyList<HomeGuardWifiNetwork>()) }
     val busy = state.phase in setOf(
         ProvisioningPhase.CONNECTING_SETUP_AP,
         ProvisioningPhase.AUTHORIZING,
@@ -119,6 +125,24 @@ fun ProvisioningScreen(
         ProvisioningPhase.DISCOVERING_LOCAL,
     )
     val manualAddressValid = normalizeLocalAddress(manualAddress) != null
+
+    fun scanWifiOnHomeGuard() {
+        if (!manualAddressValid || wifiScanBusy) return
+        scope.launch {
+            wifiScanBusy = true
+            wifiScanError = ""
+            runCatching { HomeGuardWifiScanner.scan(manualAddress) }
+                .onSuccess { networks ->
+                    wifiNetworks = networks
+                    if (networks.isEmpty()) wifiScanError = "HomeGuard не знайшов Wi-Fi мереж"
+                }
+                .onFailure { error ->
+                    wifiNetworks = emptyList()
+                    wifiScanError = error.message ?: "Не вдалося запустити Wi-Fi scan на HomeGuard"
+                }
+            wifiScanBusy = false
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -183,6 +207,36 @@ fun ProvisioningScreen(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Підключити по IP")
+        }
+
+        HorizontalDivider()
+        Text("Пошук домашньої Wi-Fi мережі")
+        OutlinedButton(
+            onClick = ::scanWifiOnHomeGuard,
+            enabled = manualAddressValid && !wifiScanBusy && !busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (wifiScanBusy) "HomeGuard сканує Wi-Fi…" else "Сканувати Wi-Fi через HomeGuard")
+        }
+        if (wifiScanBusy) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CircularProgressIndicator()
+                Text("Очікування результату від ESP32-S3…")
+            }
+        }
+        if (wifiScanError.isNotBlank()) Text("Wi-Fi scan: $wifiScanError")
+        wifiNetworks.forEach { network ->
+            OutlinedButton(
+                onClick = {
+                    form = form.copy(wifiSsid = network.ssid)
+                    wifiNetworks = emptyList()
+                    wifiScanError = ""
+                },
+                enabled = !wifiScanBusy && !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("${network.ssid} · ${network.rssi} dBm")
+            }
         }
 
         HorizontalDivider()
