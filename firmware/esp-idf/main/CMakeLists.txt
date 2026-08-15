@@ -93,15 +93,11 @@ idf_component_register(
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)
 
-# Access PIN verification deliberately performs 4096 SHA-256 rounds. ESP-IDF
-# debug-friendly defaults can make that hot path slow enough to starve an HTTP
-# request. Keep the KDF and persisted digest format unchanged, but compile only
-# the two CPU-heavy translation units with full optimization on the target.
-set_source_files_properties(
-    "../../src/access_control.cpp"
-    "../../src/sha256.cpp"
-    PROPERTIES COMPILE_OPTIONS "-O3"
-)
+# The access KDF deliberately performs 4096 SHA-256 rounds. Build the C++
+# component with release optimization on ESP32-S3 so bootstrap/login cannot
+# monopolize the HTTP task for tens of seconds. The KDF and persisted digest
+# format remain unchanged.
+target_compile_options(${COMPONENT_LIB} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-O3>")
 
 if(DEFINED ENV{GITHUB_SHA})
     set(HG_GIT_REVISION "$ENV{GITHUB_SHA}")
