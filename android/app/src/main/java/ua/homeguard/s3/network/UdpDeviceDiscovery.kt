@@ -150,7 +150,6 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
                         if (parsed != null) {
                             accepted++
                             found[parsed.deviceId] = parsed
-                            _devices.value = found.values.sortedBy { it.deviceId }
                             Log.i(TAG, "HomeGuard found: id=${parsed.deviceId} host=${parsed.host} port=${parsed.port}")
                         }
                         _status.value = _status.value.copy(
@@ -159,6 +158,7 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
                             lastResponder = responder,
                         )
                     } catch (_: SocketTimeoutException) {
+                        // Timeout is expected; loop updates progress until the scan window closes.
                     }
                 }
 
@@ -197,7 +197,7 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
             apiVersion = json.optInt("api_version", 1),
             transport = transport,
             pairingRequired = json.optBoolean("pairing_required", false),
-            source = DiscoverySource.UDP,
+            source = DiscoverySource.UDP
         )
     }
 
@@ -234,6 +234,8 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
             Log.w(TAG, "Unable to enumerate LAN broadcast addresses", error)
             _status.value = _status.value.copy(error = error.message ?: error.javaClass.simpleName)
         }
+        // Limited broadcast remains a fallback for access points that do not expose
+        // a subnet broadcast address through NetworkInterface.
         addresses += InetAddress.getByName("255.255.255.255")
         return addresses
     }
