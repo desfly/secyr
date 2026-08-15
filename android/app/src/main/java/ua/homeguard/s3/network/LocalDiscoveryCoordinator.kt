@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import ua.homeguard.s3.model.DeviceIdentity
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.DiscoverySource
 
@@ -22,45 +23,61 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
     val isScanning: StateFlow<Boolean> = combine(
         udp.status.map { it.phase == "sending" || it.phase == "listening" },
         manualScanActive,
-    ) { udpScanning, manualScanning ->
-        udpScanning || manualScanning
-    }.stateIn(scope, SharingStarted.Eagerly, false)
+    ) { udpScanning, manualScanning -> udpScanning || manualScanning }
+        .stateIn(scope, SharingStarted.Eagerly, false)
 
-    val devices: StateFlow<List<DiscoveredDevice>> = combine(nsd.devices, udp.devices, http.devices) { mdns, udpFallback, httpFallback ->
-        (mdns + udpFallback + httpFallback)
-            .groupBy { device ->
-                val id = device.deviceId.trim()
-                if (id.startsWith("HG-", ignoreCase = true)) {
-                    "id:${id.lowercase()}"
-                } else {
-                    "net:${device.baseUrl.trim().trimEnd('/').lowercase()}"
+    val devices: StateFlow<List<DiscoveredDevice>> = combine(
+        nsd.devices,
+        udp.devices,
+        http.devices,
+    ) { mdns, udpFallback, httpFallback ->
+        val all = mdns + udpFallback + httpFallback
+        val groups = mutableListOf<MutableList<DiscoveredDevice>>()
+
+        // Different discovery transports may spell the same controller differently
+        // (service name, HG-* id, HTTP endpoint). Fold them into one physical device.
+        all.sortedByDescending { it.seenAtMs }.forEach { candidate ->
+            val group = groups.firstOrNull { existing ->
+                existing.any { member ->
+                    DeviceIdentity.samePhysicalDevice(
+                        member.deviceId,
+                        member.baseUrl,
+                        candidate.deviceId,
+                        candidate.baseUrl,
+                    )
                 }
             }
-            .mapNotNull { (_, candidates) ->
-                val winner = candidates.maxWithOrNull(
-                    compareBy<DiscoveredDevice> { it.seenAtMs }
-                        .thenBy {
-                            when (it.source) {
-                                DiscoverySource.MDNS -> 2
-                                DiscoverySource.UDP -> 1
-                                DiscoverySource.HTTP -> 0
-                            }
-                        },
-                ) ?: return@mapNotNull null
+            if (group == null) groups += mutableListOf(candidate) else group += candidate
+        }
 
-                // HTTP discovery reads /api/v1/cloud/status and therefore knows the real
-                // CLOUD state. Keep that status even when a fresher mDNS/UDP candidate wins
-                // the endpoint selection for the same physical controller.
-                val cloudCandidate = candidates
-                    .filter { it.cloudConfigured != null || it.cloudConnected != null }
-                    .maxByOrNull { it.seenAtMs }
+        groups.mapNotNull { candidates ->
+            val winner = candidates.maxWithOrNull(
+                compareBy<DiscoveredDevice> { it.seenAtMs }
+                    .thenBy {
+                        when (it.source) {
+                            DiscoverySource.HTTP -> 3
+                            DiscoverySource.UDP -> 2
+                            DiscoverySource.MDNS -> 1
+                        }
+                    },
+            ) ?: return@mapNotNull null
 
-                winner.copy(
-                    cloudConfigured = cloudCandidate?.cloudConfigured ?: winner.cloudConfigured,
-                    cloudConnected = cloudCandidate?.cloudConnected ?: winner.cloudConnected,
-                )
-            }
-            .sortedBy { it.deviceId }
+            val realId = candidates
+                .filter { it.deviceId.startsWith("HG-", ignoreCase = true) }
+                .maxByOrNull { it.seenAtMs }
+                ?.deviceId
+                ?: winner.deviceId
+
+            val cloudCandidate = candidates
+                .filter { it.cloudConfigured != null || it.cloudConnected != null }
+                .maxByOrNull { it.seenAtMs }
+
+            winner.copy(
+                deviceId = realId,
+                cloudConfigured = cloudCandidate?.cloudConfigured ?: winner.cloudConfigured,
+                cloudConnected = cloudCandidate?.cloudConnected ?: winner.cloudConnected,
+            )
+        }.sortedBy { DeviceIdentity.canonicalId(it.deviceId) }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     fun start() {
@@ -77,8 +94,6 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         if (manualScanActive.value) return
         manualScanActive.value = true
         try {
-            // Manual discovery is explicit: lightweight UDP first, then bounded HTTP.
-            // HTTP verifies the real device ID and also refreshes the per-device CLOUD state.
             http.clear()
             udp.scanOnce()
             http.scanOnce()
