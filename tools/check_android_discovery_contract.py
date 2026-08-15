@@ -31,7 +31,8 @@ checks = {
     "HTTP subnet discovery source": "class HttpSubnetDiscovery" in http,
     "HTTP HomeGuard identity endpoint": "/api/v1/cloud/status" in http,
     "HTTP discovery source model": "enum class DiscoverySource { MDNS, UDP, HTTP }" in models,
-    "Coordinator combines mDNS+UDP+HTTP": "combine(nsd.devices, udp.devices, http.devices)" in coordinator,
+    "Coordinator combines mDNS+UDP+HTTP": "combine(" in coordinator and all(token in coordinator for token in ("nsd.devices", "udp.devices", "http.devices")),
+    "Coordinator identity-deduplicates transports": "DeviceIdentity.samePhysicalDevice(" in coordinator,
     "Coordinator triggers HTTP fallback": "http.scanOnce()" in coordinator,
     "Coordinator exposes scan status": "val scanStatus" in coordinator and "udp.status" in coordinator,
 
@@ -58,7 +59,7 @@ checks = {
     "Dedup preserves owner name": "!isGeneratedName(existing.name, existing.deviceId, existing.baseUrl) -> existing.name" in store and "!isGeneratedName(candidate.name, candidate.deviceId, candidate.baseUrl) -> candidate.name" in store,
     "Stored technical names are sanitized": 'name = if (isGeneratedName(storedName, id, baseUrl)) "" else storedName' in store,
     "ID is rejected as a display name": "clean.equals(deviceId.trim(), ignoreCase = true)" in store,
-    "IP/endpoint is rejected as a display name": "clean.equals(hostPort, ignoreCase = true) || clean.equals(host, ignoreCase = true)" in store,
+    "IP/endpoint is rejected as a display name": "clean.equals(endpoint, ignoreCase = true)" in store and "DeviceIdentity.endpointHost(endpoint)" in store and "clean.equals(host, ignoreCase = true)" in store,
     "Legacy service names are not shown as user names": "isLegacyGeneratedName" in list_screen and 'clean.equals("HomeGuard-S3", ignoreCase = true)' in list_screen and '"Без назви"' in list_screen,
 
     # Main cards are friendly-name/state only; technical identity belongs in Properties.
