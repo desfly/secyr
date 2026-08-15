@@ -79,21 +79,37 @@ for needle in (
 ):
     require(needle in js, f"app.js contract missing: {needle}")
 
-# Mobile Web UI regression gate. On phones Bruce must remain visible and the
-# menu must expand in normal document flow below him, never as an overlay.
+# Cemented mobile Web UI contract. The final firmware-served CSS/JS is
+# authoritative because the field failure in run 877 came from a firmware CSS
+# suffix overriding otherwise-correct access-session rules.
 for needle in (
-    "ensureMobileNavigation",
-    "mobileMenuToggle",
+    "mobile-menu-toggle",
     "mobile-menu-open",
     "object-fit:contain!important",
-    "enforceSingleSidebarActive",
-    'attributeFilter: ["class"]',
+    "ensureFirmwareMobileNavigation",
+    "enforceSingleActiveNav",
+    "mobileMenuToggle",
 ):
-    require(needle in access_session, f"mobile/access-session Web UI contract missing: {needle}")
-require('.sidebar nav{display:none!important' in access_session,
-        "mobile sidebar menu is not collapsed by default")
-require('.sidebar.mobile-menu-open nav{display:grid!important' in access_session,
-        "mobile sidebar menu does not expand in flow")
+    require(needle in web_http, f"firmware mobile Web UI contract missing: {needle}")
+require('.sidebar nav{display:none!important' in web_http,
+        "firmware mobile menu is not collapsed by default")
+require('.sidebar.mobile-menu-open nav{display:grid!important' in web_http,
+        "firmware mobile menu does not expand below Bruce")
+require('.bruce{height:150px!important' in web_http,
+        "firmware mobile Bruce frame is not the full portrait layout")
+require('object-position:center center!important' in web_http,
+        "firmware mobile Bruce portrait is not centered")
+require('.bruce{height:86px!important' not in web_http,
+        "regression: old 86px cropped Bruce rule returned")
+require('object-fit:cover!important' not in web_http,
+        "regression: firmware crops Bruce with object-fit:cover")
+require('.sidebar nav{display:grid!important' not in web_http,
+        "regression: mobile menu is forced open by default")
+
+# Secondary access-session behavior must remain compatible, but the firmware
+# no longer relies on it as the only protection against crop/overlay regressions.
+for needle in ("ensureMobileNavigation", "enforceSingleSidebarActive"):
+    require(needle in access_session, f"access-session navigation compatibility missing: {needle}")
 
 require("sendSecurityCommand" in js and "JSON.stringify({ command, actor, credential })" in js,
         "security buttons are not posting command + operator credentials")
@@ -188,7 +204,7 @@ if errors:
 
 print("Web UI contract PASS")
 print(f" - DOM ids checked: {len(required_ids)}")
-print(" - mobile menu: Bruce remains visible; menu expands below; one active item")
+print(" - mobile menu: firmware-collapsed; Bruce contain; one active item")
 print(" - quick security buttons -> authorized firmware route: 4")
 print(" - live valve buttons -> authorized firmware route: present")
 print(" - first Admin bootstrap: factory-fresh NVS only; corruption stays fail-closed")
