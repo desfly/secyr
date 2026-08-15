@@ -9,6 +9,7 @@ coordinator = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/LocalDi
 models = (ROOT / "android/app/src/main/java/ua/homeguard/s3/model/ConnectivityModels.kt").read_text(encoding="utf-8")
 add_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/AddDeviceScreen.kt").read_text(encoding="utf-8")
 list_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/DeviceListScreen.kt").read_text(encoding="utf-8")
+store = (ROOT / "android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt").read_text(encoding="utf-8")
 
 checks = {
     "UDP discovery port": "const val PORT = 45678" in udp,
@@ -35,6 +36,8 @@ checks = {
     "Found device save requires name": "onUseDevice(selected, cleanName)" in add_screen and "enabled = nameValid" in add_screen,
     "Manual IP save requires name": "enabled = nameValid && manualAddress.isNotBlank()" in add_screen,
     "Manual ID save requires name": "enabled = nameValid && manualDeviceId.isNotBlank()" in add_screen,
+    "Store rejects unnamed new discovery": "if (displayName.isBlank()) return" in store and "device.serviceName.takeIf" not in store,
+    "Manual store has no generated default name": 'suspend fun addManual(deviceId: String, baseUrl: String, name: String = "")' in store,
 
     # Product rule: technical identity/address is hidden from the normal device card.
     # It is available only through the explicit Properties dialog.
