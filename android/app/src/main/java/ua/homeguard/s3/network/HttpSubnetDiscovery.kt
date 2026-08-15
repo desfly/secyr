@@ -39,6 +39,10 @@ class HttpSubnetDiscovery(context: Context) {
     private val _devices = MutableStateFlow<List<DiscoveredDevice>>(emptyList())
     val devices: StateFlow<List<DiscoveredDevice>> = _devices.asStateFlow()
 
+    fun clear() {
+        _devices.value = emptyList()
+    }
+
     suspend fun scanOnce() = withContext(Dispatchers.IO) {
         // A manual rescan must describe this scan, not keep stale devices from an older network.
         _devices.value = emptyList()
