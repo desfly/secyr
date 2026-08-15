@@ -93,6 +93,16 @@ idf_component_register(
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)
 
+# Access PIN verification deliberately performs 4096 SHA-256 rounds. ESP-IDF
+# debug-friendly defaults can make that hot path slow enough to starve an HTTP
+# request. Keep the KDF and persisted digest format unchanged, but compile only
+# the two CPU-heavy translation units with full optimization on the target.
+set_source_files_properties(
+    "../../src/access_control.cpp"
+    "../../src/sha256.cpp"
+    PROPERTIES COMPILE_OPTIONS "-O3"
+)
+
 if(DEFINED ENV{GITHUB_SHA})
     set(HG_GIT_REVISION "$ENV{GITHUB_SHA}")
 else()
