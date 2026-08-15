@@ -21,7 +21,7 @@ checks = {
     "mDNS independent resolver": "private fun resolve(serviceInfo: NsdServiceInfo)" in nsd and "val listener = object : NsdManager.ResolveListener" in nsd,
     "mDNS shared resolver removed": "private val resolveListener" not in nsd,
     "HTTP subnet discovery source": "class HttpSubnetDiscovery" in http,
-    "HTTP HomeGuard identity endpoint": '"/api/v1/cloud/status"' in http,
+    "HTTP HomeGuard identity endpoint": "/api/v1/cloud/status" in http,
     "HTTP discovery source model": "enum class DiscoverySource { MDNS, UDP, HTTP }" in models,
     "Coordinator combines mDNS+UDP+HTTP": "combine(nsd.devices, udp.devices, http.devices)" in coordinator,
     "Coordinator triggers HTTP fallback": "http.scanOnce()" in coordinator,
