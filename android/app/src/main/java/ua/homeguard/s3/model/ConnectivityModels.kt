@@ -21,7 +21,7 @@ data class DiscoveredDevice(
         }
 }
 
-enum class DiscoverySource { MDNS, UDP }
+enum class DiscoverySource { MDNS, UDP, HTTP }
 
 data class DeviceEndpoint(
     val deviceId: String,
