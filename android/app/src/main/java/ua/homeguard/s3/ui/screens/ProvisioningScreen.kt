@@ -196,7 +196,11 @@ fun ProvisioningScreen(
         if (wifiScanError.isNotBlank()) Text("Wi-Fi scan: $wifiScanError")
         wifiNetworks.forEach { network ->
             OutlinedButton(
-                onClick = { form = form.copy(wifiSsid = network.ssid) },
+                onClick = {
+                    form = form.copy(wifiSsid = network.ssid)
+                    wifiNetworks = emptyList()
+                    wifiScanError = ""
+                },
                 enabled = !busy && !wifiScanBusy,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -205,7 +209,10 @@ fun ProvisioningScreen(
         }
         OutlinedTextField(
             form.wifiSsid,
-            { form = form.copy(wifiSsid = it) },
+            {
+                form = form.copy(wifiSsid = it)
+                if (wifiNetworks.isNotEmpty()) wifiNetworks = emptyList()
+            },
             label = { Text("Назва Wi-Fi (SSID)") },
             modifier = Modifier.fillMaxWidth(),
         )
@@ -217,7 +224,7 @@ fun ProvisioningScreen(
             visualTransformation = if (wifiPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
                 TextButton(onClick = { wifiPasswordVisible = !wifiPasswordVisible }) {
-                    Text(if (wifiPasswordVisible) "Сховати" else "Показати")
+                    Text(if (wifiPasswordVisible) "🙈" else "👁")
                 }
             },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -228,9 +235,20 @@ fun ProvisioningScreen(
             label = { Text("Назва пристрою/об’єкта") },
             modifier = Modifier.fillMaxWidth(),
         )
+        Button(
+            onClick = { onProvision(form) },
+            enabled = state.qr != null && form.wifiSsid.isNotBlank() && form.wifiPassword.length in 8..64 && !busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Підключити HomeGuard до Wi-Fi")
+        }
+        Text(state.message)
+        if (state.error.isNotBlank()) Text("Помилка: ${state.error}")
+        if (state.localUrl.isNotBlank()) Text("Локальна адреса: ${state.localUrl}")
+        if (busy) CircularProgressIndicator()
 
         HorizontalDivider()
-        Text("Крок 3 — Internet/Cloud")
+        Text("Крок 3 — Internet/Cloud (необов’язково)")
         Text("Ці поля потрібні лише якщо для цього HomeGuard увімкнено віддалений доступ.")
         OutlinedTextField(
             form.cloudEndpoint,
@@ -250,17 +268,6 @@ fun ProvisioningScreen(
                 }
             },
         )
-        Button(
-            onClick = { onProvision(form) },
-            enabled = state.qr != null && form.wifiSsid.isNotBlank() && !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Передати Wi-Fi налаштування в HomeGuard")
-        }
-        Text(state.message)
-        if (state.error.isNotBlank()) Text("Помилка: ${state.error}")
-        if (state.localUrl.isNotBlank()) Text("Локальна адреса: ${state.localUrl}")
-        if (busy) CircularProgressIndicator()
 
         HorizontalDivider()
         Text("Якщо HomeGuard уже підключений до Wi-Fi")
