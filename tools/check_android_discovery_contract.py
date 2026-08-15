@@ -52,10 +52,13 @@ checks = {
     "Manual IP save requires name": "enabled = nameValid && manualAddress.isNotBlank()" in add_screen,
     "Manual ID save requires name": "enabled = nameValid && manualDeviceId.isNotBlank()" in add_screen,
     "Manual IP autofill preserved": "LaunchedEffect(devices)" in add_screen and "manualAddress = devices.first().host" in add_screen,
-    "Store rejects unnamed/generated discovery names": "displayName.isBlank() || isGeneratedName(displayName)" in store and "device.serviceName.takeIf" not in store,
+    "Store rejects unnamed/generated discovery names": "displayName.isBlank() || isGeneratedName(displayName, device.deviceId, device.baseUrl)" in store and "device.serviceName.takeIf" not in store,
     "Manual store has no generated default name": 'suspend fun addManual(deviceId: String, baseUrl: String, name: String = "")' in store,
-    "Owner name wins during reconciliation": "val named = matching.firstOrNull { !isGeneratedName(it.name) }" in store and "val previous = named ?: exact" in store,
-    "Dedup preserves owner name": "!isGeneratedName(existing.name) -> existing.name" in store and "!isGeneratedName(candidate.name) -> candidate.name" in store,
+    "Owner name wins during reconciliation": "val named = matching.firstOrNull { !isGeneratedName(it.name, it.deviceId, it.baseUrl) }" in store and "val previous = named ?: exact" in store,
+    "Dedup preserves owner name": "!isGeneratedName(existing.name, existing.deviceId, existing.baseUrl) -> existing.name" in store and "!isGeneratedName(candidate.name, candidate.deviceId, candidate.baseUrl) -> candidate.name" in store,
+    "Stored technical names are sanitized": 'name = if (isGeneratedName(storedName, id, baseUrl)) "" else storedName' in store,
+    "ID is rejected as a display name": "clean.equals(deviceId.trim(), ignoreCase = true)" in store,
+    "IP/endpoint is rejected as a display name": "clean.equals(hostPort, ignoreCase = true) || clean.equals(host, ignoreCase = true)" in store,
     "Legacy service names are not shown as user names": "isLegacyGeneratedName" in list_screen and 'clean.equals("HomeGuard-S3", ignoreCase = true)' in list_screen and '"Без назви"' in list_screen,
 
     # Main cards are friendly-name/state only; technical identity belongs in Properties.
