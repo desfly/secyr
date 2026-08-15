@@ -1,6 +1,7 @@
 #include "hg_access_http.hpp"
 #include "hg_access_time.hpp"
 
+#include "esp_log.h"
 #include "esp_random.h"
 
 #include <array>
@@ -11,6 +12,8 @@
 
 namespace homeguard::idf {
 namespace {
+
+constexpr const char* kAccessHttpTag = "homeguard_access_http";
 
 AccessHttp* self_from(httpd_req_t* request) {
     return static_cast<AccessHttp*>(request->user_ctx);
@@ -185,19 +188,28 @@ esp_err_t AccessHttp::handle_login(httpd_req_t* request) {
 }
 
 esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
+    ESP_LOGI(kAccessHttpTag, "access/users request begin content_len=%u",
+             request == nullptr ? 0U : static_cast<unsigned>(request->content_len));
+
     std::string body;
     if (!read_body(request, 768U, body)) {
+        ESP_LOGE(kAccessHttpTag, "access/users body read failed");
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_body\"}");
     }
+    ESP_LOGI(kAccessHttpTag, "access/users body read complete bytes=%u", static_cast<unsigned>(body.size()));
 
     std::string action;
     if (!parse_json_string(body, "action", action)) {
+        ESP_LOGE(kAccessHttpTag, "access/users action parse failed");
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"action_required\"}");
     }
 
     if (action == "bootstrap") {
+        ESP_LOGI(kAccessHttpTag, "bootstrap stage=entered allowed=%d users=%u",
+                 bootstrap_allowed_ ? 1 : 0,
+                 static_cast<unsigned>(access_->user_count()));
         if (!bootstrap_allowed_) {
             httpd_resp_set_status(request, "409 Conflict");
             return send_json(request, "{\"ok\":false,\"reason\":\"bootstrap_unavailable\"}");
@@ -214,26 +226,37 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         if (!parse_json_string(body, "id", id) || !parse_json_string(body, "name", name) ||
             !parse_json_string(body, "pin", pin) || id.empty() || id.size() > 23U ||
             name.empty() || name.size() > 31U || !valid_pin(pin)) {
+            ESP_LOGE(kAccessHttpTag, "bootstrap stage=invalid_fields");
             httpd_resp_set_status(request, "400 Bad Request");
             return send_json(request, "{\"ok\":false,\"reason\":\"invalid_bootstrap_admin\"}");
         }
 
         bootstrap_allowed_ = false;
         std::array<std::uint8_t, 16> salt{};
+        ESP_LOGI(kAccessHttpTag, "bootstrap stage=random_begin");
         esp_fill_random(salt.data(), salt.size());
+        ESP_LOGI(kAccessHttpTag, "bootstrap stage=random_done");
+
+        ESP_LOGI(kAccessHttpTag, "bootstrap stage=set_user_begin");
         if (!access_->set_user(id, name, AccessRole::Admin, pin, salt, true)) {
+            ESP_LOGE(kAccessHttpTag, "bootstrap stage=set_user_failed");
             bootstrap_allowed_ = true;
             httpd_resp_set_status(request, "409 Conflict");
             return send_json(request, "{\"ok\":false,\"reason\":\"bootstrap_failed\"}");
         }
+        ESP_LOGI(kAccessHttpTag, "bootstrap stage=set_user_done");
 
+        ESP_LOGI(kAccessHttpTag, "bootstrap stage=nvs_begin");
         const auto persist = store_->save(*access_);
+        ESP_LOGI(kAccessHttpTag, "bootstrap stage=nvs_done err=%s", esp_err_to_name(persist));
         if (persist != ESP_OK) {
             access_->clear_users();
             bootstrap_allowed_ = true;
             httpd_resp_set_status(request, "500 Internal Server Error");
             return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
         }
+
+        ESP_LOGI(kAccessHttpTag, "bootstrap stage=response_send");
         return send_json(request, "{\"ok\":true,\"role\":\"admin\",\"bootstrap\":true}");
     }
 
