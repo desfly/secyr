@@ -24,6 +24,7 @@ constexpr char kNvsNamespace[] = "hg_wifi";
 constexpr char kNvsKey[] = "credentials";
 constexpr std::size_t kMaxScanRecords = 20;
 constexpr TickType_t kStaHandoverDelay = pdMS_TO_TICKS(400);
+constexpr TickType_t kSetupApRetireDelay = pdMS_TO_TICKS(120);
 
 struct CredentialsRecord {
     std::uint32_t magic{};
@@ -197,7 +198,22 @@ esp_err_t NetworkHttp::connect_post(httpd_req_t* request)
 
 esp_err_t NetworkHttp::handle_status(httpd_req_t* request)
 {
-    return send_json(request, status_json());
+    const auto response_error = send_json(request, status_json());
+    if (response_error != ESP_OK) return response_error;
+
+    // The setup AP exists only as a commissioning/recovery path. Once the STA
+    // has a real LAN address, retire 192.168.4.1 after the status response has
+    // been delivered so the controller has one normal Web UI endpoint.
+    wifi_ap_record_t ap_info{};
+    esp_netif_ip_info_t ip_info{};
+    if (sta_netif_ != nullptr && esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK &&
+        esp_netif_get_ip_info(static_cast<esp_netif_t*>(sta_netif_), &ip_info) == ESP_OK &&
+        ip_info.ip.addr != 0U) {
+        vTaskDelay(kSetupApRetireDelay);
+        (void)esp_wifi_set_mode(WIFI_MODE_STA);
+    }
+
+    return ESP_OK;
 }
 
 esp_err_t NetworkHttp::handle_scan(httpd_req_t* request)
@@ -241,6 +257,14 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
         std::fill(password.begin(), password.end(), '\0');
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"invalid_credentials\"}");
+    }
+
+    // Re-enable the setup AP while changing credentials. If the new network
+    // details are wrong the user still has the recovery path at 192.168.4.1.
+    if (esp_wifi_set_mode(WIFI_MODE_APSTA) != ESP_OK) {
+        std::fill(password.begin(), password.end(), '\0');
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_mode_failed\"}");
     }
 
     wifi_config_t sta{};
