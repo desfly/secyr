@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
+import ua.homeguard.s3.model.DeviceIdentity
 import ua.homeguard.s3.model.DiscoveredDevice
 
 data class RegisteredDevice(
@@ -25,13 +26,11 @@ class RegisteredDeviceStore(context: Context) {
             activeStore?.markAuthorization(deviceId, authorized)
         }
 
-        suspend fun reconcileActiveManual(manualDeviceId: String, discovered: DiscoveredDevice): Boolean {
-            return activeStore?.reconcileManual(manualDeviceId, discovered) ?: false
-        }
+        suspend fun reconcileActiveManual(manualDeviceId: String, discovered: DiscoveredDevice): Boolean =
+            activeStore?.reconcileManual(manualDeviceId, discovered) ?: false
 
-        suspend fun refreshActiveDiscovered(discovered: DiscoveredDevice): Boolean {
-            return activeStore?.refreshDiscovered(discovered) ?: false
-        }
+        suspend fun refreshActiveDiscovered(discovered: DiscoveredDevice): Boolean =
+            activeStore?.refreshDiscovered(discovered) ?: false
 
         suspend fun removeActive(deviceId: String): Boolean {
             if (deviceId.isBlank()) return false
@@ -47,20 +46,12 @@ class RegisteredDeviceStore(context: Context) {
 
     suspend fun addOrUpdate(device: DiscoveredDevice, requestedName: String? = null) {
         val current = _devices.value.toMutableList()
-        val endpoint = normalizeEndpoint(device.baseUrl)
-        val matching = current.filter {
-            it.deviceId.equals(device.deviceId, ignoreCase = true) ||
-                (endpoint.isNotBlank() && normalizeEndpoint(it.baseUrl) == endpoint)
-        }
+        val matching = current.filter { sameDevice(it, device) }
         val exact = matching.firstOrNull { it.deviceId.equals(device.deviceId, ignoreCase = true) }
         val named = matching.firstOrNull { !isGeneratedName(it.name, it.deviceId, it.baseUrl) }
         val previous = named ?: exact ?: matching.maxByOrNull { it.lastSeenAtMs }
         val requested = requestedName?.trim()?.take(40).orEmpty()
         val displayName = requested.ifBlank { previous?.name.orEmpty() }
-
-        // A new controller is never persisted under a generated service name, device ID,
-        // IP address or endpoint. The owner must assign a visible name first. Existing
-        // records keep their owner-assigned name during discovery refresh/reconciliation.
         if (displayName.isBlank() || isGeneratedName(displayName, device.deviceId, device.baseUrl)) return
 
         val registered = RegisteredDevice(
@@ -70,22 +61,16 @@ class RegisteredDeviceStore(context: Context) {
             lastSeenAtMs = device.seenAtMs,
             authorized = exact?.authorized ?: previous?.authorized ?: true,
         )
-
-        current.removeAll {
-            it.deviceId.equals(device.deviceId, ignoreCase = true) ||
-                (endpoint.isNotBlank() && normalizeEndpoint(it.baseUrl) == endpoint)
-        }
+        current.removeAll { sameDevice(it, device) }
         current += registered
         persist(current)
     }
 
     suspend fun addManual(deviceId: String, baseUrl: String, name: String = "") {
         val current = _devices.value.toMutableList()
-        val endpoint = normalizeEndpoint(baseUrl)
-        val idIndex = current.indexOfFirst { it.deviceId.equals(deviceId, ignoreCase = true) }
-        val endpointIndex = if (endpoint.isNotBlank()) current.indexOfFirst { normalizeEndpoint(it.baseUrl) == endpoint } else -1
-        val index = if (idIndex >= 0) idIndex else endpointIndex
-        val previous = current.getOrNull(index)
+        val previous = current.firstOrNull {
+            DeviceIdentity.samePhysicalDevice(it.deviceId, it.baseUrl, deviceId, baseUrl)
+        }
         val requested = name.trim().take(40)
         val displayName = when {
             requested.isNotBlank() && !isGeneratedName(requested, deviceId, baseUrl) -> requested
@@ -101,18 +86,21 @@ class RegisteredDeviceStore(context: Context) {
             lastSeenAtMs = System.currentTimeMillis(),
             authorized = previous?.authorized ?: true,
         )
-        if (index >= 0) current[index] = registered else current += registered
+        current.removeAll {
+            DeviceIdentity.samePhysicalDevice(it.deviceId, it.baseUrl, deviceId, baseUrl)
+        }
+        current += registered
         persist(current)
     }
 
     suspend fun reconcileManual(manualDeviceId: String, discovered: DiscoveredDevice): Boolean {
         if (!manualDeviceId.startsWith("manual-") || discovered.deviceId.isBlank()) return false
-        val endpoint = normalizeEndpoint(discovered.baseUrl)
         val current = _devices.value.toMutableList()
         val manual = current.firstOrNull {
-            it.deviceId == manualDeviceId && normalizeEndpoint(it.baseUrl) == endpoint
-        } ?: return false
-        val real = current.firstOrNull { it.deviceId.equals(discovered.deviceId, ignoreCase = true) }
+            it.deviceId == manualDeviceId &&
+                DeviceIdentity.samePhysicalDevice(it.deviceId, it.baseUrl, discovered.deviceId, discovered.baseUrl)
+        } ?: current.firstOrNull { it.deviceId == manualDeviceId } ?: return false
+        val real = current.firstOrNull { sameDevice(it, discovered) && it.deviceId != manualDeviceId }
         val ownerName = when {
             !isGeneratedName(manual.name, manual.deviceId, manual.baseUrl) -> manual.name
             real != null && !isGeneratedName(real.name, real.deviceId, real.baseUrl) -> real.name
@@ -127,12 +115,7 @@ class RegisteredDeviceStore(context: Context) {
             lastSeenAtMs = discovered.seenAtMs,
             authorized = real?.authorized ?: manual.authorized,
         )
-
-        current.removeAll {
-            it.deviceId == manualDeviceId ||
-                it.deviceId.equals(discovered.deviceId, ignoreCase = true) ||
-                (endpoint.isNotBlank() && normalizeEndpoint(it.baseUrl) == endpoint)
-        }
+        current.removeAll { it.deviceId == manualDeviceId || sameDevice(it, discovered) }
         current += merged
         persist(current)
         return true
@@ -140,11 +123,7 @@ class RegisteredDeviceStore(context: Context) {
 
     suspend fun refreshDiscovered(discovered: DiscoveredDevice): Boolean {
         val current = _devices.value.toMutableList()
-        val endpoint = normalizeEndpoint(discovered.baseUrl)
-        val matching = current.filter {
-            it.deviceId.equals(discovered.deviceId, ignoreCase = true) ||
-                (endpoint.isNotBlank() && normalizeEndpoint(it.baseUrl) == endpoint)
-        }
+        val matching = current.filter { sameDevice(it, discovered) }
         if (matching.isEmpty()) return false
 
         val exact = matching.firstOrNull { it.deviceId.equals(discovered.deviceId, ignoreCase = true) }
@@ -159,14 +138,9 @@ class RegisteredDeviceStore(context: Context) {
             lastSeenAtMs = discovered.seenAtMs,
             authorized = exact?.authorized ?: previous.authorized,
         )
-
         val alreadyCanonical = matching.size == 1 && previous == updated
         if (alreadyCanonical) return false
-
-        current.removeAll {
-            it.deviceId.equals(discovered.deviceId, ignoreCase = true) ||
-                (endpoint.isNotBlank() && normalizeEndpoint(it.baseUrl) == endpoint)
-        }
+        current.removeAll { sameDevice(it, discovered) }
         current += updated
         persist(current)
         return true
@@ -180,15 +154,21 @@ class RegisteredDeviceStore(context: Context) {
     }
 
     suspend fun remove(deviceId: String): Boolean {
-        val updated = _devices.value.filterNot { it.deviceId == deviceId }
-        if (updated.size == _devices.value.size) return false
+        val target = _devices.value.firstOrNull { it.deviceId == deviceId } ?: return false
+        val updated = _devices.value.filterNot {
+            DeviceIdentity.samePhysicalDevice(it.deviceId, it.baseUrl, target.deviceId, target.baseUrl)
+        }
         persist(updated)
         return true
     }
 
     suspend fun markAuthorization(deviceId: String, authorized: Boolean) {
-        if (_devices.value.none { it.deviceId == deviceId }) return
-        persist(_devices.value.map { if (it.deviceId == deviceId) it.copy(authorized = authorized) else it })
+        val target = _devices.value.firstOrNull { it.deviceId == deviceId } ?: return
+        persist(_devices.value.map {
+            if (DeviceIdentity.samePhysicalDevice(it.deviceId, it.baseUrl, target.deviceId, target.baseUrl)) {
+                it.copy(authorized = authorized)
+            } else it
+        })
     }
 
     private suspend fun persist(value: List<RegisteredDevice>) {
@@ -234,10 +214,13 @@ class RegisteredDeviceStore(context: Context) {
     private fun deduplicate(value: List<RegisteredDevice>): List<RegisteredDevice> {
         val result = mutableListOf<RegisteredDevice>()
         value.sortedByDescending { it.lastSeenAtMs }.forEach { candidate ->
-            val endpoint = normalizeEndpoint(candidate.baseUrl)
             val duplicateIndex = result.indexOfFirst { existing ->
-                existing.deviceId.equals(candidate.deviceId, ignoreCase = true) ||
-                    (endpoint.isNotBlank() && normalizeEndpoint(existing.baseUrl) == endpoint)
+                DeviceIdentity.samePhysicalDevice(
+                    existing.deviceId,
+                    existing.baseUrl,
+                    candidate.deviceId,
+                    candidate.baseUrl,
+                )
             }
             if (duplicateIndex < 0) {
                 result += candidate
@@ -251,31 +234,36 @@ class RegisteredDeviceStore(context: Context) {
                 else -> ""
             }
             val latest = if (existing.lastSeenAtMs >= candidate.lastSeenAtMs) existing else candidate
-            result[duplicateIndex] = latest.copy(name = ownerName)
+            result[duplicateIndex] = latest.copy(name = ownerName, authorized = existing.authorized && candidate.authorized)
         }
         return result
     }
 
+    private fun sameDevice(registered: RegisteredDevice, discovered: DiscoveredDevice): Boolean =
+        DeviceIdentity.samePhysicalDevice(
+            registered.deviceId,
+            registered.baseUrl,
+            discovered.deviceId,
+            discovered.baseUrl,
+        )
+
     private fun isGeneratedName(value: String, deviceId: String = "", baseUrl: String = ""): Boolean {
         val clean = value.trim()
-        if (clean.isBlank() ||
+        if (
+            clean.isBlank() ||
             clean.equals("HomeGuard", ignoreCase = true) ||
             clean.equals("HomeGuard-S3", ignoreCase = true) ||
             (deviceId.isNotBlank() && clean.equals(deviceId.trim(), ignoreCase = true))
         ) return true
 
-        val endpoint = normalizeEndpoint(baseUrl)
+        val endpoint = baseUrl.trim().trimEnd('/').lowercase()
         if (endpoint.isBlank()) return false
         if (clean.equals(endpoint, ignoreCase = true)) return true
 
-        val withoutScheme = endpoint.removePrefix("http://").removePrefix("https://")
-        val hostPort = withoutScheme.substringBefore('/')
-        val host = hostPort.substringBefore(':')
-        return clean.equals(hostPort, ignoreCase = true) || clean.equals(host, ignoreCase = true)
+        val host = DeviceIdentity.endpointHost(endpoint)
+        return host.isNotBlank() && clean.equals(host, ignoreCase = true)
     }
 
     private fun visibleSortName(device: RegisteredDevice): String =
         if (isGeneratedName(device.name, device.deviceId, device.baseUrl)) "~" else device.name.trim().lowercase()
-
-    private fun normalizeEndpoint(value: String): String = value.trim().trimEnd('/').lowercase()
 }
