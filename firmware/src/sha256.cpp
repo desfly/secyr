@@ -5,7 +5,13 @@
 #include <cstdint>
 #include <string>
 
+#if defined(ESP_PLATFORM)
+#include "mbedtls/sha256.h"
+#endif
+
 namespace hg {
+
+#if !defined(ESP_PLATFORM)
 namespace {
 constexpr std::array<uint32_t, 64> k{
     0x428a2f98U,0x71374491U,0xb5c0fbcfU,0xe9b5dba5U,0x3956c25bU,0x59f111f1U,0x923f82a4U,0xab1c5ed5U,
@@ -52,9 +58,18 @@ void compress_block(std::array<uint32_t, 8>& h, const uint8_t* block) {
     h[0] += a; h[1] += b; h[2] += c; h[3] += d;
     h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
 }
-}
+}  // namespace
+#endif
 
 Sha256Digest sha256(std::span<const std::byte> data) {
+#if defined(ESP_PLATFORM)
+    Sha256Digest digest{};
+    const auto* input = reinterpret_cast<const unsigned char*>(data.data());
+    if (mbedtls_sha256(input, data.size(), digest.data(), 0) != 0) {
+        digest.fill(0U);
+    }
+    return digest;
+#else
     std::array<uint32_t, 8> h{
         0x6a09e667U,0xbb67ae85U,0x3c6ef372U,0xa54ff53aU,
         0x510e527fU,0x9b05688cU,0x1f83d9abU,0x5be0cd19U
@@ -94,6 +109,7 @@ Sha256Digest sha256(std::span<const std::byte> data) {
         digest[i * 4U + 3U] = static_cast<uint8_t>(h[i]);
     }
     return digest;
+#endif
 }
 
 Sha256Digest sha256(std::string_view text) {
@@ -117,4 +133,4 @@ std::string sha256_hex(const Sha256Digest& digest) {
     }
     return out;
 }
-}
+}  // namespace hg
