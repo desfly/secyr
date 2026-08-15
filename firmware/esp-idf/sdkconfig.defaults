@@ -35,6 +35,7 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # Provisioning secret writes are blocked in software while NVS encryption is off.
 
 CONFIG_LWIP_LOCAL_HOSTNAME="homeguard-s3"
+CONFIG_LWIP_MAX_SOCKETS=24
 CONFIG_MDNS_MAX_INTERFACES=3
 
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
