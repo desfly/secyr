@@ -2,11 +2,12 @@ package ua.homeguard.s3.network
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.net.InetSocketAddress
 import java.net.URI
-import java.util.concurrent.TimeUnit
+import java.net.Socket
+import java.nio.charset.StandardCharsets
 
 data class HomeGuardWifiNetwork(
     val ssid: String,
@@ -14,44 +15,81 @@ data class HomeGuardWifiNetwork(
 )
 
 object HomeGuardWifiScanner {
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .callTimeout(25, TimeUnit.SECONDS)
-        .build()
-
     suspend fun scan(rawAddress: String): List<HomeGuardWifiNetwork> = withContext(Dispatchers.IO) {
-        val baseUrl = normalizeLocalAddress(rawAddress)
+        val uri = normalizeLocalUri(rawAddress)
             ?: error("Некоректна адреса HomeGuard")
-        val request = Request.Builder()
-            .url("$baseUrl/api/v1/network/scan")
-            .get()
-            .build()
+        if (!uri.scheme.equals("http", ignoreCase = true)) {
+            error("Wi-Fi scan HomeGuard підтримує локальний HTTP")
+        }
 
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) error("HomeGuard повернув HTTP ${response.code}")
-            val payload = JSONObject(response.body?.string().orEmpty())
-            if (!payload.optBoolean("ok", false)) {
-                error(payload.optString("reason", "Сканування Wi-Fi відхилено"))
+        val host = uri.host ?: error("Некоректна адреса HomeGuard")
+        val port = if (uri.port == -1) 80 else uri.port
+        val body = rawHttpGet(host, port, "/api/v1/network/scan")
+        val payload = JSONObject(body)
+        if (!payload.optBoolean("ok", false)) {
+            error(payload.optString("reason", "Сканування Wi-Fi відхилено"))
+        }
+
+        val networks = payload.optJSONArray("networks") ?: return@withContext emptyList()
+        val strongestBySsid = LinkedHashMap<String, Int>()
+        for (index in 0 until networks.length()) {
+            val item = networks.optJSONObject(index) ?: continue
+            val ssid = item.optString("ssid").trim()
+            if (ssid.isBlank()) continue
+            val rssi = item.optInt("rssi", -127)
+            val previous = strongestBySsid[ssid]
+            if (previous == null || rssi > previous) strongestBySsid[ssid] = rssi
+        }
+        strongestBySsid.entries
+            .sortedByDescending { it.value }
+            .map { HomeGuardWifiNetwork(it.key, it.value) }
+    }
+
+    private fun rawHttpGet(host: String, port: Int, path: String): String {
+        Socket().use { socket ->
+            socket.soTimeout = 25_000
+            socket.connect(InetSocketAddress(host, port), 5_000)
+
+            val request = buildString {
+                append("GET ").append(path).append(" HTTP/1.0\r\n")
+                append("Host: ").append(host)
+                if (port != 80) append(':').append(port)
+                append("\r\n")
+                append("Accept: application/json\r\n")
+                append("Connection: close\r\n")
+                append("\r\n")
+            }
+            socket.getOutputStream().apply {
+                write(request.toByteArray(StandardCharsets.US_ASCII))
+                flush()
             }
 
-            val networks = payload.optJSONArray("networks") ?: return@use emptyList()
-            val strongestBySsid = LinkedHashMap<String, Int>()
-            for (index in 0 until networks.length()) {
-                val item = networks.optJSONObject(index) ?: continue
-                val ssid = item.optString("ssid").trim()
-                if (ssid.isBlank()) continue
-                val rssi = item.optInt("rssi", -127)
-                val previous = strongestBySsid[ssid]
-                if (previous == null || rssi > previous) strongestBySsid[ssid] = rssi
+            val bytes = ByteArrayOutputStream()
+            val buffer = ByteArray(4096)
+            val input = socket.getInputStream()
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                if (count > 0) bytes.write(buffer, 0, count)
             }
-            strongestBySsid.entries
-                .sortedByDescending { it.value }
-                .map { HomeGuardWifiNetwork(it.key, it.value) }
+
+            val response = bytes.toString(StandardCharsets.UTF_8.name())
+            val separator = response.indexOf("\r\n\r\n")
+            if (separator < 0) error("HomeGuard повернув некоректну HTTP-відповідь")
+
+            val header = response.substring(0, separator)
+            val statusLine = header.lineSequence().firstOrNull().orEmpty()
+            val statusCode = statusLine.split(' ').getOrNull(1)?.toIntOrNull()
+                ?: error("HomeGuard повернув некоректний HTTP-статус")
+            if (statusCode !in 200..299) error("HomeGuard повернув HTTP $statusCode")
+
+            val body = response.substring(separator + 4).trim()
+            if (body.isEmpty()) error("HomeGuard повернув порожній результат Wi-Fi scan")
+            return body
         }
     }
 
-    private fun normalizeLocalAddress(raw: String): String? {
+    private fun normalizeLocalUri(raw: String): URI? {
         val value = raw.trim().trimEnd('/')
         if (value.isEmpty() || value.any(Char::isWhitespace)) return null
         val withScheme = when {
@@ -65,6 +103,6 @@ object HomeGuardWifiScanner {
         if (uri.port == 0 || uri.port > 65535) return null
         if (!uri.path.isNullOrBlank() && uri.path != "/") return null
         if (!uri.query.isNullOrBlank() || !uri.fragment.isNullOrBlank() || !uri.userInfo.isNullOrBlank()) return null
-        return withScheme.trimEnd('/')
+        return uri
     }
 }
