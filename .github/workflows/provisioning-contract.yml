@@ -1,0 +1,28 @@
+name: Provisioning Contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "android/**"
+      - "firmware/**"
+      - "tools/check_provisioning_contract.py"
+      - ".github/workflows/provisioning-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provisioning-contract:
+    name: Provisioning regression contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Verify provisioning contract
+        run: python tools/check_provisioning_contract.py
