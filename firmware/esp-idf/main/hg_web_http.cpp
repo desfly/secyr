@@ -98,22 +98,24 @@ esp_err_t WebHttp::index_get(httpd_req_t* request)
 
 esp_err_t WebHttp::css_get(httpd_req_t* request)
 {
-    // Keep the desktop source stylesheet untouched, but force a compact mobile
-    // layout in the firmware-served asset. This also guarantees the fix is in
-    // the flashed binary even when the browser previously cached /app.css.
+    // Critical phone layout lives in the firmware-served CSS itself. Do not
+    // depend on the secondary access-session script to repair the viewport.
     static constexpr char kFirmwareCssFix[] = R"CSS(
 
 [hidden]{display:none!important}
+.mobile-menu-toggle{display:none}
 @media (max-width:760px){
   html,body{max-width:100%;overflow-x:hidden}
   .shell{display:block!important;min-height:100vh}
   .sidebar{position:relative!important;top:auto!important;width:100%!important;height:auto!important;min-height:0!important;padding:10px 10px 12px!important;overflow:visible!important}
-  .brand{height:auto!important;min-height:34px!important;justify-content:flex-start!important;align-items:center!important;padding:0 8px!important}
+  .brand{height:auto!important;min-height:34px!important;justify-content:center!important;align-items:center!important;padding:0 8px!important}
   .brand h1{font-size:24px!important;letter-spacing:-.5px!important}
-  .bruce{height:86px!important;margin:4px 0 8px!important;border-radius:10px!important}
-  .bruce img{object-fit:cover!important;object-position:center 32%!important}
-  .sidebar nav{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important;margin:0!important;padding:0!important}
-  .sidebar nav a{min-height:44px!important;margin:0!important;padding:10px 12px!important;border-radius:10px!important;font-size:15px!important;display:flex!important;align-items:center!important;gap:8px!important}
+  .bruce{height:150px!important;margin:4px 8px 8px!important;border-radius:10px!important;overflow:hidden!important;background:none!important}
+  .bruce img{display:block!important;width:100%!important;height:100%!important;object-fit:contain!important;object-position:center center!important}
+  .mobile-menu-toggle{display:flex!important;width:100%!important;min-height:44px!important;margin:0 0 8px!important;padding:10px 14px!important;align-items:center!important;justify-content:space-between!important;border:1px solid rgba(255,255,255,.22)!important;border-radius:10px!important;background:rgba(255,255,255,.08)!important;color:#fff!important;font:inherit!important;font-weight:700!important}
+  .sidebar nav{display:none!important;position:static!important;width:100%!important;max-height:none!important;overflow:visible!important;margin:0!important;padding:0!important;z-index:auto!important}
+  .sidebar.mobile-menu-open nav{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important}
+  .sidebar nav a{min-height:44px!important;margin:0!important;padding:10px 12px!important;border-radius:10px!important;font-size:15px!important;align-items:center!important;gap:8px!important;min-width:0!important}
   .side-foot{display:none!important}
   .workspace{min-width:0!important;width:100%!important}
   .workspace header{padding:14px 14px 10px!important;gap:8px!important;align-items:flex-start!important;flex-wrap:wrap!important}
@@ -130,6 +132,10 @@ esp_err_t WebHttp::css_get(httpd_req_t* request)
   #networkPage .panel>div[style*="grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto"]{grid-template-columns:1fr!important}
   button,input,select{max-width:100%}
 }
+@media (max-width:430px){
+  .sidebar.mobile-menu-open nav{grid-template-columns:1fr!important}
+  .bruce{height:132px!important}
+}
 )CSS";
     return send_text_with_suffix(
         request,
@@ -143,7 +149,7 @@ esp_err_t WebHttp::css_get(httpd_req_t* request)
 esp_err_t WebHttp::js_get(httpd_req_t* request)
 {
     // Embedded-browser fixes live in one suffix so the flashed controller does
-    // not depend on user-agent quirks or stale UI assets during commissioning.
+    // not depend on user-agent quirks or the secondary access-session script.
     static constexpr char kEmbeddedViewFix[] = R"JS(
 
 ;(() => {
@@ -151,6 +157,7 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
   const dashboardBody = document.querySelector(".two-col");
   const network = document.getElementById("networkPage");
   const system = document.getElementById("system");
+  let lastSidebarLink = null;
 
   function applyEmbeddedView() {
     const hash = window.location.hash || "#overview";
@@ -176,6 +183,63 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
       if (isSystem) system.style.setProperty("display", "block", "important");
       else system.style.setProperty("display", "none", "important");
     }
+  }
+
+  function enforceSingleActiveNav() {
+    const links = [...document.querySelectorAll(".sidebar nav a")];
+    if (!links.length) return;
+    const hash = window.location.hash || "#overview";
+    const matches = links.filter(link => link.getAttribute("href") === hash);
+    const preferred = lastSidebarLink && lastSidebarLink.isConnected && lastSidebarLink.getAttribute("href") === hash
+      ? lastSidebarLink
+      : (matches[0] || links[0]);
+    links.forEach(link => link.classList.toggle("active", link === preferred));
+  }
+
+  function ensureFirmwareMobileNavigation() {
+    const sidebar = document.querySelector(".sidebar");
+    const bruce = document.querySelector(".sidebar .bruce");
+    const nav = document.querySelector(".sidebar nav");
+    if (!sidebar || !bruce || !nav) return;
+
+    let toggle = document.getElementById("mobileMenuToggle");
+    if (!toggle) {
+      toggle = document.createElement("button");
+      toggle.id = "mobileMenuToggle";
+      toggle.type = "button";
+      toggle.className = "mobile-menu-toggle";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.setAttribute("aria-controls", "homeguardSidebarNav");
+      toggle.innerHTML = "<span>☰ Меню</span><span aria-hidden=\"true\">⌄</span>";
+      nav.id = nav.id || "homeguardSidebarNav";
+      bruce.insertAdjacentElement("afterend", toggle);
+      toggle.addEventListener("click", () => {
+        const open = !sidebar.classList.contains("mobile-menu-open");
+        sidebar.classList.toggle("mobile-menu-open", open);
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+        if (toggle.lastElementChild) toggle.lastElementChild.textContent = open ? "⌃" : "⌄";
+      });
+    }
+
+    document.addEventListener("click", event => {
+      const link = event.target.closest?.(".sidebar nav a");
+      if (!link) return;
+      lastSidebarLink = link;
+      queueMicrotask(enforceSingleActiveNav);
+      setTimeout(enforceSingleActiveNav, 0);
+      if (window.matchMedia("(max-width:760px)").matches) {
+        sidebar.classList.remove("mobile-menu-open");
+        toggle.setAttribute("aria-expanded", "false");
+        if (toggle.lastElementChild) toggle.lastElementChild.textContent = "⌄";
+      }
+    });
+
+    window.addEventListener("resize", () => {
+      if (!window.matchMedia("(max-width:760px)").matches) {
+        sidebar.classList.remove("mobile-menu-open");
+        toggle.setAttribute("aria-expanded", "false");
+      }
+    }, { passive: true });
   }
 
   function ensureWifiPasswordToggle() {
@@ -240,10 +304,16 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     window.__homeguardWifiConnectFetchGuard = true;
   }
 
-  window.addEventListener("hashchange", applyEmbeddedView);
+  window.addEventListener("hashchange", () => {
+    applyEmbeddedView();
+    queueMicrotask(enforceSingleActiveNav);
+    setTimeout(enforceSingleActiveNav, 0);
+  });
   applyEmbeddedView();
+  ensureFirmwareMobileNavigation();
   ensureWifiPasswordToggle();
   installWifiConnectHandoverFetchGuard();
+  enforceSingleActiveNav();
 })();
 )JS";
 
