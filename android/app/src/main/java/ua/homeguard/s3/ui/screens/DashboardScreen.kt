@@ -116,7 +116,6 @@ fun DashboardScreen(
                 Text("Версія $versionName", style = MaterialTheme.typography.bodySmall)
                 Text("Канал: $route", style = MaterialTheme.typography.bodyMedium)
                 Text("Знайдено локально: $localDevices", style = MaterialTheme.typography.bodySmall)
-                Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати пристрій") }
             }
         }
 
