@@ -30,7 +30,7 @@ class HttpSubnetDiscovery(context: Context) {
         private const val READ_TIMEOUT_MS = 320
         private const val SETUP_CONNECT_TIMEOUT_MS = 1_200
         private const val SETUP_READ_TIMEOUT_MS = 1_500
-        private const val MAX_PARALLEL = 32
+        private const val MAX_PARALLEL = 8
         private const val SETUP_PREFIX = "192.168.4"
         private const val SETUP_CONTROLLER_IP = "192.168.4.1"
     }
@@ -40,6 +40,9 @@ class HttpSubnetDiscovery(context: Context) {
     val devices: StateFlow<List<DiscoveredDevice>> = _devices.asStateFlow()
 
     suspend fun scanOnce() = withContext(Dispatchers.IO) {
+        // A manual rescan must describe this scan, not keep stale devices from an older network.
+        _devices.value = emptyList()
+
         val network = findWifiNetwork() ?: return@withContext
         val local = connectivity.getLinkProperties(network)
             ?.linkAddresses
@@ -52,18 +55,24 @@ class HttpSubnetDiscovery(context: Context) {
         val prefix = "${bytes[0].toInt() and 0xff}.${bytes[1].toInt() and 0xff}.${bytes[2].toInt() and 0xff}"
         val ownHost = bytes[3].toInt() and 0xff
 
-        val setupDevice = if (prefix == SETUP_PREFIX && ownHost != 1) {
-            probe(
+        // Setup AP is deterministic: the controller is always 192.168.4.1.
+        // Probe it first and do not hammer the remaining /24 if it answers.
+        if (prefix == SETUP_PREFIX && ownHost != 1) {
+            val setupDevice = probe(
                 network = network,
                 ip = SETUP_CONTROLLER_IP,
                 connectTimeoutMs = SETUP_CONNECT_TIMEOUT_MS,
                 readTimeoutMs = SETUP_READ_TIMEOUT_MS,
                 allowNetworkStatusFallback = true,
             )
-        } else {
-            null
+            if (setupDevice != null) {
+                _devices.value = listOf(setupDevice)
+                return@withContext
+            }
         }
 
+        // Keep the fallback bounded. 32 simultaneous probes made discovery noisy on phones
+        // and could overlap badly with the controller Web UI and UDP discovery traffic.
         val semaphore = Semaphore(MAX_PARALLEL)
         val found = coroutineScope {
             (1..254)
@@ -86,7 +95,7 @@ class HttpSubnetDiscovery(context: Context) {
                 .filterNotNull()
         }
 
-        _devices.value = (listOfNotNull(setupDevice) + found)
+        _devices.value = found
             .associateBy { it.baseUrl.trimEnd('/').lowercase() }
             .values
             .sortedBy { it.deviceId }
@@ -152,6 +161,7 @@ class HttpSubnetDiscovery(context: Context) {
             connection.readTimeout = readTimeoutMs
             connection.useCaches = false
             connection.instanceFollowRedirects = false
+            connection.setRequestProperty("Connection", "close")
             if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
             val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             JSONObject(body)
