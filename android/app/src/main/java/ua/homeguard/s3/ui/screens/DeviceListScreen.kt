@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -22,14 +23,24 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Image
+import ua.homeguard.s3.R
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.storage.RegisteredDevice
 import ua.homeguard.s3.ui.components.BruceBrand
+
+private val StatusGreen = Color(0xFF00C853)
+private val StatusAmber = Color(0xFFFFB300)
+private val StatusRed = Color(0xFFE53935)
+private val StatusIdle = Color(0xFF8A94A6)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -47,7 +58,6 @@ fun DeviceListScreen(
     var renameDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
     var renameText by remember { mutableStateOf("") }
     var deleteDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
-    val onlineIds = discovered.mapTo(hashSetOf()) { it.deviceId }
 
     renameDevice?.let { device ->
         AlertDialog(
@@ -104,7 +114,7 @@ fun DeviceListScreen(
             ) {
                 BruceBrand(showTitle = true)
                 Text("Пристрої: ${devices.size}", style = MaterialTheme.typography.titleMedium)
-                Text("Стани оновлюються автоматично", style = MaterialTheme.typography.bodySmall)
+                Text("ID · NET · CLOUD показують реальні канали зв’язку", style = MaterialTheme.typography.bodySmall)
                 Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати") }
             }
         }
@@ -121,9 +131,36 @@ fun DeviceListScreen(
             }
         } else {
             items(devices, key = { it.deviceId }) { device ->
-                val online = device.deviceId in onlineIds || (device.deviceId == activeDeviceId && snapshot.sequence > 0)
+                val endpoint = device.baseUrl.trim().trimEnd('/').lowercase()
+                val found = discovered
+                    .filter { candidate ->
+                        candidate.deviceId.equals(device.deviceId, ignoreCase = true) ||
+                            (endpoint.isNotBlank() && candidate.baseUrl.trim().trimEnd('/').lowercase() == endpoint)
+                    }
+                    .maxByOrNull { it.seenAtMs }
+
+                val idConfirmed = found?.deviceId?.equals(device.deviceId, ignoreCase = true) == true ||
+                    (device.deviceId == activeDeviceId && snapshot.sequence > 0)
+                val idPending = !idConfirmed && (device.deviceId.startsWith("HG-", ignoreCase = true) || device.deviceId.startsWith("manual-"))
+                val netOnline = found != null
+                val cloudConfigured = found?.cloudConfigured
+                val cloudConnected = found?.cloudConnected == true
+                val online = netOnline || cloudConnected
                 val expanded = expandedId == device.deviceId
                 val titleColor = if (device.authorized) Color.Unspecified else MaterialTheme.colorScheme.error
+
+                val idColor = when {
+                    idConfirmed -> StatusGreen
+                    idPending -> StatusAmber
+                    else -> StatusRed
+                }
+                val netColor = if (netOnline) StatusGreen else StatusRed
+                val cloudColor = when {
+                    cloudConnected -> StatusGreen
+                    cloudConfigured == true -> StatusRed
+                    cloudConfigured == false -> StatusIdle
+                    else -> StatusIdle
+                }
 
                 Card(
                     modifier = Modifier
@@ -133,19 +170,58 @@ fun DeviceListScreen(
                             onDoubleClick = { onOpenDevice(device) },
                         )
                 ) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        Text(device.name, style = MaterialTheme.typography.titleMedium, color = titleColor)
-                        Text(
-                            if (online) "● online" else "○ offline",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Image(
+                                painter = painterResource(R.drawable.ic_homeguard_device),
+                                contentDescription = "HomeGuard",
+                                modifier = Modifier.size(58.dp),
+                            )
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(device.name, style = MaterialTheme.typography.titleMedium, color = titleColor)
+                                Text(
+                                    if (online) "● online" else "○ offline",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (online) StatusGreen else StatusIdle,
+                                )
+                                if (device.baseUrl.isNotBlank()) {
+                                    Text(device.baseUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            LinkIndicator("ID", idColor)
+                            LinkIndicator("NET", netColor)
+                            LinkIndicator("CLOUD", cloudColor)
+                        }
 
                         if (!device.authorized) {
                             Text("Авторизацію втрачено", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         }
 
                         if (expanded) {
+                            StatusLine("ID", when {
+                                idConfirmed -> "підтверджено"
+                                idPending -> "очікує підтвердження"
+                                else -> "не підтверджено"
+                            })
+                            StatusLine("NET", if (netOnline) "локальний зв’язок" else "немає зв’язку")
+                            StatusLine("CLOUD", when {
+                                cloudConnected -> "підключено"
+                                cloudConfigured == true -> "немає зв’язку"
+                                cloudConfigured == false -> "не налаштовано"
+                                else -> "стан невідомий"
+                            })
+
                             if (device.deviceId == activeDeviceId) {
                                 val problemZones = snapshot.zones.filter {
                                     it.state.contains("alarm", true) || it.state.contains("open", true) || it.state.contains("tamper", true) || it.state.contains("fault", true)
@@ -185,11 +261,6 @@ fun DeviceListScreen(
                                         style = MaterialTheme.typography.bodySmall,
                                     )
                                 }
-                            } else {
-                                Text(
-                                    if (online) "Контролер доступний у локальній мережі" else "Контролер зараз недоступний",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
                             }
 
                             OutlinedButton(
@@ -212,6 +283,17 @@ fun DeviceListScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun LinkIndicator(label: String, color: Color) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("●", color = color, style = MaterialTheme.typography.titleMedium)
+        Text(label, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
     }
 }
 
