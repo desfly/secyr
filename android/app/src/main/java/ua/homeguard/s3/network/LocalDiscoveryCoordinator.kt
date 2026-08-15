@@ -2,9 +2,7 @@ package ua.homeguard.s3.network
 
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -18,11 +16,15 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
     private val nsd = NsdDeviceDiscovery(appContext)
     private val udp = UdpDeviceDiscovery(appContext, scope)
     private val http = HttpSubnetDiscovery(appContext)
+    private val manualScanActive = MutableStateFlow(false)
 
     val scanStatus: StateFlow<UdpDeviceDiscovery.ScanStatus> = udp.status
-    val isScanning: StateFlow<Boolean> = udp.status
-        .map { it.phase == "sending" || it.phase == "listening" }
-        .stateIn(scope, SharingStarted.Eagerly, false)
+    val isScanning: StateFlow<Boolean> = combine(
+        udp.status.map { it.phase == "sending" || it.phase == "listening" },
+        manualScanActive,
+    ) { udpScanning, manualScanning ->
+        udpScanning || manualScanning
+    }.stateIn(scope, SharingStarted.Eagerly, false)
 
     val devices: StateFlow<List<DiscoveredDevice>> = combine(nsd.devices, udp.devices, http.devices) { mdns, udpFallback, httpFallback ->
         (mdns + udpFallback + httpFallback)
@@ -58,11 +60,19 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         udp.stop()
     }
 
-    suspend fun rescan() = coroutineScope {
-        awaitAll(
-            async { udp.scanOnce() },
-            async { http.scanOnce() },
-        )
-        Unit
+    suspend fun rescan() {
+        if (manualScanActive.value) return
+        manualScanActive.value = true
+        try {
+            // Do not launch UDP and a /24 HTTP sweep at the same time. First use the
+            // lightweight discovery paths; only fall back to HTTP when they found nothing.
+            http.clear()
+            udp.scanOnce()
+            if (udp.devices.value.isEmpty() && nsd.devices.value.isEmpty()) {
+                http.scanOnce()
+            }
+        } finally {
+            manualScanActive.value = false
+        }
     }
 }
