@@ -39,6 +39,15 @@ import ua.homeguard.s3.ui.components.BruceBrand
 private val StatusGreen = Color(0xFF00C853)
 private val StatusIdle = Color(0xFF8A94A6)
 
+private fun isLegacyGeneratedName(name: String): Boolean {
+    val clean = name.trim()
+    return clean.isBlank() ||
+        clean.equals("HomeGuard", ignoreCase = true) ||
+        clean.equals("HomeGuard-S3", ignoreCase = true)
+}
+
+private fun visibleDeviceName(name: String): String = if (isLegacyGeneratedName(name)) "Без назви" else name.trim()
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DeviceListScreen(
@@ -90,7 +99,7 @@ fun DeviceListScreen(
             onDismissRequest = { deleteDevice = null },
             title = { Text("Видалити пристрій?") },
             text = {
-                Text("«${device.name}» буде видалено зі списку цього телефону. Сам контролер HomeGuard не скидається і не видаляється з мережі.")
+                Text("«${visibleDeviceName(device.name)}» буде видалено зі списку цього телефону. Сам контролер HomeGuard не скидається і не видаляється з мережі.")
             },
             confirmButton = {
                 TextButton(
@@ -121,13 +130,14 @@ fun DeviceListScreen(
             found?.cloudConfigured == false -> "не налаштовано"
             else -> "стан невідомий"
         }
+        val visibleName = visibleDeviceName(device.name)
 
         AlertDialog(
             onDismissRequest = { propertiesDevice = null },
-            title = { Text("Властивості · ${device.name}") },
+            title = { Text("Властивості · $visibleName") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatusLine("Назва", device.name)
+                    StatusLine("Назва", visibleName)
                     StatusLine("ID", device.deviceId)
                     StatusLine("Адреса", device.baseUrl.ifBlank { "—" })
                     StatusLine("LAN", if (found != null) "доступний" else "недоступний")
@@ -156,7 +166,6 @@ fun DeviceListScreen(
                 BruceBrand(showTitle = true)
                 Text("Пристрої: ${devices.size}", style = MaterialTheme.typography.titleMedium)
                 Text("У списку показуються тільки ваші назви та стан системи", style = MaterialTheme.typography.bodySmall)
-                Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати") }
             }
         }
 
@@ -168,10 +177,7 @@ fun DeviceListScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text("Пристроїв ще немає", style = MaterialTheme.typography.titleMedium)
-                        Text("Додайте HomeGuard через пошук у мережі або вручну.")
-                        Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) {
-                            Text("+ Додати пристрій")
-                        }
+                        Text("Додавання пристроїв тимчасово сховане. Структура цього кроку буде змінена окремо.")
                     }
                 }
             }
@@ -187,7 +193,9 @@ fun DeviceListScreen(
                 val cloudConnected = found?.cloudConnected == true
                 val online = found != null || cloudConnected
                 val expanded = expandedId == device.deviceId
-                val titleColor = if (device.authorized) Color.Unspecified else MaterialTheme.colorScheme.error
+                val legacyName = isLegacyGeneratedName(device.name)
+                val visibleName = visibleDeviceName(device.name)
+                val titleColor = if (device.authorized && !legacyName) Color.Unspecified else MaterialTheme.colorScheme.error
 
                 Card(
                     modifier = Modifier
@@ -215,13 +223,21 @@ fun DeviceListScreen(
                                 modifier = Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(2.dp),
                             ) {
-                                Text(device.name, style = MaterialTheme.typography.titleMedium, color = titleColor)
+                                Text(visibleName, style = MaterialTheme.typography.titleMedium, color = titleColor)
                                 Text(
                                     if (online) "● online" else "○ offline",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = if (online) StatusGreen else StatusIdle,
                                 )
                             }
+                        }
+
+                        if (legacyName) {
+                            Text(
+                                "Потрібно задати вашу назву пристрою",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                         }
 
                         if (!device.authorized) {
@@ -310,7 +326,7 @@ fun DeviceListScreen(
 
                             OutlinedButton(
                                 onClick = {
-                                    renameText = device.name
+                                    renameText = if (legacyName) "" else device.name
                                     renameDevice = device
                                 },
                                 modifier = Modifier.fillMaxWidth(),
