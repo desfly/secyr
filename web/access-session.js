@@ -3,6 +3,7 @@
 (() => {
   let session = null;
   let mutationQueued = false;
+  let lastSidebarLink = null;
 
   const roleLabel = role => ({ admin: "Admin", user: "User", guest: "Guest" })[role] || role || "—";
   const setText = (element, value) => {
@@ -187,6 +188,30 @@
     return false;
   }
 
+  function hideRawBuildInfo() {
+    const buildInfo = document.querySelector("#buildInfo");
+    if (buildInfo) buildInfo.hidden = true;
+  }
+
+  function enforceSingleSidebarActive() {
+    const links = [...document.querySelectorAll(".sidebar nav a")];
+    if (!links.length) return;
+    const hash = window.location.hash || "#overview";
+    const activeLinks = links.filter(link => link.classList.contains("active"));
+    let preferred = null;
+    if (lastSidebarLink && lastSidebarLink.isConnected && lastSidebarLink.getAttribute("href") === hash) {
+      preferred = lastSidebarLink;
+    } else if (activeLinks.length) {
+      preferred = activeLinks[0];
+    } else {
+      preferred = links.find(link => link.getAttribute("href") === hash) || links[0];
+    }
+    links.forEach(link => {
+      const shouldBeActive = link === preferred;
+      if (link.classList.contains("active") !== shouldBeActive) link.classList.toggle("active", shouldBeActive);
+    });
+  }
+
   // Backend authorization is still authoritative. The capture boundary also
   // blocks stale/transient UI states (for example app.js re-enabling buttons
   // in finally blocks) so a forbidden command cannot even be dispatched by
@@ -206,17 +231,50 @@
     syncCredentialFields();
   }, true);
 
+  // Wi-Fi picker: after choosing an SSID, fold the long scan result list and
+  // leave one clear confirmation line while the existing app.js handler moves
+  // focus into the password field.
+  document.addEventListener("click", event => {
+    const network = event.target.closest?.(".wifi-network[data-ssid]");
+    if (!network) return;
+    const ssid = network.dataset.ssid || "";
+    setTimeout(() => {
+      const list = document.querySelector("#wifiNetworks");
+      const state = document.querySelector("#scanState");
+      if (list) list.innerHTML = "";
+      if (state) state.textContent = ssid ? `Вибрано: ${ssid}` : "Вибрано приховану мережу";
+    }, 0);
+  });
+
+  // Several menu entries intentionally open the same dashboard section. Keep
+  // only the item the operator actually pressed highlighted instead of lighting
+  // both entries that share one hash target.
+  document.addEventListener("click", event => {
+    const link = event.target.closest?.(".sidebar nav a");
+    if (!link) return;
+    lastSidebarLink = link;
+    setTimeout(enforceSingleSidebarActive, 0);
+  });
+  window.addEventListener("hashchange", () => setTimeout(enforceSingleSidebarActive, 0));
+
   const observer = new MutationObserver(() => {
     if (mutationQueued) return;
     mutationQueued = true;
     queueMicrotask(() => {
       mutationQueued = false;
       applyRoleUi();
+      hideRawBuildInfo();
     });
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
   ensureSessionUi();
+  hideRawBuildInfo();
   applyRoleUi();
-  setInterval(applyRoleUi, 1000);
+  setTimeout(enforceSingleSidebarActive, 0);
+  setInterval(() => {
+    applyRoleUi();
+    hideRawBuildInfo();
+    enforceSingleSidebarActive();
+  }, 1000);
 })();
