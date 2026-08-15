@@ -64,13 +64,15 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         if (manualScanActive.value) return
         manualScanActive.value = true
         try {
-            // Do not launch UDP and a /24 HTTP sweep at the same time. First use the
-            // lightweight discovery paths; only fall back to HTTP when they found nothing.
+            // Manual discovery is an explicit request from the operator. First run the
+            // lightweight UDP discovery, then verify the LAN with the bounded HTTP scan.
+            // This is important for "add by device ID": that record has no IP/baseUrl yet,
+            // so it must not stay offline merely because UDP/mDNS did not resolve the ID.
+            // HTTP is still serialized after UDP and limited by HttpSubnetDiscovery, so we
+            // do not recreate the earlier burst of simultaneous discovery traffic.
             http.clear()
             udp.scanOnce()
-            if (udp.devices.value.isEmpty() && nsd.devices.value.isEmpty()) {
-                http.scanOnce()
-            }
+            http.scanOnce()
         } finally {
             manualScanActive.value = false
         }
