@@ -54,10 +54,14 @@ class RegisteredDeviceStore(context: Context) {
         }
         val exact = matching.firstOrNull { it.deviceId.equals(device.deviceId, ignoreCase = true) }
         val previous = exact ?: matching.maxByOrNull { it.lastSeenAtMs }
-        val displayName = requestedName?.trim().takeUnless { it.isNullOrBlank() }
-            ?: previous?.name
-            ?: device.serviceName.takeIf { it.isNotBlank() }
-            ?: "HomeGuard"
+        val requested = requestedName?.trim()?.take(40).orEmpty()
+        val displayName = requested.ifBlank { previous?.name.orEmpty() }
+
+        // A new controller is never persisted under a generated service name, device ID,
+        // or IP address. The owner must assign a visible name first. Existing records keep
+        // their previously assigned name during discovery refresh/reconciliation.
+        if (displayName.isBlank()) return
+
         val registered = RegisteredDevice(
             deviceId = device.deviceId,
             name = displayName,
@@ -76,16 +80,20 @@ class RegisteredDeviceStore(context: Context) {
         persist(current)
     }
 
-    suspend fun addManual(deviceId: String, baseUrl: String, name: String = "HomeGuard") {
+    suspend fun addManual(deviceId: String, baseUrl: String, name: String = "") {
         val current = _devices.value.toMutableList()
         val endpoint = normalizeEndpoint(baseUrl)
         val idIndex = current.indexOfFirst { it.deviceId.equals(deviceId, ignoreCase = true) }
         val endpointIndex = if (endpoint.isNotBlank()) current.indexOfFirst { normalizeEndpoint(it.baseUrl) == endpoint } else -1
         val index = if (idIndex >= 0) idIndex else endpointIndex
         val previous = current.getOrNull(index)
+        val requested = name.trim().take(40)
+        val displayName = previous?.name ?: requested
+        if (displayName.isBlank()) return
+
         val registered = RegisteredDevice(
             deviceId = deviceId,
-            name = previous?.name ?: name,
+            name = displayName,
             baseUrl = baseUrl,
             lastSeenAtMs = System.currentTimeMillis(),
             authorized = previous?.authorized ?: true,
