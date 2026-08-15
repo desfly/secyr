@@ -9,6 +9,8 @@ coordinator = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/LocalDi
 models = (ROOT / "android/app/src/main/java/ua/homeguard/s3/model/ConnectivityModels.kt").read_text(encoding="utf-8")
 add_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/AddDeviceScreen.kt").read_text(encoding="utf-8")
 list_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/DeviceListScreen.kt").read_text(encoding="utf-8")
+bruce_brand = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/components/BruceBrand.kt").read_text(encoding="utf-8")
+main_activity = (ROOT / "android/app/src/main/java/ua/homeguard/s3/MainActivity.kt").read_text(encoding="utf-8")
 store = (ROOT / "android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt").read_text(encoding="utf-8")
 
 checks = {
@@ -29,6 +31,13 @@ checks = {
     "Coordinator combines mDNS+UDP+HTTP": "combine(nsd.devices, udp.devices, http.devices)" in coordinator,
     "Coordinator triggers HTTP fallback": "http.scanOnce()" in coordinator,
     "Coordinator exposes scan status": "val scanStatus" in coordinator and "udp.status" in coordinator,
+
+    # Product rule: the app opens on the device list. Adding is an explicit action,
+    # even when the list is empty; the empty-state card owns the Add action.
+    "Device list is primary screen": "private val deviceListOpen = MutableStateFlow(true)" in main_activity,
+    "Fresh app does not force Add screen": "showAddDevice || appSettings.deviceId.isBlank()" not in main_activity and "showAddDevice -> AddDeviceScreen(" in main_activity,
+    "Operator ID is not forced to admin": 'private val operatorId = MutableStateFlow("")' in main_activity,
+    "Bruce header stays compact": "Modifier.size(56.dp)" in bruce_brand,
 
     # Product rule: a controller must receive a user-visible name before it can be saved.
     "Device name starts empty": 'var deviceName by remember { mutableStateOf("") }' in add_screen,
