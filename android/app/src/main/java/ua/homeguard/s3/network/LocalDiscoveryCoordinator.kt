@@ -28,15 +28,16 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
 
     val devices: StateFlow<List<DiscoveredDevice>> = combine(nsd.devices, udp.devices, http.devices) { mdns, udpFallback, httpFallback ->
         (mdns + udpFallback + httpFallback)
-            // One physical controller can briefly be reported by more than one discovery
-            // source with a stale/temporary ID. Prefer the network endpoint as the identity
-            // when it is available so the UI does not show duplicate cards for one ESP32.
             .groupBy { device ->
-                device.baseUrl.trim().trimEnd('/').lowercase().takeIf { it.isNotBlank() }
-                    ?: device.deviceId.trim().lowercase()
+                val id = device.deviceId.trim()
+                if (id.startsWith("HG-", ignoreCase = true)) {
+                    "id:${id.lowercase()}"
+                } else {
+                    "net:${device.baseUrl.trim().trimEnd('/').lowercase()}"
+                }
             }
             .mapNotNull { (_, candidates) ->
-                candidates.maxWithOrNull(
+                val winner = candidates.maxWithOrNull(
                     compareBy<DiscoveredDevice> { it.seenAtMs }
                         .thenBy {
                             when (it.source) {
@@ -45,6 +46,18 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
                                 DiscoverySource.HTTP -> 0
                             }
                         },
+                ) ?: return@mapNotNull null
+
+                // HTTP discovery reads /api/v1/cloud/status and therefore knows the real
+                // CLOUD state. Keep that status even when a fresher mDNS/UDP candidate wins
+                // the endpoint selection for the same physical controller.
+                val cloudCandidate = candidates
+                    .filter { it.cloudConfigured != null || it.cloudConnected != null }
+                    .maxByOrNull { it.seenAtMs }
+
+                winner.copy(
+                    cloudConfigured = cloudCandidate?.cloudConfigured ?: winner.cloudConfigured,
+                    cloudConnected = cloudCandidate?.cloudConnected ?: winner.cloudConnected,
                 )
             }
             .sortedBy { it.deviceId }
@@ -64,12 +77,8 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         if (manualScanActive.value) return
         manualScanActive.value = true
         try {
-            // Manual discovery is an explicit request from the operator. First run the
-            // lightweight UDP discovery, then verify the LAN with the bounded HTTP scan.
-            // This is important for "add by device ID": that record has no IP/baseUrl yet,
-            // so it must not stay offline merely because UDP/mDNS did not resolve the ID.
-            // HTTP is still serialized after UDP and limited by HttpSubnetDiscovery, so we
-            // do not recreate the earlier burst of simultaneous discovery traffic.
+            // Manual discovery is explicit: lightweight UDP first, then bounded HTTP.
+            // HTTP verifies the real device ID and also refreshes the per-device CLOUD state.
             http.clear()
             udp.scanOnce()
             http.scanOnce()
