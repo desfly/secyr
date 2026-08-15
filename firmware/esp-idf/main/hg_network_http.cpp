@@ -243,10 +243,6 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"invalid_credentials\"}");
     }
 
-    // Stage STA credentials first, but do not retune the AP+STA radio until the
-    // HTTP client has received an acknowledgement. Connecting immediately here
-    // can move the SoftAP to the infrastructure AP channel and tear down the
-    // very socket that submitted this request.
     wifi_config_t sta{};
     std::memcpy(sta.sta.ssid, ssid.data(), std::min(ssid.size(), sizeof(sta.sta.ssid)));
     std::memcpy(sta.sta.password, password.data(), std::min(password.size(), sizeof(sta.sta.password)));
@@ -265,8 +261,6 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
         std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) + "\"}");
     if (response_error != ESP_OK) return response_error;
 
-    // Give lwIP/httpd time to put the acknowledgement on the wire before the
-    // STA association potentially changes the shared radio channel.
     vTaskDelay(kStaHandoverDelay);
     (void)esp_wifi_disconnect();
     return esp_wifi_connect();
@@ -361,13 +355,22 @@ std::string NetworkHttp::status_json() const
 
 std::string NetworkHttp::scan_json() const
 {
+    wifi_ap_record_t current_ap{};
+    const bool sta_was_connected = esp_wifi_sta_get_ap_info(&current_ap) == ESP_OK;
+    if (sta_was_connected) {
+        (void)esp_wifi_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(120));
+    }
+
     const auto start_error = esp_wifi_scan_start(nullptr, true);
     if (start_error != ESP_OK) {
+        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_start_failed\",\"networks\":[]}";
     }
 
     std::uint16_t count = 0;
     if (esp_wifi_scan_get_ap_num(&count) != ESP_OK) {
+        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_count_failed\",\"networks\":[]}";
     }
 
@@ -375,6 +378,7 @@ std::string NetworkHttp::scan_json() const
     std::array<wifi_ap_record_t, kMaxScanRecords> records{};
     std::uint16_t returned = count;
     if (returned != 0 && esp_wifi_scan_get_ap_records(&returned, records.data()) != ESP_OK) {
+        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_records_failed\",\"networks\":[]}";
     }
 
@@ -386,6 +390,8 @@ std::string NetworkHttp::scan_json() const
                std::to_string(static_cast<int>(records[i].rssi)) + "}";
     }
     out += "]}";
+
+    if (sta_was_connected) (void)esp_wifi_connect();
     return out;
 }
 
