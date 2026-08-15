@@ -9,6 +9,7 @@ import java.net.URI
 import java.net.Socket
 import java.nio.charset.StandardCharsets
 
+// Rescue invariant: Wi-Fi scanning is isolated from LAN discovery.
 data class HomeGuardWifiNetwork(
     val ssid: String,
     val rssi: Int,
