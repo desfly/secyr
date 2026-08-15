@@ -58,7 +58,7 @@ class HttpSubnetDiscovery(context: Context) {
                 ip = SETUP_CONTROLLER_IP,
                 connectTimeoutMs = SETUP_CONNECT_TIMEOUT_MS,
                 readTimeoutMs = SETUP_READ_TIMEOUT_MS,
-                allowSetupFallback = true,
+                allowNetworkStatusFallback = true,
             )
         } else {
             null
@@ -77,7 +77,7 @@ class HttpSubnetDiscovery(context: Context) {
                                 ip = "$prefix.$host",
                                 connectTimeoutMs = CONNECT_TIMEOUT_MS,
                                 readTimeoutMs = READ_TIMEOUT_MS,
-                                allowSetupFallback = false,
+                                allowNetworkStatusFallback = true,
                             )
                         }
                     }
@@ -104,7 +104,7 @@ class HttpSubnetDiscovery(context: Context) {
         ip: String,
         connectTimeoutMs: Int,
         readTimeoutMs: Int,
-        allowSetupFallback: Boolean,
+        allowNetworkStatusFallback: Boolean,
     ): DiscoveredDevice? {
         val cloud = readJson(
             network = network,
@@ -120,7 +120,7 @@ class HttpSubnetDiscovery(context: Context) {
             }
         }
 
-        if (!allowSetupFallback) return null
+        if (!allowNetworkStatusFallback) return null
 
         val networkStatus = readJson(
             network = network,
@@ -134,7 +134,7 @@ class HttpSubnetDiscovery(context: Context) {
         if (!apSsid.startsWith("HomeGuard-S3", ignoreCase = true)) return null
 
         val temporaryId = "setup-$ip-80"
-        Log.i(TAG, "HomeGuard setup HTTP fallback found: id=$temporaryId ip=$ip ap=$apSsid")
+        Log.i(TAG, "HomeGuard network-status fallback found: id=$temporaryId ip=$ip ap=$apSsid")
         return discovered(temporaryId, ip, serviceName = apSsid.ifBlank { "HomeGuard-S3" })
     }
 
