@@ -26,7 +26,13 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
 
     val devices: StateFlow<List<DiscoveredDevice>> = combine(nsd.devices, udp.devices, http.devices) { mdns, udpFallback, httpFallback ->
         (mdns + udpFallback + httpFallback)
-            .groupBy { it.deviceId }
+            // One physical controller can briefly be reported by more than one discovery
+            // source with a stale/temporary ID. Prefer the network endpoint as the identity
+            // when it is available so the UI does not show duplicate cards for one ESP32.
+            .groupBy { device ->
+                device.baseUrl.trim().trimEnd('/').lowercase().takeIf { it.isNotBlank() }
+                    ?: device.deviceId.trim().lowercase()
+            }
             .mapNotNull { (_, candidates) ->
                 candidates.maxWithOrNull(
                     compareBy<DiscoveredDevice> { it.seenAtMs }
