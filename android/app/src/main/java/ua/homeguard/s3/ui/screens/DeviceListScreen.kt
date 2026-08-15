@@ -1,6 +1,7 @@
 package ua.homeguard.s3.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,10 +28,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.Image
 import ua.homeguard.s3.R
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.SystemSnapshot
@@ -38,8 +37,6 @@ import ua.homeguard.s3.storage.RegisteredDevice
 import ua.homeguard.s3.ui.components.BruceBrand
 
 private val StatusGreen = Color(0xFF00C853)
-private val StatusAmber = Color(0xFFFFB300)
-private val StatusRed = Color(0xFFE53935)
 private val StatusIdle = Color(0xFF8A94A6)
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -58,6 +55,7 @@ fun DeviceListScreen(
     var renameDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
     var renameText by remember { mutableStateOf("") }
     var deleteDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
+    var propertiesDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
 
     renameDevice?.let { device ->
         AlertDialog(
@@ -81,7 +79,9 @@ fun DeviceListScreen(
                     },
                 ) { Text("Зберегти") }
             },
-            dismissButton = { TextButton(onClick = { renameDevice = null }) { Text("Скасувати") } },
+            dismissButton = {
+                TextButton(onClick = { renameDevice = null }) { Text("Скасувати") }
+            },
         )
     }
 
@@ -89,7 +89,9 @@ fun DeviceListScreen(
         AlertDialog(
             onDismissRequest = { deleteDevice = null },
             title = { Text("Видалити пристрій?") },
-            text = { Text("«${device.name}» буде видалено зі списку цього телефону. Сам контролер HomeGuard не скидається і не видаляється з мережі.") },
+            text = {
+                Text("«${device.name}» буде видалено зі списку цього телефону. Сам контролер HomeGuard не скидається і не видаляється з мережі.")
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -99,7 +101,46 @@ fun DeviceListScreen(
                     },
                 ) { Text("Видалити", color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { deleteDevice = null }) { Text("Скасувати") } },
+            dismissButton = {
+                TextButton(onClick = { deleteDevice = null }) { Text("Скасувати") }
+            },
+        )
+    }
+
+    propertiesDevice?.let { device ->
+        val endpoint = device.baseUrl.trim().trimEnd('/').lowercase()
+        val found = discovered
+            .filter { candidate ->
+                candidate.deviceId.equals(device.deviceId, ignoreCase = true) ||
+                    (endpoint.isNotBlank() && candidate.baseUrl.trim().trimEnd('/').lowercase() == endpoint)
+            }
+            .maxByOrNull { it.seenAtMs }
+        val cloudText = when {
+            found?.cloudConnected == true -> "підключено"
+            found?.cloudConfigured == true -> "налаштовано, немає зв’язку"
+            found?.cloudConfigured == false -> "не налаштовано"
+            else -> "стан невідомий"
+        }
+
+        AlertDialog(
+            onDismissRequest = { propertiesDevice = null },
+            title = { Text("Властивості · ${device.name}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatusLine("Назва", device.name)
+                    StatusLine("ID", device.deviceId)
+                    StatusLine("Адреса", device.baseUrl.ifBlank { "—" })
+                    StatusLine("LAN", if (found != null) "доступний" else "недоступний")
+                    StatusLine("CLOUD", cloudText)
+                    StatusLine("Транспорт", found?.transport?.name ?: "—")
+                    StatusLine("Виявлення", found?.source?.name ?: "—")
+                    StatusLine("HTTPS", found?.secure?.let { if (it) "так" else "ні" } ?: "—")
+                    StatusLine("Авторизація", if (device.authorized) "активна" else "втрачена")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { propertiesDevice = null }) { Text("Закрити") }
+            },
         )
     }
 
@@ -114,7 +155,7 @@ fun DeviceListScreen(
             ) {
                 BruceBrand(showTitle = true)
                 Text("Пристрої: ${devices.size}", style = MaterialTheme.typography.titleMedium)
-                Text("ID · NET · CLOUD показують реальні канали зв’язку", style = MaterialTheme.typography.bodySmall)
+                Text("У списку показуються тільки ваші назви та стан системи", style = MaterialTheme.typography.bodySmall)
                 Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати") }
             }
         }
@@ -122,10 +163,15 @@ fun DeviceListScreen(
         if (devices.isEmpty()) {
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         Text("Пристроїв ще немає", style = MaterialTheme.typography.titleMedium)
                         Text("Додайте HomeGuard через пошук у мережі або вручну.")
-                        Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати пристрій") }
+                        Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) {
+                            Text("+ Додати пристрій")
+                        }
                     }
                 }
             }
@@ -138,29 +184,10 @@ fun DeviceListScreen(
                             (endpoint.isNotBlank() && candidate.baseUrl.trim().trimEnd('/').lowercase() == endpoint)
                     }
                     .maxByOrNull { it.seenAtMs }
-
-                val idConfirmed = found?.deviceId?.equals(device.deviceId, ignoreCase = true) == true ||
-                    (device.deviceId == activeDeviceId && snapshot.sequence > 0)
-                val idPending = !idConfirmed && (device.deviceId.startsWith("HG-", ignoreCase = true) || device.deviceId.startsWith("manual-"))
-                val netOnline = found != null
-                val cloudConfigured = found?.cloudConfigured
                 val cloudConnected = found?.cloudConnected == true
-                val online = netOnline || cloudConnected
+                val online = found != null || cloudConnected
                 val expanded = expandedId == device.deviceId
                 val titleColor = if (device.authorized) Color.Unspecified else MaterialTheme.colorScheme.error
-
-                val idColor = when {
-                    idConfirmed -> StatusGreen
-                    idPending -> StatusAmber
-                    else -> StatusRed
-                }
-                val netColor = if (netOnline) StatusGreen else StatusRed
-                val cloudColor = when {
-                    cloudConnected -> StatusGreen
-                    cloudConfigured == true -> StatusRed
-                    cloudConfigured == false -> StatusIdle
-                    else -> StatusIdle
-                }
 
                 Card(
                     modifier = Modifier
@@ -170,7 +197,10 @@ fun DeviceListScreen(
                             onDoubleClick = { onOpenDevice(device) },
                         )
                 ) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -181,86 +211,101 @@ fun DeviceListScreen(
                                 contentDescription = "HomeGuard",
                                 modifier = Modifier.size(58.dp),
                             )
-                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
                                 Text(device.name, style = MaterialTheme.typography.titleMedium, color = titleColor)
                                 Text(
                                     if (online) "● online" else "○ offline",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = if (online) StatusGreen else StatusIdle,
                                 )
-                                if (device.baseUrl.isNotBlank()) {
-                                    Text(device.baseUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
                             }
                         }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            LinkIndicator("ID", idColor)
-                            LinkIndicator("NET", netColor)
-                            LinkIndicator("CLOUD", cloudColor)
-                        }
-
                         if (!device.authorized) {
-                            Text("Авторизацію втрачено", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                "Авторизацію втрачено",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                         }
 
                         if (expanded) {
-                            StatusLine("ID", when {
-                                idConfirmed -> "підтверджено"
-                                idPending -> "очікує підтвердження"
-                                else -> "не підтверджено"
-                            })
-                            StatusLine("NET", if (netOnline) "локальний зв’язок" else "немає зв’язку")
-                            StatusLine("CLOUD", when {
-                                cloudConnected -> "підключено"
-                                cloudConfigured == true -> "немає зв’язку"
-                                cloudConfigured == false -> "не налаштовано"
-                                else -> "стан невідомий"
-                            })
-
                             if (device.deviceId == activeDeviceId) {
                                 val problemZones = snapshot.zones.filter {
-                                    it.state.contains("alarm", true) || it.state.contains("open", true) || it.state.contains("tamper", true) || it.state.contains("fault", true)
+                                    it.state.contains("alarm", true) ||
+                                        it.state.contains("open", true) ||
+                                        it.state.contains("tamper", true) ||
+                                        it.state.contains("fault", true)
                                 }
                                 val abnormalPressures = snapshot.pressures.count {
-                                    !it.state.equals("ok", true) && !it.state.equals("normal", true) && !it.state.equals("unknown", true)
+                                    !it.state.equals("ok", true) &&
+                                        !it.state.equals("normal", true) &&
+                                        !it.state.equals("unknown", true)
                                 }
                                 val abnormalTemperatures = snapshot.temperatures.count {
-                                    !it.state.equals("ok", true) && !it.state.equals("normal", true) && !it.state.equals("unknown", true)
+                                    !it.state.equals("ok", true) &&
+                                        !it.state.equals("normal", true) &&
+                                        !it.state.equals("unknown", true)
                                 }
                                 val abnormalPower = snapshot.powerChannels.count {
-                                    !it.state.equals("ok", true) && !it.state.equals("normal", true) && !it.state.equals("unknown", true)
+                                    !it.state.equals("ok", true) &&
+                                        !it.state.equals("normal", true) &&
+                                        !it.state.equals("unknown", true)
                                 }
-                                val alarmActive = problemZones.isNotEmpty() || snapshot.health.name.contains("alarm", true) || snapshot.health.name.contains("critical", true)
+                                val alarmActive = problemZones.isNotEmpty() ||
+                                    snapshot.health.name.contains("alarm", true) ||
+                                    snapshot.health.name.contains("critical", true)
 
                                 StatusLine("Охорона", snapshot.mode.name)
                                 StatusLine("Система", snapshot.health.name)
-                                StatusLine("Зв’язок", if (online) snapshot.transport.name else "OFFLINE")
                                 StatusLine("Тривога", if (alarmActive) "АКТИВНА" else "немає")
                                 StatusLine("Проблемні зони", "${problemZones.size} / ${snapshot.zones.size}")
                                 if (snapshot.pressures.isNotEmpty()) {
-                                    StatusLine("Тиски", if (abnormalPressures == 0) "норма (${snapshot.pressures.size})" else "проблем: $abnormalPressures")
+                                    StatusLine(
+                                        "Тиски",
+                                        if (abnormalPressures == 0) "норма (${snapshot.pressures.size})" else "проблем: $abnormalPressures",
+                                    )
                                 }
                                 if (snapshot.temperatures.isNotEmpty()) {
                                     val primary = snapshot.temperatures.first()
-                                    StatusLine("Температура", "%.1f °C%s".format(primary.celsius, if (abnormalTemperatures > 0) " · проблем: $abnormalTemperatures" else ""))
+                                    StatusLine(
+                                        "Температура",
+                                        "%.1f °C%s".format(
+                                            primary.celsius,
+                                            if (abnormalTemperatures > 0) " · проблем: $abnormalTemperatures" else "",
+                                        ),
+                                    )
                                 }
                                 if (snapshot.powerChannels.isNotEmpty()) {
                                     val primary = snapshot.powerChannels.first()
-                                    StatusLine("Живлення", "%.2f V · %.2f A · %.1f W".format(primary.voltage, primary.current, primary.power))
-                                    if (abnormalPower > 0) StatusLine("Живлення стан", "проблем: $abnormalPower")
+                                    StatusLine(
+                                        "Живлення",
+                                        "%.2f V · %.2f A · %.1f W".format(
+                                            primary.voltage,
+                                            primary.current,
+                                            primary.power,
+                                        ),
+                                    )
+                                    if (abnormalPower > 0) {
+                                        StatusLine("Живлення стан", "проблем: $abnormalPower")
+                                    }
                                 }
                                 if (problemZones.isNotEmpty()) {
                                     Text(
-                                        "Зони: " + problemZones.take(3).joinToString { it.name } + if (problemZones.size > 3) "…" else "",
+                                        "Зони: " + problemZones.take(3).joinToString { it.name } +
+                                            if (problemZones.size > 3) "…" else "",
                                         color = MaterialTheme.colorScheme.error,
                                         style = MaterialTheme.typography.bodySmall,
                                     )
                                 }
+                            } else {
+                                Text(
+                                    if (online) "Контролер доступний" else "Контролер зараз недоступний",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
                             }
 
                             OutlinedButton(
@@ -270,30 +315,32 @@ fun DeviceListScreen(
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Перейменувати") }
-                            Button(onClick = { onOpenDevice(device) }, modifier = Modifier.fillMaxWidth()) { Text("Відкрити") }
+                            OutlinedButton(
+                                onClick = { propertiesDevice = device },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Властивості") }
+                            Button(
+                                onClick = { onOpenDevice(device) },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Відкрити") }
                             OutlinedButton(
                                 onClick = { deleteDevice = device },
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Видалити зі списку", color = MaterialTheme.colorScheme.error) }
-                            Text("Подвійне торкання також відкриває повний моніторинг", style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                "Подвійне торкання також відкриває повний моніторинг",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                         } else {
-                            Text("Торкніться для короткого стану · двічі для моніторингу", style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                "Торкніться для короткого стану · двічі для моніторингу",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                         }
                     }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun LinkIndicator(label: String, color: Color) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("●", color = color, style = MaterialTheme.typography.titleMedium)
-        Text(label, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
     }
 }
 
