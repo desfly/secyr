@@ -107,7 +107,7 @@ void test_build0054() {
         TEST_CHECK(unverified_backend.levels.count(channel) == 1U);
         TEST_CHECK(!unverified_backend.levels[channel]);
     }
-    TEST_CHECK(unverified_runtime.set_maintenance_mode(true));
+    TEST_CHECK(unverified_runtime.set_maintenance_mode(true, model));
     bench_delay_seen = 0;
     TEST_CHECK(!unverified_runtime.bench_pulse(
         hg::PhysicalOutputChannel::Siren, 100, &fake_bench_delay));
@@ -123,7 +123,7 @@ void test_build0054() {
     FakeBackend bench_backend;
     hg::PhysicalOutputRuntime bench_runtime;
     TEST_CHECK(bench_runtime.initialize(bench_backend, hardware, before_dry_run, blocked));
-    TEST_CHECK(bench_runtime.set_maintenance_mode(true));
+    TEST_CHECK(bench_runtime.set_maintenance_mode(true, model));
     TEST_CHECK(!bench_runtime.bench_pulse(
         hg::PhysicalOutputChannel::Siren, 100, &fake_bench_delay));
 
@@ -204,20 +204,34 @@ void test_build0054() {
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::HotValveOpen)]);
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::HotValveClose)]);
 
-    // Maintenance forces normal outputs OFF and blocks the supervisor. Leaving
-    // it does not re-run already consumed command revisions.
-    TEST_CHECK(model.set_output_active(1, true, 101));
-    TEST_CHECK(runtime.synchronize(model, 101));
-    TEST_CHECK(backend.levels[ch(hg::PhysicalOutputChannel::Siren)]);
-    TEST_CHECK(runtime.set_maintenance_mode(true));
-    TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::Siren)]);
+    // A valve command can arrive immediately before the 20 ms supervisor cycle.
+    // Entering Maintenance before synchronize() must consume that revision while
+    // forcing OFF, so it cannot execute when Maintenance is later exited.
+    TEST_CHECK(model.set_output_active(2, true, 101));
+    TEST_CHECK(runtime.set_maintenance_mode(true, model));
+    TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveOpen)]);
+    TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveClose)]);
+    TEST_CHECK(runtime.set_maintenance_mode(false, model));
     TEST_CHECK(runtime.synchronize(model, 102));
-    TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::Siren)]);
-    TEST_CHECK(runtime.set_maintenance_mode(false));
+    TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveOpen)]);
+    TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveClose)]);
+    TEST_CHECK(runtime.state().cold_valve.direction == hg::ValveMotionDirection::Stopped);
+
+    // Maintenance also consumes commands written while service mode is active.
+    // Existing consumed siren revisions must not wake up either.
+    TEST_CHECK(model.set_output_active(1, true, 103));
     TEST_CHECK(runtime.synchronize(model, 103));
+    TEST_CHECK(backend.levels[ch(hg::PhysicalOutputChannel::Siren)]);
+    TEST_CHECK(runtime.set_maintenance_mode(true, model));
+    TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::Siren)]);
+    TEST_CHECK(model.set_output_active(1, false, 104));
+    TEST_CHECK(runtime.synchronize(model, 104));
+    TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::Siren)]);
+    TEST_CHECK(runtime.set_maintenance_mode(false, model));
+    TEST_CHECK(runtime.synchronize(model, 105));
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::Siren)]);
 
-    // Explicit OPEN starts motion.
+    // A new explicit command revision after Maintenance is allowed normally.
     TEST_CHECK(model.set_output_active(2, true, 110));
     TEST_CHECK(runtime.synchronize(model, 110));
     TEST_CHECK(backend.levels[ch(hg::PhysicalOutputChannel::ColdValveOpen)]);
