@@ -23,6 +23,20 @@ object DeviceIdentity {
         }.getOrDefault("")
     }
 
+    fun isForbiddenFriendlyName(value: String, deviceId: String = "", baseUrl: String = ""): Boolean {
+        val clean = value.trim()
+        if (clean.isBlank()) return true
+        if (clean.equals("HomeGuard", ignoreCase = true)) return true
+        if (clean.equals("HomeGuard-S3", ignoreCase = true)) return true
+        if (deviceId.isNotBlank() && clean.equals(deviceId.trim(), ignoreCase = true)) return true
+
+        val endpoint = baseUrl.trim().trimEnd('/')
+        if (endpoint.isNotBlank() && clean.equals(endpoint, ignoreCase = true)) return true
+        val host = endpointHost(endpoint)
+        if (host.isNotBlank() && clean.equals(host, ignoreCase = true)) return true
+        return false
+    }
+
     fun samePhysicalDevice(
         firstId: String,
         firstUrl: String,
