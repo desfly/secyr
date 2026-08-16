@@ -31,6 +31,7 @@ esp_err_t AccessNvsStore::load(AccessControl& access) const {
 
 esp_err_t AccessNvsStore::save(const AccessControl& access) const {
     const auto started_us = esp_timer_get_time();
+    (void)started_us;  // ESP_LOG* is a no-op in host mocks; keep -Werror clean there.
     ESP_LOGI(log_tag, "Access NVS save begin users=%u", static_cast<unsigned>(access.user_count()));
 
     nvs_handle_t handle{};
