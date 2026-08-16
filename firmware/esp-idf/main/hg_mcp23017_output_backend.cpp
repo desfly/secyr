@@ -95,4 +95,12 @@ bool Mcp23017OutputBackend::write_output(int channel, bool level)
     return commit(interlocked_value(shadow_, channel, level));
 }
 
+bool Mcp23017OutputBackend::read_inputs(std::uint8_t* value)
+{
+    if (value == nullptr || expander_ == nullptr || !expander_->ready()) {
+        return false;
+    }
+    return expander_->read_inputs(value) == ESP_OK;
+}
+
 }  // namespace homeguard::idf
