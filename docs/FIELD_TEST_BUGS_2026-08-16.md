@@ -4,13 +4,26 @@ Source baseline: Build-877 / PR #47 head before hardening.
 
 These findings are cemented. A later revision must not regress any item that is fixed here.
 
+## Historical control point: LAN/Android discovery
+
+The 2026-08-15 field history contains a confirmed successful Android automatic local-Wi-Fi discovery immediately before the later Build-877 work. The matching green CI control point is **Run 872**, commit **36db0bd51654eaf1229b840f991c8edf172f16bb**.
+
+At that successful control point the ESP was already restoring persisted state across firmware revisions: the access user was restored from NVS and the device automatically rejoined the previously configured Wi-Fi network. Therefore:
+
+- successful LAN discovery did **not** require a clean Wi-Fi setup;
+- persisted Wi-Fi credentials across ordinary firmware flashes are expected unless NVS is explicitly erased;
+- Wi-Fi scanning was **not performed during the 2026-08-16 failure observation** and must not be cited as the cause of that failure;
+- changes that make scan non-destructive are retained as preventive hardening, not as the diagnosed root cause of the 2026-08-16 Wi-Fi dropout.
+
 ## 1. Wi-Fi recovery after disconnect — P0
 
 **Observed:** STA can drop and remain unreachable after the recovery AP has already been retired.
 
-**Root cause:** no `WIFI_EVENT_STA_DISCONNECTED` reconnect state machine; `/api/v1/network/status` had a side effect that changed APSTA to STA; Wi-Fi scan intentionally disconnected the active STA.
+**Root cause confirmed in source:** no `WIFI_EVENT_STA_DISCONNECTED` reconnect state machine; recovery AP retirement was coupled to normal HTTP/status flow instead of Wi-Fi/IP events.
 
-**Required behavior:** automatically reconnect after a real STA loss, restore the recovery AP while disconnected, retire it only after `IP_EVENT_STA_GOT_IP`, and never disconnect an established STA just to scan.
+**Not a root cause of today's observation:** Wi-Fi scan. No scan was performed in the relevant field sequence.
+
+**Required behavior:** automatically reconnect after a real STA loss, restore the recovery AP while disconnected, and retire it only after `IP_EVENT_STA_GOT_IP`. Wi-Fi scan must also remain non-destructive as a separate hardening rule.
 
 ## 2. W5500 failed-init resource leak — P0
 
@@ -99,7 +112,10 @@ The next firmware candidate must demonstrate all of the following in one field r
 
 - stable Wi-Fi reconnect after router/AP interruption;
 - recovery AP returns during STA loss and retires again only after LAN IP is restored;
-- network scan does not deliberately disconnect STA;
+- ordinary firmware update preserves previously stored Wi-Fi credentials;
+- a deliberate clean-state reset erases them;
+- Android/LAN discovery still works at least as well as the confirmed Run-872 control point;
+- network scan, when explicitly tested later, does not deliberately disconnect STA;
 - no GPIO ISR-service error;
 - no repeated W5500 commands after W5500 init/start failure;
 - no per-second INA226 error flood when INA226 is absent;
