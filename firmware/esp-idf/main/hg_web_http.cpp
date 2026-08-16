@@ -158,6 +158,7 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
   const network = document.getElementById("networkPage");
   const system = document.getElementById("system");
   let lastSidebarLink = document.querySelector(".sidebar nav a.active") || null;
+  let navRepairQueued = false;
   let bootstrapProbeInFlight = false;
   let bootstrapAvailable = null;
 
@@ -202,6 +203,22 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
 
     links.forEach(link => link.classList.toggle("active", link === preferred));
     lastSidebarLink = preferred;
+  }
+
+  function installNavMutationGuard() {
+    const nav = document.querySelector(".sidebar nav");
+    if (!nav || nav.dataset.hgNavMutationGuard === "1") return;
+    nav.dataset.hgNavMutationGuard = "1";
+
+    const observer = new MutationObserver(() => {
+      if (navRepairQueued) return;
+      navRepairQueued = true;
+      queueMicrotask(() => {
+        navRepairQueued = false;
+        enforceSingleActiveNav();
+      });
+    });
+    observer.observe(nav, { subtree: true, attributes: true, attributeFilter: ["class"] });
   }
 
   function ensureFirmwareMobileNavigation() {
@@ -446,6 +463,7 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
   function enforceAcceptanceUi() {
     applyEmbeddedView();
     ensureFirmwareMobileNavigation();
+    installNavMutationGuard();
     ensureFactoryResetUi();
     ensureSecretToggles();
     syncBootstrapAvailability();
