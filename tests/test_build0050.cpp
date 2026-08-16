@@ -27,6 +27,10 @@ hg::CommissioningPersistentState verified_commissioning() {
     s.successful_dry_runs = 1;
     s.successful_actuator_tests = 1;
     s.last_verified_at_ms = 1000;
+    s.valve_limit_polarity_verified = true;
+    s.valve_limits_active_low = true;
+    s.cold_valve_travel_timeout_ms = 12000;
+    s.hot_valve_travel_timeout_ms = 13000;
     return s;
 }
 
@@ -50,6 +54,13 @@ void test_build0050() {
     CHECK(actuator_required.commissioning_record_valid);
     CHECK(!actuator_required.boot.outputs_allowed());
     CHECK(actuator_required.boot.status == hg::BootReadinessStatus::BlockedActuatorTestRequired);
+
+    auto valve_unverified = commissioning;
+    valve_unverified.valve_limit_polarity_verified = false;
+    const auto valve_blocked = hg::make_service_readiness_snapshot(&hw, &valve_unverified);
+    CHECK(valve_blocked.commissioning_record_present);
+    CHECK(!valve_blocked.commissioning_record_valid);
+    CHECK(!valve_blocked.boot.outputs_allowed());
 
     const auto missing_hw = hg::make_service_readiness_snapshot(nullptr, &commissioning);
     CHECK(!missing_hw.boot.outputs_allowed());
