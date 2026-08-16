@@ -35,6 +35,11 @@ public:
     std::map<int, bool> levels;
 };
 
+std::uint32_t bench_delay_seen{};
+void fake_bench_delay(std::uint32_t duration_ms) {
+    bench_delay_seen = duration_ms;
+}
+
 hg::HardwareVerificationRecord verified_hardware() {
     hg::HardwareVerificationRecord record{};
     record.pins.i2c_sda = 4;
@@ -84,121 +89,137 @@ void test_build0054() {
     hg::BootReadinessReport ready{};
     ready.status = hg::BootReadinessStatus::ReadyForPhysicalOutputs;
 
-    // A fresh/uncommissioned controller may not energize outputs, but its OFF
-    // path must still be usable by Factory Reset/service invalidation. All MCP
-    // channels are configured OFF before the hardware-verification gate.
+    // Fresh/unverified hardware is still a successfully initialized OFF-only
+    // runtime. This is what makes Factory Reset and commissioning bench pulses
+    // usable without opening the normal actuator gate.
     FakeBackend unverified_backend;
     hg::PhysicalOutputRuntime unverified_runtime;
     hg::HardwareVerificationRecord missing_hardware{};
-    TEST_CHECK(!unverified_runtime.initialize(
+    TEST_CHECK(unverified_runtime.initialize(
         unverified_backend, missing_hardware, commissioning, blocked));
     TEST_CHECK(unverified_runtime.state().status == hg::PhysicalOutputStatus::InvalidHardware);
     for (int channel = 0; channel < 8; ++channel) {
         TEST_CHECK(unverified_backend.levels.count(channel) == 1U);
         TEST_CHECK(!unverified_backend.levels[channel]);
     }
-    TEST_CHECK(unverified_runtime.lockout_fail_closed());
-    TEST_CHECK(unverified_runtime.state().safety_fault_latched);
+
+    // Bench pulse is impossible outside maintenance, then works pre-verification
+    // with the hard 1-second ceiling and returns to all-OFF.
+    bench_delay_seen = 0;
+    TEST_CHECK(!unverified_runtime.bench_pulse(
+        hg::PhysicalOutputChannel::Siren, 100, &fake_bench_delay));
+    TEST_CHECK(unverified_runtime.set_maintenance_mode(true));
+    TEST_CHECK(unverified_runtime.state().maintenance_mode);
+    TEST_CHECK(unverified_runtime.bench_pulse(
+        hg::PhysicalOutputChannel::Siren, 100, &fake_bench_delay));
+    TEST_CHECK(bench_delay_seen == 100U);
+    TEST_CHECK(!unverified_runtime.bench_pulse(
+        hg::PhysicalOutputChannel::Siren,
+        hg::PhysicalOutputRuntime::kMaxBenchPulseMs + 1U,
+        &fake_bench_delay));
     for (int channel = 0; channel < 8; ++channel) {
         TEST_CHECK(!unverified_backend.levels[channel]);
     }
+    TEST_CHECK(unverified_runtime.lockout_fail_closed());
+    TEST_CHECK(unverified_runtime.state().safety_fault_latched);
 
     FakeBackend backend;
     hg::PhysicalOutputRuntime runtime;
     TEST_CHECK(runtime.initialize(backend, hardware, commissioning, blocked));
     TEST_CHECK(!runtime.state().outputs_enabled);
+    for (int channel = 0; channel < 8; ++channel) TEST_CHECK(!backend.levels[channel]);
 
-    for (int channel = 0; channel < 8; ++channel) {
-        TEST_CHECK(!backend.levels[channel]);
-    }
-
-    // Becoming ready without a valve command is STOP, not implicit CLOSE.
-    TEST_CHECK(runtime.synchronize(model, ready, 100));
+    // Dynamic commissioning/readiness update enables normal supervision without
+    // reboot; all physical outputs remain OFF until a fresh command revision.
+    TEST_CHECK(runtime.update_control_state(hardware, commissioning, ready));
+    TEST_CHECK(runtime.state().status == hg::PhysicalOutputStatus::Ready);
+    TEST_CHECK(runtime.synchronize(model, 100));
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveOpen)]);
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveClose)]);
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::HotValveOpen)]);
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::HotValveClose)]);
 
+    // Maintenance forces normal outputs OFF and blocks the supervisor. Leaving
+    // it does not re-run already consumed command revisions.
+    TEST_CHECK(model.set_output_active(1, true, 101));
+    TEST_CHECK(runtime.synchronize(model, 101));
+    TEST_CHECK(backend.levels[ch(hg::PhysicalOutputChannel::Siren)]);
+    TEST_CHECK(runtime.set_maintenance_mode(true));
+    TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::Siren)]);
+    TEST_CHECK(runtime.synchronize(model, 102));
+    TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::Siren)]);
+    TEST_CHECK(runtime.set_maintenance_mode(false));
+    TEST_CHECK(runtime.synchronize(model, 103));
+    TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::Siren)]);
+
     // Explicit OPEN starts motion.
     TEST_CHECK(model.set_output_active(2, true, 110));
-    TEST_CHECK(runtime.synchronize(model, ready, 110));
+    TEST_CHECK(runtime.synchronize(model, 110));
     TEST_CHECK(backend.levels[ch(hg::PhysicalOutputChannel::ColdValveOpen)]);
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveClose)]);
     TEST_CHECK(runtime.state().cold_valve.direction == hg::ValveMotionDirection::Opening);
 
-    // Target end-switch immediately stops both directions.
     backend.set_limit(hg::PhysicalInputChannel::ColdValveOpenLimit, true);
-    TEST_CHECK(runtime.synchronize(model, ready, 150));
+    TEST_CHECK(runtime.synchronize(model, 150));
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveOpen)]);
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveClose)]);
     TEST_CHECK(runtime.state().cold_valve.direction == hg::ValveMotionDirection::Stopped);
     const auto limit_stops = runtime.state().limit_stops;
 
-    // Same command revision cannot re-start after the end-switch stop.
-    TEST_CHECK(runtime.synchronize(model, ready, 200));
+    TEST_CHECK(runtime.synchronize(model, 200));
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveOpen)]);
     TEST_CHECK(runtime.state().limit_stops == limit_stops);
 
-    // Repeated explicit OPEN is a new revision but the active target switch
-    // consumes it without energizing the motor.
     TEST_CHECK(model.set_output_active(2, true, 210));
-    TEST_CHECK(runtime.synchronize(model, ready, 210));
+    TEST_CHECK(runtime.synchronize(model, 210));
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveOpen)]);
 
-    // Clear OPEN limit and issue CLOSE: break-before-make selects CLOSE only.
     backend.set_limit(hg::PhysicalInputChannel::ColdValveOpenLimit, false);
     TEST_CHECK(model.set_output_active(2, false, 220));
-    TEST_CHECK(runtime.synchronize(model, ready, 220));
+    TEST_CHECK(runtime.synchronize(model, 220));
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveOpen)]);
     TEST_CHECK(backend.levels[ch(hg::PhysicalOutputChannel::ColdValveClose)]);
     TEST_CHECK(runtime.state().cold_valve.direction == hg::ValveMotionDirection::Closing);
 
     backend.set_limit(hg::PhysicalInputChannel::ColdValveClosedLimit, true);
-    TEST_CHECK(runtime.synchronize(model, ready, 250));
+    TEST_CHECK(runtime.synchronize(model, 250));
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveOpen)]);
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveClose)]);
 
-    // Timeout is a latched safety fault and forces all GPA outputs OFF.
     backend.set_limit(hg::PhysicalInputChannel::ColdValveClosedLimit, false);
     TEST_CHECK(model.set_output_active(3, true, 1000));
-    TEST_CHECK(runtime.synchronize(model, ready, 1000));
+    TEST_CHECK(runtime.synchronize(model, 1000));
     TEST_CHECK(backend.levels[ch(hg::PhysicalOutputChannel::HotValveOpen)]);
-    TEST_CHECK(!runtime.synchronize(model, ready, 2200));
+    TEST_CHECK(!runtime.synchronize(model, 2200));
     const auto timeout_state = runtime.state();
     TEST_CHECK(timeout_state.status == hg::PhysicalOutputStatus::ValveTimeout);
     TEST_CHECK(timeout_state.safety_fault_latched);
     TEST_CHECK(timeout_state.valve_timeouts == 1U);
-    for (int channel = 0; channel < 8; ++channel) {
-        TEST_CHECK(!backend.levels[channel]);
-    }
+    for (int channel = 0; channel < 8; ++channel) TEST_CHECK(!backend.levels[channel]);
 
-    // Contradictory OPEN+CLOSED end-switches latch valve_safety_fault.
     FakeBackend conflicting_backend;
     conflicting_backend.set_limit(hg::PhysicalInputChannel::ColdValveOpenLimit, true);
     conflicting_backend.set_limit(hg::PhysicalInputChannel::ColdValveClosedLimit, true);
     hg::PhysicalOutputRuntime conflicting;
     TEST_CHECK(conflicting.initialize(conflicting_backend, hardware, commissioning, ready));
-    TEST_CHECK(!conflicting.synchronize(model, ready, 3000));
+    TEST_CHECK(!conflicting.synchronize(model, 3000));
     TEST_CHECK(conflicting.state().status == hg::PhysicalOutputStatus::ValveSafetyFault);
     TEST_CHECK(conflicting.state().safety_fault_latched);
 
-    // Loss of the supervised input path is fail-closed too.
     FakeBackend read_failure_backend;
     hg::PhysicalOutputRuntime read_failure;
     TEST_CHECK(read_failure.initialize(read_failure_backend, hardware, commissioning, ready));
     read_failure_backend.fail_reads = true;
-    TEST_CHECK(!read_failure.synchronize(model, ready, 4000));
+    TEST_CHECK(!read_failure.synchronize(model, 4000));
     TEST_CHECK(read_failure.state().status == hg::PhysicalOutputStatus::BackendError);
     TEST_CHECK(read_failure.state().safety_fault_latched);
 
-    // Readiness loss forces STOP/OFF even without an actuator fault.
     FakeBackend blocked_backend;
     hg::PhysicalOutputRuntime blocked_runtime;
     TEST_CHECK(blocked_runtime.initialize(blocked_backend, hardware, commissioning, ready));
-    TEST_CHECK(blocked_runtime.synchronize(model, blocked, 5000));
-    for (int channel = 0; channel < 8; ++channel) {
-        TEST_CHECK(!blocked_backend.levels[channel]);
-    }
+    TEST_CHECK(blocked_runtime.update_control_state(hardware, commissioning, blocked));
+    TEST_CHECK(blocked_runtime.synchronize(model, 5000));
+    for (int channel = 0; channel < 8; ++channel) TEST_CHECK(!blocked_backend.levels[channel]);
     TEST_CHECK(!blocked_runtime.state().outputs_enabled);
 
     FakeBackend failing;
