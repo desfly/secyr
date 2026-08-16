@@ -1,8 +1,11 @@
 #include "test_framework.hpp"
 #include "homeguard/hardware_profile.hpp"
 #include "homeguard/hardware_capabilities.hpp"
+#include "homeguard/hardware_runtime.hpp"
 #include "homeguard/service_button.hpp"
 #include "homeguard/startup_flow.hpp"
+
+#include <string>
 
 void test_build0009() {
     CHECK(hg::HardwareProfile::board == "HW-678 V0.0.0");
@@ -68,6 +71,18 @@ void test_build0009() {
     CHECK(output_capabilities.safe_for_unverified_board());
     CHECK(hg::to_string(hg::CapabilityState::Unavailable) == "unavailable");
     CHECK(hg::to_string(hg::CapabilityState::Configured) == "configured");
+
+    // Bootstrap health is explicit and machine-readable. Optional hardware may
+    // degrade the controller without being misreported as a total failure.
+    homeguard::HardwareRuntimeStatus runtime{};
+    CHECK(runtime.overall == homeguard::HardwareBootstrapState::NotInitialized);
+    runtime.overall = homeguard::HardwareBootstrapState::Degraded;
+    runtime.i2c.state = homeguard::HardwareModuleState::Ready;
+    runtime.micro_sd.state = homeguard::HardwareModuleState::Missing;
+    const std::string degraded_json = homeguard::hardware_runtime_json(runtime);
+    CHECK(degraded_json.find("\"overall\":\"degraded\"") != std::string::npos);
+    CHECK(degraded_json.find("\"micro_sd\":{\"state\":\"missing\"") != std::string::npos);
+    CHECK(std::string{homeguard::to_string(homeguard::HardwareBootstrapState::Failed)} == "failed");
 
     hg::ServiceButton button({40, 3000, 10000});
     CHECK(button.update(true, 0) == hg::ServiceButtonEvent::None);
