@@ -14,8 +14,13 @@ HardwareModuleStatus HardwareBootstrap::module_status(
             0,
         };
     }
+
+    const auto state =
+        (error == ESP_ERR_NOT_FOUND || error == ESP_ERR_TIMEOUT || error == ESP_ERR_INVALID_RESPONSE)
+            ? HardwareModuleState::Missing
+            : HardwareModuleState::Fault;
     return {
-        HardwareModuleState::Missing,
+        state,
         failure_detail,
         1,
     };
@@ -84,7 +89,7 @@ esp_err_t HardwareBootstrap::initialize()
     status_.micro_sd = module_status(
         sd_error,
         "microSD mounted at /sdcard",
-        "microSD mount failed");
+        "microSD not available");
 
     const auto eth_error =
         w5500_.initialize();
@@ -97,12 +102,13 @@ esp_err_t HardwareBootstrap::initialize()
         const auto start_error = w5500_.start();
         if (start_error != ESP_OK) {
             status_.w5500 = {
-                HardwareModuleState::Degraded,
-                "W5500 initialized but start failed",
+                HardwareModuleState::Fault,
+                "W5500 initialized but start failed; driver rolled back",
                 1,
             };
         }
     }
+
     const auto one_wire_error =
         one_wire_.initialize();
     status_.one_wire = module_status(
@@ -136,6 +142,29 @@ const HardwareRuntimeStatus&
 HardwareBootstrap::status() const noexcept
 {
     return status_;
+}
+
+std::uint32_t HardwareBootstrap::unavailable_count() const noexcept
+{
+    const HardwareModuleStatus* modules[] = {
+        &status_.ads1115_zones,
+        &status_.ads1115_telemetry,
+        &status_.mcp23017,
+        &status_.ina226,
+        &status_.ds3231,
+        &status_.w5500,
+        &status_.micro_sd,
+        &status_.one_wire,
+        &status_.rs485,
+    };
+
+    std::uint32_t count = 0;
+    for (const auto* module : modules) {
+        if (module->state != HardwareModuleState::Ready) {
+            ++count;
+        }
+    }
+    return count;
 }
 
 Ads1115& HardwareBootstrap::zone_adc() noexcept
