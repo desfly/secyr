@@ -13,13 +13,21 @@ struct CommissioningPersistentState {
 
     std::uint32_t schema_version{kSchemaVersion};
     // Historical field name retained in the persisted structure for compact
-    // compatibility of source code. In schema 2 it means the fixed HW-678
-    // hardware/output map (including MCP23017 allocation) was verified.
+    // source compatibility. In schema 2 it means the fixed HW-678 hardware and
+    // MCP23017 output allocation were verified.
     bool gpio_map_verified{};
     bool active_polarity_verified{};
     std::uint32_t successful_dry_runs{};
     std::uint32_t successful_actuator_tests{};
     std::uint64_t last_verified_at_ms{};
+
+    // Valve safety is measured during commissioning, never guessed by firmware.
+    // Zero timeout or unknown limit polarity keeps the physical output gate
+    // closed. Each valve keeps its own measured maximum travel timeout.
+    bool valve_limit_polarity_verified{};
+    bool valve_limits_active_low{};
+    std::uint32_t cold_valve_travel_timeout_ms{};
+    std::uint32_t hot_valve_travel_timeout_ms{};
 };
 
 enum class CommissioningStateValidation {
@@ -27,6 +35,7 @@ enum class CommissioningStateValidation {
     InvalidSchema,
     InvalidSequence,
     VerificationIncomplete,
+    ValveSafetyUnverified,
 };
 
 CommissioningStateValidation validate_commissioning_state(
