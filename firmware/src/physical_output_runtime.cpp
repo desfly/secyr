@@ -52,8 +52,6 @@ bool PhysicalOutputRuntime::initialize(
         return false;
     }
 
-    // HW-678 actuator outputs live on MCP23017 Port A. Configure every logical
-    // channel OFF before the readiness gate can ever expose physical control.
     for (const auto channel : kAllChannels) {
         if (!backend_->configure_output(channel_number(channel), false)) {
             ++state_.failures;
@@ -195,7 +193,6 @@ bool PhysicalOutputRuntime::process_valve_locked(
         return true;
     }
 
-    // A new explicit command cancels any in-progress direction first.
     if (motion.direction != ValveMotionDirection::Stopped &&
         !stop_valve_locked(motion, open_channel, close_channel, false)) {
         return latch_fault_locked(PhysicalOutputStatus::BackendError);
@@ -208,14 +205,10 @@ bool PhysicalOutputRuntime::process_valve_locked(
 
     const bool target_limit = output->active ? open_limit : close_limit;
     if (target_limit) {
-        // Already at the requested end position: consume this command without
-        // energizing the actuator. Both lines remain STOP/OFF.
         ++state_.limit_stops;
         return true;
     }
 
-    // Break-before-make in the core; MCP backend also atomically clears the
-    // opposite direction in the same OLAT byte.
     if (output->active) {
         if (!write_logical_locked(close_channel, false) ||
             !write_logical_locked(open_channel, true)) {
@@ -249,8 +242,6 @@ bool PhysicalOutputRuntime::lockout_fail_closed()
 {
     std::scoped_lock lock(mutex_);
     const bool ok = force_safe_locked();
-    // Latch first-class service lockout so the supervisor returns before it
-    // reads mutable readiness/commissioning state during destructive updates.
     state_.safety_fault_latched = true;
     state_.status = ok ? PhysicalOutputStatus::FailClosed : PhysicalOutputStatus::BackendError;
     return ok;
@@ -261,12 +252,19 @@ bool PhysicalOutputRuntime::synchronize(
     const BootReadinessReport& readiness,
     std::uint64_t now_ms)
 {
+    // Copy model commands before taking the actuator mutex. This prevents a
+    // physical->model lock chain and guarantees that MCP/I2C work never retains
+    // pointers into data concurrently modified by HTTP, MQTT or telemetry.
+    OutputRecord siren{};
+    OutputRecord cold_valve{};
+    OutputRecord hot_valve{};
+    const bool has_siren = model.output_snapshot(1, siren);
+    const bool has_cold_valve = model.output_snapshot(2, cold_valve);
+    const bool has_hot_valve = model.output_snapshot(3, hot_valve);
+
     std::scoped_lock lock(mutex_);
     if (backend_ == nullptr || commissioning_ == nullptr) return false;
 
-    // A latched hardware/service lockout is checked before any shared mutable
-    // readiness/commissioning data is read. This prevents destructive service
-    // operations from racing the 20 ms supervisor and re-applying stale commands.
     if (state_.safety_fault_latched) {
         return false;
     }
@@ -288,8 +286,6 @@ bool PhysicalOutputRuntime::synchronize(
         return latch_fault_locked(PhysicalOutputStatus::BackendError);
     }
 
-    // Both end switches active simultaneously is physically contradictory and
-    // must latch the whole actuator runtime fail-closed until service/reboot.
     if ((limits.cold_open && limits.cold_closed) ||
         (limits.hot_open && limits.hot_closed)) {
         return latch_fault_locked(PhysicalOutputStatus::ValveSafetyFault);
@@ -298,8 +294,7 @@ bool PhysicalOutputRuntime::synchronize(
     state_.outputs_enabled = true;
     state_.status = PhysicalOutputStatus::Ready;
 
-    const auto* siren = model.output(1);
-    const bool requested_siren = siren != nullptr && siren->active;
+    const bool requested_siren = has_siren && siren.active;
     if (!siren_known_ || requested_siren != siren_active_) {
         if (!write_logical_locked(PhysicalOutputChannel::Siren, requested_siren)) {
             return latch_fault_locked(PhysicalOutputStatus::BackendError);
@@ -314,7 +309,7 @@ bool PhysicalOutputRuntime::synchronize(
             PhysicalOutputChannel::ColdValveClose,
             limits.cold_open,
             limits.cold_closed,
-            model.output(2),
+            has_cold_valve ? &cold_valve : nullptr,
             commissioning_->cold_valve_travel_timeout_ms,
             now_ms)) {
         return false;
@@ -326,7 +321,7 @@ bool PhysicalOutputRuntime::synchronize(
             PhysicalOutputChannel::HotValveClose,
             limits.hot_open,
             limits.hot_closed,
-            model.output(3),
+            has_hot_valve ? &hot_valve : nullptr,
             commissioning_->hot_valve_travel_timeout_ms,
             now_ms)) {
         return false;
