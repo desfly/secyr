@@ -195,8 +195,8 @@ esp_err_t start_http_server()
     g_service_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_service_http.register_handlers(
         g_http_server, &g_commissioning_store, &g_hardware_verification,
-        &g_commissioning_state, &g_boot_readiness, &g_physical_outputs,
-        &g_system_bus, &g_control_state_mutex), kTag, "service routes");
+        &g_commissioning_state, &g_boot_readiness,
+        &g_physical_outputs, &g_system_bus, &g_control_state_mutex), kTag, "service routes");
     return g_build_http.register_handlers(g_http_server);
 }
 
@@ -284,7 +284,7 @@ extern "C" void app_main()
             ESP_LOGI(kTag, "Hardware bootstrap READY: all modules ready");
         } else {
             ESP_LOGW(kTag,
-                     "Hardware bootstrap DEGRADED: %lu optional module(s) unavailable/degraded",
+                     "Hardware bootstrap completed DEGRADED: %lu optional module(s) unavailable/degraded",
                      static_cast<unsigned long>(unavailable));
         }
         physical_runtime_ready = initialize_physical_outputs();
