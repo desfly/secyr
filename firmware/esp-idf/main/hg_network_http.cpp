@@ -1,5 +1,6 @@
 #include "hg_network_http.hpp"
 
+#include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
 #include "esp_wifi.h"
@@ -19,12 +20,12 @@
 namespace homeguard::idf {
 namespace {
 
+constexpr const char* kTag = "hg_network";
 constexpr std::uint32_t kCredentialsMagic = 0x48475746U; // HGWF
 constexpr char kNvsNamespace[] = "hg_wifi";
 constexpr char kNvsKey[] = "credentials";
 constexpr std::size_t kMaxScanRecords = 20;
 constexpr TickType_t kStaHandoverDelay = pdMS_TO_TICKS(400);
-constexpr TickType_t kSetupApRetireDelay = pdMS_TO_TICKS(120);
 
 struct CredentialsRecord {
     std::uint32_t magic{};
@@ -124,6 +125,26 @@ esp_err_t NetworkHttp::begin()
     auto error = esp_wifi_init(&init);
     if (error != ESP_OK) return error;
 
+    error = esp_event_handler_register(
+        WIFI_EVENT,
+        ESP_EVENT_ANY_ID,
+        &NetworkHttp::wifi_event_handler,
+        this);
+    if (error != ESP_OK) return error;
+
+    error = esp_event_handler_register(
+        IP_EVENT,
+        IP_EVENT_STA_GOT_IP,
+        &NetworkHttp::ip_event_handler,
+        this);
+    if (error != ESP_OK) {
+        (void)esp_event_handler_unregister(
+            WIFI_EVENT,
+            ESP_EVENT_ANY_ID,
+            &NetworkHttp::wifi_event_handler);
+        return error;
+    }
+
     error = esp_wifi_set_mode(WIFI_MODE_APSTA);
     if (error != ESP_OK) return error;
 
@@ -154,6 +175,7 @@ esp_err_t NetworkHttp::begin()
     std::string ssid;
     std::string password;
     if (load_credentials(ssid, password)) {
+        sta_credentials_configured_ = true;
         (void)apply_sta(ssid, password, false);
         std::fill(password.begin(), password.end(), '\0');
     }
@@ -172,8 +194,8 @@ esp_err_t NetworkHttp::register_handlers(httpd_handle_t server)
     };
 
     for (const auto& route : routes) {
-        const auto error = httpd_register_uri_handler(server, &route);
-        if (error != ESP_OK) return error;
+        const auto route_error = httpd_register_uri_handler(server, &route);
+        if (route_error != ESP_OK) return route_error;
     }
     return ESP_OK;
 }
@@ -196,24 +218,71 @@ esp_err_t NetworkHttp::connect_post(httpd_req_t* request)
     return self == nullptr ? ESP_FAIL : self->handle_connect(request);
 }
 
-esp_err_t NetworkHttp::handle_status(httpd_req_t* request)
+void NetworkHttp::wifi_event_handler(
+    void* context,
+    esp_event_base_t,
+    std::int32_t id,
+    void* data)
 {
-    const auto response_error = send_json(request, status_json());
-    if (response_error != ESP_OK) return response_error;
+    auto* self = static_cast<NetworkHttp*>(context);
+    if (self != nullptr) {
+        self->handle_wifi_event(id, data);
+    }
+}
 
-    // The setup AP exists only as a commissioning/recovery path. Once the STA
-    // has a real LAN address, retire 192.168.4.1 after the status response has
-    // been delivered so the controller has one normal Web UI endpoint.
-    wifi_ap_record_t ap_info{};
-    esp_netif_ip_info_t ip_info{};
-    if (sta_netif_ != nullptr && esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK &&
-        esp_netif_get_ip_info(static_cast<esp_netif_t*>(sta_netif_), &ip_info) == ESP_OK &&
-        ip_info.ip.addr != 0U) {
-        vTaskDelay(kSetupApRetireDelay);
-        (void)esp_wifi_set_mode(WIFI_MODE_STA);
+void NetworkHttp::ip_event_handler(
+    void* context,
+    esp_event_base_t,
+    std::int32_t id,
+    void* data)
+{
+    auto* self = static_cast<NetworkHttp*>(context);
+    if (self != nullptr) {
+        self->handle_ip_event(id, data);
+    }
+}
+
+void NetworkHttp::handle_wifi_event(std::int32_t id, void*)
+{
+    if (id != WIFI_EVENT_STA_DISCONNECTED || !sta_credentials_configured_) {
+        return;
     }
 
-    return ESP_OK;
+    ++reconnect_count_;
+    (void)esp_wifi_set_mode(WIFI_MODE_APSTA);
+    const auto error = esp_wifi_connect();
+    if (reconnect_count_ == 1U || (reconnect_count_ % 10U) == 0U) {
+        if (error == ESP_OK) {
+            ESP_LOGW(kTag,
+                     "STA disconnected; reconnect attempt %lu, recovery AP restored",
+                     static_cast<unsigned long>(reconnect_count_));
+        } else {
+            ESP_LOGW(kTag,
+                     "STA reconnect attempt %lu failed to start: %s",
+                     static_cast<unsigned long>(reconnect_count_),
+                     esp_err_to_name(error));
+        }
+    }
+}
+
+void NetworkHttp::handle_ip_event(std::int32_t id, void*)
+{
+    if (id != IP_EVENT_STA_GOT_IP) {
+        return;
+    }
+
+    reconnect_count_ = 0;
+    const auto error = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (error != ESP_OK) {
+        ESP_LOGW(kTag, "Unable to retire recovery AP after STA got IP: %s", esp_err_to_name(error));
+    } else {
+        ESP_LOGI(kTag, "STA got IP; recovery AP retired");
+    }
+}
+
+esp_err_t NetworkHttp::handle_status(httpd_req_t* request)
+{
+    return send_json(request, status_json());
 }
 
 esp_err_t NetworkHttp::handle_scan(httpd_req_t* request)
@@ -259,8 +328,6 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"invalid_credentials\"}");
     }
 
-    // Re-enable the setup AP while changing credentials. If the new network
-    // details are wrong the user still has the recovery path at 192.168.4.1.
     if (esp_wifi_set_mode(WIFI_MODE_APSTA) != ESP_OK) {
         std::fill(password.begin(), password.end(), '\0');
         httpd_resp_set_status(request, "503 Service Unavailable");
@@ -280,13 +347,18 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_connect_failed\"}");
     }
     std::fill(password.begin(), password.end(), '\0');
+    sta_credentials_configured_ = true;
+    reconnect_count_ = 0;
 
     const auto response_error = send_json(request,
         std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) + "\"}");
     if (response_error != ESP_OK) return response_error;
 
     vTaskDelay(kStaHandoverDelay);
-    (void)esp_wifi_disconnect();
+    wifi_ap_record_t current{};
+    if (esp_wifi_sta_get_ap_info(&current) == ESP_OK) {
+        return esp_wifi_disconnect();
+    }
     return esp_wifi_connect();
 }
 
@@ -302,10 +374,15 @@ bool NetworkHttp::apply_sta(const std::string& ssid, const std::string& password
     sta.sta.pmf_cfg.capable = true;
     sta.sta.pmf_cfg.required = false;
 
+    if (esp_wifi_set_mode(WIFI_MODE_APSTA) != ESP_OK) return false;
     if (esp_wifi_set_config(WIFI_IF_STA, &sta) != ESP_OK) return false;
     if (persist && !save_credentials(ssid, password)) return false;
 
-    (void)esp_wifi_disconnect();
+    sta_credentials_configured_ = true;
+    wifi_ap_record_t current{};
+    if (esp_wifi_sta_get_ap_info(&current) == ESP_OK) {
+        return esp_wifi_disconnect() == ESP_OK;
+    }
     return esp_wifi_connect() == ESP_OK;
 }
 
@@ -371,7 +448,8 @@ std::string NetworkHttp::status_json() const
     std::string out = std::string{"{\"ok\":true,\"state\":\""} + state +
         "\",\"ssid\":\"" + json_escape(ssid) +
         "\",\"ip\":\"" + json_escape(ip) +
-        "\",\"apSsid\":\"" + json_escape(ap_ssid_) + "\"";
+        "\",\"apSsid\":\"" + json_escape(ap_ssid_) +
+        "\",\"reconnectCount\":" + std::to_string(reconnect_count_);
     if (connected) out += ",\"rssi\":" + std::to_string(static_cast<int>(ap_info.rssi));
     out += '}';
     return out;
@@ -379,22 +457,13 @@ std::string NetworkHttp::status_json() const
 
 std::string NetworkHttp::scan_json() const
 {
-    wifi_ap_record_t current_ap{};
-    const bool sta_was_connected = esp_wifi_sta_get_ap_info(&current_ap) == ESP_OK;
-    if (sta_was_connected) {
-        (void)esp_wifi_disconnect();
-        vTaskDelay(pdMS_TO_TICKS(120));
-    }
-
     const auto start_error = esp_wifi_scan_start(nullptr, true);
     if (start_error != ESP_OK) {
-        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_start_failed\",\"networks\":[]}";
     }
 
     std::uint16_t count = 0;
     if (esp_wifi_scan_get_ap_num(&count) != ESP_OK) {
-        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_count_failed\",\"networks\":[]}";
     }
 
@@ -402,7 +471,6 @@ std::string NetworkHttp::scan_json() const
     std::array<wifi_ap_record_t, kMaxScanRecords> records{};
     std::uint16_t returned = count;
     if (returned != 0 && esp_wifi_scan_get_ap_records(&returned, records.data()) != ESP_OK) {
-        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_records_failed\",\"networks\":[]}";
     }
 
@@ -414,8 +482,6 @@ std::string NetworkHttp::scan_json() const
                std::to_string(static_cast<int>(records[i].rssi)) + "}";
     }
     out += "]}";
-
-    if (sta_was_connected) (void)esp_wifi_connect();
     return out;
 }
 
