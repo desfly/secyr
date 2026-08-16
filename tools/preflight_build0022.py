@@ -129,9 +129,23 @@ scan_start = network.find("std::string NetworkHttp::scan_json")
 if scan_start < 0 or "esp_wifi_disconnect" in network[scan_start:]:
     errors.append("field runtime contract regressed: Wi-Fi scan disconnects STA")
 wifi_event_start = network.find("void NetworkHttp::handle_wifi_event")
-wifi_event_end = network.find("void NetworkHttp::handle_ip_event", wifi_event_start)
+wifi_event_end = network.find("void NetworkHttp::clear_pending_credentials", wifi_event_start)
 if wifi_event_start < 0 or wifi_event_end < 0 or "esp_wifi_connect()" in network[wifi_event_start:wifi_event_end]:
     errors.append("field runtime contract regressed: Wi-Fi disconnect callback performs immediate reconnect")
+
+# Wi-Fi network switching is transactional: a candidate is staged in RAM, and the
+# last known-good NVS credentials are not replaced until got-IP proves that the
+# requested SSID is actually connected.
+require_token(network, "pending_credentials_ = true", "Wi-Fi candidate credential staging")
+require_token(network, "connected_ssid != pending_ssid_", "Wi-Fi got-IP SSID verification")
+require_token(network, "save_credentials(pending_ssid_, pending_password_)", "Wi-Fi got-IP NVS commit")
+require_token(network, "credentialsPending", "Wi-Fi pending status visibility")
+connect_start = network.find("esp_err_t NetworkHttp::handle_connect")
+connect_end = network.find("bool NetworkHttp::apply_sta", connect_start)
+if connect_start < 0 or connect_end < 0:
+    errors.append("field runtime contract regressed: Wi-Fi connect handler missing")
+elif "save_credentials(" in network[connect_start:connect_end]:
+    errors.append("field runtime contract regressed: Wi-Fi credentials persisted before got-IP")
 
 # 2 + 3: W5500 lifecycle and ISR ordering.
 for token, label in [
@@ -187,11 +201,15 @@ require_token(telemetry, "rediscovery_due", "1-Wire absent-device polling gate")
 for token, label in [
     ('/api/v1/service/factory-reset', "factory reset endpoint"),
     ('confirmation != "ERASE_ALL"', "factory reset explicit confirmation"),
+    ('"system.factory_reset"', "factory reset dedicated audit permission"),
     ("nvs_flash_erase()", "factory reset whole-NVS erase"),
     ("esp_restart()", "factory reset reboot"),
-    ('"factoryReset\\\":true', "factory reset response marker"),
+    ("factoryReset", "factory reset response marker"),
+    ("physical_outputs_->force_safe()", "destructive reset output fail-close"),
+    ("output_safe_failed", "destructive reset refuses unsafe erase"),
 ]:
     require_token(service, token, label)
+require_token(app_main, "&g_physical_outputs, &g_system_bus", "service reset wired to physical output runtime")
 
 # 10 + 12: clean-state and fail-closed rules are persistent project contracts.
 field_contract = ROOT / "docs" / "FIELD_TEST_BUGS_2026-08-16.md"
