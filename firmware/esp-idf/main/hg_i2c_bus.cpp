@@ -27,13 +27,29 @@ esp_err_t I2cBus::initialize()
     return i2c_new_master_bus(&config, &bus_);
 }
 
+esp_err_t I2cBus::probe(
+    std::uint8_t address,
+    int timeout_ms) const
+{
+    if (bus_ == nullptr || address > 0x7FU || timeout_ms < -1) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return i2c_master_probe(bus_, address, timeout_ms);
+}
+
 esp_err_t I2cBus::add_device(
     std::uint8_t address,
     std::uint32_t speed_hz,
     i2c_master_dev_handle_t* output)
 {
-    if (bus_ == nullptr || output == nullptr) {
+    if (bus_ == nullptr || output == nullptr || speed_hz == 0U) {
         return ESP_ERR_INVALID_STATE;
+    }
+
+    *output = nullptr;
+    const auto probe_error = probe(address);
+    if (probe_error != ESP_OK) {
+        return probe_error;
     }
 
     const i2c_device_config_t config{
@@ -47,6 +63,23 @@ esp_err_t I2cBus::add_device(
     };
 
     return i2c_master_bus_add_device(bus_, &config, output);
+}
+
+esp_err_t I2cBus::remove_device(
+    i2c_master_dev_handle_t* device)
+{
+    if (device == nullptr) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (*device == nullptr) {
+        return ESP_OK;
+    }
+
+    const auto error = i2c_master_bus_rm_device(*device);
+    if (error == ESP_OK) {
+        *device = nullptr;
+    }
+    return error;
 }
 
 i2c_master_bus_handle_t I2cBus::handle() const noexcept
