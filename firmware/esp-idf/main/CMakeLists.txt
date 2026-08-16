@@ -7,6 +7,8 @@ configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.css" "${CMAKE_CURRENT
 file(READ "${CMAKE_CURRENT_LIST_DIR}/../../../web/mobile-bruce-fix.css" HG_MOBILE_BRUCE_FIX_CSS)
 file(APPEND "${CMAKE_CURRENT_LIST_DIR}/web/app.css" "\n${HG_MOBILE_BRUCE_FIX_CSS}\n")
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.js" "${CMAKE_CURRENT_LIST_DIR}/web/app.js" COPYONLY)
+file(READ "${CMAKE_CURRENT_LIST_DIR}/../../../web/first-admin-hint.js" HG_FIRST_ADMIN_HINT_JS)
+file(APPEND "${CMAKE_CURRENT_LIST_DIR}/web/app.js" "\n${HG_FIRST_ADMIN_HINT_JS}\n")
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/access-session.js" "${CMAKE_CURRENT_LIST_DIR}/web/access-session.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/factory-reset.js" "${CMAKE_CURRENT_LIST_DIR}/web/factory-reset.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/bruce.jpg" "${CMAKE_CURRENT_LIST_DIR}/web/bruce.jpg" COPYONLY)
@@ -15,6 +17,7 @@ idf_component_register(
     SRCS
         "app_main.cpp"
         "hg_web_http.cpp"
+        "hg_web_png_compat.cpp"
         "hg_network_http.cpp"
         "hg_network_persistence.cpp"
         "hg_lan_http.cpp"
@@ -45,6 +48,7 @@ idf_component_register(
         "hg_access_http.cpp"
         "hg_commissioning_nvs.cpp"
         "hg_factory_reset.cpp"
+        "hg_factory_reset_indicator_wrap.cpp"
         "hg_reset_sequence.cpp"
         "hg_config_backup.cpp"
         "hg_config_transaction.cpp"
@@ -104,6 +108,15 @@ idf_component_register(
 )
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)
+
+# Runtime-only compatibility hooks.  They preserve the approved Bruce bytes
+# unchanged while serving its real PNG type in bounded chunks, and route every
+# FactoryResetManager erase call through the same five-second RGB indication.
+target_link_options(${COMPONENT_LIB} INTERFACE
+    "LINKER:--wrap=httpd_resp_set_type"
+    "LINKER:--wrap=httpd_resp_send"
+    "LINKER:--wrap=_ZNK9homeguard3idf19FactoryResetManager19erase_mutable_stateEv"
+)
 
 # The access KDF deliberately performs 4096 SHA-256 rounds. Build the C++
 # component with release optimization on ESP32-S3 so bootstrap/login cannot
