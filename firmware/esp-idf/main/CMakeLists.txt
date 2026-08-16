@@ -23,6 +23,7 @@ idf_component_register(
         "hg_ads1115.cpp"
         "hg_mcp23017.cpp"
         "hg_mcp23017_output_backend.cpp"
+        "hg_output_supervisor.cpp"
         "hg_ina226.cpp"
         "hg_ds3231.cpp"
         "hg_sd_storage.cpp"
