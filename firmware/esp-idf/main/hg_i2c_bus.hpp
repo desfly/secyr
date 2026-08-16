@@ -9,10 +9,15 @@ namespace homeguard::idf {
 class I2cBus {
 public:
     esp_err_t initialize();
+    esp_err_t probe(
+        std::uint8_t address,
+        int timeout_ms = 50) const;
     esp_err_t add_device(
         std::uint8_t address,
         std::uint32_t speed_hz,
         i2c_master_dev_handle_t* output);
+    esp_err_t remove_device(
+        i2c_master_dev_handle_t* device);
     i2c_master_bus_handle_t handle() const noexcept;
     bool ready() const noexcept;
 
