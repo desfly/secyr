@@ -25,6 +25,9 @@ require("set_command_runtime(&g_system_model, &g_system_bus, &g_access_control)"
 require('"/api/v1/cloud/status"' in http, "cloud status endpoint missing")
 require('"/api/v1/cloud/config"' in http, "cloud config endpoint missing")
 require('authorize(actor, credential, "cloud.configure")' in http, "cloud config endpoint not access-controlled")
+require("read_request_body(request, 1024U, body)" in http, "cloud config does not use a bounded complete body read")
+require("while (offset < body.size())" in http and "offset += static_cast<std::size_t>(received);" in http,
+        "cloud config body can be truncated by TCP fragmentation")
 require("store_->save(config)" in http, "cloud config is not persisted")
 require("cloud_->stop()" in http and "cloud_->start(" in http, "cloud config change does not restart MQTT")
 require("responses" in link and "response_topic_" in link, "MQTT response topic missing")
@@ -43,5 +46,6 @@ if errors:
 print("Cloud runtime contract PASS")
 print(" - persistent MQTT config + boot restore")
 print(" - admin-only cloud configuration endpoint")
+print(" - cloud POST body is fully read across TCP fragments")
 print(" - live AccessControl/SystemModel command routing")
 print(" - MQTT responses topic")
