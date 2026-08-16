@@ -104,6 +104,7 @@ add_executable(config_transaction_host_test
     esp-idf/main/hg_cloud_nvs.cpp
     esp-idf/main/hg_commissioning_nvs.cpp
     esp-idf/main/hg_network_http.cpp
+    esp-idf/main/hg_network_persistence.cpp
 )
 target_include_directories(config_transaction_host_test PRIVATE
     esp-idf/main
