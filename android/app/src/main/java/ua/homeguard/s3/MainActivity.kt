@@ -220,6 +220,8 @@ class MainActivity : ComponentActivity() {
                         provisioning::provision,
                     )
 
+                    // Kept only as an internal route for the later Add-flow redesign.
+                    // No normal Device List/Dashboard action can navigate here.
                     currentScreen == AppScreen.ADD_DEVICE -> AddDeviceScreen(
                         devices,
                         isScanning,
@@ -243,10 +245,6 @@ class MainActivity : ComponentActivity() {
                         discovered = devices,
                         activeDeviceId = appSettings.deviceId,
                         snapshot = snapshot,
-                        onAddDevice = {
-                            navigation.showAddDevice()
-                            lifecycleScope.launch { discovery.rescan() }
-                        },
                         onRenameDevice = { device, newName ->
                             lifecycleScope.launch { registeredDevices.rename(device.deviceId, newName) }
                         },
@@ -285,10 +283,6 @@ class MainActivity : ComponentActivity() {
                         statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
                         zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
                         onBackToDevices = navigation::showDeviceList,
-                        onAddDevice = {
-                            navigation.showAddDevice()
-                            lifecycleScope.launch { discovery.rescan() }
-                        },
                         onOperatorIdChange = { value ->
                             operatorId.value = value.take(23)
                             accessSession.value = null
