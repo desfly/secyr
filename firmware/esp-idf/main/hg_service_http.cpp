@@ -91,8 +91,6 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
         self->commissioning_ == nullptr || self->readiness_ == nullptr ||
         self->physical_outputs_ == nullptr) return ESP_FAIL;
 
-    // Destructive service operations are fail-closed. They must never be
-    // reachable through a direct HTTP call that bypasses the Web UI.
     if (self->access_control_ == nullptr) {
         httpd_resp_set_status(request, "503 Service Unavailable");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"access_unavailable\"}");
@@ -119,10 +117,10 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
             homeguard::to_string(decision) + "\"}");
     }
 
-    // If physical outputs are currently enabled, the safety transition must
-    // succeed before commissioning is invalidated. Never leave a latched
-    // siren/valve active under an invalid readiness record.
-    if (self->physical_outputs_->state().outputs_enabled && !self->physical_outputs_->force_safe()) {
+    // Sticky fail-closed transition is mandatory even when outputs currently
+    // look inactive. It prevents the 20 ms supervisor from re-applying a stale
+    // model command between the OFF transition and readiness/NVS invalidation.
+    if (!self->physical_outputs_->lockout_fail_closed()) {
         httpd_resp_set_status(request, "503 Service Unavailable");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"output_safe_failed\"}");
     }
@@ -183,18 +181,13 @@ esp_err_t ServiceHttp::factory_reset_post(httpd_req_t* request) {
             homeguard::to_string(decision) + "\"}");
     }
 
-    // A reset is not allowed to leave an already-active output latched while
-    // NVS is erased and the reboot response is being sent.
-    if (self->physical_outputs_->state().outputs_enabled && !self->physical_outputs_->force_safe()) {
+    // Lock the actuator runtime closed before erasing NVS. The supervisor sees
+    // the latch before any mutable commissioning/readiness state is cleared.
+    if (!self->physical_outputs_->lockout_fail_closed()) {
         httpd_resp_set_status(request, "503 Service Unavailable");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"output_safe_failed\"}");
     }
 
-    // Factory reset intentionally erases the entire default NVS partition.
-    // This clears all mutable HomeGuard state in one atomic test boundary:
-    // Wi-Fi credentials, access users, commissioning/hardware verification,
-    // cloud configuration and provisioned local secrets. Firmware and eFuse
-    // hardware identity are outside NVS and therefore remain intact.
     const auto erase_error = nvs_flash_erase();
     if (erase_error != ESP_OK) {
         httpd_resp_set_status(request, "500 Internal Server Error");
@@ -208,8 +201,6 @@ esp_err_t ServiceHttp::factory_reset_post(httpd_req_t* request) {
     const auto response_error = self->send_json(request,
         "{\"ok\":true,\"state\":\"restarting\",\"factoryReset\":true,\"outputsAllowed\":false}");
 
-    // Let the HTTP response leave the socket, then reboot into a freshly
-    // initialized empty NVS partition. Do not continue running after erase.
     vTaskDelay(pdMS_TO_TICKS(150));
     esp_restart();
     return response_error;
