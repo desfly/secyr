@@ -9,7 +9,8 @@ namespace {
 constexpr const char* kNamespace = "hg_commission";
 constexpr const char* kHardwareKey = "hardware_v2";
 constexpr const char* kLegacyHardwareKey = "hardware_v1";
-constexpr const char* kCommissioningKey = "state_v1";
+constexpr const char* kCommissioningKey = "state_v2";
+constexpr const char* kLegacyCommissioningKey = "state_v1";
 
 template <typename T>
 esp_err_t load_blob(const char* key, T& value) {
@@ -54,6 +55,8 @@ esp_err_t CommissioningNvsStore::save_hardware(const hg::HardwareVerificationRec
 }
 
 esp_err_t CommissioningNvsStore::load_commissioning(hg::CommissioningPersistentState& state) const {
+    // Commissioning results are architecture-specific. Never pair an old
+    // state_v1 dry-run/actuator test with the schema-v2 MCP23017 backend.
     const auto error = load_blob(kCommissioningKey, state);
     if (error != ESP_OK) return error;
     return hg::validate_commissioning_state(state) == hg::CommissioningStateValidation::Valid
@@ -80,6 +83,7 @@ esp_err_t CommissioningNvsStore::erase_all() const {
     error = erase_one(kHardwareKey);
     if (error == ESP_OK) error = erase_one(kLegacyHardwareKey);
     if (error == ESP_OK) error = erase_one(kCommissioningKey);
+    if (error == ESP_OK) error = erase_one(kLegacyCommissioningKey);
     if (error == ESP_OK) error = nvs_commit(handle);
     nvs_close(handle);
     return error;
