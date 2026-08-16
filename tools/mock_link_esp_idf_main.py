@@ -48,14 +48,14 @@ for component_name in ("nvs_config_store", "websocket_telemetry", "device_discov
     component_dir = COMPONENTS / component_name
     add_cmake_sources(component_dir / "CMakeLists.txt", component_dir)
 
-# These core implementations back the live telemetry/discovery paths but are
-# not all listed as main component sources because ESP-IDF normally gets them
-# through the homeguard_core component dependency.
+# These production core implementations back the live telemetry/discovery paths
+# through component dependencies. Do not add legacy local_api/controller here:
+# doing so would hide a dependency leak that the ESP image intentionally forbids.
 for filename in (
     "provisioning.cpp",
     "health_monitor.cpp",
     "telemetry.cpp",
-    "local_api.cpp",
+    "telemetry_transport.cpp",
     "discovery.cpp",
 ):
     path = CORE_SRC / filename
