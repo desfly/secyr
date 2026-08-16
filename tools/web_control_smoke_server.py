@@ -31,7 +31,7 @@ HARNESS = r"""
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       const item = document.querySelector(selector);
-      if (item && !item.disabled) return item;
+      if (item && !item.disabled && !item.hidden) return item;
       await sleep(50);
     }
     throw new Error(`timeout waiting for enabled ${selector}`);
@@ -53,13 +53,22 @@ HARNESS = r"""
   await waitFor('#accessBootstrap');
   await waitFor('[data-output-id="2"][data-output-active="true"]');
 
-  // Factory-fresh bootstrap is the only unauthenticated write path.
+  // Factory-fresh bootstrap is the only unauthenticated write path. The button
+  // starts hidden and is exposed only after GET /api/v1/access/status says that
+  // bootstrap is truly available.
   document.querySelector('#managedUserId').value = 'admin-smoke';
   document.querySelector('#managedUserName').value = 'Smoke Admin';
   document.querySelector('#managedUserRole').value = 'admin';
   document.querySelector('#managedUserPin').value = '4321';
   (await waitEnabled('#accessBootstrap')).click();
-  await sleep(500);
+  await sleep(650);
+
+  // After first Admin is created, the same read-only status endpoint must make
+  // bootstrap disappear immediately. This catches the exact Build-948 UX bug.
+  const bootstrapAfter = await waitFor('#accessBootstrap');
+  if (!bootstrapAfter.hidden || !bootstrapAfter.disabled) {
+    throw new Error('first-Admin bootstrap still visible after provisioning');
+  }
 
   // Admin: full access, including Panic, network and account management.
   await login('admin-smoke', '4321');
@@ -164,7 +173,7 @@ class SmokeState:
 
 
 class SmokeHandler(BaseHTTPRequestHandler):
-    server_version = "HomeGuardWebSmoke/1.1"
+    server_version = "HomeGuardWebSmoke/1.2"
 
     @property
     def state(self) -> SmokeState:
@@ -241,6 +250,13 @@ class SmokeHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/v1/build":
             self._json({"ok": True, "project": "HomeGuard-S3", "build": "browser-smoke"})
+            return
+        if path == "/api/v1/access/status":
+            self._json({
+                "ok": True,
+                "bootstrapAllowed": len(self.state.users) == 0,
+                "userCount": len(self.state.users),
+            })
             return
         if path == "/api/v1/network/status":
             self._json({"ok": True, "state": "connected", "ssid": self.state.network_ssid,
@@ -326,6 +342,9 @@ class SmokeHandler(BaseHTTPRequestHandler):
         if path == "/api/v1/access/users":
             action = body.get("action")
             if action == "bootstrap":
+                if self.state.users:
+                    self._json({"ok": False, "reason": "bootstrap_unavailable"}, 409)
+                    return
                 user_id = str(body.get("id", ""))
                 self.state.users = [{
                     "id": user_id, "name": body.get("name", ""),
@@ -383,6 +402,13 @@ def verify(args: argparse.Namespace) -> int:
 
     def bodies(path: str) -> list[dict[str, object]]:
         return [record.get("body", {}) for record in posts if record.get("path") == path]
+
+    access_status_gets = [
+        record for record in records
+        if record.get("method") == "GET" and record.get("path") == "/api/v1/access/status"
+    ]
+    if len(access_status_gets) < 2:
+        errors.append(f"expected repeated read-only access status checks, got {len(access_status_gets)}")
 
     logins = bodies("/api/v1/access/login")
     expected_logins = [
@@ -444,6 +470,7 @@ def verify(args: argparse.Namespace) -> int:
         return 1
 
     print("Web UI role/control smoke PASS")
+    print(" - first Admin: read-only status exposes bootstrap only while factory-fresh")
     print(" - login: Admin + User + Guest")
     print(" - Admin: Panic + Wi-Fi + user management")
     print(" - User: arm/disarm + valve open/close; restricted Admin controls")
