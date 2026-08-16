@@ -87,6 +87,8 @@ require("MainActivity::class.java" in maintenance,
         "Android does not return to the device-list activity after reset")
 require("/api/v1/system/factory-reset" in client and "ERASE_ALL" in client,
         "Android maintenance client does not call true Factory Reset endpoint")
+require('optBoolean("rebooting", false)' in client,
+        "Android treats reset as success without controller reboot acknowledgement")
 
 if errors:
     print("Android field acceptance FAIL")
@@ -100,5 +102,5 @@ print(" - mandatory friendly names; ID/IP only in Properties")
 print(" - duplicate physical ESP records merged with canonical identity")
 print(" - compact icon + LAN/CLOUD/online picons")
 print(" - PIN reveal + explicit Factory Reset")
-print(" - reset clears local authorization, endpoint, certificate and cached tokens")
+print(" - reset requires reboot acknowledgement and clears local authorization/session")
 print(" - reset restarts Android in a fresh task so stale discovery cannot stay online")
