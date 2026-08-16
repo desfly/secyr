@@ -66,14 +66,12 @@ private fun newestDiscoveryFor(
     .maxByOrNull { it.seenAtMs }
 
 @OptIn(ExperimentalFoundationApi::class)
-@Suppress("UNUSED_PARAMETER")
 @Composable
 fun DeviceListScreen(
     devices: List<RegisteredDevice>,
     discovered: List<DiscoveredDevice>,
     activeDeviceId: String,
     snapshot: SystemSnapshot,
-    onAddDevice: () -> Unit,
     onRenameDevice: (RegisteredDevice, String) -> Unit,
     onDeleteDevice: (RegisteredDevice) -> Unit,
     onOpenDevice: (RegisteredDevice) -> Unit,
