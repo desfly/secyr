@@ -94,9 +94,6 @@ void test_build0054() {
     hg::BootReadinessReport ready{};
     ready.status = hg::BootReadinessStatus::ReadyForPhysicalOutputs;
 
-    // Fresh/unverified hardware is still a successfully initialized OFF-only
-    // runtime. This keeps Factory Reset/service safe, but commissioning cannot
-    // energize anything before signed hardware verification.
     FakeBackend unverified_backend;
     hg::PhysicalOutputRuntime unverified_runtime;
     hg::HardwareVerificationRecord missing_hardware{};
@@ -115,8 +112,6 @@ void test_build0054() {
     TEST_CHECK(unverified_runtime.lockout_fail_closed());
     TEST_CHECK(unverified_runtime.state().safety_fault_latched);
 
-    // Hardware verification alone is still not permission to energize a bench
-    // output. A successful dry-run is mandatory for every bench channel.
     auto before_dry_run = commissioning;
     before_dry_run.successful_dry_runs = 0;
     before_dry_run.successful_actuator_tests = 0;
@@ -127,8 +122,6 @@ void test_build0054() {
     TEST_CHECK(!bench_runtime.bench_pulse(
         hg::PhysicalOutputChannel::Siren, 100, &fake_bench_delay));
 
-    // After dry-run, non-valve bench channels are allowed, but valve coils stay
-    // blocked until the measured limit polarity + both travel timeouts exist.
     auto dry_run_only = commissioning;
     dry_run_only.successful_actuator_tests = 0;
     dry_run_only.valve_limit_polarity_verified = false;
@@ -142,32 +135,38 @@ void test_build0054() {
     TEST_CHECK(!bench_runtime.bench_pulse(
         hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
 
-    // Valve profile permits a bounded physical pulse, but a direction only
-    // counts when the target GPB end switch transitions from inactive before
-    // the pulse to active afterwards. A pulse alone is never actuator proof.
+    // A profiled valve may need several <=1 s pulses to reach an end stop.
+    // A safe partial pulse succeeds but does not count as actuator evidence.
     auto profiled = commissioning;
     profiled.successful_actuator_tests = 0;
     TEST_CHECK(bench_runtime.update_control_state(hardware, profiled, blocked));
+    bool bench_evidence = true;
     bench_delay_seen = 0;
-    TEST_CHECK(!bench_runtime.bench_pulse(
-        hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
+    TEST_CHECK(bench_runtime.bench_pulse(
+        hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay, &bench_evidence));
+    TEST_CHECK(!bench_evidence);
     TEST_CHECK(bench_delay_seen == 100U);
     for (int channel = 0; channel < 8; ++channel) TEST_CHECK(!bench_backend.levels[channel]);
 
+    // Only a target end-stop transition during a safe pulse becomes evidence.
     bench_transition_backend = &bench_backend;
     bench_transition_cold_open = true;
+    bench_evidence = false;
     bench_delay_seen = 0;
     TEST_CHECK(bench_runtime.bench_pulse(
-        hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
+        hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay, &bench_evidence));
+    TEST_CHECK(bench_evidence);
     TEST_CHECK(bench_delay_seen == 100U);
     bench_transition_cold_open = false;
     bench_transition_backend = nullptr;
 
     // Once the target end stop is already active, another pulse toward that
     // stop is rejected before energizing the coil and cannot become evidence.
+    bench_evidence = true;
     bench_delay_seen = 0;
     TEST_CHECK(!bench_runtime.bench_pulse(
-        hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
+        hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay, &bench_evidence));
+    TEST_CHECK(!bench_evidence);
     TEST_CHECK(bench_delay_seen == 0U);
 
     TEST_CHECK(!bench_runtime.bench_pulse(
@@ -179,8 +178,6 @@ void test_build0054() {
     }
     TEST_CHECK(!bench_runtime.state().outputs_enabled);
 
-    // Contradictory end switches during commissioning are a latched physical
-    // safety fault, exactly as in normal runtime supervision.
     bench_backend.set_limit(hg::PhysicalInputChannel::ColdValveClosedLimit, true);
     TEST_CHECK(!bench_runtime.bench_pulse(
         hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
@@ -194,8 +191,6 @@ void test_build0054() {
     TEST_CHECK(!runtime.state().outputs_enabled);
     for (int channel = 0; channel < 8; ++channel) TEST_CHECK(!backend.levels[channel]);
 
-    // Dynamic commissioning/readiness update enables normal supervision without
-    // reboot; all physical outputs remain OFF until a fresh command revision.
     TEST_CHECK(runtime.update_control_state(hardware, commissioning, ready));
     TEST_CHECK(runtime.state().status == hg::PhysicalOutputStatus::Ready);
     TEST_CHECK(runtime.synchronize(model, 100));
@@ -204,9 +199,8 @@ void test_build0054() {
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::HotValveOpen)]);
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::HotValveClose)]);
 
-    // A valve command can arrive immediately before the 20 ms supervisor cycle.
-    // Entering Maintenance before synchronize() must consume that revision while
-    // forcing OFF, so it cannot execute when Maintenance is later exited.
+    // A valve command queued just before the 20 ms supervisor cycle must be
+    // consumed without execution when Maintenance begins.
     TEST_CHECK(model.set_output_active(2, true, 101));
     TEST_CHECK(runtime.set_maintenance_mode(true, model));
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveOpen)]);
@@ -217,8 +211,8 @@ void test_build0054() {
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::ColdValveClose)]);
     TEST_CHECK(runtime.state().cold_valve.direction == hg::ValveMotionDirection::Stopped);
 
-    // Maintenance also consumes commands written while service mode is active.
-    // Existing consumed siren revisions must not wake up either.
+    // Commands written while Maintenance is active are consumed at exit and do
+    // not wake up when normal supervision resumes.
     TEST_CHECK(model.set_output_active(1, true, 103));
     TEST_CHECK(runtime.synchronize(model, 103));
     TEST_CHECK(backend.levels[ch(hg::PhysicalOutputChannel::Siren)]);
@@ -231,7 +225,6 @@ void test_build0054() {
     TEST_CHECK(runtime.synchronize(model, 105));
     TEST_CHECK(!backend.levels[ch(hg::PhysicalOutputChannel::Siren)]);
 
-    // A new explicit command revision after Maintenance is allowed normally.
     TEST_CHECK(model.set_output_active(2, true, 110));
     TEST_CHECK(runtime.synchronize(model, 110));
     TEST_CHECK(backend.levels[ch(hg::PhysicalOutputChannel::ColdValveOpen)]);
