@@ -9,6 +9,7 @@ main_activity = (ANDROID / "MainActivity.kt").read_text(encoding="utf-8")
 list_screen = (ANDROID / "ui/screens/DeviceListScreen.kt").read_text(encoding="utf-8")
 dashboard_screen = (ANDROID / "ui/screens/DashboardScreen.kt").read_text(encoding="utf-8")
 add_screen = (ANDROID / "ui/screens/AddDeviceScreen.kt").read_text(encoding="utf-8")
+identity = (ANDROID / "model/DeviceIdentity.kt").read_text(encoding="utf-8")
 store = (ANDROID / "storage/RegisteredDeviceStore.kt").read_text(encoding="utf-8")
 settings = (ANDROID / "storage/SettingsStore.kt").read_text(encoding="utf-8")
 navigation = (ANDROID / "navigation/AppNavigation.kt").read_text(encoding="utf-8")
@@ -41,8 +42,27 @@ require("currentScreen == AppScreen.ADD_DEVICE -> AddDeviceScreen(" in main_acti
 # Friendly names only on cards; technical data belongs in Properties.
 require('var deviceName by remember { mutableStateOf("") }' in add_screen,
         "new device name does not start empty")
-require("val nameValid = cleanName.isNotBlank()" in add_screen,
-        "friendly name is not mandatory")
+require("fun isForbiddenFriendlyName(" in identity,
+        "shared friendly-name validator is missing")
+require('clean.equals("HomeGuard", ignoreCase = true)' in identity and
+        'clean.equals("HomeGuard-S3", ignoreCase = true)' in identity,
+        "shared friendly-name validator does not reject generated HomeGuard names")
+require("clean.equals(deviceId.trim(), ignoreCase = true)" in identity,
+        "shared friendly-name validator does not reject device ID")
+require("clean.equals(endpoint, ignoreCase = true)" in identity and
+        "endpointHost(endpoint)" in identity and "clean.equals(host, ignoreCase = true)" in identity,
+        "shared friendly-name validator does not reject endpoint/IP")
+require("val nameValid = !DeviceIdentity.isForbiddenFriendlyName(cleanName)" in add_screen,
+        "Add flow does not require a safe owner-friendly name")
+require("enabled = selectedNameValid" in add_screen and
+        "enabled = manualAddressNameValid && manualAddress.isNotBlank()" in add_screen and
+        "enabled = manualIdNameValid && manualDeviceId.isNotBlank()" in add_screen,
+        "Add flow buttons do not enforce safe friendly-name validation")
+require("val renameValid = !DeviceIdentity.isForbiddenFriendlyName(" in list_screen and
+        "enabled = renameValid" in list_screen,
+        "Rename UI can accept a generated/technical display name")
+require("DeviceIdentity.isForbiddenFriendlyName(value, deviceId, baseUrl)" in store,
+        "persistent registry does not use the shared friendly-name validator")
 require('StatusLine("ID", device.deviceId)' in list_screen and
         'StatusLine("Адреса", device.baseUrl.ifBlank { "—" })' in list_screen,
         "technical ID/address missing from Properties")
@@ -126,7 +146,8 @@ if errors:
 
 print("Android field acceptance PASS")
 print(" - device list primary; Add flow hidden with no visible callbacks")
-print(" - mandatory friendly names; ID/IP only in Properties")
+print(" - shared friendly-name validator blocks HomeGuard/ID/IP on Add + Rename + persistence")
+print(" - technical ID/IP only in Properties")
 print(" - duplicate physical ESP records merged with canonical identity")
 print(" - compact icon + LAN/CLOUD/online picons")
 print(" - unsupported runtime controls stay disabled even for Admin")
