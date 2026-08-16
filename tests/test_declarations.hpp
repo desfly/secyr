@@ -21,3 +21,4 @@ void test_build0055();
 void test_build0056();
 void test_build0057();
 void test_build0058();
+void test_build0059();
