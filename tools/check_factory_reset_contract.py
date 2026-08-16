@@ -9,6 +9,7 @@ manager = (MAIN / "hg_factory_reset.cpp").read_text(encoding="utf-8")
 manager_h = (MAIN / "hg_factory_reset.hpp").read_text(encoding="utf-8")
 commissioning = (MAIN / "hg_commissioning_nvs.cpp").read_text(encoding="utf-8")
 system = (MAIN / "hg_system_http.cpp").read_text(encoding="utf-8")
+network = (MAIN / "hg_network_http.cpp").read_text(encoding="utf-8")
 cmake = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
 config_store = (CONFIG_STORE / "nvs_config_store.cpp").read_text(encoding="utf-8")
 
@@ -16,7 +17,9 @@ checks = {
     "Factory Reset manager compiled": '"hg_factory_reset.cpp"' in cmake,
     "Factory Reset report is explicit": "struct FactoryResetReport" in manager_h and "bool ok() const" in manager_h,
     "Access state erased": 'erase_namespace("hg_access")' in manager,
-    "Wi-Fi state erased": 'erase_namespace("hg_wifi")' in manager,
+    "Wi-Fi HomeGuard state erased": 'erase_namespace("hg_wifi")' in manager,
+    "Wi-Fi driver persistence erased": "esp_wifi_restore();" in manager,
+    "Wi-Fi runtime config is RAM-only": "esp_wifi_set_storage(WIFI_STORAGE_RAM)" in network,
     "Cloud state erased": 'erase_namespace("hg_cloud")' in manager,
     "Controller config erased": 'erase_namespace("hg-config")' in manager,
     "Provisioning payload erased": 'erase_namespace("hg-provision")' in manager,
@@ -50,3 +53,4 @@ if failed:
     raise SystemExit("Factory Reset contract failed: " + ", ".join(failed))
 
 print("Factory Reset contract PASS")
+print(" - Wi-Fi persistence: hg_wifi + legacy ESP-IDF settings erased; runtime driver config RAM-only")
