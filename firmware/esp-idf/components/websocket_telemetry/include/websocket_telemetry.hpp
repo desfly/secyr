@@ -1,5 +1,5 @@
 #pragma once
-#include "homeguard/local_api.hpp"
+#include "homeguard/telemetry_transport.hpp"
 #include "homeguard/telemetry.hpp"
 #include "esp_http_server.h"
 #include <array>
