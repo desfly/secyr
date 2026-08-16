@@ -132,6 +132,7 @@ esp_err_t NetworkHttp::begin()
     bool wifi_started = false;
 
     auto rollback = [&]() {
+        clear_pending_credentials();
         if (reconnect_timer_ != nullptr) {
             if (esp_timer_is_active(reconnect_timer_)) {
                 (void)esp_timer_stop(reconnect_timer_);
@@ -250,7 +251,7 @@ esp_err_t NetworkHttp::begin()
     std::string password;
     if (load_credentials(ssid, password)) {
         sta_credentials_configured_ = true;
-        (void)apply_sta(ssid, password, false);
+        (void)apply_sta(ssid, password);
         std::fill(password.begin(), password.end(), '\0');
     }
 
@@ -389,6 +390,16 @@ void NetworkHttp::handle_wifi_event(std::int32_t id, void*)
     schedule_reconnect();
 }
 
+void NetworkHttp::clear_pending_credentials()
+{
+    if (!pending_password_.empty()) {
+        std::fill(pending_password_.begin(), pending_password_.end(), '\0');
+    }
+    pending_password_.clear();
+    pending_ssid_.clear();
+    pending_credentials_ = false;
+}
+
 void NetworkHttp::handle_ip_event(std::int32_t id, void*)
 {
     if (id != IP_EVENT_STA_GOT_IP) {
@@ -399,6 +410,37 @@ void NetworkHttp::handle_ip_event(std::int32_t id, void*)
         (void)esp_timer_stop(reconnect_timer_);
     }
     reconnect_count_ = 0;
+
+    if (pending_credentials_) {
+        wifi_ap_record_t current{};
+        if (esp_wifi_sta_get_ap_info(&current) != ESP_OK) {
+            ESP_LOGW(kTag, "STA got-IP arrived but candidate SSID cannot be verified; recovery AP stays active");
+            (void)esp_wifi_set_mode(WIFI_MODE_APSTA);
+            return;
+        }
+
+        const auto connected_ssid = ssid_from_bytes(current.ssid, sizeof(current.ssid));
+        if (connected_ssid != pending_ssid_) {
+            ESP_LOGW(kTag,
+                     "STA got-IP SSID mismatch (%s != %s); candidate credentials not committed",
+                     connected_ssid.c_str(),
+                     pending_ssid_.c_str());
+            (void)esp_wifi_set_mode(WIFI_MODE_APSTA);
+            return;
+        }
+
+        if (!save_credentials(pending_ssid_, pending_password_)) {
+            ESP_LOGE(kTag,
+                     "STA candidate connected to %s but NVS commit failed; recovery AP stays active",
+                     pending_ssid_.c_str());
+            (void)esp_wifi_set_mode(WIFI_MODE_APSTA);
+            return;
+        }
+
+        ESP_LOGI(kTag, "STA candidate %s verified by got-IP and committed to NVS", pending_ssid_.c_str());
+        clear_pending_credentials();
+    }
+
     const auto error = esp_wifi_set_mode(WIFI_MODE_STA);
     if (error != ESP_OK) {
         ESP_LOGW(kTag, "Unable to retire recovery AP after STA got IP: %s", esp_err_to_name(error));
@@ -468,17 +510,26 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
     sta.sta.pmf_cfg.capable = true;
     sta.sta.pmf_cfg.required = false;
 
-    if (esp_wifi_set_config(WIFI_IF_STA, &sta) != ESP_OK || !save_credentials(ssid, password)) {
+    if (esp_wifi_set_config(WIFI_IF_STA, &sta) != ESP_OK) {
         std::fill(password.begin(), password.end(), '\0');
         httpd_resp_set_status(request, "503 Service Unavailable");
-        return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_connect_failed\"}");
+        return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_config_failed\"}");
     }
+
+    // Stage candidate credentials only in RAM. The last known-good NVS record
+    // remains untouched until the new STA has actually received an IP on the
+    // requested SSID. A bad password therefore cannot destroy the recovery path.
+    clear_pending_credentials();
+    pending_ssid_ = ssid;
+    pending_password_ = password;
+    pending_credentials_ = true;
     std::fill(password.begin(), password.end(), '\0');
     sta_credentials_configured_ = true;
     reconnect_count_ = 0;
 
     const auto response_error = send_json(request,
-        std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) + "\"}");
+        std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) +
+        "\",\"credentialsPending\":true}");
     if (response_error != ESP_OK) return response_error;
 
     vTaskDelay(kStaHandoverDelay);
@@ -486,10 +537,13 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
     if (esp_wifi_sta_get_ap_info(&current) == ESP_OK) {
         return esp_wifi_disconnect();
     }
-    return esp_wifi_connect();
+
+    reconnect_count_ = 1U;
+    schedule_reconnect();
+    return ESP_OK;
 }
 
-bool NetworkHttp::apply_sta(const std::string& ssid, const std::string& password, bool persist)
+bool NetworkHttp::apply_sta(const std::string& ssid, const std::string& password)
 {
     if (!initialized_ || ssid.empty() || ssid.size() > 32 || password.size() > 64 ||
         (!password.empty() && password.size() < 8)) return false;
@@ -503,7 +557,6 @@ bool NetworkHttp::apply_sta(const std::string& ssid, const std::string& password
 
     if (esp_wifi_set_mode(WIFI_MODE_APSTA) != ESP_OK) return false;
     if (esp_wifi_set_config(WIFI_IF_STA, &sta) != ESP_OK) return false;
-    if (persist && !save_credentials(ssid, password)) return false;
 
     sta_credentials_configured_ = true;
     wifi_ap_record_t current{};
@@ -582,7 +635,8 @@ std::string NetworkHttp::status_json() const
         "\",\"ssid\":\"" + json_escape(ssid) +
         "\",\"ip\":\"" + json_escape(ip) +
         "\",\"apSsid\":\"" + json_escape(ap_ssid_) +
-        "\",\"reconnectCount\":" + std::to_string(reconnect_count_);
+        "\",\"credentialsPending\":" + (pending_credentials_ ? "true" : "false") +
+        ",\"reconnectCount\":" + std::to_string(reconnect_count_);
     if (connected) out += ",\"rssi\":" + std::to_string(static_cast<int>(ap_info.rssi));
     out += '}';
     return out;
