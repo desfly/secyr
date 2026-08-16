@@ -39,6 +39,12 @@ import ua.homeguard.s3.ui.components.BruceBrand
 private val StatusGreen = Color(0xFF00C853)
 private val StatusIdle = Color(0xFF8A94A6)
 
+private enum class LinkState {
+    ACTIVE,
+    INACTIVE,
+    UNKNOWN,
+}
+
 private fun isLegacyGeneratedName(name: String): Boolean {
     val clean = name.trim()
     return clean.isBlank() ||
@@ -192,6 +198,12 @@ fun DeviceListScreen(
                     .maxByOrNull { it.seenAtMs }
                 val cloudConnected = found?.cloudConnected == true
                 val online = found != null || cloudConnected
+                val lanState = if (found != null) LinkState.ACTIVE else LinkState.INACTIVE
+                val cloudState = when {
+                    cloudConnected -> LinkState.ACTIVE
+                    found?.cloudConfigured != null -> LinkState.INACTIVE
+                    else -> LinkState.UNKNOWN
+                }
                 val expanded = expandedId == device.deviceId
                 val legacyName = isLegacyGeneratedName(device.name)
                 val visibleName = visibleDeviceName(device.name)
@@ -221,7 +233,7 @@ fun DeviceListScreen(
                             )
                             Column(
                                 modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
                                 Text(visibleName, style = MaterialTheme.typography.titleMedium, color = titleColor)
                                 Text(
@@ -229,6 +241,13 @@ fun DeviceListScreen(
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = if (online) StatusGreen else StatusIdle,
                                 )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    ConnectionIndicator("LAN", lanState)
+                                    ConnectionIndicator("CLOUD", cloudState)
+                                }
                             }
                         }
 
@@ -358,6 +377,21 @@ fun DeviceListScreen(
             }
         }
     }
+}
+
+@Composable
+private fun ConnectionIndicator(label: String, state: LinkState) {
+    val glyph = when (state) {
+        LinkState.ACTIVE -> "●"
+        LinkState.INACTIVE -> "○"
+        LinkState.UNKNOWN -> "◌"
+    }
+    val color = if (state == LinkState.ACTIVE) StatusGreen else StatusIdle
+    Text(
+        "$glyph $label",
+        style = MaterialTheme.typography.labelMedium,
+        color = color,
+    )
 }
 
 @Composable
