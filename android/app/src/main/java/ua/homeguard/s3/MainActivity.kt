@@ -28,6 +28,8 @@ import ua.homeguard.s3.network.ControllerIdentity
 import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
 import ua.homeguard.s3.network.DiscoveryInputValidator
+import ua.homeguard.s3.network.FactoryResetClient
+import ua.homeguard.s3.network.FactoryResetResult
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
 import ua.homeguard.s3.network.TelemetrySocket
 import ua.homeguard.s3.notifications.HomeGuardNotifications
@@ -134,7 +136,7 @@ class MainActivity : ComponentActivity() {
                     showProvisioning || provisioningActive -> ProvisioningScreen(provisioningState, { if (!provisioningActive) { provisioningOpen.value = false; addDeviceOpen.value = true } }, ::requestQrScan, provisioning::provision)
                     showAddDevice -> AddDeviceScreen(devices, isScanning, scanStatus, { addDeviceOpen.value = false; deviceListOpen.value = true }, { lifecycleScope.launch { discovery.rescan() } }, { device, name -> lifecycleScope.launch { registeredDevices.addOrUpdate(device, name); settings.remember(device); addDeviceOpen.value = false; deviceListOpen.value = true } }, { name, address -> addManualDevice(name, address) }, { name, deviceId -> addManualDeviceId(name, deviceId) }, { addDeviceOpen.value = false; provisioningOpen.value = true })
                     showDeviceList -> DeviceListScreen(devices = registered, discovered = devices, activeDeviceId = appSettings.deviceId, snapshot = snapshot, onAddDevice = { addDeviceOpen.value = true; lifecycleScope.launch { discovery.rescan() } }, onRenameDevice = { device, newName -> lifecycleScope.launch { registeredDevices.rename(device.deviceId, newName) } }, onDeleteDevice = { device -> lifecycleScope.launch { registeredDevices.remove(device.deviceId); if (settings.settings.value.deviceId == device.deviceId) { settings.selectDevice(""); accessSession.value = null; operatorPin.value = "" } } }, onOpenDevice = { device -> lifecycleScope.launch { settings.selectDevice(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() }); deviceListOpen.value = false } })
-                    else -> DashboardScreen(versionName = BuildConfig.VERSION_NAME, localDevices = devices.size, route = endpoint.path.name, deviceId = appSettings.deviceId, snapshot = snapshot, events = events, diagnostics = diagnostics, backupStatus = maintenanceMessage, commandStatus = commandMessage, operatorId = currentOperator, operatorPin = currentPin, accessSession = currentAccessSession, criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled, statusNotificationsEnabled = appSettings.statusNotificationsEnabled, zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled, onBackToDevices = { deviceListOpen.value = true }, onAddDevice = { deviceListOpen.value = true; addDeviceOpen.value = true; lifecycleScope.launch { discovery.rescan() } }, onOperatorIdChange = { value -> operatorId.value = value.take(23); accessSession.value = null }, onOperatorPinChange = { value -> operatorPin.value = value.filter(Char::isDigit).take(12); accessSession.value = null }, onLogin = ::loginOperator, onLogout = ::logoutOperator, onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } }, onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } }, onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } }, onClearEventHistory = { eventHistory.clear(); telemetry.clearEvents() }, onExportEvents = { pendingExportText = EventLogExporter.toCsv(events); exportLauncher.launch(EventLogExporter.suggestedFileName()) }, onShareEvents = { val payload = EventLogExporter.toCsv(events); startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/csv"; putExtra(Intent.EXTRA_SUBJECT, "HomeGuard-S3 event log"); putExtra(Intent.EXTRA_TEXT, payload) }, "Поділитися журналом")) }, onExportSettings = { pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings); settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName()) }, onImportSettings = { settingsRestoreLauncher.launch("application/json") }, onCommand = ::executeCommand)
+                    else -> DashboardScreen(versionName = BuildConfig.VERSION_NAME, localDevices = devices.size, route = endpoint.path.name, deviceId = appSettings.deviceId, snapshot = snapshot, events = events, diagnostics = diagnostics, backupStatus = maintenanceMessage, commandStatus = commandMessage, operatorId = currentOperator, operatorPin = currentPin, accessSession = currentAccessSession, criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled, statusNotificationsEnabled = appSettings.statusNotificationsEnabled, zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled, onBackToDevices = { deviceListOpen.value = true }, onAddDevice = { deviceListOpen.value = true; addDeviceOpen.value = true; lifecycleScope.launch { discovery.rescan() } }, onOperatorIdChange = { value -> operatorId.value = value.take(23); accessSession.value = null }, onOperatorPinChange = { value -> operatorPin.value = value.filter(Char::isDigit).take(12); accessSession.value = null }, onLogin = ::loginOperator, onLogout = ::logoutOperator, onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } }, onStatusNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(statusNotificationsEnabled = enabled)) } }, onZoneNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(zoneNotificationsEnabled = enabled)) } }, onClearEventHistory = { eventHistory.clear(); telemetry.clearEvents() }, onExportEvents = { pendingExportText = EventLogExporter.toCsv(events); exportLauncher.launch(EventLogExporter.suggestedFileName()) }, onShareEvents = { val payload = EventLogExporter.toCsv(events); startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/csv"; putExtra(Intent.EXTRA_SUBJECT, "HomeGuard-S3 event log"); putExtra(Intent.EXTRA_TEXT, payload) }, "Поділитися журналом")) }, onExportSettings = { pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings); settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName()) }, onImportSettings = { settingsRestoreLauncher.launch("application/json") }, onFactoryReset = ::factoryResetController, onCommand = ::executeCommand)
                 }
             }
         }
@@ -155,6 +157,55 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { commandStatus.value = "Перевірка доступу…"; runCatching { commands.login(actor, credential) }.onSuccess { authenticated -> accessSession.value = authenticated; commandStatus.value = "Вхід: ${authenticated.name} · ${authenticated.role.name.lowercase()}" }.onFailure { error -> accessSession.value = null; commandStatus.value = "Вхід відхилено: ${error.message ?: "network"}" } }
     }
     private fun logoutOperator() { accessSession.value = null; operatorPin.value = ""; commandStatus.value = "Сеанс завершено" }
+
+    private fun factoryResetController() {
+        val authenticated = accessSession.value
+        val actor = operatorId.value.trim()
+        val credential = operatorPin.value
+        if (authenticated == null || authenticated.actor != actor || authenticated.role.name != "ADMIN") {
+            commandStatus.value = "Factory Reset доступний тільки після входу Admin"
+            return
+        }
+        if (credential.length !in 4..12 || !credential.all(Char::isDigit)) {
+            accessSession.value = null
+            commandStatus.value = "PIN сеансу відсутній — увійдіть знову"
+            return
+        }
+        val target = resolver.endpoint.value
+        if (target.apiBaseUrl.isBlank() || target.path.name == "OFFLINE" || target.path.name == "CLOUD") {
+            commandStatus.value = "Factory Reset потребує локального підключення до контролера"
+            return
+        }
+        val selectedId = settings.settings.value.deviceId
+        lifecycleScope.launch {
+            commandStatus.value = "Factory Reset…"
+            val outcome = runCatching {
+                FactoryResetClient(target.apiBaseUrl, target.certificateSha256).reset(actor, credential)
+            }.getOrElse { error ->
+                commandStatus.value = "Factory Reset: ${error.message ?: "помилка"}"
+                return@launch
+            }
+            when (outcome) {
+                FactoryResetResult.REJECTED -> commandStatus.value = "Factory Reset відхилено контролером"
+                FactoryResetResult.ACCEPTED,
+                FactoryResetResult.CONNECTION_LOST -> {
+                    if (selectedId.isNotBlank()) registeredDevices.markAuthorization(selectedId, false)
+                    settings.selectDevice("")
+                    accessSession.value = null
+                    operatorPin.value = ""
+                    addDeviceOpen.value = false
+                    provisioningOpen.value = false
+                    deviceListOpen.value = true
+                    commandStatus.value = if (outcome == FactoryResetResult.ACCEPTED) {
+                        "Factory Reset прийнято; контролер перезавантажується"
+                    } else {
+                        "Зв’язок обірвався під час Factory Reset; локальну сесію закрито"
+                    }
+                }
+            }
+        }
+    }
+
     private fun executeCommand(type: CommandType) {
         val actor = operatorId.value.trim(); val credential = operatorPin.value; val authenticated = accessSession.value
         if (authenticated == null || authenticated.actor != actor) { commandStatus.value = "Спочатку увійдіть"; return }
