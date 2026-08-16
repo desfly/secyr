@@ -14,8 +14,10 @@ MAIN = ROOT / "firmware" / "esp-idf" / "main"
 web_http = (MAIN / "hg_web_http.cpp").read_text(encoding="utf-8")
 system_http = (MAIN / "hg_system_http.cpp").read_text(encoding="utf-8")
 access_http = (MAIN / "hg_access_http.cpp").read_text(encoding="utf-8")
+idf_cmake = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
 web_app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
 access_session = (ROOT / "web" / "access-session.js").read_text(encoding="utf-8")
+first_admin_hint = (ROOT / "web" / "first-admin-hint.js").read_text(encoding="utf-8")
 errors: list[str] = []
 
 
@@ -64,22 +66,25 @@ require(
 )
 
 # The first-Admin action is allowed only on a truly factory-fresh controller.
-# The browser must use a read-only status endpoint; fake/partial bootstrap POSTs
-# are forbidden because they pollute logs and couple UX to error ordering.
+# A transient request failure immediately after boot must remain fail-closed but
+# MUST be retried; otherwise one boot race permanently hides the bootstrap UI.
 for needle in (
     "syncBootstrapAvailability",
     "applyBootstrapVisibility",
     "bootstrapProbeInFlight",
     "bootstrapAvailable",
-    'fetch("/api/v1/access/status"',
+    "/api/v1/access/status",
     'method: "GET"',
     "body.bootstrapAllowed === true",
     "Number(body.userCount || 0) === 0",
     'button.hidden = !visible',
     'hint.hidden = !visible',
-    "bootstrapAvailable = false",
+    "bootstrapAvailable = null",
+    "setInterval(enforceAcceptanceUi, 500)",
 ):
     require(needle in web_http, f"first-Admin firmware visibility contract missing: {needle}")
+require("bootstrapAvailable = false" not in web_http,
+        "a transient access/status failure can permanently suppress first-Admin bootstrap")
 require('JSON.stringify({ action: "bootstrap" })' not in web_http,
         "firmware-owned UI still probes bootstrap by issuing a fake POST")
 
@@ -92,6 +97,15 @@ for needle in (
     "button.hidden || button.disabled",
 ):
     require(needle in web_app, f"base Web first-Admin visibility contract missing: {needle}")
+
+for needle in (
+    "setInterval(refreshFirstAdminHint, 1500)",
+    "/api/v1/access/status?ts=",
+    "if (!response.ok || body?.ok === false)",
+    "showBanner()",
+    "Створити першого Admin",
+):
+    require(needle in first_admin_hint, f"factory-fresh first-Admin retry/banner missing: {needle}")
 
 for needle in (
     '"/api/v1/access/status"',
@@ -136,6 +150,25 @@ for needle in (
 ):
     require(needle in web_http, f"navigation/mobile field contract missing: {needle}")
 
+# The approved Bruce bytes are PNG despite the historical /bruce.jpg URL.
+# Serve them directly from the route; no global linker wrapping of HTTP calls.
+for needle in (
+    "send_binary_chunked",
+    'return send_binary_chunked(request, "image/png", bruce_jpg_start, bruce_jpg_end);',
+    "httpd_resp_send_chunk",
+):
+    require(needle in web_http, f"Bruce direct-serving contract missing: {needle}")
+require("--wrap=httpd_resp" not in idf_cmake,
+        "Bruce serving still depends on global HTTP linker wrappers")
+require("hg_web_png_compat.cpp" not in idf_cmake,
+        "obsolete Bruce compatibility wrapper is still compiled")
+for needle in (
+    "refreshBruceSource",
+    "/bruce.jpg?rev=",
+    'image.addEventListener("error"',
+):
+    require(needle in first_admin_hint, f"Bruce browser retry/cache-bust missing: {needle}")
+
 # Firmware suffix also repairs hash navigation synchronously; the source
 # access/session layer performs the same guarantee around duplicate href links.
 require(
@@ -179,9 +212,9 @@ if errors:
 print("Field Web acceptance PASS")
 print(" - Factory Reset: firmware-visible + Admin credentials + double confirm")
 print(" - reset transport loss is indeterminate/offline; explicit HTTP rejection remains retryable")
-print(" - first Admin: read-only status API; button/hint fail-closed unless factory-fresh")
+print(" - first Admin: read-only status API + retry across boot-time HTTP races")
 print(" - fake bootstrap POST capability probes are forbidden")
 print(" - password/PIN show-hide controls: firmware-owned")
 print(" - navigation: synchronous exact-one-active repair + mutation fallback + collapsed mobile menu")
-print(" - Bruce: contain, not cover")
+print(" - Bruce: direct PNG chunk serving + cache-busted retry + contain, not cover")
 print(" - backend: ERASE_ALL + access authorization + erase + reboot")
