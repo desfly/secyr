@@ -79,8 +79,12 @@ require("settings.clearControllerSessionAfterFactoryReset()" in maintenance,
 require("apiToken = \"\"" in settings and "telemetryToken = \"\"" in settings and
         "lastKnownLocalUrl = \"\"" in settings and "localCertificateSha256 = \"\"" in settings,
         "Factory Reset session cleanup leaves stale URL/certificate/token data")
-require("path = ControlPath.OFFLINE" in maintenance and "MainActivity::class.java" in maintenance,
-        "Android does not force an offline safe device-list flow after reset")
+require("path = ControlPath.OFFLINE" in maintenance,
+        "Android does not force endpoint offline after reset")
+require("Intent.FLAG_ACTIVITY_CLEAR_TASK" in maintenance and "Intent.FLAG_ACTIVITY_NEW_TASK" in maintenance,
+        "Android may reuse stale discovery/session Activity state after reset")
+require("MainActivity::class.java" in maintenance,
+        "Android does not return to the device-list activity after reset")
 require("/api/v1/system/factory-reset" in client and "ERASE_ALL" in client,
         "Android maintenance client does not call true Factory Reset endpoint")
 
@@ -97,3 +101,4 @@ print(" - duplicate physical ESP records merged with canonical identity")
 print(" - compact icon + LAN/CLOUD/online picons")
 print(" - PIN reveal + explicit Factory Reset")
 print(" - reset clears local authorization, endpoint, certificate and cached tokens")
+print(" - reset restarts Android in a fresh task so stale discovery cannot stay online")
