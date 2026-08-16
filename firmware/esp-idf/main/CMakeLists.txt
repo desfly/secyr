@@ -48,7 +48,6 @@ idf_component_register(
         "hg_access_http.cpp"
         "hg_commissioning_nvs.cpp"
         "hg_factory_reset.cpp"
-        "hg_factory_reset_indicator_wrap.cpp"
         "hg_reset_sequence.cpp"
         "hg_config_backup.cpp"
         "hg_config_transaction.cpp"
@@ -109,13 +108,11 @@ idf_component_register(
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)
 
-# Runtime-only compatibility hooks.  They preserve the approved Bruce bytes
-# unchanged while serving its real PNG type in bounded chunks, and route every
-# FactoryResetManager erase call through the same five-second RGB indication.
+# Runtime-only HTTP compatibility hooks preserve the approved Bruce bytes
+# unchanged while serving its real PNG type in bounded chunks.
 target_link_options(${COMPONENT_LIB} INTERFACE
     "LINKER:--wrap=httpd_resp_set_type"
     "LINKER:--wrap=httpd_resp_send"
-    "LINKER:--wrap=_ZNK9homeguard3idf19FactoryResetManager19erase_mutable_stateEv"
 )
 
 # The access KDF deliberately performs 4096 SHA-256 rounds. Build the C++
