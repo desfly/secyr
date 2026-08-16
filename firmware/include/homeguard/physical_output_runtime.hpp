@@ -92,10 +92,12 @@ public:
         const CommissioningPersistentState& commissioning,
         const BootReadinessReport& readiness);
 
-    // Maintenance mode is a non-sticky service gate. Entering it forces all
-    // outputs OFF and prevents normal supervisor commands from energizing them.
-    // Bench pulses are the only permitted ON path until maintenance is exited.
-    bool set_maintenance_mode(bool active);
+    // Maintenance is a non-sticky service gate. Both transitions force every
+    // channel OFF and consume the current SystemModel output revisions without
+    // executing them. This prevents a command queued just before/during service
+    // from waking up when maintenance is exited. Bench pulses are the only ON
+    // path while maintenance is active.
+    bool set_maintenance_mode(bool active, const SystemModel& model);
 
     bool synchronize(const SystemModel& model, std::uint64_t now_ms);
     bool force_safe();
