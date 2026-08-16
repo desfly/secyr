@@ -47,8 +47,7 @@ bool PhysicalOutputRuntime::initialize(
     readiness_ = readiness;
     hardware_verified_ = false;
     state_ = {};
-    siren_known_ = true;
-    siren_active_ = false;
+    siren_command_revision_ = 0U;
 
     for (const auto channel : kAllChannels) {
         if (!backend_->configure_output(channel_number(channel), false)) {
@@ -100,7 +99,7 @@ bool PhysicalOutputRuntime::update_control_state(
         return true;
     }
 
-    if (!readiness_.outputs_allowed() ||
+    if (state_.maintenance_mode || !readiness_.outputs_allowed() ||
         !commissioning_state_allows_physical_outputs(commissioning_)) {
         if (!force_safe_locked()) return false;
         state_.status = PhysicalOutputStatus::FailClosed;
@@ -111,6 +110,37 @@ bool PhysicalOutputRuntime::update_control_state(
     if (!force_safe_locked()) return false;
     state_.status = PhysicalOutputStatus::Ready;
     state_.outputs_enabled = true;
+    return true;
+}
+
+bool PhysicalOutputRuntime::set_maintenance_mode(bool active)
+{
+    std::scoped_lock lock(mutex_);
+    if (backend_ == nullptr || state_.safety_fault_latched) return false;
+
+    if (active) {
+        if (!force_safe_locked()) return false;
+        state_.maintenance_mode = true;
+        state_.status = hardware_verified_
+            ? PhysicalOutputStatus::FailClosed
+            : PhysicalOutputStatus::InvalidHardware;
+        state_.outputs_enabled = false;
+        return true;
+    }
+
+    state_.maintenance_mode = false;
+    if (!force_safe_locked()) return false;
+    if (!hardware_verified_) {
+        state_.status = PhysicalOutputStatus::InvalidHardware;
+        state_.outputs_enabled = false;
+    } else if (readiness_.outputs_allowed() &&
+               commissioning_state_allows_physical_outputs(commissioning_)) {
+        state_.status = PhysicalOutputStatus::Ready;
+        state_.outputs_enabled = true;
+    } else {
+        state_.status = PhysicalOutputStatus::FailClosed;
+        state_.outputs_enabled = false;
+    }
     return true;
 }
 
@@ -150,8 +180,6 @@ bool PhysicalOutputRuntime::force_safe_locked()
     state_.hot_valve.started_at_ms = 0;
     state_.hot_valve.timeout_ms = 0;
     state_.outputs_enabled = false;
-    siren_known_ = true;
-    siren_active_ = false;
 
     if (!ok) {
         state_.status = PhysicalOutputStatus::BackendError;
@@ -291,15 +319,12 @@ bool PhysicalOutputRuntime::bench_pulse(
     BenchDelayFn delay_fn)
 {
     std::scoped_lock lock(mutex_);
-    if (backend_ == nullptr || state_.safety_fault_latched ||
+    if (backend_ == nullptr || state_.safety_fault_latched || !state_.maintenance_mode ||
         delay_fn == nullptr || duration_ms == 0U || duration_ms > kMaxBenchPulseMs ||
         !bench_channel_allowed(channel)) {
         return false;
     }
 
-    // This is the only intentional pre-verification ON path. It remains bounded
-    // and serialized; authorization/maintenance/disarmed/live-MCP requirements
-    // are enforced by ServiceHttp before this call.
     if (!force_safe_locked()) return false;
     if (!write_logical_locked(channel, true)) {
         return latch_fault_locked(PhysicalOutputStatus::BackendError);
@@ -308,17 +333,11 @@ bool PhysicalOutputRuntime::bench_pulse(
     delay_fn(duration_ms);
 
     if (!force_safe_locked()) return false;
-    if (!hardware_verified_) {
-        state_.status = PhysicalOutputStatus::InvalidHardware;
-        state_.outputs_enabled = false;
-    } else if (readiness_.outputs_allowed() &&
-               commissioning_state_allows_physical_outputs(commissioning_)) {
-        state_.status = PhysicalOutputStatus::Ready;
-        state_.outputs_enabled = true;
-    } else {
-        state_.status = PhysicalOutputStatus::FailClosed;
-        state_.outputs_enabled = false;
-    }
+    state_.maintenance_mode = true;
+    state_.status = hardware_verified_
+        ? PhysicalOutputStatus::FailClosed
+        : PhysicalOutputStatus::InvalidHardware;
+    state_.outputs_enabled = false;
     return true;
 }
 
@@ -327,7 +346,9 @@ bool PhysicalOutputRuntime::force_safe()
     std::scoped_lock lock(mutex_);
     const bool ok = force_safe_locked();
     if (ok && !state_.safety_fault_latched) {
-        state_.status = PhysicalOutputStatus::FailClosed;
+        state_.status = state_.maintenance_mode
+            ? (hardware_verified_ ? PhysicalOutputStatus::FailClosed : PhysicalOutputStatus::InvalidHardware)
+            : PhysicalOutputStatus::FailClosed;
     }
     return ok;
 }
@@ -354,6 +375,14 @@ bool PhysicalOutputRuntime::synchronize(const SystemModel& model, std::uint64_t 
     if (backend_ == nullptr) return false;
     if (state_.safety_fault_latched) return false;
 
+    if (state_.maintenance_mode) {
+        state_.outputs_enabled = false;
+        state_.status = hardware_verified_
+            ? PhysicalOutputStatus::FailClosed
+            : PhysicalOutputStatus::InvalidHardware;
+        return true;
+    }
+
     if (!hardware_verified_) {
         state_.status = PhysicalOutputStatus::InvalidHardware;
         state_.outputs_enabled = false;
@@ -364,8 +393,7 @@ bool PhysicalOutputRuntime::synchronize(const SystemModel& model, std::uint64_t 
         !commissioning_state_allows_physical_outputs(commissioning_)) {
         if (state_.outputs_enabled ||
             state_.cold_valve.direction != ValveMotionDirection::Stopped ||
-            state_.hot_valve.direction != ValveMotionDirection::Stopped ||
-            siren_active_) {
+            state_.hot_valve.direction != ValveMotionDirection::Stopped) {
             if (!force_safe_locked()) return false;
         }
         state_.status = PhysicalOutputStatus::FailClosed;
@@ -385,13 +413,11 @@ bool PhysicalOutputRuntime::synchronize(const SystemModel& model, std::uint64_t 
     state_.outputs_enabled = true;
     state_.status = PhysicalOutputStatus::Ready;
 
-    const bool requested_siren = has_siren && siren.active;
-    if (!siren_known_ || requested_siren != siren_active_) {
-        if (!write_logical_locked(PhysicalOutputChannel::Siren, requested_siren)) {
+    if (has_siren && siren.commanded && siren.command_revision != siren_command_revision_) {
+        if (!write_logical_locked(PhysicalOutputChannel::Siren, siren.active)) {
             return latch_fault_locked(PhysicalOutputStatus::BackendError);
         }
-        siren_known_ = true;
-        siren_active_ = requested_siren;
+        siren_command_revision_ = siren.command_revision;
     }
 
     if (!process_valve_locked(
