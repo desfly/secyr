@@ -48,14 +48,16 @@ esp_err_t ServiceHttp::register_handlers(
     hg::HardwareVerificationRecord* hardware,
     hg::CommissioningPersistentState* commissioning,
     hg::BootReadinessReport* readiness,
+    hg::PhysicalOutputRuntime* physical_outputs,
     hg::SystemEventBus* bus)
 {
     if (server == nullptr || store == nullptr || hardware == nullptr || commissioning == nullptr ||
-        readiness == nullptr || bus == nullptr) return ESP_ERR_INVALID_ARG;
+        readiness == nullptr || physical_outputs == nullptr || bus == nullptr) return ESP_ERR_INVALID_ARG;
     store_ = store;
     hardware_ = hardware;
     commissioning_ = commissioning;
     readiness_ = readiness;
+    physical_outputs_ = physical_outputs;
     bus_ = bus;
 
     const httpd_uri_t routes[] = {
@@ -86,7 +88,8 @@ esp_err_t ServiceHttp::readiness_get(httpd_req_t* request) {
 esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
     auto* self = self_from(request);
     if (self == nullptr || self->store_ == nullptr || self->hardware_ == nullptr ||
-        self->commissioning_ == nullptr || self->readiness_ == nullptr) return ESP_FAIL;
+        self->commissioning_ == nullptr || self->readiness_ == nullptr ||
+        self->physical_outputs_ == nullptr) return ESP_FAIL;
 
     // Destructive service operations are fail-closed. They must never be
     // reachable through a direct HTTP call that bypasses the Web UI.
@@ -109,10 +112,19 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
     }
 
     const auto decision = self->access_control_->authorize(actor, credential, "system.service.invalidate");
+    credential.assign(credential.size(), '\0');
     if (decision != homeguard::AuditDecision::Allowed) {
         httpd_resp_set_status(request, "403 Forbidden");
         return self->send_json(request, std::string{"{\"ok\":false,\"reason\":\""} +
             homeguard::to_string(decision) + "\"}");
+    }
+
+    // If physical outputs are currently enabled, the safety transition must
+    // succeed before commissioning is invalidated. Never leave a latched
+    // siren/valve active under an invalid readiness record.
+    if (self->physical_outputs_->state().outputs_enabled && !self->physical_outputs_->force_safe()) {
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return self->send_json(request, "{\"ok\":false,\"reason\":\"output_safe_failed\"}");
     }
 
     const auto error = self->store_->erase_all();
@@ -134,7 +146,7 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
 esp_err_t ServiceHttp::factory_reset_post(httpd_req_t* request) {
     auto* self = self_from(request);
     if (self == nullptr || self->hardware_ == nullptr || self->commissioning_ == nullptr ||
-        self->readiness_ == nullptr) return ESP_FAIL;
+        self->readiness_ == nullptr || self->physical_outputs_ == nullptr) return ESP_FAIL;
 
     if (self->access_control_ == nullptr) {
         httpd_resp_set_status(request, "503 Service Unavailable");
@@ -158,16 +170,24 @@ esp_err_t ServiceHttp::factory_reset_post(httpd_req_t* request) {
     }
 
     if (confirmation != "ERASE_ALL") {
+        credential.assign(credential.size(), '\0');
         httpd_resp_set_status(request, "409 Conflict");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"confirmation_mismatch\"}");
     }
 
-    const auto decision = self->access_control_->authorize(actor, credential, "system.service.invalidate");
+    const auto decision = self->access_control_->authorize(actor, credential, "system.factory_reset");
     credential.assign(credential.size(), '\0');
     if (decision != homeguard::AuditDecision::Allowed) {
         httpd_resp_set_status(request, "403 Forbidden");
         return self->send_json(request, std::string{"{\"ok\":false,\"reason\":\""} +
             homeguard::to_string(decision) + "\"}");
+    }
+
+    // A reset is not allowed to leave an already-active output latched while
+    // NVS is erased and the reboot response is being sent.
+    if (self->physical_outputs_->state().outputs_enabled && !self->physical_outputs_->force_safe()) {
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return self->send_json(request, "{\"ok\":false,\"reason\":\"output_safe_failed\"}");
     }
 
     // Factory reset intentionally erases the entire default NVS partition.
