@@ -1,0 +1,29 @@
+name: Factory Reset Safety
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "firmware/esp-idf/main/hg_factory_reset.*"
+      - "firmware/esp-idf/main/hg_commissioning_nvs.*"
+      - "firmware/esp-idf/main/hg_system_http.*"
+      - "tools/check_factory_reset_contract.py"
+      - ".github/workflows/factory-reset-safety.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  factory-reset-safety:
+    name: Preserve hardware, erase mutable state
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Verify Factory Reset contract
+        run: python tools/check_factory_reset_contract.py
