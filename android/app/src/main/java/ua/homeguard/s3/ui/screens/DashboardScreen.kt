@@ -54,7 +54,6 @@ fun DashboardScreen(
     statusNotificationsEnabled: Boolean,
     zoneNotificationsEnabled: Boolean,
     onBackToDevices: () -> Unit,
-    onAddDevice: () -> Unit,
     onOperatorIdChange: (String) -> Unit,
     onOperatorPinChange: (String) -> Unit,
     onLogin: () -> Unit,
