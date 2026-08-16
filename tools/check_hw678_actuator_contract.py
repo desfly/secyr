@@ -35,12 +35,17 @@ t49 = read(TESTS / "test_build0049.cpp")
 t54 = read(TESTS / "test_build0054.cpp")
 
 configure_off_pos = physical_cpp.find("for (const auto channel : kAllChannels)")
-verify_gate_pos = physical_cpp.find("if (!hardware_verification_allows_outputs(hardware))")
+verification_assign_pos = physical_cpp.find("hardware_verified_ = hardware_verification_allows_outputs(hardware_)")
+verification_block_pos = physical_cpp.find("if (!hardware_verified_)", verification_assign_pos)
 
 checks = {
     "MCP backend compiled": '"hg_mcp23017_output_backend.cpp"' in cmake,
     "output supervisor compiled": '"hg_output_supervisor.cpp"' in cmake,
     "legacy GPIO backend excluded": '"hg_gpio_output_backend.cpp"' not in cmake,
+    "legacy DeviceCommandRouter excluded": '"../../src/device_command_router.cpp"' not in cmake,
+    "legacy DeviceApiModel excluded": '"../../src/device_api_model.cpp"' not in cmake,
+    "legacy Controller excluded": '"../../src/controller.cpp"' not in cmake,
+    "legacy LocalApi excluded": '"../../src/local_api.cpp"' not in cmake,
     "app uses MCP backend": "Mcp23017OutputBackend g_mcp_outputs" in app,
     "app starts output supervisor": "g_output_supervisor.start(" in app,
     "app has no legacy GPIO runtime": "GpioOutputBackend g_gpio_outputs" not in app,
@@ -82,7 +87,14 @@ checks = {
     "boot exposes actuator test gate": "BlockedActuatorTestRequired" in boot and "actuator_test_required" in boot,
     "destructive service uses sticky lockout": service.count("lockout_fail_closed()") >= 2,
     "destructive service rejects unsafe lockout": "output_safe_failed" in service,
-    "OFF channels configured before verification gate": configure_off_pos >= 0 and verify_gate_pos >= 0 and configure_off_pos < verify_gate_pos,
+    "OFF channels configured before verification": configure_off_pos >= 0 and verification_assign_pos > configure_off_pos and verification_block_pos > verification_assign_pos,
+    "invalid hardware keeps supervisor-capable OFF runtime": verification_block_pos >= 0 and "return true;" in physical_cpp[verification_block_pos:verification_block_pos + 260],
+    "bench requires hardware and dry-run": "hardware_verified_ &&" in physical_cpp and "commissioning_.successful_dry_runs > 0U" in physical_cpp,
+    "bench valve profile mandatory": "commissioning_.valve_limit_polarity_verified" in physical_cpp and "valve_bench_channel(channel)" in physical_cpp,
+    "bench pre-reads end stops": "LimitSnapshot before{}" in physical_cpp and "read_limits_locked(before)" in physical_cpp,
+    "bench does not drive active target": "target_limit_active(" in physical_cpp and "before.cold_open" in physical_cpp,
+    "bench post-reads end stops": "LimitSnapshot after{}" in physical_cpp and "read_limits_locked(after)" in physical_cpp,
+    "bench success is end-stop evidence": "target_limit_reached = target_limit_active(" in physical_cpp and "return target_limit_reached" in physical_cpp,
     "commissioning test blocks missing valve safety": "ValveSafetyUnverified" in t47,
     "readiness test blocks missing valve profile": "BlockedValveSafetyProfileRequired" in t49,
     "physical test checks limit stop": "ColdValveOpenLimit" in t54 and "limit_stops" in t54,
@@ -90,6 +102,7 @@ checks = {
     "physical test checks contradictory limits": "ColdValveClosedLimit" in t54 and "ValveSafetyFault" in t54,
     "physical test checks read failure": "fail_reads" in t54 and "BackendError" in t54,
     "physical test checks uncommissioned OFF path": "missing_hardware" in t54 and "lockout_fail_closed()" in t54,
+    "physical test checks end-stop transition": "bench_transition_cold_open = true" in t54 and "bench_delay_seen == 0U" in t54,
 }
 
 failed = [name for name, ok in checks.items() if not ok]
