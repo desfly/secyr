@@ -49,16 +49,19 @@ esp_err_t ServiceHttp::register_handlers(
     hg::CommissioningPersistentState* commissioning,
     hg::BootReadinessReport* readiness,
     hg::PhysicalOutputRuntime* physical_outputs,
-    hg::SystemEventBus* bus)
+    hg::SystemEventBus* bus,
+    std::mutex* control_state_mutex)
 {
     if (server == nullptr || store == nullptr || hardware == nullptr || commissioning == nullptr ||
-        readiness == nullptr || physical_outputs == nullptr || bus == nullptr) return ESP_ERR_INVALID_ARG;
+        readiness == nullptr || physical_outputs == nullptr || bus == nullptr ||
+        control_state_mutex == nullptr) return ESP_ERR_INVALID_ARG;
     store_ = store;
     hardware_ = hardware;
     commissioning_ = commissioning;
     readiness_ = readiness;
     physical_outputs_ = physical_outputs;
     bus_ = bus;
+    control_state_mutex_ = control_state_mutex;
 
     const httpd_uri_t routes[] = {
         {.uri="/api/v1/service/readiness", .method=HTTP_GET, .handler=&ServiceHttp::readiness_get, .user_ctx=this},
@@ -80,8 +83,13 @@ esp_err_t ServiceHttp::send_json(httpd_req_t* request, const std::string& body) 
 
 esp_err_t ServiceHttp::readiness_get(httpd_req_t* request) {
     auto* self = self_from(request);
-    if (self == nullptr) return ESP_FAIL;
-    const auto snapshot = hg::make_service_readiness_snapshot(self->hardware_, self->commissioning_);
+    if (self == nullptr || self->control_state_mutex_ == nullptr) return ESP_FAIL;
+
+    hg::ServiceReadinessSnapshot snapshot{};
+    {
+        std::scoped_lock lock(*self->control_state_mutex_);
+        snapshot = hg::make_service_readiness_snapshot(self->hardware_, self->commissioning_);
+    }
     return self->send_json(request, hg::service_readiness_json(snapshot));
 }
 
@@ -89,7 +97,7 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
     auto* self = self_from(request);
     if (self == nullptr || self->store_ == nullptr || self->hardware_ == nullptr ||
         self->commissioning_ == nullptr || self->readiness_ == nullptr ||
-        self->physical_outputs_ == nullptr) return ESP_FAIL;
+        self->physical_outputs_ == nullptr || self->control_state_mutex_ == nullptr) return ESP_FAIL;
 
     if (self->access_control_ == nullptr) {
         httpd_resp_set_status(request, "503 Service Unavailable");
@@ -117,9 +125,8 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
             homeguard::to_string(decision) + "\"}");
     }
 
-    // Sticky fail-closed transition is mandatory even when outputs currently
-    // look inactive. It prevents the 20 ms supervisor from re-applying a stale
-    // model command between the OFF transition and readiness/NVS invalidation.
+    // Lock order for destructive service is physical -> control-state. Sticky
+    // output lockout is completed before mutable readiness records are touched.
     if (!self->physical_outputs_->lockout_fail_closed()) {
         httpd_resp_set_status(request, "503 Service Unavailable");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"output_safe_failed\"}");
@@ -131,9 +138,12 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
         return self->send_json(request, "{\"ok\":false,\"reason\":\"nvs_erase_failed\"}");
     }
 
-    *self->hardware_ = {};
-    *self->commissioning_ = {};
-    *self->readiness_ = hg::evaluate_boot_readiness({nullptr, nullptr});
+    {
+        std::scoped_lock lock(*self->control_state_mutex_);
+        *self->hardware_ = {};
+        *self->commissioning_ = {};
+        *self->readiness_ = hg::evaluate_boot_readiness({nullptr, nullptr});
+    }
     if (self->bus_ != nullptr) {
         self->bus_->publish({hg::SystemEventType::ConfigChanged, 0, 0, 0, 5000});
     }
@@ -144,7 +154,8 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
 esp_err_t ServiceHttp::factory_reset_post(httpd_req_t* request) {
     auto* self = self_from(request);
     if (self == nullptr || self->hardware_ == nullptr || self->commissioning_ == nullptr ||
-        self->readiness_ == nullptr || self->physical_outputs_ == nullptr) return ESP_FAIL;
+        self->readiness_ == nullptr || self->physical_outputs_ == nullptr ||
+        self->control_state_mutex_ == nullptr) return ESP_FAIL;
 
     if (self->access_control_ == nullptr) {
         httpd_resp_set_status(request, "503 Service Unavailable");
@@ -181,8 +192,6 @@ esp_err_t ServiceHttp::factory_reset_post(httpd_req_t* request) {
             homeguard::to_string(decision) + "\"}");
     }
 
-    // Lock the actuator runtime closed before erasing NVS. The supervisor sees
-    // the latch before any mutable commissioning/readiness state is cleared.
     if (!self->physical_outputs_->lockout_fail_closed()) {
         httpd_resp_set_status(request, "503 Service Unavailable");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"output_safe_failed\"}");
@@ -194,9 +203,12 @@ esp_err_t ServiceHttp::factory_reset_post(httpd_req_t* request) {
         return self->send_json(request, "{\"ok\":false,\"reason\":\"factory_reset_erase_failed\"}");
     }
 
-    *self->hardware_ = {};
-    *self->commissioning_ = {};
-    *self->readiness_ = hg::evaluate_boot_readiness({nullptr, nullptr});
+    {
+        std::scoped_lock lock(*self->control_state_mutex_);
+        *self->hardware_ = {};
+        *self->commissioning_ = {};
+        *self->readiness_ = hg::evaluate_boot_readiness({nullptr, nullptr});
+    }
 
     const auto response_error = self->send_json(request,
         "{\"ok\":true,\"state\":\"restarting\",\"factoryReset\":true,\"outputsAllowed\":false}");
