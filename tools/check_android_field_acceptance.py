@@ -38,7 +38,8 @@ require('StatusLine("ID", device.deviceId)' in list_screen and
 require("Text(device.baseUrl" not in list_screen,
         "raw endpoint leaked into normal device card")
 
-# One physical ESP must collapse to one owner-visible record.
+# One physical ESP must collapse to one owner-visible record. Persistence and
+# visible LAN/CLOUD state must use the same canonical identity algorithm.
 for needle in (
     "DeviceIdentity.samePhysicalDevice(",
     "current.removeAll { sameDevice(it, device) }",
@@ -46,6 +47,11 @@ for needle in (
     "deduplicate(loaded)",
 ):
     require(needle in store, f"duplicate merge contract missing: {needle}")
+require("private fun newestDiscoveryFor(" in list_screen and
+        "DeviceIdentity.samePhysicalDevice(" in list_screen,
+        "device cards/properties do not use canonical ESP identity")
+require("candidate.deviceId.equals(device.deviceId" not in list_screen,
+        "device list still uses a second simplified identity matcher")
 
 # Small icon + visible LAN/CLOUD state picons are required on the card.
 require("Modifier.size(36.dp)" in list_screen,
@@ -79,6 +85,6 @@ if errors:
 print("Android field acceptance PASS")
 print(" - device list primary; Add flow hidden")
 print(" - mandatory friendly names; ID/IP only in Properties")
-print(" - duplicate physical ESP records merged")
+print(" - duplicate physical ESP records merged with canonical identity")
 print(" - compact icon + LAN/CLOUD/online picons")
 print(" - PIN reveal + explicit Factory Reset + safe return")
