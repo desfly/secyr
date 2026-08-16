@@ -17,7 +17,6 @@ idf_component_register(
     SRCS
         "app_main.cpp"
         "hg_web_http.cpp"
-        "hg_web_png_compat.cpp"
         "hg_network_http.cpp"
         "hg_network_persistence.cpp"
         "hg_lan_http.cpp"
@@ -107,13 +106,6 @@ idf_component_register(
 )
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)
-
-# Runtime-only HTTP compatibility hooks preserve the approved Bruce bytes
-# unchanged while serving its real PNG type in bounded chunks.
-target_link_options(${COMPONENT_LIB} INTERFACE
-    "LINKER:--wrap=httpd_resp_set_type"
-    "LINKER:--wrap=httpd_resp_send"
-)
 
 # The access KDF deliberately performs 4096 SHA-256 rounds. Build the C++
 # component with release optimization on ESP32-S3 so bootstrap/login cannot
