@@ -14,6 +14,7 @@ public:
 
     bool configure_output(int channel, bool initial_level) override;
     bool write_output(int channel, bool level) override;
+    bool read_inputs(std::uint8_t* value) override;
 
 private:
     static bool valid_channel(int channel) noexcept;
