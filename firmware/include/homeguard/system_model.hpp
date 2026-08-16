@@ -41,11 +41,10 @@ private:
     struct Subscriber { SystemEventCallback callback{}; void* context{}; };
     std::array<SystemEvent, queue_capacity> queue_{};
     std::array<Subscriber, subscriber_capacity> subscribers_{};
-    std::size_t subscriber_count_{};
-    std::array<SystemEvent, queue_capacity> queue_{};
     std::size_t queue_head_{};
     std::size_t queue_tail_{};
     std::size_t queue_size_{};
+    std::size_t subscriber_count_{};
     std::uint64_t published_{};
     std::uint64_t dropped_{};
     std::uint64_t next_sequence_{1};
