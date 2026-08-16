@@ -26,13 +26,11 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
 
     val devices: StateFlow<List<DiscoveredDevice>> = combine(nsd.devices, udp.devices, http.devices) { mdns, udpFallback, httpFallback ->
         (mdns + udpFallback + httpFallback)
-            // One physical controller can briefly be reported by more than one discovery
-            // source with a stale/temporary ID. Prefer the network endpoint as the identity
-            // when it is available so the UI does not show duplicate cards for one ESP32.
-            .groupBy { device ->
-                device.baseUrl.trim().trimEnd('/').lowercase().takeIf { it.isNotBlank() }
-                    ?: device.deviceId.trim().lowercase()
-            }
+            // Cemented rule: one physical ESP controller is one UI device.
+            // Discovery transports may report different IDs, schemes or ports for the
+            // same controller, therefore URL is not a safe identity. The controller's
+            // LAN host is the primary identity; deviceId is only a fallback.
+            .groupBy(::physicalControllerKey)
             .mapNotNull { (_, candidates) ->
                 candidates.maxWithOrNull(
                     compareBy<DiscoveredDevice> { it.seenAtMs }
@@ -64,5 +62,11 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
             async { http.scanOnce() },
         )
         Unit
+    }
+
+    private fun physicalControllerKey(device: DiscoveredDevice): String {
+        val host = device.host.trim().trim('[', ']').lowercase()
+        if (host.isNotBlank()) return "host:$host"
+        return "id:${device.deviceId.trim().lowercase()}"
     }
 }
