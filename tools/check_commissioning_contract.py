@@ -112,6 +112,12 @@ for token, label in [
     ("force_safe_locked()", "bench/off fail-safe transitions"),
     ("state_.maintenance_mode", "normal supervisor maintenance block"),
     ("siren.command_revision != siren_command_revision_", "siren stale-command suppression"),
+    ("hardware_verified_ &&", "bench pulse requires signed hardware verification"),
+    ("commissioning_.successful_dry_runs > 0U", "bench pulse requires completed dry-run"),
+    ("valve_bench_channel(channel)", "valve bench directions distinguished from non-valve outputs"),
+    ("commissioning_.valve_limit_polarity_verified", "valve bench requires verified limit polarity"),
+    ("commissioning_.cold_valve_travel_timeout_ms == 0U", "valve bench rejects missing cold timeout"),
+    ("commissioning_.hot_valve_travel_timeout_ms == 0U", "valve bench rejects missing hot timeout"),
 ]:
     require(physical, token, label)
 
@@ -135,6 +141,8 @@ for token in ["dry_run_required", "valve_safety_profile_required", "actuator_tes
     require(t49, token, f"unit test covers {token}")
 require(t47, "commissioning_state_persistable", "unit test covers partial persistence")
 require(t54, "kMaxBenchPulseMs + 1U", "unit test rejects overlong bench pulse")
+require(t54, "before_dry_run.successful_dry_runs = 0", "unit test blocks bench before dry-run")
+require(t54, "dry_run_only.valve_limit_polarity_verified = false", "unit test blocks valve bench before profile")
 require(t54, "set_maintenance_mode(true)", "unit test covers maintenance bench gate")
 
 # Destructive operations use sticky fail-closed. Factory reset always reboots;
