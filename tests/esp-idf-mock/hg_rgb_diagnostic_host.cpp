@@ -12,4 +12,8 @@ esp_err_t RgbDiagnostic::test_white(int gpio, unsigned duration_ms) {
         : ESP_ERR_INVALID_ARG;
 }
 
+esp_err_t RgbDiagnostic::factory_reset_sequence(int gpio) {
+    return supported_gpio(gpio) ? ESP_OK : ESP_ERR_INVALID_ARG;
+}
+
 }  // namespace homeguard::idf
