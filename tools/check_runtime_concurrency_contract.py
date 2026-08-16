@@ -23,9 +23,13 @@ model = text("firmware/src/system_model.cpp")
 physical = text("firmware/src/physical_output_runtime.cpp")
 system_api = text("firmware/src/system_api.cpp")
 telemetry = text("firmware/esp-idf/main/hg_telemetry_runtime.cpp")
+output_http_hpp = text("firmware/esp-idf/main/hg_output_http.hpp")
 output_http = text("firmware/esp-idf/main/hg_output_http.cpp")
+service_http_hpp = text("firmware/esp-idf/main/hg_service_http.hpp")
+service_http = text("firmware/esp-idf/main/hg_service_http.cpp")
 system_http_hpp = text("firmware/esp-idf/main/hg_system_http.hpp")
 system_http = text("firmware/esp-idf/main/hg_system_http.cpp")
+app_main = text("firmware/esp-idf/main/app_main.cpp")
 
 for token, label in [
     ("#include <mutex>", "SystemModel mutex header"),
@@ -62,15 +66,31 @@ for body, token, label in [
 ]:
     require(body, token, label)
 
-# Runtime firmware must never retain raw pointers returned by SystemModel's
-# legacy pointer views. Those accessors remain only for startup/host-test
-# compatibility; concurrent runtime readers must use copy snapshots.
+# Mutable hardware verification / commissioning / boot readiness are shared by
+# output and destructive-service HTTP paths. They must use one common lock.
+for body, token, label in [
+    (app_main, "std::mutex g_control_state_mutex", "global control-state mutex"),
+    (output_http_hpp, "std::mutex* control_state_mutex_", "output HTTP control-state mutex member"),
+    (service_http_hpp, "std::mutex* control_state_mutex_", "service HTTP control-state mutex member"),
+    (output_http, "std::scoped_lock lock(*control_state_mutex_)", "output readiness snapshot lock"),
+    (output_http, "readiness_snapshot = *readiness_", "output readiness copied under lock"),
+    (service_http, "std::scoped_lock lock(*self->control_state_mutex_)", "service shared-state lock"),
+]:
+    require(body, token, label)
+
+if app_main.count("&g_control_state_mutex") < 2:
+    errors.append("runtime concurrency contract regressed: shared control mutex not wired to both HTTP modules")
+if service_http.count("std::scoped_lock lock(*self->control_state_mutex_)") < 3:
+    errors.append("runtime concurrency contract regressed: service readiness/invalidate/reset are not all serialized")
+
+# Runtime SystemModel readers must use copy snapshots. Avoid broad '.output('
+# matching because unrelated classes may legitimately expose output() methods.
 forbidden = (
-    ".output(", "->output(",
-    ".zone_at(", "->zone_at(",
-    ".sensor_at(", "->sensor_at(",
-    ".output_at(", "->output_at(",
-    ".partition_at(", "->partition_at(",
+    "model.output(", "model_->output(", "system_model_->output(",
+    "model.zone_at(", "model_->zone_at(", "system_model_->zone_at(",
+    "model.sensor_at(", "model_->sensor_at(", "system_model_->sensor_at(",
+    "model.output_at(", "model_->output_at(", "system_model_->output_at(",
+    "model.partition_at(", "model_->partition_at(", "system_model_->partition_at(",
 )
 
 scan_roots = [ROOT / "firmware" / "src", ROOT / "firmware" / "esp-idf" / "main"]
