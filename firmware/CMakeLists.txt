@@ -94,6 +94,24 @@ target_include_directories(factory_reset_host_test PRIVATE
 )
 target_link_libraries(factory_reset_host_test PRIVATE homeguard_core)
 
+# Apply a decoded backup through the real persistence stores. A one-shot NVS
+# write fault after Access/Wi-Fi mutation must roll every earlier write back,
+# while the same transaction without the injected fault must commit normally.
+add_executable(config_transaction_host_test
+    ../tests/test_config_transaction_host.cpp
+    esp-idf/main/hg_config_transaction.cpp
+    esp-idf/main/hg_access_nvs.cpp
+    esp-idf/main/hg_cloud_nvs.cpp
+    esp-idf/main/hg_commissioning_nvs.cpp
+    esp-idf/main/hg_network_http.cpp
+)
+target_include_directories(config_transaction_host_test PRIVATE
+    esp-idf/main
+    ../tests/esp-idf-mock/include
+)
+target_link_libraries(config_transaction_host_test PRIVATE homeguard_core)
+
 enable_testing()
 add_test(NAME homeguard_tests COMMAND homeguard_tests)
 add_test(NAME factory_reset_host_test COMMAND factory_reset_host_test)
+add_test(NAME config_transaction_host_test COMMAND config_transaction_host_test)
