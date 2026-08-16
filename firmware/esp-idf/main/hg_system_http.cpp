@@ -51,6 +51,18 @@ bool parse_json_string(const std::string& body, const char* key, std::string& va
     return true;
 }
 
+bool read_request_body(httpd_req_t* request, std::size_t limit, std::string& body) {
+    if (request == nullptr || request->content_len == 0 || request->content_len > limit) return false;
+    body.assign(request->content_len, '\0');
+    std::size_t offset = 0;
+    while (offset < body.size()) {
+        const auto received = httpd_req_recv(request, body.data() + offset, body.size() - offset);
+        if (received <= 0) return false;
+        offset += static_cast<std::size_t>(received);
+    }
+    return true;
+}
+
 void delayed_factory_reboot(void*) {
     vTaskDelay(pdMS_TO_TICKS(350));
     esp_restart();
@@ -149,18 +161,12 @@ esp_err_t SystemHttp::factory_reset_post(httpd_req_t* request) {
 
 esp_err_t SystemHttp::handle_factory_reset(httpd_req_t* request) {
     if (access_control_ == nullptr) return ESP_FAIL;
-    if (request->content_len == 0 || request->content_len > 512) {
+
+    std::string body;
+    if (!read_request_body(request, 512U, body)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_body\"}", -1);
     }
-
-    std::string body(request->content_len, '\0');
-    const auto received = httpd_req_recv(request, body.data(), body.size());
-    if (received <= 0) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"read_failed\"}", -1);
-    }
-    body.resize(static_cast<std::size_t>(received));
 
     std::string actor;
     std::string credential;
@@ -207,18 +213,12 @@ esp_err_t SystemHttp::handle_factory_reset(httpd_req_t* request) {
 
 esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
     if (model_ == nullptr || bus_ == nullptr || access_control_ == nullptr) return ESP_FAIL;
-    if (request->content_len == 0 || request->content_len > 384) {
+
+    std::string body;
+    if (!read_request_body(request, 384U, body)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_body\"}", -1);
     }
-
-    std::string body(request->content_len, '\0');
-    const auto received = httpd_req_recv(request, body.data(), body.size());
-    if (received <= 0) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"read_failed\"}", -1);
-    }
-    body.resize(static_cast<std::size_t>(received));
 
     std::string command;
     std::string actor;
