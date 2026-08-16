@@ -246,6 +246,7 @@ bool PhysicalOutputRuntime::latch_fault_locked(PhysicalOutputStatus status)
 
 bool PhysicalOutputRuntime::read_limits_locked(LimitSnapshot& limits)
 {
+    state_.limit_inputs_valid = false;
     if (backend_ == nullptr || !commissioning_.valve_limit_polarity_verified) {
         return false;
     }
@@ -261,6 +262,13 @@ bool PhysicalOutputRuntime::read_limits_locked(LimitSnapshot& limits)
     limits.cold_closed = bit_active(raw, input_number(PhysicalInputChannel::ColdValveClosedLimit), active_low);
     limits.hot_open = bit_active(raw, input_number(PhysicalInputChannel::HotValveOpenLimit), active_low);
     limits.hot_closed = bit_active(raw, input_number(PhysicalInputChannel::HotValveClosedLimit), active_low);
+
+    state_.raw_limit_inputs = raw;
+    state_.cold_open_limit = limits.cold_open;
+    state_.cold_closed_limit = limits.cold_closed;
+    state_.hot_open_limit = limits.hot_open;
+    state_.hot_closed_limit = limits.hot_closed;
+    state_.limit_inputs_valid = true;
     return true;
 }
 
@@ -391,9 +399,6 @@ bool PhysicalOutputRuntime::bench_pulse(
         return false;
     }
 
-    // Never energize a valve toward an already-active mechanical end stop. It
-    // is not valid actuator evidence and risks holding the coil against the
-    // stop for the full bench interval. Contradictory inputs are a sticky fault.
     if (is_valve) {
         LimitSnapshot before{};
         if (!read_limits_locked(before)) {
@@ -446,10 +451,6 @@ bool PhysicalOutputRuntime::bench_pulse(
     state_.outputs_enabled = false;
 
     if (target_evidence != nullptr) *target_evidence = target_limit_reached;
-
-    // A safe bounded pulse is successful even when a valve has not reached its
-    // target yet. The caller may repeat another <=1 s pulse. Evidence remains
-    // false until the matching physical GPB end switch is observed afterwards.
     return true;
 }
 
