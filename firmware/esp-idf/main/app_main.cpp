@@ -37,6 +37,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <mutex>
 #include <string>
 
 namespace {
@@ -73,6 +74,7 @@ hg::BootReadinessReport g_boot_readiness;
 hg::PhysicalOutputRuntime g_physical_outputs;
 hg::SystemEventBus g_system_bus;
 hg::SystemModel g_system_model{g_system_bus};
+std::mutex g_control_state_mutex;
 httpd_handle_t g_http_server = nullptr;
 bool g_access_bootstrap_allowed = false;
 
@@ -155,9 +157,6 @@ void initialize_system_model()
 
 bool initialize_physical_outputs()
 {
-    // HW-678 physical actuator outputs are MCP23017 Port A. The expander is
-    // attached only after HardwareBootstrap has initialized it and forced OLAT
-    // safe, so no direct ESP GPIO can be energized by the physical runtime.
     g_mcp_outputs.attach(&g_hardware.io_expander());
     if (!g_physical_outputs.initialize(
             g_mcp_outputs,
@@ -188,11 +187,16 @@ esp_err_t start_http_server()
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus, &g_access_control), kTag, "system routes");
     g_output_http.set_access_control(&g_access_control);
-    ESP_RETURN_ON_ERROR(g_output_http.register_handlers(g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus), kTag, "output routes");
+    ESP_RETURN_ON_ERROR(g_output_http.register_handlers(
+        g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs,
+        &g_system_bus, &g_control_state_mutex), kTag, "output routes");
     ESP_RETURN_ON_ERROR(g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed), kTag, "access routes");
     ESP_RETURN_ON_ERROR(g_telemetry_session_http.register_handlers(g_http_server, &g_access_control, &g_websocket_telemetry), kTag, "telemetry session route");
     g_service_http.set_access_control(&g_access_control);
-    ESP_RETURN_ON_ERROR(g_service_http.register_handlers(g_http_server, &g_commissioning_store, &g_hardware_verification, &g_commissioning_state, &g_boot_readiness, &g_physical_outputs, &g_system_bus), kTag, "service routes");
+    ESP_RETURN_ON_ERROR(g_service_http.register_handlers(
+        g_http_server, &g_commissioning_store, &g_hardware_verification,
+        &g_commissioning_state, &g_boot_readiness, &g_physical_outputs,
+        &g_system_bus, &g_control_state_mutex), kTag, "service routes");
     return g_build_http.register_handlers(g_http_server);
 }
 
@@ -272,14 +276,15 @@ extern "C" void app_main()
     bool physical_runtime_ready = false;
     const auto hardware_error = g_hardware.initialize();
     if (hardware_error != ESP_OK) {
-        ESP_LOGE(kTag, "Hardware bootstrap failed: %s", esp_err_to_name(hardware_error));
+        ESP_LOGE(kTag, "Hardware bootstrap FAILED: %s", esp_err_to_name(hardware_error));
     } else {
+        const auto& hardware_status = g_hardware.status();
         const auto unavailable = g_hardware.unavailable_count();
-        if (unavailable == 0U) {
-            ESP_LOGI(kTag, "Hardware bootstrap completed: all modules ready");
+        if (hardware_status.overall == homeguard::HardwareBootstrapState::Ready) {
+            ESP_LOGI(kTag, "Hardware bootstrap READY: all modules ready");
         } else {
             ESP_LOGW(kTag,
-                     "Hardware bootstrap completed DEGRADED: %lu optional module(s) unavailable/degraded",
+                     "Hardware bootstrap DEGRADED: %lu optional module(s) unavailable/degraded",
                      static_cast<unsigned long>(unavailable));
         }
         physical_runtime_ready = initialize_physical_outputs();
