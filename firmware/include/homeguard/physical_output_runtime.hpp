@@ -8,11 +8,22 @@
 
 namespace hg {
 
+enum class PhysicalOutputChannel : int {
+    CorridorLight = 0,
+    Siren = 1,
+    ColdValveOpen = 2,
+    ColdValveClose = 3,
+    HotValveOpen = 4,
+    HotValveClose = 5,
+    Reserve1 = 6,
+    Reserve2 = 7,
+};
+
 class PhysicalOutputBackend {
 public:
     virtual ~PhysicalOutputBackend() = default;
-    virtual bool configure_output(int gpio, bool initial_level) = 0;
-    virtual bool write_output(int gpio, bool level) = 0;
+    virtual bool configure_output(int channel, bool initial_level) = 0;
+    virtual bool write_output(int channel, bool level) = 0;
 };
 
 enum class PhysicalOutputStatus : std::uint8_t {
@@ -42,11 +53,14 @@ public:
     [[nodiscard]] const PhysicalOutputRuntimeState& state() const { return state_; }
 
 private:
-    bool write_safe(int gpio);
-    bool write_logical(int gpio, bool active);
+    bool write_safe(PhysicalOutputChannel channel);
+    bool write_logical(PhysicalOutputChannel channel, bool active);
+    bool write_valve(
+        PhysicalOutputChannel open_channel,
+        PhysicalOutputChannel close_channel,
+        const OutputRecord* output);
 
     PhysicalOutputBackend* backend_{};
-    const HardwareVerificationRecord* hardware_{};
     PhysicalOutputRuntimeState state_{};
 };
 
