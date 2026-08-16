@@ -7,7 +7,8 @@ OutputCommandResult apply_output_command(
     const BootReadinessReport& readiness,
     const OutputCommand& command)
 {
-    if (model.output(command.output_id) == nullptr) {
+    OutputRecord output{};
+    if (!model.output_snapshot(command.output_id, output)) {
         return {OutputCommandStatus::InvalidOutput, OutputInterlockDecision::InvalidOutput, false};
     }
 
@@ -21,11 +22,12 @@ OutputCommandResult apply_output_command(
         });
 
     if (!interlock.allow) {
-        const auto* output = model.output(command.output_id);
+        OutputRecord current{};
+        const bool present = model.output_snapshot(command.output_id, current);
         return {
             OutputCommandStatus::RejectedInterlock,
             interlock.decision,
-            output != nullptr && output->active,
+            present && current.active,
         };
     }
 
@@ -33,11 +35,12 @@ OutputCommandResult apply_output_command(
         return {OutputCommandStatus::InvalidOutput, OutputInterlockDecision::InvalidOutput, false};
     }
 
-    const auto* output = model.output(command.output_id);
+    OutputRecord current{};
+    const bool present = model.output_snapshot(command.output_id, current);
     return {
         OutputCommandStatus::Applied,
         OutputInterlockDecision::Allowed,
-        output != nullptr && output->active,
+        present && current.active,
     };
 }
 
