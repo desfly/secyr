@@ -72,8 +72,12 @@ require('Text("СТЕРТИ ВСЕ")' in maintenance,
         "Android Factory Reset destructive confirmation missing")
 require("maintenance.factoryReset(authenticated, pin)" in maintenance,
         "Android Factory Reset is not connected to controller client")
-require("registeredDevices.markAuthorization(resetDeviceId, false)" in maintenance,
-        "Android leaves reset controller locally authorized")
+require("val resetBaseUrl = endpoint.value.apiBaseUrl" in maintenance and
+        "registeredDevices.markAuthorization(resetDeviceId, resetBaseUrl, false)" in maintenance,
+        "Android does not invalidate reset controller by physical ID/endpoint")
+require("suspend fun markAuthorization(deviceId: String, baseUrl: String = \"\", authorized: Boolean)" in store and
+        "DeviceIdentity.samePhysicalDevice(" in store,
+        "authorization invalidation is not canonical ESP identity aware")
 require("settings.clearControllerSessionAfterFactoryReset()" in maintenance,
         "Android does not clear selected controller session after reset")
 require("apiToken = \"\"" in settings and "telemetryToken = \"\"" in settings and
@@ -102,5 +106,5 @@ print(" - mandatory friendly names; ID/IP only in Properties")
 print(" - duplicate physical ESP records merged with canonical identity")
 print(" - compact icon + LAN/CLOUD/online picons")
 print(" - PIN reveal + explicit Factory Reset")
-print(" - reset requires reboot acknowledgement and clears local authorization/session")
-print(" - reset restarts Android in a fresh task so stale discovery cannot stay online")
+print(" - reset requires reboot acknowledgement and canonical authorization invalidation")
+print(" - reset clears endpoint/certificate/tokens and restarts a fresh Android task")
