@@ -137,6 +137,12 @@ esp_err_t NetworkHttp::begin()
     auto error = esp_wifi_init(&init);
     if (error != ESP_OK) return error;
 
+    // HomeGuard owns persistence in hg_wifi. Keep the ESP-IDF Wi-Fi driver's
+    // runtime STA/AP configuration in RAM so there is no second hidden copy of
+    // user SSID/password outside the namespace erased by Factory Reset.
+    error = esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    if (error != ESP_OK) return error;
+
     error = esp_wifi_set_mode(WIFI_MODE_APSTA);
     if (error != ESP_OK) return error;
 
