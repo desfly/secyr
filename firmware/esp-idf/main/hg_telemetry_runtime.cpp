@@ -21,6 +21,7 @@ namespace {
 
 constexpr const char* kTag = "hg_telemetry";
 constexpr TickType_t kTelemetryPeriod = pdMS_TO_TICKS(1000);
+constexpr std::uint32_t kOneWireRediscoveryCycles = 60U;
 
 hg::HealthState module_health(homeguard::HardwareModuleState state)
 {
@@ -181,7 +182,10 @@ void TelemetryRuntime::run()
         if (hardware_status.one_wire.state != homeguard::HardwareModuleState::Missing &&
             hardware_status.one_wire.state != homeguard::HardwareModuleState::Fault &&
             one_wire.ready()) {
-            if (one_wire.device_count() == 0U) (void)one_wire.discover();
+            const bool rediscovery_due = cycles == 0U || (cycles % kOneWireRediscoveryCycles) == 0U;
+            if (one_wire.device_count() == 0U && rediscovery_due) {
+                (void)one_wire.discover();
+            }
             if (one_wire.device_count() > 0U && one_wire.convert_all() == ESP_OK) {
                 (void)one_wire.read_all();
             }
