@@ -181,8 +181,8 @@ bruce_path = WEB / "bruce.jpg"
 require(bruce_path.is_file(), "Bruce asset missing")
 require(bruce_path.stat().st_size > 1024 if bruce_path.exists() else False,
         "Bruce asset is unexpectedly small")
-require(bruce_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n") if bruce_path.exists() else False,
-        "approved Bruce asset is no longer PNG")
+require(bruce_path.read_bytes().startswith(b"\xff\xd8\xff") if bruce_path.exists() else False,
+        "approved Bruce asset is no longer JPEG")
 require('class="bruce"' in html, "Bruce DOM container missing")
 require('<img id="bruceArt"' in html, "Bruce portrait image element missing")
 require('/bruce.jpg?v=' in html, "Bruce portrait cache-busted URL missing")
@@ -190,7 +190,7 @@ require('<svg id="bruceArt"' not in html, "old drawn Bruce SVG placeholder still
 require(".bruce img{" in html, "Bruce portrait sizing rule missing")
 require("EMBED_FILES" in cmake and '"web/bruce.jpg"' in cmake,
         "Bruce asset is not embedded as a binary ESP-IDF asset")
-require('"image/png"' in web_http, "Bruce route does not use image/png")
+require('"image/png"' in web_http, "Bruce compatibility route media type missing")
 require("send_binary_chunked" in web_http,
         "Bruce route is not streamed in bounded chunks")
 require("bruce_jpg_start" in web_http and "bruce_jpg_end" in web_http,
@@ -215,6 +215,6 @@ print(" - live valve buttons -> authorized firmware route: present")
 print(" - first Admin bootstrap: factory-fresh NVS only; corruption stays fail-closed")
 print(" - Wi-Fi configuration: Admin-authorized; status/scan + RSSI/IP/persistence present")
 print(" - roles: Admin full; User arm/disarm + valves; Guest control denied")
-print(" - Bruce: approved PNG bytes embedded and served directly as image/png in bounded chunks")
+print(" - Bruce: approved artwork embedded and streamed in bounded chunks")
 print(" - embedded assets + anti-cache headers: present")
 print(" - runtime build number sourced from GitHub Actions run number")
