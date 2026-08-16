@@ -14,6 +14,8 @@ provisioning_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/scre
 bruce_brand = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/components/BruceBrand.kt").read_text(encoding="utf-8")
 main_activity = (ROOT / "android/app/src/main/java/ua/homeguard/s3/MainActivity.kt").read_text(encoding="utf-8")
 store = (ROOT / "android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt").read_text(encoding="utf-8")
+lan_icon = ROOT / "android/app/src/main/res/drawable/ic_status_lan.xml"
+cloud_icon = ROOT / "android/app/src/main/res/drawable/ic_status_cloud.xml"
 
 checks = {
     # Working LAN discovery is a field-proven invariant: do not rewrite it while fixing UI.
@@ -65,9 +67,13 @@ checks = {
     # Main cards are friendly-name/state only; technical identity belongs in Properties.
     "Device cards hide raw endpoint": "Text(device.baseUrl" not in list_screen,
     "Legacy technical channel strip stays hidden": "LinkIndicator(" not in list_screen,
-    "Device cards expose LAN state indicator": 'ConnectionIndicator("LAN", lanState)' in list_screen,
-    "Device cards expose CLOUD state indicator": 'ConnectionIndicator("CLOUD", cloudState)' in list_screen,
-    "State indicators use compact glyphs": all(token in list_screen for token in ('LinkState.ACTIVE -> "●"', 'LinkState.INACTIVE -> "○"', 'LinkState.UNKNOWN -> "◌"')),
+    "LAN vector icon resource exists": lan_icon.is_file(),
+    "CLOUD vector icon resource exists": cloud_icon.is_file(),
+    "Device cards use LAN vector icon": 'ConnectionIndicator("LAN", lanState, R.drawable.ic_status_lan)' in list_screen,
+    "Device cards use CLOUD vector icon": 'ConnectionIndicator("CLOUD", cloudState, R.drawable.ic_status_cloud)' in list_screen,
+    "State indicators render Material3 icons": "androidx.compose.material3.Icon" in list_screen and "Icon(" in list_screen,
+    "State icons stay compact": "modifier = Modifier.size(18.dp)" in list_screen,
+    "Legacy status glyphs removed": '$glyph $label' not in list_screen and 'LinkState.ACTIVE -> "●"' not in list_screen,
     "Properties exposes ID": 'StatusLine("ID", device.deviceId)' in list_screen,
     "Properties exposes endpoint": 'StatusLine("Адреса", device.baseUrl.ifBlank { "—" })' in list_screen,
     "Properties action exists": 'Text("Властивості")' in list_screen,
