@@ -8,7 +8,9 @@
 namespace hg {
 
 struct HardwareVerificationRecord {
-    static constexpr std::uint32_t kSchemaVersion = 1;
+    // Schema 2 is the HW-678 MCP23017 output architecture. Schema 1 encoded
+    // siren/valves as direct ESP GPIOs and must never unlock physical outputs.
+    static constexpr std::uint32_t kSchemaVersion = 2;
 
     std::uint32_t schema_version{kSchemaVersion};
     BoardPinMap pins{};
@@ -21,7 +23,7 @@ enum class HardwareVerificationStatus {
     Valid,
     InvalidSchema,
     InvalidPinMap,
-    UnassignedRequiredOutput,
+    UnassignedRequiredOutput, // retained for decoding legacy diagnostics only
     PolarityUnverified,
     MissingTimestamp,
     CrcMismatch,
