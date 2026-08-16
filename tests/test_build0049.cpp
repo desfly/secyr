@@ -5,20 +5,21 @@ namespace {
 
 hg::HardwareVerificationRecord valid_hardware() {
     hg::HardwareVerificationRecord r;
-    r.pins.i2c_sda = 1;
-    r.pins.i2c_scl = 2;
-    r.pins.w5500_mosi = 3;
-    r.pins.w5500_miso = 4;
-    r.pins.w5500_sclk = 5;
-    r.pins.w5500_cs = 6;
-    r.pins.w5500_int = 7;
+    r.pins.i2c_sda = 4;
+    r.pins.i2c_scl = 5;
+    r.pins.w5500_mosi = 11;
+    r.pins.w5500_miso = 13;
+    r.pins.w5500_sclk = 12;
+    r.pins.w5500_cs = 10;
+    r.pins.w5500_int = 9;
     r.pins.w5500_rst = 8;
-    r.pins.service_button = 9;
-    r.pins.siren = 10;
-    r.pins.valve1 = 11;
-    r.pins.valve2 = 12;
-    r.pins.aux1 = 13;
-    r.pins.aux2 = 14;
+    r.pins.service_button = 21;
+    // HW-678 schema v2 uses MCP23017 Port A for actuator outputs.
+    r.pins.siren = hg::gpio_unassigned;
+    r.pins.valve1 = hg::gpio_unassigned;
+    r.pins.valve2 = hg::gpio_unassigned;
+    r.pins.aux1 = hg::gpio_unassigned;
+    r.pins.aux2 = hg::gpio_unassigned;
     r.active_polarity_verified = true;
     r.verified_at_ms = 1000U;
     r.profile_crc32 = hg::hardware_profile_crc32(r);
@@ -41,10 +42,38 @@ void test_build0049() {
     auto hardware = valid_hardware();
     auto commissioning = valid_commissioning();
 
+    CHECK(hg::HardwareVerificationRecord::kSchemaVersion == 2U);
+    CHECK(!hg::gpio_number_valid(22));
+    CHECK(!hg::gpio_number_valid(23));
+    CHECK(!hg::gpio_number_valid(24));
+    CHECK(!hg::gpio_number_valid(25));
+    CHECK(hg::gpio_number_valid(21));
+    CHECK(hg::gpio_number_valid(26));
+
     auto report = hg::evaluate_boot_readiness({&hardware, &commissioning});
     CHECK(report.status == hg::BootReadinessStatus::ReadyForPhysicalOutputs);
     CHECK(report.outputs_allowed());
     CHECK(hg::boot_readiness_json(report).find("\"outputsAllowed\":true") != std::string::npos);
+
+    auto legacy_schema = hardware;
+    legacy_schema.schema_version = 1U;
+    legacy_schema.profile_crc32 = hg::hardware_profile_crc32(legacy_schema);
+    CHECK(hg::validate_hardware_verification(legacy_schema) == hg::HardwareVerificationStatus::InvalidSchema);
+
+    auto direct_output = hardware;
+    direct_output.pins.siren = 26;
+    direct_output.profile_crc32 = hg::hardware_profile_crc32(direct_output);
+    CHECK(hg::validate_hardware_verification(direct_output) == hg::HardwareVerificationStatus::InvalidPinMap);
+
+    auto wrong_i2c = hardware;
+    wrong_i2c.pins.i2c_sda = 26;
+    wrong_i2c.profile_crc32 = hg::hardware_profile_crc32(wrong_i2c);
+    CHECK(hg::validate_hardware_verification(wrong_i2c) == hg::HardwareVerificationStatus::InvalidPinMap);
+
+    auto wrong_w5500 = hardware;
+    wrong_w5500.pins.w5500_cs = 26;
+    wrong_w5500.profile_crc32 = hg::hardware_profile_crc32(wrong_w5500);
+    CHECK(hg::validate_hardware_verification(wrong_w5500) == hg::HardwareVerificationStatus::InvalidPinMap);
 
     report = hg::evaluate_boot_readiness({nullptr, &commissioning});
     CHECK(report.status == hg::BootReadinessStatus::BlockedMissingHardwareRecord);
