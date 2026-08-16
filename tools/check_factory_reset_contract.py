@@ -33,6 +33,25 @@ checks = {
     "Hardware verification key remains separate": 'kHardwareKey = "hardware_v1"' in commissioning,
     "Selective commissioning erase targets only state_v1": "return erase_key(kCommissioningKey);" in commissioning,
 
+    # Acceptance item 20: every user-owned provisioning secret belongs to the
+    # mutable hg-provision namespace that Factory Reset erases. Factory-issued
+    # identity/private material remains in hg-factory and must be preserved.
+    "Mutable provisioning namespace is hg-provision": 'provision_namespace[] = "hg-provision"' in config_store,
+    "User Wi-Fi SSID is mutable provisioning": '"wifi_ssid"' in config_store,
+    "User Wi-Fi password is mutable provisioning": '"wifi_pass"' in config_store,
+    "Local API token is mutable provisioning": '"api_token"' in config_store,
+    "Cloud endpoint is mutable provisioning": '"cloud_uri"' in config_store,
+    "Cloud token is mutable provisioning": '"cloud_token"' in config_store,
+    "Owner label is mutable provisioning": '"owner"' in config_store,
+    "Provisioning completion marker is mutable": '"complete"' in config_store,
+    "Factory certificate stays in hg-factory": '"cert_pem"' in config_store and 'factory_namespace[] = "hg-factory"' in config_store,
+    "Factory private key stays in hg-factory": '"key_pem"' in config_store,
+    "Factory certificate hash stays in hg-factory": '"cert_sha"' in config_store,
+    "Factory pairing code stays in hg-factory": '"pair_code"' in config_store,
+    "Factory setup password stays in hg-factory": '"setup_pass"' in config_store,
+    "Factory identity loader uses only factory namespace": "nvs_open(factory_namespace, NVS_READONLY" in config_store,
+    "Provisioning loader uses only mutable namespace": "nvs_open(provision_namespace, NVS_READONLY" in config_store,
+
     # Acceptance item 22: clearing hg_access must become factory-first-Admin
     # after reboot. Guard the exact storage->boot decision chain.
     "Access store reads factory namespace": 'constexpr const char* nvs_namespace = "hg_access"' in access_nvs,
@@ -68,4 +87,6 @@ if failed:
 
 print("Factory Reset contract PASS")
 print(" - Wi-Fi persistence: hg_wifi + legacy ESP-IDF settings erased; runtime driver config RAM-only")
+print(" - mutable provisioning secrets/owner marker are all in erased hg-provision")
+print(" - immutable certificate/key/pairing/setup identity remains in preserved hg-factory")
 print(" - reboot factory-fresh chain: missing hg_access -> bootstrap allowed; corrupt DB remains fail-closed")
