@@ -255,3 +255,52 @@
   links.forEach(link => navObserver.observe(link, { attributes: true, attributeFilter: ["class"] }));
   enforceSingleActive();
 })();
+
+// Phone layout: Bruce stays fully visible and the navigation is collapsed by
+// default. The menu button is placed after Bruce, so opening/closing navigation
+// never overlays the artwork or the page content.
+(() => {
+  const sidebar = document.querySelector(".sidebar");
+  const bruce = sidebar?.querySelector(".bruce");
+  const nav = sidebar?.querySelector("nav");
+  if (!sidebar || !bruce || !nav || document.querySelector("#mobileNavToggle")) return;
+
+  const style = document.createElement("style");
+  style.textContent = `
+    #mobileNavToggle{display:none}
+    @media(max-width:720px){
+      .sidebar{position:relative!important;height:auto!important;overflow:visible!important}
+      .sidebar .bruce{height:180px!important;overflow:visible!important;margin-bottom:8px!important}
+      .sidebar .bruce img{width:100%!important;height:100%!important;object-fit:contain!important;object-position:center center!important}
+      .sidebar nav{display:none!important}
+      .sidebar.mobile-nav-open nav{display:flex!important}
+      #mobileNavToggle{display:block;width:calc(100% - 24px);margin:0 12px 10px;padding:11px 14px;border:1px solid rgba(255,255,255,.28);border-radius:8px;background:#173551;color:#fff;font:inherit;font-weight:700;text-align:left}
+    }`;
+  document.head.appendChild(style);
+
+  const toggle = document.createElement("button");
+  toggle.id = "mobileNavToggle";
+  toggle.type = "button";
+  toggle.textContent = "☰ Меню";
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.setAttribute("aria-controls", "homeguardNav");
+  nav.id = nav.id || "homeguardNav";
+  bruce.insertAdjacentElement("afterend", toggle);
+
+  const closeMenu = () => {
+    sidebar.classList.remove("mobile-nav-open");
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.textContent = "☰ Меню";
+  };
+
+  toggle.addEventListener("click", () => {
+    const open = sidebar.classList.toggle("mobile-nav-open");
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.textContent = open ? "✕ Закрити меню" : "☰ Меню";
+  });
+  nav.querySelectorAll("a").forEach(link => link.addEventListener("click", closeMenu));
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > 720) closeMenu();
+  });
+  closeMenu();
+})();
