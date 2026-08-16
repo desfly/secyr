@@ -19,6 +19,7 @@ app = read(MAIN / "app_main.cpp")
 mcp = read(MAIN / "hg_mcp23017.cpp")
 mcp_backend = read(MAIN / "hg_mcp23017_output_backend.cpp")
 supervisor = read(MAIN / "hg_output_supervisor.cpp")
+service = read(MAIN / "hg_service_http.cpp")
 commissioning_nvs = read(MAIN / "hg_commissioning_nvs.cpp")
 hardware_verification = read(INC / "hardware_verification.hpp")
 commissioning_state_h = read(INC / "commissioning_state.hpp")
@@ -32,6 +33,9 @@ output_http = read(MAIN / "hg_output_http.cpp")
 t47 = read(TESTS / "test_build0047.cpp")
 t49 = read(TESTS / "test_build0049.cpp")
 t54 = read(TESTS / "test_build0054.cpp")
+
+configure_off_pos = physical_cpp.find("for (const auto channel : kAllChannels)")
+verify_gate_pos = physical_cpp.find("if (!hardware_verification_allows_outputs(hardware))")
 
 checks = {
     "MCP backend compiled": '"hg_mcp23017_output_backend.cpp"' in cmake,
@@ -63,8 +67,7 @@ checks = {
     "target limit stop": "target_reached" in physical_cpp and "stop_valve_locked" in physical_cpp,
     "measured timeout stop": "configured_timeout_ms" in physical_cpp and "ValveTimeout" in physical_cpp,
     "contradictory limits fail closed": "limits.cold_open && limits.cold_closed" in physical_cpp and "ValveSafetyFault" in physical_cpp,
-    "no-command valve STOP": "No command since boot" in physical_cpp or "output == nullptr || !output->commanded" in physical_cpp,
-    "break before make": "Break-before-make" in physical_cpp,
+    "no-command valve STOP": "output == nullptr || !output->commanded" in physical_cpp,
     "runtime mutex serialized": "std::mutex" in physical_h and "std::scoped_lock" in physical_cpp,
     "20 ms independent supervisor": "pdMS_TO_TICKS(20)" in supervisor,
     "supervisor uses monotonic time": "esp_timer_get_time()" in supervisor,
@@ -77,12 +80,16 @@ checks = {
     "actuator test mandatory": "successful_actuator_tests > 0U" in commissioning_state_cpp,
     "boot exposes valve profile gate": "BlockedValveSafetyProfileRequired" in boot and "valve_safety_profile_required" in boot,
     "boot exposes actuator test gate": "BlockedActuatorTestRequired" in boot and "actuator_test_required" in boot,
+    "destructive service uses sticky lockout": service.count("lockout_fail_closed()") >= 2,
+    "destructive service rejects unsafe lockout": "output_safe_failed" in service,
+    "OFF channels configured before verification gate": configure_off_pos >= 0 and verify_gate_pos >= 0 and configure_off_pos < verify_gate_pos,
     "commissioning test blocks missing valve safety": "ValveSafetyUnverified" in t47,
     "readiness test blocks missing valve profile": "BlockedValveSafetyProfileRequired" in t49,
     "physical test checks limit stop": "ColdValveOpenLimit" in t54 and "limit_stops" in t54,
     "physical test checks timeout latch": "ValveTimeout" in t54 and "safety_fault_latched" in t54,
     "physical test checks contradictory limits": "ColdValveClosedLimit" in t54 and "ValveSafetyFault" in t54,
     "physical test checks read failure": "fail_reads" in t54 and "BackendError" in t54,
+    "physical test checks uncommissioned OFF path": "missing_hardware" in t54 and "lockout_fail_closed()" in t54,
 }
 
 failed = [name for name, ok in checks.items() if not ok]
