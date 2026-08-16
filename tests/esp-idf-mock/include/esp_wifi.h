@@ -8,6 +8,7 @@
 using wifi_interface_t = int;
 using wifi_mode_t = int;
 using wifi_auth_mode_t = int;
+using wifi_scan_type_t = int;
 
 constexpr wifi_interface_t WIFI_IF_STA = 0;
 constexpr wifi_interface_t WIFI_IF_AP = 1;
@@ -16,6 +17,7 @@ constexpr wifi_mode_t WIFI_MODE_AP = 2;
 constexpr wifi_mode_t WIFI_MODE_APSTA = 3;
 constexpr wifi_auth_mode_t WIFI_AUTH_OPEN = 0;
 constexpr wifi_auth_mode_t WIFI_AUTH_WPA2_PSK = 3;
+constexpr wifi_scan_type_t WIFI_SCAN_TYPE_ACTIVE = 0;
 
 struct wifi_pmf_config_t {
     bool capable{};
@@ -51,7 +53,23 @@ struct wifi_config_t {
 struct wifi_init_config_t {};
 #define WIFI_INIT_CONFIG_DEFAULT() wifi_init_config_t{}
 
-struct wifi_scan_config_t {};
+struct wifi_active_scan_time_t {
+    std::uint32_t min{};
+    std::uint32_t max{};
+};
+
+struct wifi_scan_time_t {
+    wifi_active_scan_time_t active{};
+};
+
+struct wifi_scan_config_t {
+    std::uint8_t* ssid{};
+    std::uint8_t* bssid{};
+    std::uint8_t channel{};
+    bool show_hidden{};
+    wifi_scan_type_t scan_type{};
+    wifi_scan_time_t scan_time{};
+};
 
 struct wifi_ap_record_t {
     std::uint8_t ssid[33]{};
