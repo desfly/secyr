@@ -96,24 +96,36 @@ void test_build0049() {
     report = hg::evaluate_boot_readiness({&hardware, &bad_commissioning});
     CHECK(report.status == hg::BootReadinessStatus::BlockedCommissioningState);
 
-    auto missing_valve_safety = commissioning;
-    missing_valve_safety.valve_limit_polarity_verified = false;
-    report = hg::evaluate_boot_readiness({&hardware, &missing_valve_safety});
+    // Cement the exact field commissioning order after hardware verification.
+    hg::CommissioningPersistentState staged{};
+    staged.gpio_map_verified = true;
+    staged.active_polarity_verified = true;
+    staged.last_verified_at_ms = 1000U;
+    report = hg::evaluate_boot_readiness({&hardware, &staged});
+    CHECK(report.status == hg::BootReadinessStatus::BlockedDryRunRequired);
+    CHECK(!report.outputs_allowed());
+    CHECK(hg::boot_readiness_json(report).find("dry_run_required") != std::string::npos);
+
+    staged.successful_dry_runs = 1U;
+    staged.last_verified_at_ms = 1100U;
+    report = hg::evaluate_boot_readiness({&hardware, &staged});
     CHECK(report.status == hg::BootReadinessStatus::BlockedValveSafetyProfileRequired);
     CHECK(!report.outputs_allowed());
     CHECK(hg::boot_readiness_json(report).find("valve_safety_profile_required") != std::string::npos);
 
-    auto no_dry_run = commissioning;
-    no_dry_run.successful_dry_runs = 0U;
-    no_dry_run.successful_actuator_tests = 0U;
-    report = hg::evaluate_boot_readiness({&hardware, &no_dry_run});
-    CHECK(report.status == hg::BootReadinessStatus::BlockedDryRunRequired);
-    CHECK(!report.outputs_allowed());
-
-    auto no_actuator_test = commissioning;
-    no_actuator_test.successful_actuator_tests = 0U;
-    report = hg::evaluate_boot_readiness({&hardware, &no_actuator_test});
+    staged.valve_limit_polarity_verified = true;
+    staged.valve_limits_active_low = true;
+    staged.cold_valve_travel_timeout_ms = 12000U;
+    staged.hot_valve_travel_timeout_ms = 13000U;
+    staged.last_verified_at_ms = 1200U;
+    report = hg::evaluate_boot_readiness({&hardware, &staged});
     CHECK(report.status == hg::BootReadinessStatus::BlockedActuatorTestRequired);
     CHECK(!report.outputs_allowed());
     CHECK(hg::boot_readiness_json(report).find("actuator_test_required") != std::string::npos);
+
+    staged.successful_actuator_tests = 1U;
+    staged.last_verified_at_ms = 1300U;
+    report = hg::evaluate_boot_readiness({&hardware, &staged});
+    CHECK(report.status == hg::BootReadinessStatus::ReadyForPhysicalOutputs);
+    CHECK(report.outputs_allowed());
 }
