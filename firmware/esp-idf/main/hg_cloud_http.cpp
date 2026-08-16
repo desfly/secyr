@@ -59,6 +59,19 @@ bool parse_json_bool(const std::string& body, const char* key, bool& value)
     return false;
 }
 
+bool read_request_body(httpd_req_t* request, std::size_t limit, std::string& body)
+{
+    if (request == nullptr || request->content_len == 0 || request->content_len > limit) return false;
+    body.assign(request->content_len, '\0');
+    std::size_t offset = 0;
+    while (offset < body.size()) {
+        const auto received = httpd_req_recv(request, body.data() + offset, body.size() - offset);
+        if (received <= 0) return false;
+        offset += static_cast<std::size_t>(received);
+    }
+    return true;
+}
+
 esp_err_t send_json(httpd_req_t* request, const std::string& body)
 {
     httpd_resp_set_type(request, "application/json");
@@ -116,17 +129,11 @@ esp_err_t CloudHttp::config_post(httpd_req_t* request)
 
 esp_err_t CloudHttp::handle_config(httpd_req_t* request)
 {
-    if (request->content_len == 0 || request->content_len > 1024) {
+    std::string body;
+    if (!read_request_body(request, 1024U, body)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_body\"}");
     }
-    std::string body(request->content_len, '\0');
-    const auto received = httpd_req_recv(request, body.data(), body.size());
-    if (received <= 0) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return send_json(request, "{\"ok\":false,\"reason\":\"read_failed\"}");
-    }
-    body.resize(static_cast<std::size_t>(received));
 
     std::string actor, credential;
     if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
