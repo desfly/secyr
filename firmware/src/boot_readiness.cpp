@@ -32,6 +32,11 @@ BootReadinessReport evaluate_boot_readiness(const BootReadinessInput& input) noe
         return report;
     }
 
+    if (input.commissioning->successful_actuator_tests == 0U) {
+        report.status = BootReadinessStatus::BlockedActuatorTestRequired;
+        return report;
+    }
+
     if (!hardware_verification_allows_outputs(*input.hardware) ||
         !commissioning_state_allows_physical_outputs(*input.commissioning)) {
         report.status = BootReadinessStatus::BlockedCommissioningState;
@@ -49,6 +54,7 @@ const char* to_string(const BootReadinessStatus status) noexcept {
         case BootReadinessStatus::BlockedHardwareVerification: return "hardware_verification_failed";
         case BootReadinessStatus::BlockedCommissioningState: return "commissioning_state_failed";
         case BootReadinessStatus::BlockedDryRunRequired: return "dry_run_required";
+        case BootReadinessStatus::BlockedActuatorTestRequired: return "actuator_test_required";
         case BootReadinessStatus::ReadyForPhysicalOutputs: return "ready_for_physical_outputs";
     }
     return "unknown";
