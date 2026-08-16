@@ -19,6 +19,18 @@ class ControllerIdentityTest {
     }
 
     @Test
+    fun `manual ip registration reconciles with discovered controller across transport changes`() {
+        assertTrue(
+            ControllerIdentity.sameController(
+                leftDeviceId = "manual-deadbeef",
+                leftBaseUrl = "http://192.168.55.40:80/",
+                rightDeviceId = "HG-ACA7041DA710",
+                rightBaseUrl = "https://192.168.55.40:8443/api/v1",
+            )
+        )
+    }
+
+    @Test
     fun `different hosts are not merged when ids differ`() {
         assertFalse(
             ControllerIdentity.sameController(
