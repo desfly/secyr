@@ -202,13 +202,28 @@ esp_err_t SystemHttp::handle_factory_reset(httpd_req_t* request) {
     }
 
     access_control_->clear_users();
+
+    // Schedule the reboot before replying. If the HTTP socket disappears after
+    // NVS erase (expected when networking is being torn down), the controller
+    // must still reach a factory-fresh boot. Never make reboot depend on a
+    // successful response write.
+    const auto reboot_task = xTaskCreate(
+        &delayed_factory_reboot,
+        "hg_factory_reset",
+        2048,
+        nullptr,
+        5,
+        nullptr);
+    if (reboot_task != pdPASS) {
+        // Mutable state is already erased. Failing to reboot would leave the
+        // live runtime inconsistent with NVS, so force an immediate reset.
+        esp_restart();
+        return ESP_FAIL;
+    }
+
     static constexpr char response[] =
         "{\"ok\":true,\"state\":\"factory_reset_complete\",\"rebooting\":true}";
-    const auto send_error = send_json(request, response, sizeof(response) - 1U);
-    if (send_error == ESP_OK) {
-        (void)xTaskCreate(&delayed_factory_reboot, "hg_factory_reset", 2048, nullptr, 5, nullptr);
-    }
-    return send_error;
+    return send_json(request, response, sizeof(response) - 1U);
 }
 
 esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
