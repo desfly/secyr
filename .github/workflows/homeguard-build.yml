@@ -62,10 +62,16 @@ jobs:
           ctest --test-dir build-host --output-on-failure
       - name: Web UI contract
         run: python tools/check_web_ui_contract.py
+      - name: Web field acceptance
+        run: python tools/check_field_acceptance_web.py
+      - name: Factory Reset contract
+        run: python tools/check_factory_reset_contract.py
       - name: LAN UI/API contract
         run: python tools/check_lan_ui_contract.py
       - name: Android LAN discovery contract
         run: python tools/check_android_discovery_contract.py
+      - name: Android field acceptance
+        run: python tools/check_android_field_acceptance.py
       - name: Cloud runtime contract
         run: python tools/check_cloud_runtime_contract.py
       - name: Web UI JavaScript syntax
