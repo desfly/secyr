@@ -48,6 +48,18 @@ bool parse_json_string(const std::string& body, const char* key, std::string& va
     value.assign(body, pos + 1U, end - pos - 1U);
     return true;
 }
+
+bool read_request_body(httpd_req_t* request, std::size_t limit, std::string& body) {
+    if (request == nullptr || request->content_len == 0 || request->content_len > limit) return false;
+    body.assign(request->content_len, '\0');
+    std::size_t offset = 0;
+    while (offset < body.size()) {
+        const auto received = httpd_req_recv(request, body.data() + offset, body.size() - offset);
+        if (received <= 0) return false;
+        offset += static_cast<std::size_t>(received);
+    }
+    return true;
+}
 }
 
 esp_err_t OutputHttp::register_handlers(
@@ -79,18 +91,11 @@ esp_err_t OutputHttp::command_post(httpd_req_t* request) {
 }
 
 esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
-    if (request->content_len == 0 || request->content_len > 384) {
+    std::string body;
+    if (!read_request_body(request, 384U, body)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_body\"}", -1);
     }
-
-    std::string body(request->content_len, '\0');
-    const auto received = httpd_req_recv(request, body.data(), body.size());
-    if (received <= 0) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"read_failed\"}", -1);
-    }
-    body.resize(static_cast<std::size_t>(received));
 
     std::uint16_t output_id{};
     bool active{};
