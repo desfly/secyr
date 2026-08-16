@@ -24,6 +24,44 @@ CommissioningStateValidation validate_commissioning_state(
     return CommissioningStateValidation::Valid;
 }
 
+bool commissioning_state_persistable(
+    const CommissioningPersistentState& state) noexcept
+{
+    if (state.schema_version != CommissioningPersistentState::kSchemaVersion) return false;
+    if (state.successful_actuator_tests > state.successful_dry_runs) return false;
+
+    const bool has_progress =
+        state.gpio_map_verified || state.active_polarity_verified ||
+        state.successful_dry_runs != 0U || state.successful_actuator_tests != 0U ||
+        state.valve_limit_polarity_verified ||
+        state.cold_valve_travel_timeout_ms != 0U ||
+        state.hot_valve_travel_timeout_ms != 0U;
+    if (has_progress && state.last_verified_at_ms == 0U) return false;
+
+    if (state.successful_dry_runs != 0U &&
+        (!state.gpio_map_verified || !state.active_polarity_verified)) {
+        return false;
+    }
+
+    const bool any_valve_profile =
+        state.valve_limit_polarity_verified ||
+        state.cold_valve_travel_timeout_ms != 0U ||
+        state.hot_valve_travel_timeout_ms != 0U;
+    const bool complete_valve_profile =
+        state.valve_limit_polarity_verified &&
+        state.cold_valve_travel_timeout_ms != 0U &&
+        state.hot_valve_travel_timeout_ms != 0U;
+    if (any_valve_profile && !complete_valve_profile) return false;
+
+    if (state.successful_actuator_tests != 0U &&
+        (!state.gpio_map_verified || !state.active_polarity_verified ||
+         !complete_valve_profile)) {
+        return false;
+    }
+
+    return true;
+}
+
 bool commissioning_state_allows_physical_outputs(
     const CommissioningPersistentState& state) noexcept
 {
@@ -46,6 +84,7 @@ std::string commissioning_state_json(const CommissioningPersistentState& state)
         << ",\"valveLimitsActiveLow\":" << (state.valve_limits_active_low ? "true" : "false")
         << ",\"coldValveTravelTimeoutMs\":" << state.cold_valve_travel_timeout_ms
         << ",\"hotValveTravelTimeoutMs\":" << state.hot_valve_travel_timeout_ms
+        << ",\"persistable\":" << (commissioning_state_persistable(state) ? "true" : "false")
         << ",\"validation\":\"" << to_string(validate_commissioning_state(state)) << "\""
         << ",\"physicalOutputsAllowed\":" << (commissioning_state_allows_physical_outputs(state) ? "true" : "false")
         << "}";
