@@ -86,4 +86,31 @@ esp_err_t RgbDiagnostic::test_white(int gpio, unsigned duration_ms) {
     return transmit_rgb(gpio, off);
 }
 
+esp_err_t RgbDiagnostic::factory_reset_sequence(int gpio) {
+    if (!supported_gpio(gpio)) return ESP_ERR_INVALID_ARG;
+
+    // WS2812 byte order is GRB. One second per color makes destructive Factory
+    // Reset unmistakable and visually different from the normal five-second
+    // white boot indication.
+    constexpr std::array<std::array<std::uint8_t, 3>, 5> colors{{
+        {{0x00U, 0xffU, 0x00U}},  // red
+        {{0xffU, 0xffU, 0x00U}},  // yellow
+        {{0xffU, 0x00U, 0x00U}},  // green
+        {{0x00U, 0x00U, 0xffU}},  // blue
+        {{0x00U, 0xffU, 0xffU}},  // magenta
+    }};
+    constexpr std::array<std::uint8_t, 3> off{{0x00U, 0x00U, 0x00U}};
+
+    for (const auto& color : colors) {
+        const auto error = transmit_rgb(gpio, color);
+        if (error != ESP_OK) {
+            (void)transmit_rgb(gpio, off);
+            return error;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000U));
+    }
+
+    return transmit_rgb(gpio, off);
+}
+
 }  // namespace homeguard::idf
