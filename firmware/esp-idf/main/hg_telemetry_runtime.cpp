@@ -40,9 +40,9 @@ hg::HealthState module_health(homeguard::HardwareModuleState state)
 
 hg::SystemMode system_mode(const hg::SystemModel& model)
 {
-    const auto* partition = model.partition_at(0);
-    if (partition == nullptr) return hg::SystemMode::Disarmed;
-    switch (partition->arm_state) {
+    hg::PartitionRecord partition{};
+    if (!model.partition_at_snapshot(0, partition)) return hg::SystemMode::Disarmed;
+    switch (partition.arm_state) {
         case hg::PartitionArmState::Stay: return hg::SystemMode::ArmedHome;
         case hg::PartitionArmState::Away: return hg::SystemMode::ArmedAway;
         case hg::PartitionArmState::Alarm: return hg::SystemMode::Alarm;
@@ -150,8 +150,9 @@ void TelemetryRuntime::run()
         zones.fill(hg::ZoneState::Disabled);
         const auto zone_count = std::min<std::size_t>(zones.size(), system_model_->zone_count());
         for (std::size_t index = 0; index < zone_count; ++index) {
-            if (const auto* zone = system_model_->zone_at(index); zone != nullptr) {
-                zones[index] = zone_state(*zone);
+            hg::ZoneRecord zone{};
+            if (system_model_->zone_at_snapshot(index, zone)) {
+                zones[index] = zone_state(zone);
             }
         }
 
