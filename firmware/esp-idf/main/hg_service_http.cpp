@@ -544,13 +544,15 @@ esp_err_t ServiceHttp::bench_pulse_post(httpd_req_t* request) {
         return self->send_json(request, "{\"ok\":false,\"reason\":\"bench_pulse_out_of_range\"}");
     }
 
-    if (!self->physical_outputs_->bench_pulse(channel, duration_ms, &bench_delay)) {
+    bool target_evidence = false;
+    if (!self->physical_outputs_->bench_pulse(
+            channel, duration_ms, &bench_delay, &target_evidence)) {
         httpd_resp_set_status(request, "503 Service Unavailable");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"bench_pulse_failed\"}");
     }
 
     bool evidence_counted = false;
-    if (valve_mask != 0U && self->store_ != nullptr) {
+    if (valve_mask != 0U && target_evidence && self->store_ != nullptr) {
         hg::HardwareVerificationRecord hardware{};
         hg::CommissioningPersistentState progress{};
         const bool prerequisites =
@@ -570,6 +572,8 @@ esp_err_t ServiceHttp::bench_pulse_post(httpd_req_t* request) {
     return self->send_json(request,
         std::string{"{\"ok\":true,\"target\":\""} + target +
         "\",\"durationMs\":" + std::to_string(duration_ms) +
+        ",\"pulseApplied\":true" +
+        ",\"targetReached\":" + (target_evidence ? "true" : "false") +
         ",\"actuatorEvidenceCounted\":" + (evidence_counted ? "true" : "false") + "}");
 }
 
