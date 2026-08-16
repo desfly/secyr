@@ -495,10 +495,16 @@
     const link = event.target.closest?.(".sidebar nav a");
     if (!link) return;
     lastSidebarLink = link;
+    // Repair immediately in the click turn so duplicate href entries never
+    // survive until the browser paints the next frame.
+    enforceSingleSidebarActive();
     queueMicrotask(enforceSingleSidebarActive);
     setTimeout(enforceSingleSidebarActive, 0);
   });
   window.addEventListener("hashchange", () => {
+    // app.js may mark every link sharing this hash active. Collapse it back to
+    // the selected link synchronously before paint; async calls are fallback.
+    enforceSingleSidebarActive();
     queueMicrotask(enforceSingleSidebarActive);
     setTimeout(enforceSingleSidebarActive, 0);
   });
