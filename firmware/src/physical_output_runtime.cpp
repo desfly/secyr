@@ -347,6 +347,7 @@ bool PhysicalOutputRuntime::bench_pulse(
     // plus a completed dry-run. Valve directions additionally require the
     // measured limit polarity and non-zero travel timeouts before any coil can
     // be energized. Normal outputs remain fail-closed throughout commissioning.
+    const bool is_valve = valve_bench_channel(channel);
     const bool dry_run_verified =
         hardware_verified_ &&
         commissioning_.gpio_map_verified &&
@@ -354,7 +355,7 @@ bool PhysicalOutputRuntime::bench_pulse(
         commissioning_.successful_dry_runs > 0U;
     if (!dry_run_verified) return false;
 
-    if (valve_bench_channel(channel) &&
+    if (is_valve &&
         (!commissioning_.valve_limit_polarity_verified ||
          commissioning_.cold_valve_travel_timeout_ms == 0U ||
          commissioning_.hot_valve_travel_timeout_ms == 0U)) {
@@ -368,13 +369,37 @@ bool PhysicalOutputRuntime::bench_pulse(
 
     delay_fn(duration_ms);
 
+    bool target_limit_reached = true;
+    if (is_valve) {
+        LimitSnapshot limits{};
+        if (!read_limits_locked(limits)) {
+            return latch_fault_locked(PhysicalOutputStatus::BackendError);
+        }
+        if ((limits.cold_open && limits.cold_closed) ||
+            (limits.hot_open && limits.hot_closed)) {
+            return latch_fault_locked(PhysicalOutputStatus::ValveSafetyFault);
+        }
+        switch (channel) {
+            case PhysicalOutputChannel::ColdValveOpen: target_limit_reached = limits.cold_open; break;
+            case PhysicalOutputChannel::ColdValveClose: target_limit_reached = limits.cold_closed; break;
+            case PhysicalOutputChannel::HotValveOpen: target_limit_reached = limits.hot_open; break;
+            case PhysicalOutputChannel::HotValveClose: target_limit_reached = limits.hot_closed; break;
+            default: target_limit_reached = false; break;
+        }
+    }
+
     if (!force_safe_locked()) return false;
     state_.maintenance_mode = true;
     state_.status = hardware_verified_
         ? PhysicalOutputStatus::FailClosed
         : PhysicalOutputStatus::InvalidHardware;
     state_.outputs_enabled = false;
-    return true;
+
+    // For valves, success is evidence: the requested direction was pulsed and
+    // the corresponding physical GPB end switch was observed active. A pulse
+    // that did not yet reach the target is still safely turned OFF but cannot
+    // count toward actuator acceptance.
+    return target_limit_reached;
 }
 
 bool PhysicalOutputRuntime::force_safe()
