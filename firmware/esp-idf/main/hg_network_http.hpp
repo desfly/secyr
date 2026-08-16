@@ -2,8 +2,10 @@
 
 #include "homeguard/access_control.hpp"
 #include "esp_err.h"
+#include "esp_event.h"
 #include "esp_http_server.h"
 
+#include <cstdint>
 #include <string>
 
 namespace homeguard::idf {
@@ -18,10 +20,22 @@ private:
     static esp_err_t status_get(httpd_req_t* request);
     static esp_err_t scan_get(httpd_req_t* request);
     static esp_err_t connect_post(httpd_req_t* request);
+    static void wifi_event_handler(
+        void* context,
+        esp_event_base_t base,
+        std::int32_t id,
+        void* data);
+    static void ip_event_handler(
+        void* context,
+        esp_event_base_t base,
+        std::int32_t id,
+        void* data);
 
     esp_err_t handle_status(httpd_req_t* request);
     esp_err_t handle_scan(httpd_req_t* request);
     esp_err_t handle_connect(httpd_req_t* request);
+    void handle_wifi_event(std::int32_t id, void* data);
+    void handle_ip_event(std::int32_t id, void* data);
 
     bool apply_sta(const std::string& ssid, const std::string& password, bool persist);
     bool load_credentials(std::string& ssid, std::string& password) const;
@@ -33,6 +47,8 @@ private:
     void* sta_netif_{};
     std::string ap_ssid_;
     bool initialized_{};
+    bool sta_credentials_configured_{};
+    std::uint32_t reconnect_count_{};
 };
 
 }  // namespace homeguard::idf
