@@ -15,16 +15,14 @@ constexpr TickType_t kSupervisorPeriod = pdMS_TO_TICKS(20);
 
 esp_err_t OutputSupervisor::start(
     hg::PhysicalOutputRuntime* runtime,
-    const hg::SystemModel* model,
-    const hg::BootReadinessReport* readiness)
+    const hg::SystemModel* model)
 {
-    if (runtime == nullptr || model == nullptr || readiness == nullptr) {
+    if (runtime == nullptr || model == nullptr) {
         return ESP_ERR_INVALID_ARG;
     }
 
     runtime_ = runtime;
     model_ = model;
-    readiness_ = readiness;
 
     const auto result = xTaskCreate(
         &OutputSupervisor::task_entry,
@@ -47,7 +45,7 @@ void OutputSupervisor::run()
 
     while (true) {
         const auto now_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
-        (void)runtime_->synchronize(*model_, *readiness_, now_ms);
+        (void)runtime_->synchronize(*model_, now_ms);
 
         const auto snapshot = runtime_->state();
         if (snapshot.status != last) {
