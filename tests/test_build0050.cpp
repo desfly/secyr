@@ -5,20 +5,15 @@ namespace {
 
 hg::HardwareVerificationRecord verified_hardware() {
     hg::HardwareVerificationRecord r;
-    r.pins.i2c_sda = 1;
-    r.pins.i2c_scl = 2;
-    r.pins.w5500_mosi = 3;
-    r.pins.w5500_miso = 4;
-    r.pins.w5500_sclk = 5;
-    r.pins.w5500_cs = 6;
-    r.pins.w5500_int = 7;
+    r.pins.i2c_sda = 4;
+    r.pins.i2c_scl = 5;
+    r.pins.w5500_mosi = 11;
+    r.pins.w5500_miso = 13;
+    r.pins.w5500_sclk = 12;
+    r.pins.w5500_cs = 10;
+    r.pins.w5500_int = 9;
     r.pins.w5500_rst = 8;
-    r.pins.service_button = 9;
-    r.pins.siren = 10;
-    r.pins.valve1 = 11;
-    r.pins.valve2 = 12;
-    r.pins.aux1 = 13;
-    r.pins.aux2 = 14;
+    r.pins.service_button = 21;
     r.active_polarity_verified = true;
     r.verified_at_ms = 1000;
     r.profile_crc32 = hg::hardware_profile_crc32(r);
@@ -30,7 +25,7 @@ hg::CommissioningPersistentState verified_commissioning() {
     s.gpio_map_verified = true;
     s.active_polarity_verified = true;
     s.successful_dry_runs = 1;
-    s.successful_actuator_tests = 0;
+    s.successful_actuator_tests = 1;
     s.last_verified_at_ms = 1000;
     return s;
 }
@@ -48,6 +43,13 @@ void test_build0050() {
     CHECK(ready.commissioning_record_valid);
     CHECK(ready.boot.outputs_allowed());
     CHECK(hg::service_readiness_json(ready).find("\"outputsAllowed\":true") != std::string::npos);
+
+    auto dry_only = commissioning;
+    dry_only.successful_actuator_tests = 0;
+    const auto actuator_required = hg::make_service_readiness_snapshot(&hw, &dry_only);
+    CHECK(actuator_required.commissioning_record_valid);
+    CHECK(!actuator_required.boot.outputs_allowed());
+    CHECK(actuator_required.boot.status == hg::BootReadinessStatus::BlockedActuatorTestRequired);
 
     const auto missing_hw = hg::make_service_readiness_snapshot(nullptr, &commissioning);
     CHECK(!missing_hw.boot.outputs_allowed());
