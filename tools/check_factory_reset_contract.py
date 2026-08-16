@@ -2,8 +2,10 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MAIN = ROOT / "firmware" / "esp-idf" / "main"
-CONFIG_STORE = ROOT / "firmware" / "esp-idf" / "components" / "nvs_config_store"
+FIRMWARE = ROOT / "firmware"
+MAIN = FIRMWARE / "esp-idf" / "main"
+CONFIG_STORE = FIRMWARE / "esp-idf" / "components" / "nvs_config_store"
+TESTS = ROOT / "tests"
 
 manager = (MAIN / "hg_factory_reset.cpp").read_text(encoding="utf-8")
 manager_h = (MAIN / "hg_factory_reset.hpp").read_text(encoding="utf-8")
@@ -12,11 +14,14 @@ system = (MAIN / "hg_system_http.cpp").read_text(encoding="utf-8")
 network = (MAIN / "hg_network_http.cpp").read_text(encoding="utf-8")
 access_nvs = (MAIN / "hg_access_nvs.cpp").read_text(encoding="utf-8")
 app_main = (MAIN / "app_main.cpp").read_text(encoding="utf-8")
-cmake = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
+idf_cmake = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
+host_cmake = (FIRMWARE / "CMakeLists.txt").read_text(encoding="utf-8")
 config_store = (CONFIG_STORE / "nvs_config_store.cpp").read_text(encoding="utf-8")
+host_test = (TESTS / "test_factory_reset_host.cpp").read_text(encoding="utf-8")
+nvs_mock = (TESTS / "esp-idf-mock/include/nvs.h").read_text(encoding="utf-8")
 
 checks = {
-    "Factory Reset manager compiled": '"hg_factory_reset.cpp"' in cmake,
+    "Factory Reset manager compiled in ESP-IDF": '"hg_factory_reset.cpp"' in idf_cmake,
     "Factory Reset report is explicit": "struct FactoryResetReport" in manager_h and "bool ok() const" in manager_h,
     "Access state erased": 'erase_namespace("hg_access")' in manager,
     "Wi-Fi HomeGuard state erased": 'erase_namespace("hg_wifi")' in manager,
@@ -32,6 +37,28 @@ checks = {
     "Factory Reset never calls commissioning erase_all": ".erase_all()" not in manager,
     "Hardware verification key remains separate": 'kHardwareKey = "hardware_v1"' in commissioning,
     "Selective commissioning erase targets only state_v1": "return erase_key(kCommissioningKey);" in commissioning,
+
+    # A real CTest must execute the production FactoryResetManager against a
+    # stateful ESP-IDF mock. Static source checks alone are not release proof.
+    "Stateful NVS mock exists": "inline std::unordered_map<std::string, Namespace> namespaces" in nvs_mock and "inline void reset()" in nvs_mock,
+    "NVS mock can inspect persisted keys": "inline bool has_key(" in nvs_mock and "inline void put_blob(" in nvs_mock,
+    "Factory Reset host executable exists": "add_executable(factory_reset_host_test" in host_cmake,
+    "Host test compiles production reset manager": "esp-idf/main/hg_factory_reset.cpp" in host_cmake,
+    "Host test compiles production commissioning store": "esp-idf/main/hg_commissioning_nvs.cpp" in host_cmake,
+    "Factory Reset host test registered in CTest": "add_test(NAME factory_reset_host_test COMMAND factory_reset_host_test)" in host_cmake,
+    "Host test invokes production manager": "FactoryResetManager{}.erase_mutable_state()" in host_test,
+    "Host test requires successful report": "expect(report.ok()" in host_test,
+    "Host test seeds mutable access state": 'seed_blob("hg_access"' in host_test,
+    "Host test seeds mutable Wi-Fi state": 'seed_blob("hg_wifi"' in host_test,
+    "Host test seeds mutable cloud state": 'seed_blob("hg_cloud"' in host_test,
+    "Host test seeds mutable controller config": 'seed_blob("hg-config"' in host_test,
+    "Host test seeds mutable provisioning": 'seed_blob("hg-provision"' in host_test,
+    "Host test seeds mutable commissioning state": 'seed_blob("hg_commission", "state_v1"' in host_test,
+    "Host test preserves hardware verification": 'has_key("hg_commission", "hardware_v1")' in host_test,
+    "Host test preserves factory certificate": 'has_key("hg-factory", "cert_pem")' in host_test,
+    "Host test preserves factory private key": 'has_key("hg-factory", "key_pem")' in host_test,
+    "Host test preserves unrelated namespace": 'has_key("unrelated", "sentinel")' in host_test,
+    "Host test verifies legacy Wi-Fi driver erase": "mock_wifi_sta_config().sta.ssid[0] == 0U" in host_test,
 
     # Acceptance item 20: every user-owned provisioning secret belongs to the
     # mutable hg-provision namespace that Factory Reset erases. Factory-issued
@@ -54,7 +81,7 @@ checks = {
 
     # Acceptance item 22: clearing hg_access must become factory-first-Admin
     # after reboot. Guard the exact storage->boot decision chain.
-    "Access store reads factory namespace": 'constexpr const char* nvs_namespace = "hg_access"' in access_nvs,
+    "Access store reads hg_access namespace": 'constexpr const char* nvs_namespace = "hg_access"' in access_nvs,
     "Missing access namespace stays NOT_FOUND": "if (open_error == ESP_ERR_NVS_NOT_FOUND) return open_error;" in access_nvs,
     "Missing access key stays NOT_FOUND": "if (read_error != ESP_OK) return read_error;" in access_nvs,
     "Boot starts bootstrap fail-closed": "g_access_bootstrap_allowed = false;" in app_main,
@@ -86,6 +113,7 @@ if failed:
     raise SystemExit("Factory Reset contract failed: " + ", ".join(failed))
 
 print("Factory Reset contract PASS")
+print(" - executable CTest runs production reset manager against stateful NVS/Wi-Fi mocks")
 print(" - Wi-Fi persistence: hg_wifi + legacy ESP-IDF settings erased; runtime driver config RAM-only")
 print(" - mutable provisioning secrets/owner marker are all in erased hg-provision")
 print(" - immutable certificate/key/pairing/setup identity remains in preserved hg-factory")
