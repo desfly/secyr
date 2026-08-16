@@ -95,6 +95,9 @@ checks = {
     "bench does not drive active target": "target_limit_active(" in physical_cpp and "before.cold_open" in physical_cpp,
     "bench post-reads end stops": "LimitSnapshot after{}" in physical_cpp and "read_limits_locked(after)" in physical_cpp,
     "bench success is end-stop evidence": "target_limit_reached = target_limit_active(" in physical_cpp and "return target_limit_reached" in physical_cpp,
+    "maintenance accepts SystemModel snapshot": "set_maintenance_mode(bool active, const SystemModel& model)" in physical_h,
+    "maintenance consumes all actuator revisions": "consume_current_revisions" in physical_cpp and "siren_command_revision_ = siren.command_revision" in physical_cpp and "state_.cold_valve.command_revision = cold_valve.command_revision" in physical_cpp and "state_.hot_valve.command_revision = hot_valve.command_revision" in physical_cpp,
+    "service wires SystemModel into maintenance": "set_maintenance_mode(active, *self->model_)" in service,
     "commissioning test blocks missing valve safety": "ValveSafetyUnverified" in t47,
     "readiness test blocks missing valve profile": "BlockedValveSafetyProfileRequired" in t49,
     "physical test checks limit stop": "ColdValveOpenLimit" in t54 and "limit_stops" in t54,
@@ -103,6 +106,8 @@ checks = {
     "physical test checks read failure": "fail_reads" in t54 and "BackendError" in t54,
     "physical test checks uncommissioned OFF path": "missing_hardware" in t54 and "lockout_fail_closed()" in t54,
     "physical test checks end-stop transition": "bench_transition_cold_open = true" in t54 and "bench_delay_seen == 0U" in t54,
+    "physical test checks pre-maintenance pending command": "model.set_output_active(2, true, 101)" in t54 and "runtime.synchronize(model, 102)" in t54,
+    "physical test checks in-maintenance pending command": "model.set_output_active(1, false, 104)" in t54 and "runtime.synchronize(model, 105)" in t54,
 }
 
 failed = [name for name, ok in checks.items() if not ok]
