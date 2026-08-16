@@ -3,10 +3,18 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <mutex>
 #include <string>
 
 namespace homeguard {
 namespace {
+// AccessControl is used from the ESP-IDF HTTP server task and from the MQTT
+// client event task. Keep authorization throttles, audit records and user
+// mutations serialized. A recursive mutex is intentional because public
+// helpers call other public helpers (for example set_user -> import_user and
+// would_preserve_admin_access -> enabled_admin_count/find_user).
+std::recursive_mutex g_access_control_mutex;
+
 std::string salt_hex(const std::array<std::uint8_t, 16>& salt) {
     static constexpr char digits[] = "0123456789abcdef";
     std::string out;
@@ -70,6 +78,7 @@ bool AccessControl::set_user(
     std::string_view pin,
     const std::array<std::uint8_t, 16>& salt,
     bool enabled) {
+    std::scoped_lock lock(g_access_control_mutex);
     if (id.empty() || pin.size() < 4U || pin.size() > 12U) return false;
 
     AccessUser record{};
@@ -90,6 +99,7 @@ std::size_t AccessControl::user_index(std::string_view actor) const {
 }
 
 bool AccessControl::import_user(const AccessUser& user) {
+    std::scoped_lock lock(g_access_control_mutex);
     if (!terminated(user.id) || !terminated(user.name) || user.id[0] == '\0') return false;
     if (static_cast<std::uint8_t>(user.role) > static_cast<std::uint8_t>(AccessRole::Admin)) return false;
 
@@ -105,6 +115,7 @@ bool AccessControl::import_user(const AccessUser& user) {
 }
 
 void AccessControl::clear_users() {
+    std::scoped_lock lock(g_access_control_mutex);
     for (auto& user : users_) user = AccessUser{};
     for (auto& throttle : auth_throttles_) throttle = AuthThrottleState{};
     unknown_auth_throttle_ = {};
@@ -112,15 +123,18 @@ void AccessControl::clear_users() {
 }
 
 const AccessUser* AccessControl::user_at(std::size_t index) const {
+    std::scoped_lock lock(g_access_control_mutex);
     return index < user_count_ ? &users_[index] : nullptr;
 }
 
 const AccessUser* AccessControl::find_user(std::string_view id) const {
+    std::scoped_lock lock(g_access_control_mutex);
     const auto index = user_index(id);
     return index < user_count_ ? &users_[index] : nullptr;
 }
 
 std::size_t AccessControl::enabled_admin_count() const {
+    std::scoped_lock lock(g_access_control_mutex);
     std::size_t count = 0;
     for (std::size_t i = 0; i < user_count_; ++i) {
         if (users_[i].enabled && users_[i].role == AccessRole::Admin) ++count;
@@ -132,6 +146,7 @@ bool AccessControl::would_preserve_admin_access(
     std::string_view user_id,
     AccessRole replacement_role,
     bool replacement_enabled) const {
+    std::scoped_lock lock(g_access_control_mutex);
     auto projected = enabled_admin_count();
     const auto* existing = find_user(user_id);
     const bool existing_enabled_admin =
@@ -149,11 +164,13 @@ bool AccessControl::would_preserve_admin_access(
 }
 
 bool AccessControl::verify_pin(const AccessUser& user, std::string_view pin) const {
+    std::scoped_lock lock(g_access_control_mutex);
     if (!user.enabled || pin.empty()) return false;
     return hg::constant_time_equal(user.pin_digest, derive_pin_digest(user.id.data(), pin, user.salt));
 }
 
 bool AccessControl::role_allows(AccessRole role, std::string_view command) const {
+    std::scoped_lock lock(g_access_control_mutex);
     if (role == AccessRole::Admin) return true;
     if (role == AccessRole::Guest) return false;
 
@@ -190,6 +207,7 @@ const AccessControl::AuthThrottleState& AccessControl::throttle_for(std::string_
 std::uint64_t AccessControl::authentication_retry_after_ms(
     std::string_view actor,
     std::uint64_t now_ms) const {
+    std::scoped_lock lock(g_access_control_mutex);
     const auto& state = throttle_for(actor);
     return state.blocked_until_ms > now_ms ? state.blocked_until_ms - now_ms : 0U;
 }
@@ -245,6 +263,7 @@ AuditDecision AccessControl::authenticate_unthrottled(
 }
 
 AuditDecision AccessControl::authenticate(std::string_view actor, std::string_view pin) {
+    std::scoped_lock lock(g_access_control_mutex);
     if (auth_clock_ != nullptr) return authenticate(actor, pin, auth_clock_());
     return authenticate_unthrottled(actor, pin);
 }
@@ -253,6 +272,7 @@ AuditDecision AccessControl::authenticate(
     std::string_view actor,
     std::string_view pin,
     std::uint64_t now_ms) {
+    std::scoped_lock lock(g_access_control_mutex);
     if (authentication_retry_after_ms(actor, now_ms) != 0U) {
         append_audit(actor, "access.login", AuditDecision::DeniedRateLimited);
         return AuditDecision::DeniedRateLimited;
@@ -287,6 +307,7 @@ AuditDecision AccessControl::authorize(
     std::string_view actor,
     std::string_view pin,
     std::string_view command) {
+    std::scoped_lock lock(g_access_control_mutex);
     if (auth_clock_ != nullptr) return authorize(actor, pin, command, auth_clock_());
     return authorize_unthrottled(actor, pin, command);
 }
@@ -296,6 +317,7 @@ AuditDecision AccessControl::authorize(
     std::string_view pin,
     std::string_view command,
     std::uint64_t now_ms) {
+    std::scoped_lock lock(g_access_control_mutex);
     if (authentication_retry_after_ms(actor, now_ms) != 0U) {
         append_audit(actor, command, AuditDecision::DeniedRateLimited);
         return AuditDecision::DeniedRateLimited;
@@ -306,6 +328,7 @@ AuditDecision AccessControl::authorize(
 }
 
 const AccessAuditRecord* AccessControl::audit_at_oldest(std::size_t index) const {
+    std::scoped_lock lock(g_access_control_mutex);
     if (index >= audit_size_) return nullptr;
     const auto oldest = (audit_head_ + audit_capacity - audit_size_) % audit_capacity;
     return &audit_[(oldest + index) % audit_capacity];
