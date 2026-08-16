@@ -15,6 +15,7 @@ web_http = (MAIN / "hg_web_http.cpp").read_text(encoding="utf-8")
 system_http = (MAIN / "hg_system_http.cpp").read_text(encoding="utf-8")
 access_http = (MAIN / "hg_access_http.cpp").read_text(encoding="utf-8")
 web_app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+access_session = (ROOT / "web" / "access-session.js").read_text(encoding="utf-8")
 errors: list[str] = []
 
 
@@ -115,6 +116,25 @@ for needle in (
 ):
     require(needle in web_http, f"navigation/mobile field contract missing: {needle}")
 
+# The base access/session layer must repair duplicate-href navigation in the
+# same event turn, not only via microtask/timer. Otherwise Build-948 style
+# double highlighting can still be painted for one frame.
+require("function enforceSingleSidebarActive()" in access_session,
+        "base access-session navigation repair is missing")
+require(
+    "lastSidebarLink = link;\n    // Repair immediately" in access_session and
+    "enforceSingleSidebarActive();\n    queueMicrotask(enforceSingleSidebarActive);" in access_session,
+    "sidebar click repair is not synchronous before microtask fallback",
+)
+require(
+    'window.addEventListener("hashchange", () => {' in access_session and
+    "// app.js may mark every link sharing this hash active" in access_session and
+    "enforceSingleSidebarActive();\n    queueMicrotask(enforceSingleSidebarActive);" in access_session,
+    "hashchange repair is not synchronous before microtask fallback",
+)
+require("new MutationObserver" in access_session and 'attributeFilter: ["class"]' in access_session,
+        "base access-session lost mutation fallback for active navigation")
+
 # Backend must remain independently protected even if the browser is bypassed.
 for needle in (
     '"/api/v1/system/factory-reset"',
@@ -137,6 +157,6 @@ print(" - Factory Reset: firmware-visible + Admin credentials + double confirm")
 print(" - first Admin: read-only status API; button/hint fail-closed unless factory-fresh")
 print(" - fake bootstrap POST capability probes are forbidden")
 print(" - password/PIN show-hide controls: firmware-owned")
-print(" - navigation: exactly-one-active + immediate mutation repair + collapsed mobile menu")
+print(" - navigation: synchronous exact-one-active repair + mutation fallback + collapsed mobile menu")
 print(" - Bruce: contain, not cover")
 print(" - backend: ERASE_ALL + access authorization + erase + reboot")
