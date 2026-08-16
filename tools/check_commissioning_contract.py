@@ -19,6 +19,10 @@ def require(body: str, token: str, label: str) -> None:
         errors.append(f"commissioning contract regressed: {label}")
 
 
+legacy_http = ROOT / "firmware/esp-idf/main/hg_commissioning_http.hpp"
+if legacy_http.exists():
+    errors.append("commissioning contract regressed: obsolete CommissioningHttp declaration restored")
+
 service_h = read("firmware/esp-idf/main/hg_service_http.hpp")
 service = read("firmware/esp-idf/main/hg_service_http.cpp")
 nvs = read("firmware/esp-idf/main/hg_commissioning_nvs.cpp")
