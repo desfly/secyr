@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -147,6 +148,17 @@ for scan_root in scan_roots:
                 errors.append(
                     f"runtime concurrency contract regressed: raw SystemModel view {token} in {path.relative_to(ROOT)}"
                 )
+
+# The workflow already invokes this runtime contract. Chain the dedicated staged
+# commissioning gate here so a future YAML edit cannot silently stop enforcing
+# commissioning safety.
+commissioning_gate = ROOT / "tools" / "check_commissioning_contract.py"
+if not commissioning_gate.is_file():
+    errors.append("runtime contract regressed: commissioning contract gate missing")
+else:
+    result = subprocess.run([sys.executable, str(commissioning_gate)], cwd=ROOT)
+    if result.returncode != 0:
+        errors.append("runtime contract regressed: commissioning contract failed")
 
 if errors:
     for error in errors:
