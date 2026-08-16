@@ -18,6 +18,7 @@
 #include "hg_access_http.hpp"
 #include "hg_access_time.hpp"
 #include "hg_commissioning_nvs.hpp"
+#include "hg_reset_sequence.hpp"
 #include "device_discovery.hpp"
 #include "nvs_config_store.hpp"
 #include "websocket_telemetry.hpp"
@@ -236,6 +237,8 @@ void start_device_discovery()
 extern "C" void app_main()
 {
     ESP_ERROR_CHECK(initialize_nvs());
+    if (homeguard::idf::handle_triple_rst_factory_reset()) return;
+
     g_access_control.set_auth_clock(&homeguard::idf::access_now_ms);
     restore_access_control();
     restore_commissioning_state();
