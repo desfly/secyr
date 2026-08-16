@@ -43,6 +43,18 @@ class ControllerIdentityTest {
     }
 
     @Test
+    fun `stable device id matching ignores case and surrounding whitespace`() {
+        assertTrue(
+            ControllerIdentity.sameController(
+                leftDeviceId = " HG-A1B2C3 ",
+                leftBaseUrl = "http://192.168.55.40:80",
+                rightDeviceId = "hg-a1b2c3",
+                rightBaseUrl = "http://192.168.55.77:80",
+            )
+        )
+    }
+
+    @Test
     fun `ipv6 host normalization ignores brackets and port`() {
         assertEquals("fe80::1234", ControllerIdentity.hostFromBaseUrl("http://[fe80::1234]:8080/api"))
         assertEquals("host:fe80::1234", ControllerIdentity.key("ignored", "[FE80::1234]"))
