@@ -93,6 +93,12 @@ public:
         std::uint64_t now_ms);
     bool force_safe();
 
+    // Used before destructive service operations. Unlike force_safe(), this
+    // latches the runtime closed so the 20 ms supervisor cannot immediately
+    // re-apply an old model command while NVS/readiness is being invalidated.
+    // The lockout is cleared only by initialize() after reboot/recommissioning.
+    bool lockout_fail_closed();
+
     [[nodiscard]] PhysicalOutputRuntimeState state() const;
 
 private:
