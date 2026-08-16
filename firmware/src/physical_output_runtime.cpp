@@ -47,11 +47,10 @@ bool PhysicalOutputRuntime::initialize(
     siren_known_ = true;
     siren_active_ = false;
 
-    if (!hardware_verification_allows_outputs(hardware)) {
-        state_.status = PhysicalOutputStatus::InvalidHardware;
-        return false;
-    }
-
+    // The OFF path must exist even before commissioning is valid. Hardware
+    // bootstrap has already initialized MCP23017 and forced OLAT A low; now
+    // register all logical channels OFF so Factory Reset/service invalidation
+    // can always re-confirm a safe state on an uncommissioned controller.
     for (const auto channel : kAllChannels) {
         if (!backend_->configure_output(channel_number(channel), false)) {
             ++state_.failures;
@@ -59,6 +58,14 @@ bool PhysicalOutputRuntime::initialize(
             state_.safety_fault_latched = true;
             return false;
         }
+    }
+
+    // Verification controls permission to energize outputs, never permission
+    // to drive them OFF.
+    if (!hardware_verification_allows_outputs(hardware)) {
+        state_.status = PhysicalOutputStatus::InvalidHardware;
+        state_.outputs_enabled = false;
+        return false;
     }
 
     if (!readiness.outputs_allowed() ||
@@ -252,9 +259,6 @@ bool PhysicalOutputRuntime::synchronize(
     const BootReadinessReport& readiness,
     std::uint64_t now_ms)
 {
-    // Copy model commands before taking the actuator mutex. This prevents a
-    // physical->model lock chain and guarantees that MCP/I2C work never retains
-    // pointers into data concurrently modified by HTTP, MQTT or telemetry.
     OutputRecord siren{};
     OutputRecord cold_valve{};
     OutputRecord hot_valve{};
@@ -264,10 +268,7 @@ bool PhysicalOutputRuntime::synchronize(
 
     std::scoped_lock lock(mutex_);
     if (backend_ == nullptr || commissioning_ == nullptr) return false;
-
-    if (state_.safety_fault_latched) {
-        return false;
-    }
+    if (state_.safety_fault_latched) return false;
 
     if (!readiness.outputs_allowed() ||
         !commissioning_state_allows_physical_outputs(*commissioning_)) {
