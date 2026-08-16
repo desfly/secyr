@@ -109,8 +109,10 @@ bool SystemModel::set_output_active(std::uint16_t id, bool active, std::uint64_t
     for (std::size_t i = 0; i < output_count_; ++i) {
         auto& item = outputs_[i];
         if (item.id != id) continue;
-        if (item.active == active) return true;
+        const bool changed = item.active != active;
         item.active = active;
+        item.commanded = true;
+        if (!changed) return true;
         return emit(active ? SystemEventType::OutputOn : SystemEventType::OutputOff, id, now_ms);
     }
     return false;
