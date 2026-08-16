@@ -22,15 +22,44 @@ esp_err_t Ds3231::initialize(
     I2cBus& bus,
     std::uint8_t address)
 {
-    return bus.add_device(
+    if (initialized_) {
+        return ESP_OK;
+    }
+
+    initialized_ = false;
+    device_ = nullptr;
+
+    auto error = bus.add_device(
         address,
         100000,
         &device_);
+    if (error != ESP_OK) {
+        return error;
+    }
+
+    // Verify real register I/O before exposing the RTC as Ready. A software
+    // handle alone is not evidence that the physical DS3231 is operational.
+    std::uint8_t status_register = 0x0F;
+    std::uint8_t status = 0;
+    error = i2c_master_transmit_receive(
+        device_,
+        &status_register,
+        1,
+        &status,
+        1,
+        100);
+    if (error != ESP_OK) {
+        (void)bus.remove_device(&device_);
+        return error;
+    }
+
+    initialized_ = true;
+    return ESP_OK;
 }
 
 esp_err_t Ds3231::read_time(std::tm* result)
 {
-    if (device_ == nullptr || result == nullptr) {
+    if (!initialized_ || device_ == nullptr || result == nullptr) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -65,7 +94,7 @@ esp_err_t Ds3231::read_time(std::tm* result)
 
 esp_err_t Ds3231::write_time(const std::tm& value)
 {
-    if (device_ == nullptr) {
+    if (!initialized_ || device_ == nullptr) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -96,7 +125,7 @@ esp_err_t Ds3231::write_time(const std::tm& value)
 
 esp_err_t Ds3231::read_temperature(float* celsius)
 {
-    if (device_ == nullptr || celsius == nullptr) {
+    if (!initialized_ || device_ == nullptr || celsius == nullptr) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -124,7 +153,7 @@ esp_err_t Ds3231::read_temperature(float* celsius)
 
 bool Ds3231::ready() const noexcept
 {
-    return device_ != nullptr;
+    return initialized_ && device_ != nullptr;
 }
 
 }  // namespace homeguard::idf
