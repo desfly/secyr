@@ -45,6 +45,8 @@ jobs:
           sudo apt-get install -y g++ ninja-build
       - name: Project preflight
         run: python tools/preflight_build0022.py
+      - name: HW-678 actuator safety contract
+        run: python tools/check_hw678_actuator_contract.py
       - name: ESP-IDF source audit
         run: python tools/audit_esp_idf_sources.py
       - name: Component dependency audit
