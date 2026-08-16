@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
+#include "esp_timer.h"
 
 #include <cstdint>
 #include <string>
@@ -30,12 +31,15 @@ private:
         esp_event_base_t base,
         std::int32_t id,
         void* data);
+    static void reconnect_timer_handler(void* context);
 
     esp_err_t handle_status(httpd_req_t* request);
     esp_err_t handle_scan(httpd_req_t* request);
     esp_err_t handle_connect(httpd_req_t* request);
     void handle_wifi_event(std::int32_t id, void* data);
     void handle_ip_event(std::int32_t id, void* data);
+    void handle_reconnect_timer();
+    void schedule_reconnect();
 
     bool apply_sta(const std::string& ssid, const std::string& password, bool persist);
     bool load_credentials(std::string& ssid, std::string& password) const;
@@ -45,6 +49,7 @@ private:
 
     AccessControl* access_{};
     void* sta_netif_{};
+    esp_timer_handle_t reconnect_timer_{};
     std::string ap_ssid_;
     bool initialized_{};
     bool sta_credentials_configured_{};
