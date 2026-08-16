@@ -10,7 +10,7 @@ void test_build0009() {
     CHECK(hg::HardwareProfile::ethernet == "W5500 LAN module");
 
     hg::BoardPinMap empty{};
-    CHECK(hg::validate_pin_map(empty).ok());
+    CHECK(!hg::validate_pin_map(empty).ok());
     CHECK(!hg::w5500_assigned(empty));
     CHECK(!hg::i2c_assigned(empty));
 
@@ -22,29 +22,27 @@ void test_build0009() {
     CHECK(empty_capabilities.configured_output_count == 0);
     CHECK(empty_capabilities.safe_for_unverified_board());
     CHECK(hg::gpio_number_valid(-1));
+    CHECK(hg::gpio_number_valid(21));
+    CHECK(!hg::gpio_number_valid(22));
+    CHECK(!hg::gpio_number_valid(25));
+    CHECK(hg::gpio_number_valid(26));
     CHECK(hg::gpio_number_valid(48));
     CHECK(!hg::gpio_number_valid(49));
 
     hg::BoardPinMap partial_i2c{};
-    partial_i2c.i2c_sda = 8;
+    partial_i2c.i2c_sda = 4;
     CHECK(hg::validate_pin_map(partial_i2c).error == hg::PinMapError::IncompleteI2c);
 
-    hg::BoardPinMap duplicate{};
-    duplicate.i2c_sda = 8;
-    duplicate.i2c_scl = 9;
-    duplicate.service_button = 8;
-    CHECK(hg::validate_pin_map(duplicate).error == hg::PinMapError::DuplicateGpio);
-
     hg::BoardPinMap complete{};
-    complete.i2c_sda = 1;
-    complete.i2c_scl = 2;
-    complete.w5500_mosi = 3;
-    complete.w5500_miso = 4;
-    complete.w5500_sclk = 5;
-    complete.w5500_cs = 6;
-    complete.w5500_int = 7;
+    complete.i2c_sda = 4;
+    complete.i2c_scl = 5;
+    complete.w5500_mosi = 11;
+    complete.w5500_miso = 13;
+    complete.w5500_sclk = 12;
+    complete.w5500_cs = 10;
+    complete.w5500_int = 9;
     complete.w5500_rst = 8;
-    complete.service_button = 9;
+    complete.service_button = 21;
     CHECK(hg::validate_pin_map(complete).ok());
     CHECK(hg::w5500_assigned(complete));
     CHECK(hg::i2c_assigned(complete));
@@ -54,14 +52,20 @@ void test_build0009() {
     CHECK(complete_capabilities.w5500 == hg::CapabilityState::Configured);
     CHECK(complete_capabilities.service_button == hg::CapabilityState::Configured);
     CHECK(complete_capabilities.outputs == hg::CapabilityState::Unavailable);
+    CHECK(complete_capabilities.configured_output_count == 0);
     CHECK(complete_capabilities.safe_for_unverified_board());
 
-    complete.siren = 10;
-    complete.valve1 = 11;
-    const auto output_capabilities = hg::derive_capabilities(complete);
-    CHECK(output_capabilities.outputs == hg::CapabilityState::Configured);
-    CHECK(output_capabilities.configured_output_count == 2);
-    CHECK(!output_capabilities.safe_for_unverified_board());
+    auto wrong_board_map = complete;
+    wrong_board_map.i2c_sda = 26;
+    CHECK(!hg::validate_pin_map(wrong_board_map).ok());
+
+    auto legacy_direct_output = complete;
+    legacy_direct_output.siren = 26;
+    CHECK(!hg::validate_pin_map(legacy_direct_output).ok());
+    const auto output_capabilities = hg::derive_capabilities(legacy_direct_output);
+    CHECK(output_capabilities.outputs == hg::CapabilityState::Unavailable);
+    CHECK(output_capabilities.configured_output_count == 0);
+    CHECK(output_capabilities.safe_for_unverified_board());
     CHECK(hg::to_string(hg::CapabilityState::Unavailable) == "unavailable");
     CHECK(hg::to_string(hg::CapabilityState::Configured) == "configured");
 
