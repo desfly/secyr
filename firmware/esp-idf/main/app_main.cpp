@@ -18,6 +18,7 @@
 #include "hg_access_http.hpp"
 #include "hg_access_time.hpp"
 #include "hg_commissioning_nvs.hpp"
+#include "hg_config_http.hpp"
 #include "device_discovery.hpp"
 #include "nvs_config_store.hpp"
 #include "websocket_telemetry.hpp"
@@ -62,6 +63,7 @@ homeguard::idf::GpioOutputBackend g_gpio_outputs;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::AccessHttp g_access_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
+homeguard::idf::ConfigHttp g_config_http;
 NvsConfigStore g_provisioning_store;
 WebsocketTelemetry g_websocket_telemetry;
 DeviceDiscoveryService g_device_discovery;
@@ -173,6 +175,7 @@ esp_err_t start_http_server()
     ESP_RETURN_ON_ERROR(g_web_http.register_handlers(g_http_server), kTag, "web routes");
     g_network_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_network_http.register_handlers(g_http_server), kTag, "network routes");
+    ESP_RETURN_ON_ERROR(g_config_http.register_handlers(g_http_server, &g_access_control, &g_access_store, &g_network_http, &g_cloud_store, &g_commissioning_store), kTag, "config routes");
     ESP_RETURN_ON_ERROR(g_lan_http.register_handlers(g_http_server), kTag, "LAN discovery routes");
     ESP_RETURN_ON_ERROR(g_cloud_http.register_handlers(g_http_server, &g_cloud_link, &g_cloud_store, &g_access_control), kTag, "cloud routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
