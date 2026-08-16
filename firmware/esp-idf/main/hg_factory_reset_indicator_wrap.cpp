@@ -1,6 +1,8 @@
 #include "hg_factory_reset.hpp"
 #include "hg_rgb_diagnostic.hpp"
 
+#ifdef ESP_PLATFORM
+
 namespace homeguard::idf {
 namespace {
 
@@ -26,3 +28,5 @@ FactoryResetReport wrapped_erase(const FactoryResetManager* self)
 
 }  // namespace
 }  // namespace homeguard::idf
+
+#endif  // ESP_PLATFORM
