@@ -41,6 +41,7 @@ public:
 private:
     struct Subscriber { SystemEventCallback callback{}; void* context{}; };
     mutable std::mutex mutex_;
+    std::mutex dispatch_mutex_;
     std::array<SystemEvent, queue_capacity> queue_{};
     std::array<Subscriber, subscriber_capacity> subscribers_{};
     std::size_t queue_head_{};
@@ -73,12 +74,7 @@ struct OutputRecord {
     std::uint16_t id{};
     ModelOutputType type{ModelOutputType::Relay};
     bool active{};
-    // For a valve, active=true means OPEN and active=false means CLOSE. This
-    // bit distinguishes a real CLOSE command from the harmless power-on
-    // default false state so boot never moves a valve merely by synchronizing.
     bool commanded{};
-    // Incremented for every explicit command, even if it repeats the same
-    // direction. Physical actuator runtime consumes each revision exactly once.
     std::uint32_t command_revision{};
     std::uint32_t timeout_ms{};
 };
@@ -104,8 +100,6 @@ public:
     bool set_output_active(std::uint16_t id, bool active, std::uint64_t now_ms);
     bool set_partition_arm(std::uint16_t id, PartitionArmState state, std::uint64_t now_ms);
 
-    // Thread-safe copy views for all runtime/API readers. Never retain a raw
-    // pointer into the model across a task boundary.
     [[nodiscard]] bool zone_snapshot(std::uint16_t id, ZoneRecord& out) const;
     [[nodiscard]] bool sensor_snapshot(std::uint16_t id, SensorRecord& out) const;
     [[nodiscard]] bool output_snapshot(std::uint16_t id, OutputRecord& out) const;
@@ -119,8 +113,6 @@ public:
     [[nodiscard]] std::size_t output_count() const;
     [[nodiscard]] std::size_t partition_count() const;
 
-    // Legacy startup/test views. Runtime code must use the snapshot API above;
-    // returned pointers are not protected after this call returns.
     [[nodiscard]] const ZoneRecord* zone(std::uint16_t id) const;
     [[nodiscard]] const SensorRecord* sensor(std::uint16_t id) const;
     [[nodiscard]] const OutputRecord* output(std::uint16_t id) const;
