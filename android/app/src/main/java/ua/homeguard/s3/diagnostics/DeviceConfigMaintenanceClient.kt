@@ -84,6 +84,9 @@ class DeviceConfigMaintenanceClient(
         if (!result.optBoolean("ok", false)) {
             throw IOException(result.optString("reason", "factory reset rejected"))
         }
+        if (!result.optBoolean("rebooting", false)) {
+            throw IOException("factory reset did not confirm reboot")
+        }
     }
 
     private fun requireAdmin(session: AccessSession, credential: String) {
