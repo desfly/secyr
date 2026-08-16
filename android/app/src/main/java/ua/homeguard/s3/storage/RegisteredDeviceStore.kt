@@ -32,7 +32,7 @@ class RegisteredDeviceStore(context: Context) {
         @Volatile private var activeStore: RegisteredDeviceStore? = null
 
         suspend fun markActiveAuthorization(deviceId: String, authorized: Boolean) {
-            if (deviceId.isNotBlank()) activeStore?.markAuthorization(deviceId, authorized)
+            if (deviceId.isNotBlank()) activeStore?.markAuthorization(deviceId, authorized = authorized)
         }
 
         suspend fun reconcileActiveManual(manualDeviceId: String, discovered: DiscoveredDevice): Boolean =
@@ -192,8 +192,17 @@ class RegisteredDeviceStore(context: Context) {
         return true
     }
 
-    suspend fun markAuthorization(deviceId: String, authorized: Boolean) {
-        val target = _devices.value.firstOrNull { it.deviceId == deviceId } ?: return
+    suspend fun markAuthorization(deviceId: String, baseUrl: String = "", authorized: Boolean) {
+        val target = _devices.value.firstOrNull { candidate ->
+            DeviceIdentity.samePhysicalDevice(
+                candidate.deviceId,
+                candidate.baseUrl,
+                deviceId,
+                baseUrl,
+            )
+        } ?: _devices.value.firstOrNull { it.deviceId.equals(deviceId, ignoreCase = true) }
+        ?: return
+
         persist(
             _devices.value.map { candidate ->
                 if (DeviceIdentity.samePhysicalDevice(
