@@ -313,7 +313,7 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     else button.tabIndex = -1;
 
     const row = button.parentElement;
-    const hint = row?.nextElementSibling;
+    const hint = document.getElementById("accessBootstrapHint") || row?.nextElementSibling;
     if (hint && hint.tagName === "SMALL" && hint.textContent?.includes("першого Admin")) {
       hint.hidden = !visible;
       hint.setAttribute("aria-hidden", visible ? "false" : "true");
@@ -328,27 +328,19 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     if (bootstrapAvailable !== null || bootstrapProbeInFlight) return;
     bootstrapProbeInFlight = true;
     try {
-      // Safe capability probe: the firmware checks the one-time gate before it
-      // validates bootstrap fields. An empty bootstrap body can therefore tell
-      // us whether the controller is factory-fresh without creating a user.
-      const response = await fetch("/api/v1/access/users", {
-        method: "POST",
+      const response = await fetch("/api/v1/access/status", {
+        method: "GET",
         cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "bootstrap" })
+        headers: { "Accept": "application/json" }
       });
       const text = await response.text();
       let body = {};
       try { body = text ? JSON.parse(text) : {}; } catch (_) { body = {}; }
-
-      if (response.status === 400 && body.reason === "invalid_bootstrap_admin") {
-        bootstrapAvailable = true;
-      } else if (response.status === 409 &&
-                 (body.reason === "bootstrap_unavailable" || body.reason === "already_provisioned")) {
-        bootstrapAvailable = false;
-      }
+      if (!response.ok || body.ok === false) throw new Error(body.reason || `HTTP ${response.status}`);
+      bootstrapAvailable = body.bootstrapAllowed === true && Number(body.userCount || 0) === 0;
     } catch (_) {
-      bootstrapAvailable = null;
+      // Fail closed: never expose bootstrap unless firmware explicitly confirms it.
+      bootstrapAvailable = false;
     } finally {
       bootstrapProbeInFlight = false;
       applyBootstrapVisibility(button);
