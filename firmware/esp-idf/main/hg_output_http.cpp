@@ -56,15 +56,18 @@ esp_err_t OutputHttp::register_handlers(
     hg::SystemModel* model,
     hg::BootReadinessReport* readiness,
     hg::PhysicalOutputRuntime* physical,
-    hg::SystemEventBus* bus)
+    hg::SystemEventBus* bus,
+    std::mutex* control_state_mutex)
 {
-    if (server == nullptr || model == nullptr || readiness == nullptr || physical == nullptr || bus == nullptr) {
+    if (server == nullptr || model == nullptr || readiness == nullptr || physical == nullptr ||
+        bus == nullptr || control_state_mutex == nullptr) {
         return ESP_ERR_INVALID_ARG;
     }
     model_ = model;
     readiness_ = readiness;
     physical_ = physical;
     bus_ = bus;
+    control_state_mutex_ = control_state_mutex;
     const httpd_uri_t route{
         .uri="/api/v1/system/output-command",
         .method=HTTP_POST,
@@ -109,7 +112,7 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         httpd_resp_set_type(request, "application/json");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"credential_required\"}", -1);
     }
-    if (access_control_ == nullptr) {
+    if (access_control_ == nullptr || control_state_mutex_ == nullptr) {
         std::fill(credential.begin(), credential.end(), '\0');
         httpd_resp_set_status(request, "503 Service Unavailable");
         httpd_resp_set_type(request, "application/json");
@@ -131,6 +134,9 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         return httpd_resp_send(request, response.c_str(), static_cast<ssize_t>(response.size()));
     }
 
+    // Lock order is physical -> control-state. Destructive service uses the
+    // same order. Copy readiness and release the control lock before touching
+    // the model or sending a response.
     const auto physical_state = physical_->state();
     if (physical_state.safety_fault_latched ||
         physical_state.status != hg::PhysicalOutputStatus::Ready ||
@@ -142,8 +148,14 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         return httpd_resp_send(request, response.c_str(), static_cast<ssize_t>(response.size()));
     }
 
+    hg::BootReadinessReport readiness_snapshot{};
+    {
+        std::scoped_lock lock(*control_state_mutex_);
+        readiness_snapshot = *readiness_;
+    }
+
     const auto result = hg::apply_output_command(
-        *model_, *readiness_, {output_id, active, alarm_active, 0});
+        *model_, readiness_snapshot, {output_id, active, alarm_active, 0});
 
     std::string response = std::string{"{\"ok\":"} +
         (result.status == hg::OutputCommandStatus::Applied ? "true" : "false") +
