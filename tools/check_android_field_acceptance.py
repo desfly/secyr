@@ -8,6 +8,7 @@ ANDROID = ROOT / "android/app/src/main/java/ua/homeguard/s3"
 list_screen = (ANDROID / "ui/screens/DeviceListScreen.kt").read_text(encoding="utf-8")
 add_screen = (ANDROID / "ui/screens/AddDeviceScreen.kt").read_text(encoding="utf-8")
 store = (ANDROID / "storage/RegisteredDeviceStore.kt").read_text(encoding="utf-8")
+settings = (ANDROID / "storage/SettingsStore.kt").read_text(encoding="utf-8")
 navigation = (ANDROID / "navigation/AppNavigation.kt").read_text(encoding="utf-8")
 maintenance = (ANDROID / "ControllerMaintenanceActivity.kt").read_text(encoding="utf-8")
 client = (ANDROID / "diagnostics/DeviceConfigMaintenanceClient.kt").read_text(encoding="utf-8")
@@ -71,8 +72,15 @@ require('Text("СТЕРТИ ВСЕ")' in maintenance,
         "Android Factory Reset destructive confirmation missing")
 require("maintenance.factoryReset(authenticated, pin)" in maintenance,
         "Android Factory Reset is not connected to controller client")
-require("settings.selectDevice(\"\")" in maintenance and "MainActivity::class.java" in maintenance,
-        "Android does not return safely to device-list flow after reset")
+require("registeredDevices.markAuthorization(resetDeviceId, false)" in maintenance,
+        "Android leaves reset controller locally authorized")
+require("settings.clearControllerSessionAfterFactoryReset()" in maintenance,
+        "Android does not clear selected controller session after reset")
+require("apiToken = \"\"" in settings and "telemetryToken = \"\"" in settings and
+        "lastKnownLocalUrl = \"\"" in settings and "localCertificateSha256 = \"\"" in settings,
+        "Factory Reset session cleanup leaves stale URL/certificate/token data")
+require("path = ControlPath.OFFLINE" in maintenance and "MainActivity::class.java" in maintenance,
+        "Android does not force an offline safe device-list flow after reset")
 require("/api/v1/system/factory-reset" in client and "ERASE_ALL" in client,
         "Android maintenance client does not call true Factory Reset endpoint")
 
@@ -87,4 +95,5 @@ print(" - device list primary; Add flow hidden")
 print(" - mandatory friendly names; ID/IP only in Properties")
 print(" - duplicate physical ESP records merged with canonical identity")
 print(" - compact icon + LAN/CLOUD/online picons")
-print(" - PIN reveal + explicit Factory Reset + safe return")
+print(" - PIN reveal + explicit Factory Reset")
+print(" - reset clears local authorization, endpoint, certificate and cached tokens")
