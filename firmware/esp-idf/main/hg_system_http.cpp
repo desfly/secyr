@@ -1,5 +1,10 @@
 #include "hg_system_http.hpp"
+#include "hg_factory_reset.hpp"
 #include "homeguard/system_api.hpp"
+
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -46,6 +51,23 @@ bool parse_json_string(const std::string& body, const char* key, std::string& va
     return true;
 }
 
+bool read_request_body(httpd_req_t* request, std::size_t limit, std::string& body) {
+    if (request == nullptr || request->content_len == 0 || request->content_len > limit) return false;
+    body.assign(request->content_len, '\0');
+    std::size_t offset = 0;
+    while (offset < body.size()) {
+        const auto received = httpd_req_recv(request, body.data() + offset, body.size() - offset);
+        if (received <= 0) return false;
+        offset += static_cast<std::size_t>(received);
+    }
+    return true;
+}
+
+void delayed_factory_reboot(void*) {
+    vTaskDelay(pdMS_TO_TICKS(350));
+    esp_restart();
+}
+
 const char* arm_state_name(hg::PartitionArmState state) {
     switch (state) {
         case hg::PartitionArmState::Stay: return "stay";
@@ -61,9 +83,7 @@ esp_err_t SystemHttp::register_handlers(
     hg::SystemModel* model,
     hg::SystemEventBus* bus,
     homeguard::AccessControl* access_control) {
-    if (server == nullptr || model == nullptr || bus == nullptr || access_control == nullptr) {
-        return ESP_ERR_INVALID_ARG;
-    }
+    if (server == nullptr || model == nullptr || bus == nullptr || access_control == nullptr) return ESP_ERR_INVALID_ARG;
     server_ = server;
     model_ = model;
     bus_ = bus;
@@ -77,6 +97,7 @@ esp_err_t SystemHttp::register_handlers(
         {.uri="/api/v1/system/partitions", .method=HTTP_GET, .handler=&SystemHttp::partitions_get, .user_ctx=this},
         {.uri="/api/v1/system/events", .method=HTTP_GET, .handler=&SystemHttp::events_get, .user_ctx=this},
         {.uri="/api/v1/system/security-command", .method=HTTP_POST, .handler=&SystemHttp::security_command_post, .user_ctx=this},
+        {.uri="/api/v1/system/factory-reset", .method=HTTP_POST, .handler=&SystemHttp::factory_reset_post, .user_ctx=this},
         {.uri="/ws/system", .method=HTTP_GET, .handler=&SystemHttp::websocket, .user_ctx=this, .is_websocket=true},
     };
     for (const auto& route : routes) {
@@ -91,160 +112,54 @@ esp_err_t SystemHttp::send_json(httpd_req_t* request, const char* body, std::siz
     return httpd_resp_send(request, body, static_cast<ssize_t>(size));
 }
 
-esp_err_t SystemHttp::status_get(httpd_req_t* request) {
-    auto* self = self_from(request);
-    if (self == nullptr || self->model_ == nullptr || self->bus_ == nullptr) return ESP_FAIL;
-    const auto body = hg::system_status_json(*self->model_, *self->bus_);
-    return self->send_json(request, body.c_str(), body.size());
-}
+esp_err_t SystemHttp::status_get(httpd_req_t* request) { auto* self=self_from(request); if(!self||!self->model_||!self->bus_) return ESP_FAIL; const auto body=hg::system_status_json(*self->model_,*self->bus_); return self->send_json(request,body.c_str(),body.size()); }
+esp_err_t SystemHttp::zones_get(httpd_req_t* request) { auto* self=self_from(request); if(!self||!self->model_) return ESP_FAIL; const auto body=hg::system_zones_json(*self->model_); return self->send_json(request,body.c_str(),body.size()); }
+esp_err_t SystemHttp::outputs_get(httpd_req_t* request) { auto* self=self_from(request); if(!self||!self->model_) return ESP_FAIL; const auto body=hg::system_outputs_json(*self->model_); return self->send_json(request,body.c_str(),body.size()); }
+esp_err_t SystemHttp::partitions_get(httpd_req_t* request) { auto* self=self_from(request); if(!self||!self->model_) return ESP_FAIL; const auto body=hg::system_partitions_json(*self->model_); return self->send_json(request,body.c_str(),body.size()); }
+esp_err_t SystemHttp::events_get(httpd_req_t* request) { auto* self=self_from(request); if(!self) return ESP_FAIL; const auto body=self->events_json(); return self->send_json(request,body.c_str(),body.size()); }
+esp_err_t SystemHttp::security_command_post(httpd_req_t* request) { auto* self=self_from(request); return self?self->handle_security_command(request):ESP_FAIL; }
+esp_err_t SystemHttp::factory_reset_post(httpd_req_t* request) { auto* self=self_from(request); return self?self->handle_factory_reset(request):ESP_FAIL; }
 
-esp_err_t SystemHttp::zones_get(httpd_req_t* request) {
-    auto* self = self_from(request);
-    if (self == nullptr || self->model_ == nullptr) return ESP_FAIL;
-    const auto body = hg::system_zones_json(*self->model_);
-    return self->send_json(request, body.c_str(), body.size());
-}
-
-esp_err_t SystemHttp::outputs_get(httpd_req_t* request) {
-    auto* self = self_from(request);
-    if (self == nullptr || self->model_ == nullptr) return ESP_FAIL;
-    const auto body = hg::system_outputs_json(*self->model_);
-    return self->send_json(request, body.c_str(), body.size());
-}
-
-esp_err_t SystemHttp::partitions_get(httpd_req_t* request) {
-    auto* self = self_from(request);
-    if (self == nullptr || self->model_ == nullptr) return ESP_FAIL;
-    const auto body = hg::system_partitions_json(*self->model_);
-    return self->send_json(request, body.c_str(), body.size());
-}
-
-esp_err_t SystemHttp::events_get(httpd_req_t* request) {
-    auto* self = self_from(request);
-    if (self == nullptr) return ESP_FAIL;
-    const auto body = self->events_json();
-    return self->send_json(request, body.c_str(), body.size());
-}
-
-esp_err_t SystemHttp::security_command_post(httpd_req_t* request) {
-    auto* self = self_from(request);
-    return self == nullptr ? ESP_FAIL : self->handle_security_command(request);
+esp_err_t SystemHttp::handle_factory_reset(httpd_req_t* request) {
+    if (access_control_ == nullptr) return ESP_FAIL;
+    std::string body;
+    if (!read_request_body(request, 512U, body)) { httpd_resp_set_status(request,"400 Bad Request"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"invalid_body\"}",-1); }
+    std::string actor, credential, confirm;
+    if (!parse_json_string(body,"actor",actor) || !parse_json_string(body,"credential",credential)) { httpd_resp_set_status(request,"401 Unauthorized"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"credential_required\"}",-1); }
+    if (!parse_json_string(body,"confirm",confirm) || confirm != "ERASE_ALL") { httpd_resp_set_status(request,"409 Conflict"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"explicit_confirmation_required\"}",-1); }
+    const auto decision=access_control_->authorize(actor,credential,"system.factory_reset");
+    if (decision != homeguard::AuditDecision::Allowed) { httpd_resp_set_status(request,"403 Forbidden"); const std::string response=std::string{"{\"ok\":false,\"reason\":\""}+homeguard::to_string(decision)+"\"}"; return send_json(request,response.c_str(),response.size()); }
+    const auto report=FactoryResetManager{}.erase_mutable_state();
+    if (!report.ok()) { httpd_resp_set_status(request,"500 Internal Server Error"); const std::string response=std::string{"{\"ok\":false,\"reason\":\"erase_failed\",\"access\":"}+std::to_string(report.access)+",\"wifi\":"+std::to_string(report.wifi)+",\"cloud\":"+std::to_string(report.cloud)+",\"controllerConfig\":"+std::to_string(report.controller_config)+",\"provisioning\":"+std::to_string(report.provisioning)+",\"commissioning\":"+std::to_string(report.commissioning)+"}"; return send_json(request,response.c_str(),response.size()); }
+    access_control_->clear_users();
+    const auto reboot_task=xTaskCreate(&delayed_factory_reboot,"hg_factory_reset",2048,nullptr,5,nullptr);
+    if (reboot_task != pdPASS) { esp_restart(); return ESP_FAIL; }
+    static constexpr char response[]="{\"ok\":true,\"state\":\"factory_reset_complete\",\"rebooting\":true}";
+    return send_json(request,response,sizeof(response)-1U);
 }
 
 esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
     if (model_ == nullptr || bus_ == nullptr || access_control_ == nullptr) return ESP_FAIL;
-    if (request->content_len == 0 || request->content_len > 384) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_body\"}", -1);
-    }
-
-    std::string body(request->content_len, '\0');
-    const auto received = httpd_req_recv(request, body.data(), body.size());
-    if (received <= 0) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"read_failed\"}", -1);
-    }
-    body.resize(static_cast<std::size_t>(received));
-
-    std::string command;
-    std::string actor;
-    std::string credential;
-    if (!parse_json_string(body, "command", command)) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"missing_command\"}", -1);
-    }
-    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
-        httpd_resp_set_status(request, "401 Unauthorized");
-        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"credential_required\"}", -1);
-    }
-
-    const auto decision = access_control_->authorize(actor, credential, command);
-    if (decision != homeguard::AuditDecision::Allowed) {
-        httpd_resp_set_status(request, "403 Forbidden");
-        const std::string response = std::string{"{\"ok\":false,\"reason\":\""} +
-            homeguard::to_string(decision) + "\"}";
-        return send_json(request, response.c_str(), response.size());
-    }
-
+    std::string body;
+    if (!read_request_body(request,384U,body)) { httpd_resp_set_status(request,"400 Bad Request"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"invalid_body\"}",-1); }
+    std::string command,actor,credential;
+    if (!parse_json_string(body,"command",command)) { httpd_resp_set_status(request,"400 Bad Request"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"missing_command\"}",-1); }
+    if (!parse_json_string(body,"actor",actor) || !parse_json_string(body,"credential",credential)) { httpd_resp_set_status(request,"401 Unauthorized"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"credential_required\"}",-1); }
+    const auto decision=access_control_->authorize(actor,credential,command);
+    if (decision != homeguard::AuditDecision::Allowed) { httpd_resp_set_status(request,"403 Forbidden"); const std::string response=std::string{"{\"ok\":false,\"reason\":\""}+homeguard::to_string(decision)+"\"}"; return send_json(request,response.c_str(),response.size()); }
     hg::PartitionArmState target{};
-    if (command == "security.arm_away") target = hg::PartitionArmState::Away;
-    else if (command == "security.arm_home") target = hg::PartitionArmState::Stay;
-    else if (command == "security.disarm") target = hg::PartitionArmState::Disarmed;
-    else if (command == "security.panic") target = hg::PartitionArmState::Alarm;
-    else {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"unsupported_command\"}", -1);
-    }
-
-    if (!model_->set_partition_arm(1, target, 0)) {
-        httpd_resp_set_status(request, "409 Conflict");
-        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"partition_command_failed\"}", -1);
-    }
+    if(command=="security.arm_away") target=hg::PartitionArmState::Away; else if(command=="security.arm_home") target=hg::PartitionArmState::Stay; else if(command=="security.disarm") target=hg::PartitionArmState::Disarmed; else if(command=="security.panic") target=hg::PartitionArmState::Alarm; else { httpd_resp_set_status(request,"400 Bad Request"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"unsupported_command\"}",-1); }
+    if(!model_->set_partition_arm(1,target,0)) { httpd_resp_set_status(request,"409 Conflict"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"partition_command_failed\"}",-1); }
     (void)bus_->dispatch_all();
-
-    const std::string response = std::string{"{\"ok\":true,\"command\":\""} + command +
-        "\",\"armState\":\"" + arm_state_name(target) + "\"}";
-    return send_json(request, response.c_str(), response.size());
+    const std::string response=std::string{"{\"ok\":true,\"command\":\""}+command+"\",\"armState\":\""+arm_state_name(target)+"\"}";
+    return send_json(request,response.c_str(),response.size());
 }
 
-void SystemHttp::remember_client(int socket_fd) {
-    if (socket_fd < 0) return;
-    for (const int client : clients_) if (client == socket_fd) return;
-    for (auto& client : clients_) {
-        if (client < 0) { client = socket_fd; return; }
-    }
-    clients_[0] = socket_fd;
-}
-
-esp_err_t SystemHttp::websocket(httpd_req_t* request) {
-    auto* self = self_from(request);
-    if (self == nullptr) return ESP_FAIL;
-    self->remember_client(httpd_req_to_sockfd(request));
-    return ESP_OK;
-}
-
-void SystemHttp::on_event(const hg::SystemEvent& event, void* context) {
-    auto* self = static_cast<SystemHttp*>(context);
-    if (self == nullptr) return;
-    self->record(event);
-    self->broadcast(event);
-}
-
-void SystemHttp::record(const hg::SystemEvent& event) {
-    event_log_.append(
-        event.timestamp_ms,
-        severity_for(event.type),
-        static_cast<std::uint16_t>(event.type),
-        hg::system_event_type_name(event.type));
-}
-
-std::string SystemHttp::events_json() const {
-    std::ostringstream out;
-    out << "{\"capacity\":" << hg::EventLog::capacity << ",\"events\":[";
-    for (std::size_t i = 0; i < event_log_.size(); ++i) {
-        if (i != 0U) out << ',';
-        const auto& item = event_log_.at_oldest(i);
-        out << "{\"sequence\":" << item.sequence
-            << ",\"timestampMs\":" << item.timestamp_ms
-            << ",\"severity\":\"" << severity_name(item.severity)
-            << "\",\"code\":" << item.code
-            << ",\"event\":\"" << item.text.data() << "\"}";
-    }
-    out << "]}";
-    return out.str();
-}
-
-void SystemHttp::broadcast(const hg::SystemEvent& event) {
-    if (server_ == nullptr) return;
-    const std::string payload = hg::system_event_json(event);
-    httpd_ws_frame_t frame{};
-    frame.type = HTTPD_WS_TYPE_TEXT;
-    frame.payload = reinterpret_cast<std::uint8_t*>(const_cast<char*>(payload.data()));
-    frame.len = payload.size();
-    for (auto& client : clients_) {
-        if (client < 0) continue;
-        if (httpd_ws_send_frame_async(server_, client, &frame) != ESP_OK) client = -1;
-    }
-}
+void SystemHttp::remember_client(int socket_fd) { if(socket_fd<0)return; for(const int client:clients_)if(client==socket_fd)return; for(auto& client:clients_){if(client<0){client=socket_fd;return;}} clients_[0]=socket_fd; }
+esp_err_t SystemHttp::websocket(httpd_req_t* request) { auto* self=self_from(request); if(!self)return ESP_FAIL; self->remember_client(httpd_req_to_sockfd(request)); return ESP_OK; }
+void SystemHttp::on_event(const hg::SystemEvent& event,void* context) { auto* self=static_cast<SystemHttp*>(context); if(!self)return; self->record(event); self->broadcast(event); }
+void SystemHttp::record(const hg::SystemEvent& event) { event_log_.append(event.timestamp_ms,severity_for(event.type),static_cast<std::uint16_t>(event.type),hg::system_event_type_name(event.type)); }
+std::string SystemHttp::events_json() const { std::ostringstream out; out<<"{\"capacity\":"<<hg::EventLog::capacity<<",\"events\":["; for(std::size_t i=0;i<event_log_.size();++i){if(i)out<<','; const auto& item=event_log_.at_oldest(i); out<<"{\"sequence\":"<<item.sequence<<",\"timestampMs\":"<<item.timestamp_ms<<",\"severity\":\""<<severity_name(item.severity)<<"\",\"code\":"<<item.code<<",\"event\":\""<<item.text.data()<<"\"}";} out<<"]}"; return out.str(); }
+void SystemHttp::broadcast(const hg::SystemEvent& event) { if(!server_)return; const std::string payload=hg::system_event_json(event); httpd_ws_frame_t frame{}; frame.type=HTTPD_WS_TYPE_TEXT; frame.payload=reinterpret_cast<std::uint8_t*>(const_cast<char*>(payload.data())); frame.len=payload.size(); for(auto& client:clients_){if(client<0)continue; if(httpd_ws_send_frame_async(server_,client,&frame)!=ESP_OK)client=-1;} }
 
 }  // namespace homeguard::idf
