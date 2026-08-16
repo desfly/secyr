@@ -1,6 +1,7 @@
 #include "hg_reset_sequence.hpp"
 
 #include "hg_factory_reset.hpp"
+#include "homeguard/reset_sequence.hpp"
 
 #include "esp_attr.h"
 #include "esp_log.h"
@@ -33,35 +34,23 @@ void reset_sequence_state() {
     g_external_reset_count = 0U;
 }
 
-bool is_external_rst(esp_reset_reason_t reason) {
-    return reason == ESP_RST_EXT;
-}
-
 }  // namespace
 
 bool handle_triple_rst_factory_reset() {
-    const auto reason = esp_reset_reason();
+    if (g_reset_magic != kMagic) reset_sequence_state();
 
-    if (g_reset_magic != kMagic) {
-        reset_sequence_state();
-    }
+    const auto step = hg::advance_reset_sequence(
+        g_external_reset_count,
+        esp_reset_reason() == ESP_RST_EXT,
+        kRequiredPresses);
+    g_external_reset_count = step.count;
 
-    // Only the physical EN/RST path participates. Power-on, software restart,
-    // watchdog, panic and brownout explicitly cancel any partial sequence.
-    if (!is_external_rst(reason)) {
-        reset_sequence_state();
-        return false;
-    }
+    if (!step.trigger_factory_reset) {
+        if (g_external_reset_count == 0U) return false;
 
-    if (g_external_reset_count < 0xffU) {
-        ++g_external_reset_count;
-    }
-
-    ESP_LOGW(kTag, "External RST sequence: %u/%u",
-             static_cast<unsigned>(g_external_reset_count),
-             static_cast<unsigned>(kRequiredPresses));
-
-    if (g_external_reset_count < kRequiredPresses) {
+        ESP_LOGW(kTag, "External RST sequence: %u/%u",
+                 static_cast<unsigned>(g_external_reset_count),
+                 static_cast<unsigned>(kRequiredPresses));
         if (xTaskCreate(
                 &clear_sequence_after_window,
                 "hg_rst_window",
@@ -69,16 +58,13 @@ bool handle_triple_rst_factory_reset() {
                 nullptr,
                 3,
                 nullptr) != pdPASS) {
-            // Fail safe: inability to arm the expiry window must not leave a
-            // latent reset count alive indefinitely.
             reset_sequence_state();
             ESP_LOGE(kTag, "Cannot arm triple-RST expiry window; sequence cancelled");
         }
         return false;
     }
 
-    // Consume the sequence before touching flash so a reboot during erase can
-    // never recursively trigger another factory reset.
+    // Consume before erasing so a reset during flash operations cannot loop.
     reset_sequence_state();
     ESP_LOGW(kTag, "Triple RST detected: erasing mutable HomeGuard state");
 
