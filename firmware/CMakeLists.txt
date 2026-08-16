@@ -40,6 +40,7 @@ add_library(homeguard_core
     src/health_monitor.cpp
     src/network_failover.cpp
     src/telemetry.cpp
+    src/telemetry_transport.cpp
     src/maintenance.cpp
     src/power_monitor.cpp
     src/command.cpp
