@@ -109,10 +109,22 @@ int main() {
         commissioning_store,
     };
 
+    // Defense-in-depth lockout test: even a caller that bypasses the JSON codec
+    // cannot apply an access image with no enabled Admin. The rejection occurs
+    // before snapshot/write and therefore must leave every old value untouched.
+    auto lockout = incoming;
+    lockout.access = homeguard::AccessControl{};
+    std::string reason;
+    expect(!transaction.apply(lockout, reason), "Admin-less transaction unexpectedly succeeded");
+    expect(reason == "access_admin_required", "Admin-less transaction returned wrong reason");
+    expect_access_user(access_store, "oldadmin", "newadmin");
+    expect_wifi(network, "OldWifi", "oldpass88");
+    expect_cloud(cloud_store, "mqtts://old-broker.local:8883", "old-user", "old-password");
+
     // Access and Wi-Fi are written before Cloud. Failing this first Cloud write
     // therefore exercises rollback of already-mutated persistent state.
     mock_nvs::fail_next_write("hg_cloud", "enabled", ESP_FAIL);
-    std::string reason;
+    reason.clear();
     expect(!transaction.apply(incoming, reason), "faulted transaction unexpectedly succeeded");
     expect(reason == "write_cloud_failed", "unexpected rollback failure reason");
 
