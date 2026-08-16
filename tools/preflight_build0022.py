@@ -113,9 +113,14 @@ service = source_text("hg_service_http.cpp")
 app_main = source_text("app_main.cpp")
 
 # 1: Wi-Fi reconnect/recovery must be event-driven; status GET must be side-effect free;
-# scanning must not deliberately disconnect an established STA.
+# scanning must not deliberately disconnect an established STA. Reconnect retries use
+# a bounded one-shot timer so the event loop is never blocked and a dead AP cannot
+# create a tight reconnect storm.
 require_token(network, "WIFI_EVENT_STA_DISCONNECTED", "Wi-Fi disconnect event reconnect")
 require_token(network, "IP_EVENT_STA_GOT_IP", "Wi-Fi recovery AP retirement after got-IP")
+require_token(network, "esp_timer_start_once", "Wi-Fi one-shot reconnect timer")
+require_token(network, "kReconnectMaximumUs", "Wi-Fi bounded reconnect backoff")
+require_token(network, "esp_netif_destroy_default_wifi", "Wi-Fi partial-start netif rollback")
 status_start = network.find("esp_err_t NetworkHttp::handle_status")
 status_end = network.find("esp_err_t NetworkHttp::handle_scan", status_start)
 if status_start < 0 or status_end < 0 or "esp_wifi_set_mode" in network[status_start:status_end]:
@@ -123,6 +128,10 @@ if status_start < 0 or status_end < 0 or "esp_wifi_set_mode" in network[status_s
 scan_start = network.find("std::string NetworkHttp::scan_json")
 if scan_start < 0 or "esp_wifi_disconnect" in network[scan_start:]:
     errors.append("field runtime contract regressed: Wi-Fi scan disconnects STA")
+wifi_event_start = network.find("void NetworkHttp::handle_wifi_event")
+wifi_event_end = network.find("void NetworkHttp::handle_ip_event", wifi_event_start)
+if wifi_event_start < 0 or wifi_event_end < 0 or "esp_wifi_connect()" in network[wifi_event_start:wifi_event_end]:
+    errors.append("field runtime contract regressed: Wi-Fi disconnect callback performs immediate reconnect")
 
 # 2 + 3: W5500 lifecycle and ISR ordering.
 for token, label in [
