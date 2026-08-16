@@ -30,7 +30,9 @@ struct HardwareRuntimeStatus {
     HardwareModuleStatus micro_sd;
     HardwareModuleStatus one_wire;
     HardwareModuleStatus rs485;
-    bool safe_outputs_forced{true};
+    // This is evidence, not an optimistic default. It becomes true only after
+    // firmware has successfully driven the expander output latch to OFF.
+    bool safe_outputs_forced{false};
 };
 
 const char* to_string(HardwareModuleState state) noexcept;
