@@ -38,6 +38,7 @@ private:
     i2c_master_dev_handle_t device_{nullptr};
     float current_lsb_a_{0.0F};
     float power_lsb_w_{0.0F};
+    bool initialized_{false};
 };
 
 }  // namespace homeguard::idf
