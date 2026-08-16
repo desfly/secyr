@@ -71,6 +71,7 @@ inline esp_err_t esp_wifi_start() { return ESP_OK; }
 inline esp_err_t esp_wifi_stop() { return ESP_OK; }
 inline esp_err_t esp_wifi_connect() { return ESP_OK; }
 inline esp_err_t esp_wifi_disconnect() { return ESP_OK; }
+inline esp_err_t esp_wifi_restore() { mock_wifi_sta_config() = {}; return ESP_OK; }
 
 inline esp_err_t esp_wifi_set_config(wifi_interface_t interface, const wifi_config_t* config) {
     if (config == nullptr) return ESP_ERR_INVALID_ARG;
