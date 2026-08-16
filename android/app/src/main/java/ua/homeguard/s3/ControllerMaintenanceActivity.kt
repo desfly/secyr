@@ -130,12 +130,13 @@ class ControllerMaintenanceActivity : ComponentActivity() {
                                 confirmReset = false
                                 val authenticated = session ?: return@TextButton
                                 val resetDeviceId = endpoint.value.deviceId
+                                val resetBaseUrl = endpoint.value.apiBaseUrl
                                 lifecycleScope.launch {
                                     status = "Виконується Factory Reset…"
                                     runCatching { maintenance.factoryReset(authenticated, pin) }
                                         .onSuccess {
-                                            if (resetDeviceId.isNotBlank()) {
-                                                registeredDevices.markAuthorization(resetDeviceId, false)
+                                            if (resetDeviceId.isNotBlank() || resetBaseUrl.isNotBlank()) {
+                                                registeredDevices.markAuthorization(resetDeviceId, resetBaseUrl, false)
                                             }
                                             settings.clearControllerSessionAfterFactoryReset()
                                             endpoint.value = DeviceEndpoint(
