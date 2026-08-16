@@ -16,16 +16,17 @@ CommissioningStateValidation validate_commissioning_state(
     if (!state.gpio_map_verified || !state.active_polarity_verified) {
         return CommissioningStateValidation::VerificationIncomplete;
     }
+    if (!state.valve_limit_polarity_verified ||
+        state.cold_valve_travel_timeout_ms == 0U ||
+        state.hot_valve_travel_timeout_ms == 0U) {
+        return CommissioningStateValidation::ValveSafetyUnverified;
+    }
     return CommissioningStateValidation::Valid;
 }
 
 bool commissioning_state_allows_physical_outputs(
     const CommissioningPersistentState& state) noexcept
 {
-    // Both stages are mandatory for the MCP23017 architecture: dry-run proves
-    // the controller/sensor path, actuator test proves real output polarity,
-    // interlock and connected actuator behavior. A dry-run alone is never a
-    // permission to energize physical outputs.
     return validate_commissioning_state(state) == CommissioningStateValidation::Valid &&
            state.successful_dry_runs > 0U &&
            state.successful_actuator_tests > 0U;
@@ -41,6 +42,10 @@ std::string commissioning_state_json(const CommissioningPersistentState& state)
         << ",\"successfulDryRuns\":" << state.successful_dry_runs
         << ",\"successfulActuatorTests\":" << state.successful_actuator_tests
         << ",\"lastVerifiedAtMs\":" << state.last_verified_at_ms
+        << ",\"valveLimitPolarityVerified\":" << (state.valve_limit_polarity_verified ? "true" : "false")
+        << ",\"valveLimitsActiveLow\":" << (state.valve_limits_active_low ? "true" : "false")
+        << ",\"coldValveTravelTimeoutMs\":" << state.cold_valve_travel_timeout_ms
+        << ",\"hotValveTravelTimeoutMs\":" << state.hot_valve_travel_timeout_ms
         << ",\"validation\":\"" << to_string(validate_commissioning_state(state)) << "\""
         << ",\"physicalOutputsAllowed\":" << (commissioning_state_allows_physical_outputs(state) ? "true" : "false")
         << "}";
@@ -54,6 +59,7 @@ const char* to_string(CommissioningStateValidation validation) noexcept
     case CommissioningStateValidation::InvalidSchema: return "invalid_schema";
     case CommissioningStateValidation::InvalidSequence: return "invalid_sequence";
     case CommissioningStateValidation::VerificationIncomplete: return "verification_incomplete";
+    case CommissioningStateValidation::ValveSafetyUnverified: return "valve_safety_unverified";
     }
     return "unknown";
 }
