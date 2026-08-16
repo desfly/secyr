@@ -12,6 +12,8 @@ settings = (ANDROID / "storage/SettingsStore.kt").read_text(encoding="utf-8")
 navigation = (ANDROID / "navigation/AppNavigation.kt").read_text(encoding="utf-8")
 maintenance = (ANDROID / "ControllerMaintenanceActivity.kt").read_text(encoding="utf-8")
 client = (ANDROID / "diagnostics/DeviceConfigMaintenanceClient.kt").read_text(encoding="utf-8")
+access_models = (ANDROID / "model/AccessModels.kt").read_text(encoding="utf-8")
+http_api = (ANDROID / "network/HttpDeviceApi.kt").read_text(encoding="utf-8")
 errors: list[str] = []
 
 
@@ -64,6 +66,20 @@ require('"☁ CLOUD"' in list_screen,
 require('"● online"' in list_screen and '"○ offline"' in list_screen,
         "overall connection state missing")
 
+# No active UI control may route to a runtime command that is known to be
+# unimplemented. Admin authorization is broad, but UI enablement must still
+# respect runtime capabilities.
+require("AccessRole.ADMIN -> capabilities.allowsOperatorCommand(command)" in access_models,
+        "Admin UI bypasses runtime capabilities and can enable dead commands")
+require("CommandType.SILENCE, CommandType.RESET_ALARM" in access_models and
+        "CommandType.ENTER_MAINTENANCE, CommandType.EXIT_MAINTENANCE -> false" in access_models,
+        "unsupported operator commands are not explicitly disabled")
+require('else -> CommandReply(false, code = "runtime_command_not_wired")' in http_api,
+        "runtime API fallback for unsupported commands was removed")
+require("CommandType.ARM_HOME -> runtimeSecurityCommand" in http_api and
+        "CommandType.OPEN_VALVES -> runtimeValveCommand" in http_api,
+        "supported runtime command wiring is missing")
+
 # Controller maintenance must expose PIN reveal and explicit destructive reset.
 require("var pinVisible by remember" in maintenance and
         'Text(if (pinVisible) "Сховати" else "Показати")' in maintenance,
@@ -105,6 +121,7 @@ print(" - device list primary; Add flow hidden")
 print(" - mandatory friendly names; ID/IP only in Properties")
 print(" - duplicate physical ESP records merged with canonical identity")
 print(" - compact icon + LAN/CLOUD/online picons")
+print(" - unsupported runtime controls stay disabled even for Admin")
 print(" - PIN reveal + explicit Factory Reset")
 print(" - reset requires reboot acknowledgement and canonical authorization invalidation")
 print(" - reset clears endpoint/certificate/tokens and restarts a fresh Android task")
