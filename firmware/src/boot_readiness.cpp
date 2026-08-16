@@ -22,6 +22,10 @@ BootReadinessReport evaluate_boot_readiness(const BootReadinessInput& input) noe
     }
 
     report.commissioning_status = validate_commissioning_state(*input.commissioning);
+    if (report.commissioning_status == CommissioningStateValidation::ValveSafetyUnverified) {
+        report.status = BootReadinessStatus::BlockedValveSafetyProfileRequired;
+        return report;
+    }
     if (report.commissioning_status != CommissioningStateValidation::Valid) {
         report.status = BootReadinessStatus::BlockedCommissioningState;
         return report;
@@ -53,6 +57,7 @@ const char* to_string(const BootReadinessStatus status) noexcept {
         case BootReadinessStatus::BlockedMissingCommissioningState: return "missing_commissioning_state";
         case BootReadinessStatus::BlockedHardwareVerification: return "hardware_verification_failed";
         case BootReadinessStatus::BlockedCommissioningState: return "commissioning_state_failed";
+        case BootReadinessStatus::BlockedValveSafetyProfileRequired: return "valve_safety_profile_required";
         case BootReadinessStatus::BlockedDryRunRequired: return "dry_run_required";
         case BootReadinessStatus::BlockedActuatorTestRequired: return "actuator_test_required";
         case BootReadinessStatus::ReadyForPhysicalOutputs: return "ready_for_physical_outputs";
