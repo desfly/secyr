@@ -2,6 +2,7 @@
 
 #include "esp_err.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -37,8 +38,8 @@ static inline int64_t esp_timer_get_time(void) {
 }
 
 static inline esp_err_t esp_timer_create(const esp_timer_create_args_t* args, esp_timer_handle_t* out) {
-    static struct mock_esp_timer timer{};
-    if (args == nullptr || args->callback == nullptr || out == nullptr) return ESP_ERR_INVALID_ARG;
+    static struct mock_esp_timer timer = {0};
+    if (args == NULL || args->callback == NULL || out == NULL) return ESP_ERR_INVALID_ARG;
     timer.callback = args->callback;
     timer.arg = args->arg;
     timer.active = false;
@@ -46,27 +47,28 @@ static inline esp_err_t esp_timer_create(const esp_timer_create_args_t* args, es
     return ESP_OK;
 }
 
-static inline esp_err_t esp_timer_start_once(esp_timer_handle_t timer, uint64_t) {
-    if (timer == nullptr) return ESP_ERR_INVALID_ARG;
+static inline esp_err_t esp_timer_start_once(esp_timer_handle_t timer, uint64_t timeout_us) {
+    (void)timeout_us;
+    if (timer == NULL) return ESP_ERR_INVALID_ARG;
     timer->active = true;
     return ESP_OK;
 }
 
 static inline esp_err_t esp_timer_stop(esp_timer_handle_t timer) {
-    if (timer == nullptr) return ESP_ERR_INVALID_ARG;
+    if (timer == NULL) return ESP_ERR_INVALID_ARG;
     timer->active = false;
     return ESP_OK;
 }
 
 static inline bool esp_timer_is_active(esp_timer_handle_t timer) {
-    return timer != nullptr && timer->active;
+    return timer != NULL && timer->active;
 }
 
 static inline esp_err_t esp_timer_delete(esp_timer_handle_t timer) {
-    if (timer == nullptr) return ESP_ERR_INVALID_ARG;
+    if (timer == NULL) return ESP_ERR_INVALID_ARG;
     timer->active = false;
-    timer->callback = nullptr;
-    timer->arg = nullptr;
+    timer->callback = NULL;
+    timer->arg = NULL;
     return ESP_OK;
 }
 
