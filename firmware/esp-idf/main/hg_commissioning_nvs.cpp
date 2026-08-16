@@ -38,9 +38,6 @@ esp_err_t save_blob(const char* key, const T& value) {
 }  // namespace
 
 esp_err_t CommissioningNvsStore::load_hardware(hg::HardwareVerificationRecord& record) const {
-    // Never auto-upgrade schema-v1 records: those encoded actuator outputs as
-    // direct ESP GPIOs. Absence of hardware_v2 intentionally keeps outputs
-    // fail-closed until the HW-678 MCP23017 profile is re-verified.
     const auto error = load_blob(kHardwareKey, record);
     if (error != ESP_OK) return error;
     return hg::validate_hardware_verification(record) == hg::HardwareVerificationStatus::Valid
@@ -55,16 +52,17 @@ esp_err_t CommissioningNvsStore::save_hardware(const hg::HardwareVerificationRec
 }
 
 esp_err_t CommissioningNvsStore::load_commissioning(hg::CommissioningPersistentState& state) const {
-    // Commissioning results are architecture-specific. Never pair an old
-    // state_v1 dry-run/actuator test with the schema-v2 MCP23017 backend.
+    // Partial schema-v2 progress is loadable so a safe commissioning sequence
+    // can survive reboot. Output permission is still decided separately by
+    // commissioning_state_allows_physical_outputs().
     const auto error = load_blob(kCommissioningKey, state);
     if (error != ESP_OK) return error;
-    return hg::validate_commissioning_state(state) == hg::CommissioningStateValidation::Valid
+    return hg::commissioning_state_persistable(state)
         ? ESP_OK : ESP_ERR_INVALID_STATE;
 }
 
 esp_err_t CommissioningNvsStore::save_commissioning(const hg::CommissioningPersistentState& state) const {
-    if (hg::validate_commissioning_state(state) != hg::CommissioningStateValidation::Valid) {
+    if (!hg::commissioning_state_persistable(state)) {
         return ESP_ERR_INVALID_ARG;
     }
     return save_blob(kCommissioningKey, state);
