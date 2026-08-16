@@ -40,6 +40,7 @@ idf_component_register(
         "hg_access_http.cpp"
         "hg_commissioning_nvs.cpp"
         "hg_factory_reset.cpp"
+        "hg_config_backup.cpp"
         "../../src/system_model.cpp"
         "../../src/system_api.cpp"
         "../../src/output_interlock.cpp"
@@ -78,6 +79,7 @@ idf_component_register(
         esp_timer
         esp_wifi
         fatfs
+        json
         mqtt
         nvs_flash
         sdmmc
