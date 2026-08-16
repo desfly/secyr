@@ -147,7 +147,8 @@ if invalidate_start < 0 or invalidate_end < 0:
     errors.append("commissioning contract regressed: invalidate route implementation missing")
 else:
     invalidate_body = service[invalidate_start:invalidate_end]
-    require(invalidate_body, '"state\\\":\\\"restarting"', "commissioning invalidation reports restart")
+    require(invalidate_body, "restarting", "commissioning invalidation reports restart")
+    require(invalidate_body, "commissioning_invalidated", "commissioning invalidation reports reason")
     require(invalidate_body, "esp_restart();", "commissioning invalidation reboots after sticky lockout")
 
 if errors:
