@@ -63,6 +63,25 @@ class SettingsStore(context: Context) {
         )
     }
 
+    /**
+     * Remote Factory Reset invalidates every controller-side credential. Keep
+     * the owner-visible registry entry, but drop the selected endpoint,
+     * certificate pin and cached API/telemetry tokens so the app cannot present
+     * a stale authenticated/connected state after the controller reboots.
+     */
+    suspend fun clearControllerSessionAfterFactoryReset() {
+        val current = settings.value
+        update(
+            current.copy(
+                deviceId = "",
+                lastKnownLocalUrl = "",
+                localCertificateSha256 = "",
+                apiToken = "",
+                telemetryToken = "",
+            ),
+        )
+    }
+
     suspend fun remember(device: DiscoveredDevice) {
         selectDevice(device.deviceId, device.baseUrl)
     }
