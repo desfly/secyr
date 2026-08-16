@@ -29,10 +29,9 @@ FactoryResetReport FactoryResetManager::erase_mutable_state() const {
 
     // Cemented field requirement: every Factory Reset path (hardware triple-RST,
     // Web UI, or Android API) must visibly identify the destructive operation.
-    // Keep the same onboard WS2812/GPIO48 indication already field-proven at boot:
-    // solid white for five seconds before mutable state is erased and the caller
-    // reboots the controller.
-    (void)RgbDiagnostic::test_white(48, 5000U);
+    // Factory Reset is deliberately different from normal boot: five different
+    // colors, one second each, before mutable state is erased and the caller reboots.
+    (void)RgbDiagnostic::factory_reset_sequence(48);
 
     // Access users/Admin state.
     report.access = erase_namespace("hg_access");
