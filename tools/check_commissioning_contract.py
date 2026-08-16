@@ -75,6 +75,7 @@ for token, label in [
     ("hotTimeoutMs", "measured hot timeout input"),
     ("activeLow", "measured limit polarity input"),
     ("refresh_control_state_from_store", "dynamic readiness refresh"),
+    ("set_maintenance_mode(active, *self->model_)", "service passes SystemModel into maintenance boundary"),
 ]:
     require(service, token, label)
 
@@ -99,7 +100,7 @@ if "validate_commissioning_state(state) == hg::CommissioningStateValidation::Val
 
 for token, label in [
     ("kMaxBenchPulseMs = 1000U", "hard one-second bench ceiling"),
-    ("bool set_maintenance_mode(bool active)", "actuator maintenance gate"),
+    ("bool set_maintenance_mode(bool active, const SystemModel& model)", "model-aware actuator maintenance gate"),
     ("bool update_control_state", "actuator-local control state refresh"),
     ("bool bench_pulse", "bounded commissioning pulse API"),
     ("bool maintenance_mode{}", "maintenance state visibility"),
@@ -130,6 +131,10 @@ for token, label in [
     ("after.hot_open && after.hot_closed", "post-pulse contradictory hot limits"),
     ("target_limit_reached = target_limit_active(", "post-pulse target evidence"),
     ("return target_limit_reached", "valve pulse success means physical end-stop transition evidence"),
+    ("consume_current_revisions", "maintenance consumes pending output revisions"),
+    ("siren_command_revision_ = siren.command_revision", "maintenance consumes pending siren revision"),
+    ("state_.cold_valve.command_revision = cold_valve.command_revision", "maintenance consumes pending cold-valve revision"),
+    ("state_.hot_valve.command_revision = hot_valve.command_revision", "maintenance consumes pending hot-valve revision"),
 ]:
     require(physical, token, label)
 
@@ -159,7 +164,11 @@ require(t54, "bench_transition_backend = &bench_backend", "unit test changes tar
 require(t54, "bench_transition_cold_open = true", "unit test drives cold-open end-stop transition")
 require(t54, "TEST_CHECK(bench_delay_seen == 0U)", "unit test proves active target prevents energizing")
 require(t54, "PhysicalOutputStatus::ValveSafetyFault", "unit test latches contradictory bench limits")
-require(t54, "set_maintenance_mode(true)", "unit test covers maintenance bench gate")
+require(t54, "set_maintenance_mode(true, model)", "unit test covers model-aware maintenance gate")
+require(t54, "model.set_output_active(2, true, 101)", "unit test queues valve command before maintenance")
+require(t54, "runtime.synchronize(model, 102)", "unit test verifies queued valve command is discarded")
+require(t54, "model.set_output_active(1, false, 104)", "unit test queues command during maintenance")
+require(t54, "runtime.synchronize(model, 105)", "unit test verifies in-maintenance command is discarded")
 
 # Destructive operations use sticky fail-closed. Factory reset always reboots;
 # commissioning invalidation must reboot too, otherwise same-boot recommissioning cannot legally clear the latch.
