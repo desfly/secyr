@@ -394,6 +394,7 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
 
       button.disabled = true;
       if (state) state.textContent = "Виконується Factory Reset…";
+      let responseReceived = false;
       try {
         const response = await fetch("/api/v1/system/factory-reset", {
           method: "POST",
@@ -401,6 +402,7 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ actor: actorValue, credential: credentialValue, confirm: "ERASE_ALL" })
         });
+        responseReceived = true;
         const text = await response.text();
         let body = {};
         try { body = text ? JSON.parse(text) : {}; } catch (_) { body = {}; }
@@ -410,7 +412,15 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
         if (credential) credential.value = "";
         if (state) state.textContent = "Factory Reset прийнято. Контролер перезавантажується…";
       } catch (error) {
-        if (state) state.textContent = `Factory Reset не виконано: ${error.message}`;
+        if (credential) credential.value = "";
+        if (!responseReceived) {
+          // A successful reset may erase Wi-Fi and reboot before HTTP can
+          // return its JSON. Treat transport loss as indeterminate/offline,
+          // never as proof that the destructive operation failed.
+          if (state) state.textContent = "Зв’язок обірвався під час Factory Reset. Контролер може перезавантажуватися; перевірте його після запуску.";
+          return;
+        }
+        if (state) state.textContent = `Factory Reset відхилено: ${error.message}`;
         button.disabled = false;
       }
     });
@@ -465,6 +475,7 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
 
   window.addEventListener("hashchange", () => {
     applyEmbeddedView();
+    enforceSingleActiveNav();
     queueMicrotask(enforceSingleActiveNav);
     setTimeout(enforceSingleActiveNav, 0);
   });
