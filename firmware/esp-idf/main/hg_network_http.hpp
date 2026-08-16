@@ -21,6 +21,12 @@ public:
     bool load_persisted_credentials(std::string& ssid, std::string& password) const {
         return load_credentials(ssid, password);
     }
+    // Snapshot accessor used by transactional config import. Unlike the legacy
+    // bool loader it distinguishes "not configured" from a real NVS/read error.
+    esp_err_t snapshot_persisted_credentials(
+        std::string& ssid,
+        std::string& password,
+        bool& present) const;
     bool save_persisted_credentials(const std::string& ssid, const std::string& password) const {
         if (ssid.empty() || ssid.size() > 32 || password.size() > 64 ||
             (!password.empty() && password.size() < 8)) {
