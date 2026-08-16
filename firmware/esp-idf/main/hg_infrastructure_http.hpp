@@ -14,8 +14,8 @@ public:
         HardwareBootstrap* hardware);
 
 private:
-    static esp_err_t status_get(
-        httpd_req_t* request);
+    static esp_err_t status_get(httpd_req_t* request);
+    static esp_err_t rgb_test_post(httpd_req_t* request);
 };
 
 }  // namespace homeguard::idf
