@@ -1,12 +1,25 @@
 #include "homeguard/physical_output_runtime.hpp"
 
+#include <array>
+
 namespace hg {
 namespace {
 
-bool output_state(const SystemModel& model, std::uint16_t id) {
-    const auto* output = model.output(id);
-    return output != nullptr && output->active;
+constexpr int channel_number(PhysicalOutputChannel channel) noexcept
+{
+    return static_cast<int>(channel);
 }
+
+constexpr std::array<PhysicalOutputChannel, 8> kAllChannels{
+    PhysicalOutputChannel::CorridorLight,
+    PhysicalOutputChannel::Siren,
+    PhysicalOutputChannel::ColdValveOpen,
+    PhysicalOutputChannel::ColdValveClose,
+    PhysicalOutputChannel::HotValveOpen,
+    PhysicalOutputChannel::HotValveClose,
+    PhysicalOutputChannel::Reserve1,
+    PhysicalOutputChannel::Reserve2,
+};
 
 }  // namespace
 
@@ -16,7 +29,6 @@ bool PhysicalOutputRuntime::initialize(
     const BootReadinessReport& readiness)
 {
     backend_ = &backend;
-    hardware_ = &hardware;
     state_ = {};
 
     if (!hardware_verification_allows_outputs(hardware)) {
@@ -24,11 +36,10 @@ bool PhysicalOutputRuntime::initialize(
         return false;
     }
 
-    const int gpios[] = {hardware.pins.siren, hardware.pins.valve1, hardware.pins.valve2,
-                        hardware.pins.aux1, hardware.pins.aux2};
-    for (const int gpio : gpios) {
-        if (gpio == gpio_unassigned) continue;
-        if (!backend_->configure_output(gpio, false)) {
+    // HW-678 actuator outputs live on MCP23017 Port A. Configure every logical
+    // channel OFF before the readiness gate can ever expose physical control.
+    for (const auto channel : kAllChannels) {
+        if (!backend_->configure_output(channel_number(channel), false)) {
             ++state_.failures;
             state_.status = PhysicalOutputStatus::BackendError;
             force_safe();
@@ -47,9 +58,9 @@ bool PhysicalOutputRuntime::initialize(
     return true;
 }
 
-bool PhysicalOutputRuntime::write_safe(int gpio) {
-    if (gpio == gpio_unassigned) return true;
-    if (backend_ == nullptr || !backend_->write_output(gpio, false)) {
+bool PhysicalOutputRuntime::write_safe(PhysicalOutputChannel channel)
+{
+    if (backend_ == nullptr || !backend_->write_output(channel_number(channel), false)) {
         ++state_.failures;
         return false;
     }
@@ -57,9 +68,9 @@ bool PhysicalOutputRuntime::write_safe(int gpio) {
     return true;
 }
 
-bool PhysicalOutputRuntime::write_logical(int gpio, bool active) {
-    if (gpio == gpio_unassigned) return true;
-    if (backend_ == nullptr || !backend_->write_output(gpio, active)) {
+bool PhysicalOutputRuntime::write_logical(PhysicalOutputChannel channel, bool active)
+{
+    if (backend_ == nullptr || !backend_->write_output(channel_number(channel), active)) {
         ++state_.failures;
         state_.status = PhysicalOutputStatus::BackendError;
         state_.outputs_enabled = false;
@@ -69,21 +80,43 @@ bool PhysicalOutputRuntime::write_logical(int gpio, bool active) {
     return true;
 }
 
-bool PhysicalOutputRuntime::force_safe() {
-    if (hardware_ == nullptr) return false;
+bool PhysicalOutputRuntime::write_valve(
+    PhysicalOutputChannel open_channel,
+    PhysicalOutputChannel close_channel,
+    const OutputRecord* output)
+{
+    if (output == nullptr || !output->commanded) {
+        // No command since boot: STOP. Never infer CLOSE from the default false
+        // value because that would move a valve during unrelated synchronization.
+        bool ok = write_logical(open_channel, false);
+        ok = write_logical(close_channel, false) && ok;
+        return ok;
+    }
+
+    // active=true means OPEN; active=false means CLOSE. The MCP backend also
+    // atomically clears the opposite line, providing a second software interlock.
+    return output->active
+        ? write_logical(open_channel, true)
+        : write_logical(close_channel, true);
+}
+
+bool PhysicalOutputRuntime::force_safe()
+{
+    if (backend_ == nullptr) return false;
     bool ok = true;
-    ok = write_safe(hardware_->pins.siren) && ok;
-    ok = write_safe(hardware_->pins.valve1) && ok;
-    ok = write_safe(hardware_->pins.valve2) && ok;
-    ok = write_safe(hardware_->pins.aux1) && ok;
-    ok = write_safe(hardware_->pins.aux2) && ok;
+    for (const auto channel : kAllChannels) {
+        ok = write_safe(channel) && ok;
+    }
     state_.outputs_enabled = false;
     if (!ok) state_.status = PhysicalOutputStatus::BackendError;
     return ok;
 }
 
-bool PhysicalOutputRuntime::synchronize(const SystemModel& model, const BootReadinessReport& readiness) {
-    if (backend_ == nullptr || hardware_ == nullptr) return false;
+bool PhysicalOutputRuntime::synchronize(
+    const SystemModel& model,
+    const BootReadinessReport& readiness)
+{
+    if (backend_ == nullptr) return false;
     if (!readiness.outputs_allowed()) {
         state_.status = PhysicalOutputStatus::FailClosed;
         return force_safe();
@@ -91,20 +124,33 @@ bool PhysicalOutputRuntime::synchronize(const SystemModel& model, const BootRead
 
     state_.outputs_enabled = true;
     state_.status = PhysicalOutputStatus::Ready;
+
     bool ok = true;
-    ok = write_logical(hardware_->pins.siren, output_state(model, 1)) && ok;
-    ok = write_logical(hardware_->pins.valve1, output_state(model, 2)) && ok;
-    ok = write_logical(hardware_->pins.valve2, output_state(model, 3)) && ok;
+    const auto* siren = model.output(1);
+    ok = write_logical(
+             PhysicalOutputChannel::Siren,
+             siren != nullptr && siren->active) && ok;
+
+    ok = write_valve(
+             PhysicalOutputChannel::ColdValveOpen,
+             PhysicalOutputChannel::ColdValveClose,
+             model.output(2)) && ok;
+    ok = write_valve(
+             PhysicalOutputChannel::HotValveOpen,
+             PhysicalOutputChannel::HotValveClose,
+             model.output(3)) && ok;
+
     if (!ok) force_safe();
     return ok;
 }
 
-const char* to_string(PhysicalOutputStatus status) {
+const char* to_string(PhysicalOutputStatus status)
+{
     switch (status) {
-    case PhysicalOutputStatus::Ready: return "ready";
-    case PhysicalOutputStatus::FailClosed: return "fail_closed";
-    case PhysicalOutputStatus::InvalidHardware: return "invalid_hardware";
-    case PhysicalOutputStatus::BackendError: return "backend_error";
+        case PhysicalOutputStatus::Ready: return "ready";
+        case PhysicalOutputStatus::FailClosed: return "fail_closed";
+        case PhysicalOutputStatus::InvalidHardware: return "invalid_hardware";
+        case PhysicalOutputStatus::BackendError: return "backend_error";
     }
     return "unknown";
 }
