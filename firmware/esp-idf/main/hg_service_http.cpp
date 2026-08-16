@@ -133,10 +133,11 @@ bool live_mcp_ready(const HardwareBootstrap& hardware) {
 }
 
 bool dry_run_hardware_ready(const HardwareBootstrap& hardware) {
-    const auto& status = hardware.status();
-    return live_mcp_ready(hardware) &&
-           status.ads1115_zones.state == HardwareModuleState::Ready &&
-           status.ads1115_telemetry.state == HardwareModuleState::Ready;
+    // Commissioning of the fail-closed actuator path depends on the I2C/MCP
+    // safety core. ADS1115 telemetry/zone ADCs, RTC, INA226, SD and W5500 are
+    // separately observable optional modules: their absence may make hardware
+    // overall Degraded, but must not deadlock actuator commissioning.
+    return live_mcp_ready(hardware);
 }
 
 bool target_channel(
@@ -349,7 +350,6 @@ esp_err_t ServiceHttp::hardware_verify_post(httpd_req_t* request) {
         return self->send_json(request, "{\"ok\":false,\"reason\":\"hardware_save_failed\"}");
     }
 
-    // A new hardware signoff invalidates all old dry-run/profile/actuator proof.
     hg::CommissioningPersistentState progress{};
     progress.gpio_map_verified = true;
     progress.active_polarity_verified = true;
@@ -688,8 +688,12 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
     if (self->bus_ != nullptr) {
         self->bus_->publish({hg::SystemEventType::ConfigChanged, 0, 0, 0, 5000});
     }
-    return self->send_json(request,
-        "{\"ok\":true,\"outputsAllowed\":false,\"reason\":\"commissioning_invalidated\"}");
+
+    const auto response_error = self->send_json(request,
+        "{\"ok\":true,\"state\":\"restarting\",\"outputsAllowed\":false,\"reason\":\"commissioning_invalidated\"}");
+    vTaskDelay(pdMS_TO_TICKS(150));
+    esp_restart();
+    return response_error;
 }
 
 esp_err_t ServiceHttp::factory_reset_post(httpd_req_t* request) {
