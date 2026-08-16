@@ -12,6 +12,7 @@
 #include "hg_service_http.hpp"
 #include "hg_output_http.hpp"
 #include "hg_mcp23017_output_backend.hpp"
+#include "hg_output_supervisor.hpp"
 #include "hg_telemetry_runtime.hpp"
 #include "hg_telemetry_session_http.hpp"
 #include "hg_access_nvs.hpp"
@@ -58,6 +59,7 @@ homeguard::idf::SystemHttp g_system_http;
 homeguard::idf::ServiceHttp g_service_http;
 homeguard::idf::OutputHttp g_output_http;
 homeguard::idf::Mcp23017OutputBackend g_mcp_outputs;
+homeguard::idf::OutputSupervisor g_output_supervisor;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::AccessHttp g_access_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
@@ -151,17 +153,22 @@ void initialize_system_model()
     g_system_model.add_output(3, hg::ModelOutputType::Valve);
 }
 
-void initialize_physical_outputs()
+bool initialize_physical_outputs()
 {
     // HW-678 physical actuator outputs are MCP23017 Port A. The expander is
     // attached only after HardwareBootstrap has initialized it and forced OLAT
     // safe, so no direct ESP GPIO can be energized by the physical runtime.
     g_mcp_outputs.attach(&g_hardware.io_expander());
-    if (!g_physical_outputs.initialize(g_mcp_outputs, g_hardware_verification, g_boot_readiness)) {
+    if (!g_physical_outputs.initialize(
+            g_mcp_outputs,
+            g_hardware_verification,
+            g_commissioning_state,
+            g_boot_readiness)) {
         ESP_LOGW(kTag, "Physical outputs unavailable; runtime remains fail-closed (%s)", hg::to_string(g_physical_outputs.state().status));
-        return;
+        return false;
     }
     ESP_LOGI(kTag, "Physical output runtime initialized on MCP23017: %s", hg::to_string(g_physical_outputs.state().status));
+    return true;
 }
 
 esp_err_t start_http_server()
@@ -262,6 +269,7 @@ extern "C" void app_main()
     g_cloud_link.set_command_runtime(&g_system_model, &g_system_bus, &g_access_control);
     if (cloud_identity_error == ESP_OK) restore_cloud_config();
 
+    bool physical_runtime_ready = false;
     const auto hardware_error = g_hardware.initialize();
     if (hardware_error != ESP_OK) {
         ESP_LOGE(kTag, "Hardware bootstrap failed: %s", esp_err_to_name(hardware_error));
@@ -274,7 +282,22 @@ extern "C" void app_main()
                      "Hardware bootstrap completed DEGRADED: %lu optional module(s) unavailable/degraded",
                      static_cast<unsigned long>(unavailable));
         }
-        initialize_physical_outputs();
+        physical_runtime_ready = initialize_physical_outputs();
+    }
+
+    if (physical_runtime_ready) {
+        const auto output_guard_error = g_output_supervisor.start(
+            &g_physical_outputs,
+            &g_system_model,
+            &g_boot_readiness);
+        if (output_guard_error != ESP_OK) {
+            ESP_LOGE(kTag, "Physical output supervisor failed: %s", esp_err_to_name(output_guard_error));
+            if (!g_physical_outputs.force_safe()) {
+                ESP_LOGE(kTag, "Physical outputs could not be confirmed safe after supervisor start failure");
+            }
+        } else {
+            ESP_LOGI(kTag, "Physical output supervisor ready: MCP limits/timeout guard active");
+        }
     }
 
     const auto http_error = start_http_server();
