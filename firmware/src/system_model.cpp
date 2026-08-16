@@ -16,13 +16,11 @@ bool SystemEventBus::publish(SystemEvent event) {
     std::scoped_lock lock(mutex_);
     event.sequence = next_sequence_++;
     ++published_;
-
     if (queue_size_ == queue_.size()) {
         queue_head_ = (queue_head_ + 1U) % queue_.size();
         --queue_size_;
         ++dropped_;
     }
-
     queue_[queue_tail_] = event;
     queue_tail_ = (queue_tail_ + 1U) % queue_.size();
     ++queue_size_;
@@ -30,6 +28,9 @@ bool SystemEventBus::publish(SystemEvent event) {
 }
 
 bool SystemEventBus::dispatch_one() {
+    // Only one task may execute subscriber callbacks at a time. The queue lock
+    // itself is released before callbacks, so callbacks may safely publish.
+    std::scoped_lock dispatch_lock(dispatch_mutex_);
     SystemEvent event{};
     std::array<Subscriber, subscriber_capacity> subscribers{};
     std::size_t subscriber_count = 0;
@@ -42,9 +43,6 @@ bool SystemEventBus::dispatch_one() {
         subscriber_count = subscriber_count_;
         std::copy_n(subscribers_.begin(), subscriber_count, subscribers.begin());
     }
-
-    // Never call arbitrary subscribers while the queue mutex is held. A
-    // callback may read/update the model or publish another event.
     for (std::size_t i = 0; i < subscriber_count; ++i) {
         subscribers[i].callback(event, subscribers[i].context);
     }
@@ -151,9 +149,6 @@ bool SystemModel::set_output_active(std::uint16_t id, bool active, std::uint64_t
         item.active = active;
         item.commanded = true;
         ++item.command_revision;
-        // A repeated OPEN/CLOSE is still a new physical command revision even
-        // when the logical active flag does not change. No duplicate event is
-        // needed, but actuator runtime will see and consume the new revision.
         if (!changed) return true;
         return emit(active ? SystemEventType::OutputOn : SystemEventType::OutputOff, id, now_ms);
     }
@@ -175,33 +170,25 @@ bool SystemModel::set_partition_arm(std::uint16_t id, PartitionArmState state, s
 
 bool SystemModel::zone_snapshot(std::uint16_t id, ZoneRecord& out) const {
     std::scoped_lock lock(mutex_);
-    for (std::size_t i = 0; i < zone_count_; ++i) {
-        if (zones_[i].id == id) { out = zones_[i]; return true; }
-    }
+    for (std::size_t i = 0; i < zone_count_; ++i) if (zones_[i].id == id) { out = zones_[i]; return true; }
     return false;
 }
 
 bool SystemModel::sensor_snapshot(std::uint16_t id, SensorRecord& out) const {
     std::scoped_lock lock(mutex_);
-    for (std::size_t i = 0; i < sensor_count_; ++i) {
-        if (sensors_[i].id == id) { out = sensors_[i]; return true; }
-    }
+    for (std::size_t i = 0; i < sensor_count_; ++i) if (sensors_[i].id == id) { out = sensors_[i]; return true; }
     return false;
 }
 
 bool SystemModel::output_snapshot(std::uint16_t id, OutputRecord& out) const {
     std::scoped_lock lock(mutex_);
-    for (std::size_t i = 0; i < output_count_; ++i) {
-        if (outputs_[i].id == id) { out = outputs_[i]; return true; }
-    }
+    for (std::size_t i = 0; i < output_count_; ++i) if (outputs_[i].id == id) { out = outputs_[i]; return true; }
     return false;
 }
 
 bool SystemModel::partition_snapshot(std::uint16_t id, PartitionRecord& out) const {
     std::scoped_lock lock(mutex_);
-    for (std::size_t i = 0; i < partition_count_; ++i) {
-        if (partitions_[i].id == id) { out = partitions_[i]; return true; }
-    }
+    for (std::size_t i = 0; i < partition_count_; ++i) if (partitions_[i].id == id) { out = partitions_[i]; return true; }
     return false;
 }
 
@@ -233,41 +220,23 @@ bool SystemModel::partition_at_snapshot(std::size_t index, PartitionRecord& out)
     return true;
 }
 
-std::size_t SystemModel::zone_count() const {
-    std::scoped_lock lock(mutex_);
-    return zone_count_;
-}
-
-std::size_t SystemModel::sensor_count() const {
-    std::scoped_lock lock(mutex_);
-    return sensor_count_;
-}
-
-std::size_t SystemModel::output_count() const {
-    std::scoped_lock lock(mutex_);
-    return output_count_;
-}
-
-std::size_t SystemModel::partition_count() const {
-    std::scoped_lock lock(mutex_);
-    return partition_count_;
-}
+std::size_t SystemModel::zone_count() const { std::scoped_lock lock(mutex_); return zone_count_; }
+std::size_t SystemModel::sensor_count() const { std::scoped_lock lock(mutex_); return sensor_count_; }
+std::size_t SystemModel::output_count() const { std::scoped_lock lock(mutex_); return output_count_; }
+std::size_t SystemModel::partition_count() const { std::scoped_lock lock(mutex_); return partition_count_; }
 
 const ZoneRecord* SystemModel::zone(std::uint16_t id) const {
     for (std::size_t i = 0; i < zone_count_; ++i) if (zones_[i].id == id) return &zones_[i];
     return nullptr;
 }
-
 const SensorRecord* SystemModel::sensor(std::uint16_t id) const {
     for (std::size_t i = 0; i < sensor_count_; ++i) if (sensors_[i].id == id) return &sensors_[i];
     return nullptr;
 }
-
 const OutputRecord* SystemModel::output(std::uint16_t id) const {
     for (std::size_t i = 0; i < output_count_; ++i) if (outputs_[i].id == id) return &outputs_[i];
     return nullptr;
 }
-
 const PartitionRecord* SystemModel::partition(std::uint16_t id) const {
     for (std::size_t i = 0; i < partition_count_; ++i) if (partitions_[i].id == id) return &partitions_[i];
     return nullptr;
