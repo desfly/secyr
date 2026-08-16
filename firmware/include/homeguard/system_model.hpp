@@ -41,10 +41,11 @@ private:
     struct Subscriber { SystemEventCallback callback{}; void* context{}; };
     std::array<SystemEvent, queue_capacity> queue_{};
     std::array<Subscriber, subscriber_capacity> subscribers_{};
+    std::size_t subscriber_count_{};
+    std::array<SystemEvent, queue_capacity> queue_{};
     std::size_t queue_head_{};
     std::size_t queue_tail_{};
     std::size_t queue_size_{};
-    std::size_t subscriber_count_{};
     std::uint64_t published_{};
     std::uint64_t dropped_{};
     std::uint64_t next_sequence_{1};
@@ -71,6 +72,10 @@ struct OutputRecord {
     std::uint16_t id{};
     ModelOutputType type{ModelOutputType::Relay};
     bool active{};
+    // For a valve, active=true means OPEN and active=false means CLOSE. This
+    // bit distinguishes a real CLOSE command from the harmless power-on
+    // default false state so boot never moves a valve merely by synchronizing.
+    bool commanded{};
     std::uint32_t timeout_ms{};
 };
 struct PartitionRecord {
