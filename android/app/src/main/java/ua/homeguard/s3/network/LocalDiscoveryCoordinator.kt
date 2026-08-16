@@ -13,6 +13,14 @@ import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.DiscoverySource
 
 class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineScope) {
+    companion object {
+        // UDP is refreshed every 5 s and HTTP is scan-scoped. mDNS normally
+        // supplies onServiceLost, but some Android stacks miss that callback;
+        // keep a longer grace window while still preventing permanent online.
+        private const val ACTIVE_DISCOVERY_TTL_MS = 30_000L
+        private const val MDNS_DISCOVERY_TTL_MS = 90_000L
+    }
+
     private val appContext = context.applicationContext
     private val nsd = NsdDeviceDiscovery(appContext)
     private val udp = UdpDeviceDiscovery(appContext, scope)
@@ -30,8 +38,20 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         nsd.devices,
         udp.devices,
         http.devices,
-    ) { mdns, udpFallback, httpFallback ->
-        val all = mdns + udpFallback + httpFallback
+        // Scan status changes every periodic UDP pass and gives this combine a
+        // heartbeat even when a stale source list itself has not changed.
+        udp.status,
+    ) { mdns, udpFallback, httpFallback, _ ->
+        val now = System.currentTimeMillis()
+        val all = (mdns + udpFallback + httpFallback).filter { candidate ->
+            val ttl = if (candidate.source == DiscoverySource.MDNS) {
+                MDNS_DISCOVERY_TTL_MS
+            } else {
+                ACTIVE_DISCOVERY_TTL_MS
+            }
+            val age = (now - candidate.seenAtMs).coerceAtLeast(0L)
+            age <= ttl
+        }
         val groups = mutableListOf<MutableList<DiscoveredDevice>>()
 
         // Different discovery transports may spell the same controller differently
@@ -88,6 +108,7 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
     fun stop() {
         nsd.stop()
         udp.stop()
+        http.clear()
     }
 
     suspend fun rescan() {
