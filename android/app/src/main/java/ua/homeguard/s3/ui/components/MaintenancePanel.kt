@@ -4,12 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,40 +23,10 @@ fun MaintenancePanel(
     backupStatus: String,
     onExportSettings: () -> Unit,
     onImportSettings: () -> Unit,
-    deviceAdminAvailable: Boolean = false,
-    onExportDeviceConfig: () -> Unit = {},
-    onImportDeviceConfig: () -> Unit = {},
-    onFactoryReset: () -> Unit = {},
 ) {
     var detailsExpanded by remember { mutableStateOf(false) }
-    var confirmFactoryReset by remember { mutableStateOf(false) }
     val connectionProblems = diagnostics.connectionItems.count { !it.ok }
     val hardwareProblems = diagnostics.hardwareItems.count { !it.ok }
-
-    if (confirmFactoryReset) {
-        AlertDialog(
-            onDismissRequest = { confirmFactoryReset = false },
-            title = { Text("Повне заводське скидання?") },
-            text = {
-                Text(
-                    "Будуть видалені користувачі, Admin bootstrap state, Wi-Fi, Cloud та інші " +
-                        "користувацькі налаштування контролера. Прошивка й апаратна ідентичність залишаться."
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = deviceAdminAvailable,
-                    onClick = {
-                        confirmFactoryReset = false
-                        onFactoryReset()
-                    },
-                ) { Text("СТЕРТИ ВСЕ") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmFactoryReset = false }) { Text("Скасувати") }
-            },
-        )
-    }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -99,40 +67,17 @@ fun MaintenancePanel(
                 }
             }
 
-            Text("Застосунок", style = MaterialTheme.typography.titleSmall)
             OutlinedButton(onClick = onExportSettings, modifier = Modifier.fillMaxWidth()) {
-                Text("Backup налаштувань застосунку")
+                Text("Backup налаштувань")
             }
             OutlinedButton(onClick = onImportSettings, modifier = Modifier.fillMaxWidth()) {
-                Text("Restore налаштувань застосунку")
+                Text("Restore налаштувань")
             }
-            Text(
-                "API token не входить у backup застосунку і не замінюється під час restore.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-
-            Text("Контролер", style = MaterialTheme.typography.titleSmall)
-            OutlinedButton(
-                enabled = deviceAdminAvailable,
-                onClick = onExportDeviceConfig,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Експорт конфігурації контролера") }
-            OutlinedButton(
-                enabled = deviceAdminAvailable,
-                onClick = onImportDeviceConfig,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Імпорт конфігурації контролера") }
-            OutlinedButton(
-                enabled = deviceAdminAvailable,
-                onClick = { confirmFactoryReset = true },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Повне заводське скидання") }
-            Text(
-                if (deviceAdminAvailable) "Операції контролера доступні для активної Admin-сесії."
-                else "Увійдіть як Admin через локальне підключення, щоб керувати конфігурацією контролера.",
-                style = MaterialTheme.typography.bodySmall,
-            )
             Text(backupStatus, style = MaterialTheme.typography.bodySmall)
+            Text(
+                "API token не входить у backup і не замінюється під час restore.",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }
