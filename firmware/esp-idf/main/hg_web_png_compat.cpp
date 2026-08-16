@@ -1,5 +1,7 @@
 #include "esp_http_server.h"
 
+#ifdef ESP_PLATFORM
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -52,3 +54,5 @@ extern "C" esp_err_t __wrap_httpd_resp_send(httpd_req_t* request, const char* bu
     }
     return httpd_resp_send_chunk(request, nullptr, 0U);
 }
+
+#endif  // ESP_PLATFORM
