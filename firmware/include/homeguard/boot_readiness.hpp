@@ -12,6 +12,7 @@ enum class BootReadinessStatus {
     BlockedMissingCommissioningState,
     BlockedHardwareVerification,
     BlockedCommissioningState,
+    BlockedValveSafetyProfileRequired,
     BlockedDryRunRequired,
     BlockedActuatorTestRequired,
     ReadyForPhysicalOutputs,
