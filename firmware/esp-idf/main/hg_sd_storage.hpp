@@ -24,6 +24,7 @@ public:
 
 private:
     sdmmc_card_t* card_{nullptr};
+    bool spi_bus_owned_{false};
     SdStorageStatus status_{};
 };
 
