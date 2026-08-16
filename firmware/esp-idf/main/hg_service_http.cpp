@@ -133,10 +133,6 @@ bool live_mcp_ready(const HardwareBootstrap& hardware) {
 }
 
 bool dry_run_hardware_ready(const HardwareBootstrap& hardware) {
-    // Commissioning of the fail-closed actuator path depends on the I2C/MCP
-    // safety core. ADS1115 telemetry/zone ADCs, RTC, INA226, SD and W5500 are
-    // separately observable optional modules: their absence may make hardware
-    // overall Degraded, but must not deadlock actuator commissioning.
     return live_mcp_ready(hardware);
 }
 
@@ -271,7 +267,8 @@ esp_err_t ServiceHttp::readiness_get(httpd_req_t* request) {
 
 esp_err_t ServiceHttp::maintenance_post(httpd_req_t* request) {
     auto* self = self_from(request);
-    if (self == nullptr || self->physical_outputs_ == nullptr || self->control_state_mutex_ == nullptr) return ESP_FAIL;
+    if (self == nullptr || self->physical_outputs_ == nullptr || self->model_ == nullptr ||
+        self->control_state_mutex_ == nullptr) return ESP_FAIL;
 
     std::string body;
     if (!read_body(request, 384U, body)) {
@@ -293,7 +290,7 @@ esp_err_t ServiceHttp::maintenance_post(httpd_req_t* request) {
         return self->send_json(request, "{\"ok\":false,\"reason\":\"forbidden\"}");
     }
 
-    if (!self->physical_outputs_->set_maintenance_mode(active)) {
+    if (!self->physical_outputs_->set_maintenance_mode(active, *self->model_)) {
         httpd_resp_set_status(request, "503 Service Unavailable");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"physical_output_not_safe\"}");
     }
