@@ -116,8 +116,9 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"access_unavailable\"}", -1);
     }
 
-    const auto* output = model_->output(output_id);
-    const std::string command = output != nullptr && output->type == hg::ModelOutputType::Valve
+    hg::OutputRecord output{};
+    const bool output_present = model_->output_snapshot(output_id, output);
+    const std::string command = output_present && output.type == hg::ModelOutputType::Valve
         ? (active ? "valve.open" : "valve.close")
         : "output.control";
     const auto decision = access_control_->authorize(actor, credential, command);
@@ -130,8 +131,6 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         return httpd_resp_send(request, response.c_str(), static_cast<ssize_t>(response.size()));
     }
 
-    // Only the output supervisor may touch the physical MCP/I2C backend. HTTP
-    // commands are rejected when that supervisor/runtime is not healthy.
     const auto physical_state = physical_->state();
     if (physical_state.safety_fault_latched ||
         physical_state.status != hg::PhysicalOutputStatus::Ready ||
