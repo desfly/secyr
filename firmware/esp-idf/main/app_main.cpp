@@ -30,7 +30,6 @@
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
-#include "esp_rom_sys.h"
 #include "esp_netif.h"
 #include "nvs_flash.h"
 
@@ -237,7 +236,6 @@ void start_device_discovery()
 
 extern "C" void app_main()
 {
-    esp_log_set_vprintf(esp_rom_vprintf);
     ESP_ERROR_CHECK(initialize_nvs());
     g_access_control.set_auth_clock(&homeguard::idf::access_now_ms);
     restore_access_control();
@@ -262,8 +260,18 @@ extern "C" void app_main()
     initialize_physical_outputs();
 
     const auto hardware_error = g_hardware.initialize();
-    if (hardware_error != ESP_OK) ESP_LOGE(kTag, "Hardware bootstrap failed: %s", esp_err_to_name(hardware_error));
-    else ESP_LOGI(kTag, "Hardware bootstrap completed");
+    if (hardware_error != ESP_OK) {
+        ESP_LOGE(kTag, "Hardware bootstrap failed: %s", esp_err_to_name(hardware_error));
+    } else {
+        const auto unavailable = g_hardware.unavailable_count();
+        if (unavailable == 0U) {
+            ESP_LOGI(kTag, "Hardware bootstrap completed: all modules ready");
+        } else {
+            ESP_LOGW(kTag,
+                     "Hardware bootstrap completed DEGRADED: %lu optional module(s) unavailable/degraded",
+                     static_cast<unsigned long>(unavailable));
+        }
+    }
 
     const auto http_error = start_http_server();
     if (http_error != ESP_OK) {
