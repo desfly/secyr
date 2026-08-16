@@ -47,7 +47,7 @@ private:
     static esp_err_t factory_reset_post(httpd_req_t* request);
 
     esp_err_t send_json(httpd_req_t* request, const std::string& body) const;
-    void refresh_control_state_from_store();
+    bool refresh_control_state_from_store();
     [[nodiscard]] bool maintenance_active() const;
 
     CommissioningNvsStore* store_{};
