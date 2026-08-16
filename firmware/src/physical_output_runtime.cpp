@@ -42,15 +42,16 @@ bool PhysicalOutputRuntime::initialize(
 {
     std::scoped_lock lock(mutex_);
     backend_ = &backend;
-    commissioning_ = &commissioning;
+    hardware_ = hardware;
+    commissioning_ = commissioning;
+    readiness_ = readiness;
+    hardware_verified_ = false;
     state_ = {};
     siren_known_ = true;
     siren_active_ = false;
 
-    // The OFF path must exist even before commissioning is valid. Hardware
-    // bootstrap has already initialized MCP23017 and forced OLAT A low; now
-    // register all logical channels OFF so Factory Reset/service invalidation
-    // can always re-confirm a safe state on an uncommissioned controller.
+    // The OFF path exists before verification. This lets a clean/uncommissioned
+    // controller remain safely resettable while still forbidding any ON path.
     for (const auto channel : kAllChannels) {
         if (!backend_->configure_output(channel_number(channel), false)) {
             ++state_.failures;
@@ -60,16 +61,17 @@ bool PhysicalOutputRuntime::initialize(
         }
     }
 
-    // Verification controls permission to energize outputs, never permission
-    // to drive them OFF.
-    if (!hardware_verification_allows_outputs(hardware)) {
+    hardware_verified_ = hardware_verification_allows_outputs(hardware_);
+    if (!hardware_verified_) {
         state_.status = PhysicalOutputStatus::InvalidHardware;
         state_.outputs_enabled = false;
-        return false;
+        // Backend initialization succeeded and is useful as a fail-safe OFF
+        // runtime. Missing verification is a permission state, not init failure.
+        return true;
     }
 
-    if (!readiness.outputs_allowed() ||
-        !commissioning_state_allows_physical_outputs(commissioning)) {
+    if (!readiness_.outputs_allowed() ||
+        !commissioning_state_allows_physical_outputs(commissioning_)) {
         state_.status = PhysicalOutputStatus::FailClosed;
         state_.outputs_enabled = false;
         return true;
@@ -77,6 +79,46 @@ bool PhysicalOutputRuntime::initialize(
 
     state_.outputs_enabled = true;
     state_.status = PhysicalOutputStatus::Ready;
+    return true;
+}
+
+bool PhysicalOutputRuntime::update_control_state(
+    const HardwareVerificationRecord& hardware,
+    const CommissioningPersistentState& commissioning,
+    const BootReadinessReport& readiness)
+{
+    std::scoped_lock lock(mutex_);
+    if (backend_ == nullptr) return false;
+
+    hardware_ = hardware;
+    commissioning_ = commissioning;
+    readiness_ = readiness;
+    hardware_verified_ = hardware_verification_allows_outputs(hardware_);
+
+    // A destructive-service or hardware safety fault is sticky until reboot.
+    // Updating commissioning records must never clear that latch.
+    if (state_.safety_fault_latched) return false;
+
+    if (!hardware_verified_) {
+        if (!force_safe_locked()) return false;
+        state_.status = PhysicalOutputStatus::InvalidHardware;
+        state_.outputs_enabled = false;
+        return true;
+    }
+
+    if (!readiness_.outputs_allowed() ||
+        !commissioning_state_allows_physical_outputs(commissioning_)) {
+        if (!force_safe_locked()) return false;
+        state_.status = PhysicalOutputStatus::FailClosed;
+        state_.outputs_enabled = false;
+        return true;
+    }
+
+    // Permission is ready; all physical channels remain OFF until the supervisor
+    // consumes an explicit model command revision.
+    if (!force_safe_locked()) return false;
+    state_.status = PhysicalOutputStatus::Ready;
+    state_.outputs_enabled = true;
     return true;
 }
 
@@ -136,8 +178,7 @@ bool PhysicalOutputRuntime::latch_fault_locked(PhysicalOutputStatus status)
 
 bool PhysicalOutputRuntime::read_limits_locked(LimitSnapshot& limits)
 {
-    if (backend_ == nullptr || commissioning_ == nullptr ||
-        !commissioning_->valve_limit_polarity_verified) {
+    if (backend_ == nullptr || !commissioning_.valve_limit_polarity_verified) {
         return false;
     }
 
@@ -147,7 +188,7 @@ bool PhysicalOutputRuntime::read_limits_locked(LimitSnapshot& limits)
         return false;
     }
 
-    const bool active_low = commissioning_->valve_limits_active_low;
+    const bool active_low = commissioning_.valve_limits_active_low;
     limits.cold_open = bit_active(raw, input_number(PhysicalInputChannel::ColdValveOpenLimit), active_low);
     limits.cold_closed = bit_active(raw, input_number(PhysicalInputChannel::ColdValveClosedLimit), active_low);
     limits.hot_open = bit_active(raw, input_number(PhysicalInputChannel::HotValveOpenLimit), active_low);
@@ -235,6 +276,56 @@ bool PhysicalOutputRuntime::process_valve_locked(
     return true;
 }
 
+bool PhysicalOutputRuntime::bench_channel_allowed(PhysicalOutputChannel channel) noexcept
+{
+    switch (channel) {
+        case PhysicalOutputChannel::CorridorLight:
+        case PhysicalOutputChannel::Siren:
+        case PhysicalOutputChannel::ColdValveOpen:
+        case PhysicalOutputChannel::ColdValveClose:
+        case PhysicalOutputChannel::HotValveOpen:
+        case PhysicalOutputChannel::HotValveClose:
+            return true;
+        case PhysicalOutputChannel::Reserve1:
+        case PhysicalOutputChannel::Reserve2:
+            return false;
+    }
+    return false;
+}
+
+bool PhysicalOutputRuntime::bench_pulse(
+    PhysicalOutputChannel channel,
+    std::uint32_t duration_ms,
+    BenchDelayFn delay_fn)
+{
+    std::scoped_lock lock(mutex_);
+    if (backend_ == nullptr || !hardware_verified_ || state_.safety_fault_latched ||
+        delay_fn == nullptr || duration_ms == 0U || duration_ms > kMaxBenchPulseMs ||
+        !bench_channel_allowed(channel)) {
+        return false;
+    }
+
+    // The supervisor blocks on this mutex for the entire pulse. Every bench
+    // operation starts and ends from an all-OFF state.
+    if (!force_safe_locked()) return false;
+    if (!write_logical_locked(channel, true)) {
+        return latch_fault_locked(PhysicalOutputStatus::BackendError);
+    }
+
+    delay_fn(duration_ms);
+
+    if (!force_safe_locked()) return false;
+    if (hardware_verified_ && readiness_.outputs_allowed() &&
+        commissioning_state_allows_physical_outputs(commissioning_)) {
+        state_.status = PhysicalOutputStatus::Ready;
+        state_.outputs_enabled = true;
+    } else {
+        state_.status = PhysicalOutputStatus::FailClosed;
+        state_.outputs_enabled = false;
+    }
+    return true;
+}
+
 bool PhysicalOutputRuntime::force_safe()
 {
     std::scoped_lock lock(mutex_);
@@ -254,10 +345,7 @@ bool PhysicalOutputRuntime::lockout_fail_closed()
     return ok;
 }
 
-bool PhysicalOutputRuntime::synchronize(
-    const SystemModel& model,
-    const BootReadinessReport& readiness,
-    std::uint64_t now_ms)
+bool PhysicalOutputRuntime::synchronize(const SystemModel& model, std::uint64_t now_ms)
 {
     OutputRecord siren{};
     OutputRecord cold_valve{};
@@ -267,11 +355,17 @@ bool PhysicalOutputRuntime::synchronize(
     const bool has_hot_valve = model.output_snapshot(3, hot_valve);
 
     std::scoped_lock lock(mutex_);
-    if (backend_ == nullptr || commissioning_ == nullptr) return false;
+    if (backend_ == nullptr) return false;
     if (state_.safety_fault_latched) return false;
 
-    if (!readiness.outputs_allowed() ||
-        !commissioning_state_allows_physical_outputs(*commissioning_)) {
+    if (!hardware_verified_) {
+        state_.status = PhysicalOutputStatus::InvalidHardware;
+        state_.outputs_enabled = false;
+        return true;
+    }
+
+    if (!readiness_.outputs_allowed() ||
+        !commissioning_state_allows_physical_outputs(commissioning_)) {
         if (state_.outputs_enabled ||
             state_.cold_valve.direction != ValveMotionDirection::Stopped ||
             state_.hot_valve.direction != ValveMotionDirection::Stopped ||
@@ -311,7 +405,7 @@ bool PhysicalOutputRuntime::synchronize(
             limits.cold_open,
             limits.cold_closed,
             has_cold_valve ? &cold_valve : nullptr,
-            commissioning_->cold_valve_travel_timeout_ms,
+            commissioning_.cold_valve_travel_timeout_ms,
             now_ms)) {
         return false;
     }
@@ -323,7 +417,7 @@ bool PhysicalOutputRuntime::synchronize(
             limits.hot_open,
             limits.hot_closed,
             has_hot_valve ? &hot_valve : nullptr,
-            commissioning_->hot_valve_travel_timeout_ms,
+            commissioning_.hot_valve_travel_timeout_ms,
             now_ms)) {
         return false;
     }
