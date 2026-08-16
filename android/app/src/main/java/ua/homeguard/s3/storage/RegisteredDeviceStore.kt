@@ -1,6 +1,7 @@
 package ua.homeguard.s3.storage
 
 import android.content.Context
+import java.net.URI
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,9 +49,15 @@ class RegisteredDeviceStore(context: Context) {
     suspend fun addOrUpdate(device: DiscoveredDevice, requestedName: String? = null) {
         val current = _devices.value.toMutableList()
         val endpoint = normalizeEndpoint(device.baseUrl)
+        val host = normalizeHost(device.baseUrl)
         val exactIndex = current.indexOfFirst { it.deviceId == device.deviceId }
+        val hostIndex = if (host.isNotBlank()) current.indexOfFirst { normalizeHost(it.baseUrl) == host } else -1
         val endpointIndex = if (endpoint.isNotBlank()) current.indexOfFirst { normalizeEndpoint(it.baseUrl) == endpoint } else -1
-        val previousIndex = if (exactIndex >= 0) exactIndex else endpointIndex
+        val previousIndex = when {
+            exactIndex >= 0 -> exactIndex
+            hostIndex >= 0 -> hostIndex
+            else -> endpointIndex
+        }
         val previous = current.getOrNull(previousIndex)
         val displayName = requestedName?.trim().takeUnless { it.isNullOrBlank() }
             ?: previous?.name
@@ -64,19 +71,25 @@ class RegisteredDeviceStore(context: Context) {
             authorized = previous?.authorized ?: true,
         )
 
-        // If the same controller was saved earlier with a temporary/stale device ID,
-        // replace that record instead of creating a second HomeGuard card.
         if (previousIndex >= 0) current[previousIndex] = registered else current += registered
-        current.removeAll { it !== registered && it.deviceId != registered.deviceId && endpoint.isNotBlank() && normalizeEndpoint(it.baseUrl) == endpoint }
+        current.removeAll { candidate ->
+            candidate !== registered && candidate.deviceId != registered.deviceId && sameController(candidate.baseUrl, registered.baseUrl)
+        }
         persist(current)
     }
 
     suspend fun addManual(deviceId: String, baseUrl: String, name: String = "HomeGuard") {
         val current = _devices.value.toMutableList()
         val endpoint = normalizeEndpoint(baseUrl)
+        val host = normalizeHost(baseUrl)
         val idIndex = current.indexOfFirst { it.deviceId == deviceId }
+        val hostIndex = if (host.isNotBlank()) current.indexOfFirst { normalizeHost(it.baseUrl) == host } else -1
         val endpointIndex = if (endpoint.isNotBlank()) current.indexOfFirst { normalizeEndpoint(it.baseUrl) == endpoint } else -1
-        val index = if (idIndex >= 0) idIndex else endpointIndex
+        val index = when {
+            idIndex >= 0 -> idIndex
+            hostIndex >= 0 -> hostIndex
+            else -> endpointIndex
+        }
         val previous = current.getOrNull(index)
         val registered = RegisteredDevice(
             deviceId = deviceId,
@@ -91,15 +104,16 @@ class RegisteredDeviceStore(context: Context) {
 
     suspend fun reconcileManual(manualDeviceId: String, discovered: DiscoveredDevice): Boolean {
         if (!manualDeviceId.startsWith("manual-") || discovered.deviceId.isBlank()) return false
-        val normalizedDiscoveredUrl = normalizeEndpoint(discovered.baseUrl)
         val current = _devices.value.toMutableList()
         val manualIndex = current.indexOfFirst {
-            it.deviceId == manualDeviceId && normalizeEndpoint(it.baseUrl) == normalizedDiscoveredUrl
+            it.deviceId == manualDeviceId && sameController(it.baseUrl, discovered.baseUrl)
         }
         if (manualIndex < 0) return false
 
         val manual = current[manualIndex]
-        val realIndex = current.indexOfFirst { it.deviceId == discovered.deviceId }
+        val realIndex = current.indexOfFirst {
+            it.deviceId == discovered.deviceId || sameController(it.baseUrl, discovered.baseUrl)
+        }
         val merged = RegisteredDevice(
             deviceId = discovered.deviceId,
             name = manual.name,
@@ -108,9 +122,9 @@ class RegisteredDeviceStore(context: Context) {
             authorized = if (realIndex >= 0) current[realIndex].authorized else manual.authorized,
         )
 
-        if (realIndex >= 0) {
+        if (realIndex >= 0 && realIndex != manualIndex) {
             current[realIndex] = merged
-            if (manualIndex != realIndex) current.removeAt(manualIndex)
+            current.removeAt(manualIndex)
         } else {
             current[manualIndex] = merged
         }
@@ -121,9 +135,15 @@ class RegisteredDeviceStore(context: Context) {
     suspend fun refreshDiscovered(discovered: DiscoveredDevice): Boolean {
         val current = _devices.value.toMutableList()
         val endpoint = normalizeEndpoint(discovered.baseUrl)
+        val host = normalizeHost(discovered.baseUrl)
         val idIndex = current.indexOfFirst { it.deviceId == discovered.deviceId }
+        val hostIndex = if (host.isNotBlank()) current.indexOfFirst { normalizeHost(it.baseUrl) == host } else -1
         val endpointIndex = if (endpoint.isNotBlank()) current.indexOfFirst { normalizeEndpoint(it.baseUrl) == endpoint } else -1
-        val index = if (idIndex >= 0) idIndex else endpointIndex
+        val index = when {
+            idIndex >= 0 -> idIndex
+            hostIndex >= 0 -> hostIndex
+            else -> endpointIndex
+        }
         if (index < 0) return false
 
         val previous = current[index]
@@ -132,10 +152,9 @@ class RegisteredDeviceStore(context: Context) {
             baseUrl = discovered.baseUrl,
             lastSeenAtMs = discovered.seenAtMs,
         )
-        if (previous == updated) return false
         current[index] = updated
         persist(current)
-        return true
+        return previous != updated || current.size != _devices.value.size
     }
 
     suspend fun rename(deviceId: String, name: String) {
@@ -197,15 +216,26 @@ class RegisteredDeviceStore(context: Context) {
     private fun deduplicate(value: List<RegisteredDevice>): List<RegisteredDevice> {
         val result = mutableListOf<RegisteredDevice>()
         value.sortedByDescending { it.lastSeenAtMs }.forEach { candidate ->
-            val endpoint = normalizeEndpoint(candidate.baseUrl)
             val duplicate = result.any { existing ->
-                existing.deviceId == candidate.deviceId ||
-                    (endpoint.isNotBlank() && normalizeEndpoint(existing.baseUrl) == endpoint)
+                existing.deviceId == candidate.deviceId || sameController(existing.baseUrl, candidate.baseUrl)
             }
             if (!duplicate) result += candidate
         }
         return result
     }
+
+    private fun sameController(leftUrl: String, rightUrl: String): Boolean {
+        val leftHost = normalizeHost(leftUrl)
+        val rightHost = normalizeHost(rightUrl)
+        if (leftHost.isNotBlank() && rightHost.isNotBlank()) return leftHost == rightHost
+        val leftEndpoint = normalizeEndpoint(leftUrl)
+        val rightEndpoint = normalizeEndpoint(rightUrl)
+        return leftEndpoint.isNotBlank() && leftEndpoint == rightEndpoint
+    }
+
+    private fun normalizeHost(value: String): String = runCatching {
+        URI(normalizeEndpoint(value)).host.orEmpty().trim('[', ']').lowercase()
+    }.getOrDefault("")
 
     private fun normalizeEndpoint(value: String): String = value.trim().trimEnd('/').lowercase()
 }
