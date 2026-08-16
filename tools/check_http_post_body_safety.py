@@ -3,7 +3,8 @@
 
 ESP-IDF httpd_req_recv() may return less than content_len. Every mutating or
 credential-bearing POST endpoint must therefore loop until the declared body is
-fully consumed or fail closed.
+fully consumed or fail closed. Output-command scalar parsing is also required
+to accept normal JSON whitespace after ':' rather than a single compact form.
 """
 from pathlib import Path
 import sys
@@ -31,6 +32,9 @@ checks = {
     "service loops body": "while (offset < body.size())" in sources["service"],
     "system loops body": "while (offset < body.size())" in sources["system"] and "read_request_body(request, 512U, body)" in sources["system"],
     "telemetry loops body": "while (offset < body.size())" in sources["telemetry"],
+    "output scalar parser finds colon independently": "find_json_value" in sources["output"] and "body.find(':', pos + marker.size())" in sources["output"],
+    "output scalar parser skips JSON whitespace": "std::isspace(static_cast<unsigned char>(body[pos]))" in sources["output"],
+    "output uint uses tolerant value locator": "if (!find_json_value(body, key, pos)) return false;" in sources["output"],
 }
 
 # Catch the exact anti-pattern that caused the field-risk: allocate content_len,
@@ -50,3 +54,4 @@ if failed:
 print("HTTP POST body safety PASS")
 print(" - all credential-bearing/mutating POST handlers consume complete bodies")
 print(" - single-fragment recv+resize anti-pattern is forbidden")
+print(" - output scalar JSON accepts normal whitespace")
