@@ -26,6 +26,8 @@ constexpr char kNvsNamespace[] = "hg_wifi";
 constexpr char kNvsKey[] = "credentials";
 constexpr std::size_t kMaxScanRecords = 20;
 constexpr TickType_t kStaHandoverDelay = pdMS_TO_TICKS(400);
+constexpr std::uint64_t kReconnectInitialUs = 500000ULL;
+constexpr std::uint64_t kReconnectMaximumUs = 30000000ULL;
 
 struct CredentialsRecord {
     std::uint32_t magic{};
@@ -130,6 +132,13 @@ esp_err_t NetworkHttp::begin()
     bool wifi_started = false;
 
     auto rollback = [&]() {
+        if (reconnect_timer_ != nullptr) {
+            if (esp_timer_is_active(reconnect_timer_)) {
+                (void)esp_timer_stop(reconnect_timer_);
+            }
+            (void)esp_timer_delete(reconnect_timer_);
+            reconnect_timer_ = nullptr;
+        }
         if (wifi_started) {
             (void)esp_wifi_stop();
         }
@@ -164,6 +173,19 @@ esp_err_t NetworkHttp::begin()
         return error;
     }
     wifi_initialized = true;
+
+    const esp_timer_create_args_t reconnect_timer_args{
+        .callback = &NetworkHttp::reconnect_timer_handler,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "hg_wifi_reconnect",
+        .skip_unhandled_events = true,
+    };
+    error = esp_timer_create(&reconnect_timer_args, &reconnect_timer_);
+    if (error != ESP_OK) {
+        rollback();
+        return error;
+    }
 
     error = esp_event_handler_register(
         WIFI_EVENT,
@@ -294,6 +316,63 @@ void NetworkHttp::ip_event_handler(
     }
 }
 
+void NetworkHttp::reconnect_timer_handler(void* context)
+{
+    auto* self = static_cast<NetworkHttp*>(context);
+    if (self != nullptr) {
+        self->handle_reconnect_timer();
+    }
+}
+
+void NetworkHttp::schedule_reconnect()
+{
+    if (!sta_credentials_configured_ || reconnect_timer_ == nullptr) {
+        return;
+    }
+
+    if (reconnect_count_ == 0U) {
+        reconnect_count_ = 1U;
+    }
+
+    const auto shift = std::min<std::uint32_t>(reconnect_count_ - 1U, 6U);
+    const auto delay_us = std::min<std::uint64_t>(
+        kReconnectInitialUs << shift,
+        kReconnectMaximumUs);
+
+    if (esp_timer_is_active(reconnect_timer_)) {
+        (void)esp_timer_stop(reconnect_timer_);
+    }
+
+    const auto error = esp_timer_start_once(reconnect_timer_, delay_us);
+    if (error != ESP_OK) {
+        ESP_LOGW(kTag,
+                 "Unable to schedule STA reconnect attempt %lu: %s",
+                 static_cast<unsigned long>(reconnect_count_),
+                 esp_err_to_name(error));
+    } else if (reconnect_count_ == 1U || (reconnect_count_ % 5U) == 0U) {
+        ESP_LOGW(kTag,
+                 "STA reconnect attempt %lu scheduled in %llu ms; recovery AP active",
+                 static_cast<unsigned long>(reconnect_count_),
+                 static_cast<unsigned long long>(delay_us / 1000ULL));
+    }
+}
+
+void NetworkHttp::handle_reconnect_timer()
+{
+    if (!sta_credentials_configured_) {
+        return;
+    }
+
+    const auto error = esp_wifi_connect();
+    if (error != ESP_OK) {
+        ++reconnect_count_;
+        ESP_LOGW(kTag,
+                 "STA reconnect attempt failed to start: %s",
+                 esp_err_to_name(error));
+        schedule_reconnect();
+    }
+}
+
 void NetworkHttp::handle_wifi_event(std::int32_t id, void*)
 {
     if (id != WIFI_EVENT_STA_DISCONNECTED || !sta_credentials_configured_) {
@@ -301,20 +380,13 @@ void NetworkHttp::handle_wifi_event(std::int32_t id, void*)
     }
 
     ++reconnect_count_;
-    (void)esp_wifi_set_mode(WIFI_MODE_APSTA);
-    const auto error = esp_wifi_connect();
-    if (reconnect_count_ == 1U || (reconnect_count_ % 10U) == 0U) {
-        if (error == ESP_OK) {
-            ESP_LOGW(kTag,
-                     "STA disconnected; reconnect attempt %lu, recovery AP restored",
-                     static_cast<unsigned long>(reconnect_count_));
-        } else {
-            ESP_LOGW(kTag,
-                     "STA reconnect attempt %lu failed to start: %s",
-                     static_cast<unsigned long>(reconnect_count_),
-                     esp_err_to_name(error));
-        }
+    const auto mode_error = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (mode_error != ESP_OK) {
+        ESP_LOGW(kTag,
+                 "Unable to restore recovery AP after STA disconnect: %s",
+                 esp_err_to_name(mode_error));
     }
+    schedule_reconnect();
 }
 
 void NetworkHttp::handle_ip_event(std::int32_t id, void*)
@@ -323,6 +395,9 @@ void NetworkHttp::handle_ip_event(std::int32_t id, void*)
         return;
     }
 
+    if (reconnect_timer_ != nullptr && esp_timer_is_active(reconnect_timer_)) {
+        (void)esp_timer_stop(reconnect_timer_);
+    }
     reconnect_count_ = 0;
     const auto error = esp_wifi_set_mode(WIFI_MODE_STA);
     if (error != ESP_OK) {
@@ -435,7 +510,13 @@ bool NetworkHttp::apply_sta(const std::string& ssid, const std::string& password
     if (esp_wifi_sta_get_ap_info(&current) == ESP_OK) {
         return esp_wifi_disconnect() == ESP_OK;
     }
-    return esp_wifi_connect() == ESP_OK;
+
+    const auto error = esp_wifi_connect();
+    if (error != ESP_OK) {
+        reconnect_count_ = std::max<std::uint32_t>(reconnect_count_, 1U);
+        schedule_reconnect();
+    }
+    return error == ESP_OK;
 }
 
 bool NetworkHttp::load_credentials(std::string& ssid, std::string& password) const
