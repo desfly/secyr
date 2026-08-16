@@ -33,6 +33,17 @@ esp_err_t save_blob(const char* key, const T& value) {
     nvs_close(handle);
     return error;
 }
+
+esp_err_t erase_key(const char* key) {
+    nvs_handle_t handle{};
+    auto error = nvs_open(kNamespace, NVS_READWRITE, &handle);
+    if (error != ESP_OK) return error;
+    error = nvs_erase_key(handle, key);
+    if (error == ESP_ERR_NVS_NOT_FOUND) error = ESP_OK;
+    if (error == ESP_OK) error = nvs_commit(handle);
+    nvs_close(handle);
+    return error;
+}
 }  // namespace
 
 esp_err_t CommissioningNvsStore::load_hardware(hg::HardwareVerificationRecord& record) const {
@@ -61,6 +72,10 @@ esp_err_t CommissioningNvsStore::save_commissioning(const hg::CommissioningPersi
         return ESP_ERR_INVALID_ARG;
     }
     return save_blob(kCommissioningKey, state);
+}
+
+esp_err_t CommissioningNvsStore::erase_commissioning_state() const {
+    return erase_key(kCommissioningKey);
 }
 
 esp_err_t CommissioningNvsStore::erase_all() const {
