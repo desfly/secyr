@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import ua.homeguard.s3.model.DeviceIdentity
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.network.UdpDeviceDiscovery
 
@@ -48,7 +49,12 @@ fun AddDeviceScreen(
     val progress = scanStatus.progress.coerceIn(0f, 1f)
     val progressPercent = (progress * 100f).toInt()
     val cleanName = deviceName.trim()
-    val nameValid = cleanName.isNotBlank()
+    val nameValid = !DeviceIdentity.isForbiddenFriendlyName(cleanName)
+    val selectedNameValid = selectedDiscoveredDevice?.let { selected ->
+        !DeviceIdentity.isForbiddenFriendlyName(cleanName, selected.deviceId, selected.baseUrl)
+    } ?: nameValid
+    val manualAddressNameValid = !DeviceIdentity.isForbiddenFriendlyName(cleanName, baseUrl = manualAddress)
+    val manualIdNameValid = !DeviceIdentity.isForbiddenFriendlyName(cleanName, deviceId = manualDeviceId)
 
     LaunchedEffect(devices) {
         if (!manualAddressTouched && devices.isNotEmpty()) {
@@ -179,7 +185,10 @@ fun AddDeviceScreen(
                 onValueChange = { deviceName = it.take(40) },
                 label = { Text("Назва пристрою *") },
                 supportingText = {
-                    Text(if (nameValid) "Буде показано як: $cleanName" else "Назва обов’язкова")
+                    Text(
+                        if (nameValid) "Буде показано як: $cleanName"
+                        else "Введіть власну назву, не HomeGuard, ID або IP",
+                    )
                 },
                 isError = deviceName.isNotEmpty() && !nameValid,
                 singleLine = true,
@@ -189,7 +198,7 @@ fun AddDeviceScreen(
             selectedDiscoveredDevice?.let { selected ->
                 Button(
                     onClick = { onUseDevice(selected, cleanName) },
-                    enabled = nameValid,
+                    enabled = selectedNameValid,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Зберегти знайдений пристрій") }
                 Text(
@@ -217,7 +226,7 @@ fun AddDeviceScreen(
             )
             Button(
                 onClick = { onUseManualAddress(cleanName, manualAddress) },
-                enabled = nameValid && manualAddress.isNotBlank(),
+                enabled = manualAddressNameValid && manualAddress.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Додати за IP") }
 
@@ -232,7 +241,7 @@ fun AddDeviceScreen(
             )
             Button(
                 onClick = { onUseDeviceId(cleanName, manualDeviceId) },
-                enabled = nameValid && manualDeviceId.isNotBlank(),
+                enabled = manualIdNameValid && manualDeviceId.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Знайти за ID") }
         }
