@@ -129,6 +129,25 @@ require(off_pos >= 0 and verify_pos > off_pos and block_pos > verify_pos,
 require("return true;" in physical[block_pos:block_pos + 240] if block_pos >= 0 else False,
         "invalid hardware must initialize fail-closed so supervisor can still run")
 
+# Production firmware has exactly one actuator state/ownership path. Legacy
+# logical Controller/DeviceApi/LocalApi command machines may remain as host
+# library code, but they must never be linked into the ESP32-S3 image.
+for forbidden in (
+    '"../../src/device_command_router.cpp"',
+    '"../../src/device_api_model.cpp"',
+    '"../../src/controller.cpp"',
+    '"../../src/local_api.cpp"',
+):
+    require(forbidden not in cmake, f"legacy actuator command path restored to ESP-IDF binary: {forbidden}")
+for mandatory in (
+    '"hg_mcp23017_output_backend.cpp"',
+    '"hg_output_supervisor.cpp"',
+    '"../../src/output_interlock.cpp"',
+    '"../../src/output_command.cpp"',
+    '"../../src/physical_output_runtime.cpp"',
+):
+    require(mandatory in cmake, f"production actuator owner missing from ESP-IDF binary: {mandatory}")
+
 # HW-678 uses MCP23017 only. Supervisor must start on clean/blocked boot and own
 # runtime synchronization independently of HTTP commands.
 require("Mcp23017OutputBackend g_mcp_outputs" in app, "MCP23017 backend missing from app_main")
