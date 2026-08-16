@@ -85,6 +85,94 @@ for cpp in MAIN.glob("*.cpp"):
         errors.append(f"esp_check.h missing: {cpp.name}")
 
 
+# Cemented field-runtime contract from the 2026-08-16 Build-877 hardware test.
+def source_text(name: str) -> str:
+    path = MAIN / name
+    if not path.is_file():
+        errors.append(f"field runtime contract missing source: {name}")
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+def require_token(text: str, token: str, label: str) -> None:
+    if token not in text:
+        errors.append(f"field runtime contract regressed: {label}")
+
+
+network = source_text("hg_network_http.cpp")
+i2c = source_text("hg_i2c_bus.cpp")
+ina = source_text("hg_ina226.cpp")
+mcp = source_text("hg_mcp23017.cpp")
+w5500 = source_text("hg_w5500.cpp")
+sd = source_text("hg_sd_storage.cpp")
+telemetry = source_text("hg_telemetry_runtime.cpp")
+bootstrap = source_text("hg_hardware_bootstrap.cpp")
+app_main = source_text("app_main.cpp")
+
+# 1: Wi-Fi reconnect/recovery must be event-driven; status GET must be side-effect free;
+# scanning must not deliberately disconnect an established STA.
+require_token(network, "WIFI_EVENT_STA_DISCONNECTED", "Wi-Fi disconnect event reconnect")
+require_token(network, "IP_EVENT_STA_GOT_IP", "Wi-Fi recovery AP retirement after got-IP")
+status_start = network.find("esp_err_t NetworkHttp::handle_status")
+status_end = network.find("esp_err_t NetworkHttp::handle_scan", status_start)
+if status_start < 0 or status_end < 0 or "esp_wifi_set_mode" in network[status_start:status_end]:
+    errors.append("field runtime contract regressed: network status GET changed Wi-Fi mode")
+scan_start = network.find("std::string NetworkHttp::scan_json")
+if scan_start < 0 or "esp_wifi_disconnect" in network[scan_start:]:
+    errors.append("field runtime contract regressed: Wi-Fi scan disconnects STA")
+
+# 2 + 3: W5500 lifecycle and ISR ordering.
+for token, label in [
+    ("gpio_install_isr_service", "W5500 GPIO ISR service installation"),
+    ("esp_eth_driver_uninstall", "W5500 Ethernet driver rollback"),
+    ("esp_eth_del_netif_glue", "W5500 netif glue rollback"),
+    ("phy_->del", "W5500 PHY rollback"),
+    ("mac_->del", "W5500 MAC rollback"),
+    ("spi_bus_free", "W5500 SPI rollback"),
+]:
+    require_token(w5500, token, label)
+
+# 4: INA226 must not remain logically Ready after configuration failure or log every sample error.
+require_token(ina, "initialized_ = true", "INA226 transactional initialization")
+require_token(ina, "remove_device(&device_)", "INA226 failed-init cleanup")
+if "ESP_RETURN_ON_ERROR" in ina:
+    errors.append("field runtime contract regressed: INA226 per-read ESP_ERROR logging restored")
+
+# 5: physical I2C ACK is mandatory before accepting a device handle.
+require_token(i2c, "i2c_master_probe", "I2C physical ACK probe")
+
+# 6: MCP23017 initialization is transactional and safe outputs are part of successful init.
+require_token(mcp, "remove_device(&device_)", "MCP23017 failed-init cleanup")
+require_token(mcp, "kOlatA, 0x00", "MCP23017 safe-output initialization")
+
+# 7: degraded bootstrap must be visible instead of a false all-good completion.
+require_token(app_main, "Hardware bootstrap completed DEGRADED", "degraded hardware bootstrap reporting")
+require_token(bootstrap, "HardwareModuleState::Fault", "hardware fault classification")
+
+# 8: absent SD card releases owned SPI resources and is not polled when unmounted.
+require_token(sd, "spi_bus_free(SPI3_HOST)", "microSD failed-mount SPI cleanup")
+require_token(telemetry, "storage().status().mounted", "microSD runtime gating")
+
+# 9: telemetry respects bootstrap hardware state.
+require_token(telemetry, "hardware_status.ina226.state", "INA226 telemetry gating")
+require_token(telemetry, "hardware_status.ads1115_telemetry.state", "ADC telemetry gating")
+require_token(telemetry, "hardware_status.ds3231.state", "RTC telemetry gating")
+
+# 10 + 12: clean-state and fail-closed rules are persistent project contracts.
+field_contract = ROOT / "docs" / "FIELD_TEST_BUGS_2026-08-16.md"
+if not field_contract.is_file():
+    errors.append("field runtime contract missing: docs/FIELD_TEST_BUGS_2026-08-16.md")
+else:
+    field_text = field_contract.read_text(encoding="utf-8")
+    require_token(field_text, "Clean-state test / Factory Reset invariant", "clean-state Factory Reset invariant")
+    require_token(field_text, "FAIL-CLOSED physical outputs", "physical-output fail-closed invariant")
+require_token(app_main, "Physical outputs remain FAIL-CLOSED after boot", "boot fail-closed output gate")
+
+# 11: preserve ESP-IDF's normal thread-safe logger.
+if "esp_log_set_vprintf(esp_rom_vprintf)" in app_main:
+    errors.append("field runtime contract regressed: non-reentrant ROM vprintf override restored")
+
+
 def mobile_web_runtime_smoke() -> None:
     """Exercise the actual Web UI at a phone-sized viewport.
 
