@@ -11,7 +11,7 @@
 #include "hg_system_http.hpp"
 #include "hg_service_http.hpp"
 #include "hg_output_http.hpp"
-#include "hg_gpio_output_backend.hpp"
+#include "hg_mcp23017_output_backend.hpp"
 #include "hg_telemetry_runtime.hpp"
 #include "hg_telemetry_session_http.hpp"
 #include "hg_access_nvs.hpp"
@@ -57,7 +57,7 @@ homeguard::idf::BuildHttp g_build_http;
 homeguard::idf::SystemHttp g_system_http;
 homeguard::idf::ServiceHttp g_service_http;
 homeguard::idf::OutputHttp g_output_http;
-homeguard::idf::GpioOutputBackend g_gpio_outputs;
+homeguard::idf::Mcp23017OutputBackend g_mcp_outputs;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::AccessHttp g_access_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
@@ -153,11 +153,15 @@ void initialize_system_model()
 
 void initialize_physical_outputs()
 {
-    if (!g_physical_outputs.initialize(g_gpio_outputs, g_hardware_verification, g_boot_readiness)) {
+    // HW-678 physical actuator outputs are MCP23017 Port A. The expander is
+    // attached only after HardwareBootstrap has initialized it and forced OLAT
+    // safe, so no direct ESP GPIO can be energized by the physical runtime.
+    g_mcp_outputs.attach(&g_hardware.io_expander());
+    if (!g_physical_outputs.initialize(g_mcp_outputs, g_hardware_verification, g_boot_readiness)) {
         ESP_LOGW(kTag, "Physical outputs unavailable; runtime remains fail-closed (%s)", hg::to_string(g_physical_outputs.state().status));
         return;
     }
-    ESP_LOGI(kTag, "Physical output runtime initialized: %s", hg::to_string(g_physical_outputs.state().status));
+    ESP_LOGI(kTag, "Physical output runtime initialized on MCP23017: %s", hg::to_string(g_physical_outputs.state().status));
 }
 
 esp_err_t start_http_server()
@@ -257,7 +261,6 @@ extern "C" void app_main()
     initialize_system_model();
     g_cloud_link.set_command_runtime(&g_system_model, &g_system_bus, &g_access_control);
     if (cloud_identity_error == ESP_OK) restore_cloud_config();
-    initialize_physical_outputs();
 
     const auto hardware_error = g_hardware.initialize();
     if (hardware_error != ESP_OK) {
@@ -271,6 +274,7 @@ extern "C" void app_main()
                      "Hardware bootstrap completed DEGRADED: %lu optional module(s) unavailable/degraded",
                      static_cast<unsigned long>(unavailable));
         }
+        initialize_physical_outputs();
     }
 
     const auto http_error = start_http_server();
