@@ -27,6 +27,7 @@ public:
         }
         return save_credentials(ssid, password);
     }
+    bool clear_persisted_credentials() const;
 
 private:
     static esp_err_t status_get(httpd_req_t* request);
