@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -245,8 +246,8 @@ fun DeviceListScreen(
                                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    ConnectionIndicator("LAN", lanState)
-                                    ConnectionIndicator("CLOUD", cloudState)
+                                    ConnectionIndicator("LAN", lanState, R.drawable.ic_status_lan)
+                                    ConnectionIndicator("CLOUD", cloudState, R.drawable.ic_status_cloud)
                                 }
                             }
                         }
@@ -380,18 +381,33 @@ fun DeviceListScreen(
 }
 
 @Composable
-private fun ConnectionIndicator(label: String, state: LinkState) {
-    val glyph = when (state) {
-        LinkState.ACTIVE -> "●"
-        LinkState.INACTIVE -> "○"
-        LinkState.UNKNOWN -> "◌"
+private fun ConnectionIndicator(label: String, state: LinkState, iconRes: Int) {
+    val tint = when (state) {
+        LinkState.ACTIVE -> StatusGreen
+        LinkState.INACTIVE -> StatusIdle
+        LinkState.UNKNOWN -> StatusIdle.copy(alpha = 0.55f)
     }
-    val color = if (state == LinkState.ACTIVE) StatusGreen else StatusIdle
-    Text(
-        "$glyph $label",
-        style = MaterialTheme.typography.labelMedium,
-        color = color,
-    )
+    val stateDescription = when (state) {
+        LinkState.ACTIVE -> "підключено"
+        LinkState.INACTIVE -> "немає зв’язку"
+        LinkState.UNKNOWN -> "стан невідомий"
+    }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = "$label: $stateDescription",
+            modifier = Modifier.size(18.dp),
+            tint = tint,
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = tint,
+        )
+    }
 }
 
 @Composable
