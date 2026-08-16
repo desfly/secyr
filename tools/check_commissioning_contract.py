@@ -76,6 +76,11 @@ for token, label in [
     ("activeLow", "measured limit polarity input"),
     ("refresh_control_state_from_store", "dynamic readiness refresh"),
     ("set_maintenance_mode(active, *self->model_)", "service passes SystemModel into maintenance boundary"),
+    ("bool target_evidence = false", "service separates safe pulse from end-stop evidence"),
+    ("&bench_delay, &target_evidence", "service requests physical end-stop evidence"),
+    ("valve_mask != 0U && target_evidence", "service counts only confirmed valve evidence"),
+    ("pulseApplied", "bench API reports a safe applied pulse"),
+    ("targetReached", "bench API reports physical target state"),
 ]:
     require(service, token, label)
 
@@ -103,6 +108,7 @@ for token, label in [
     ("bool set_maintenance_mode(bool active, const SystemModel& model)", "model-aware actuator maintenance gate"),
     ("bool update_control_state", "actuator-local control state refresh"),
     ("bool bench_pulse", "bounded commissioning pulse API"),
+    ("bool* target_evidence = nullptr", "bench pulse separates apply result from target evidence"),
     ("bool maintenance_mode{}", "maintenance state visibility"),
 ]:
     require(physical_h, token, label)
@@ -130,7 +136,8 @@ for token, label in [
     ("after.cold_open && after.cold_closed", "post-pulse contradictory cold limits"),
     ("after.hot_open && after.hot_closed", "post-pulse contradictory hot limits"),
     ("target_limit_reached = target_limit_active(", "post-pulse target evidence"),
-    ("return target_limit_reached", "valve pulse success means physical end-stop transition evidence"),
+    ("if (target_evidence != nullptr) *target_evidence = false", "bench evidence defaults false"),
+    ("if (target_evidence != nullptr) *target_evidence = target_limit_reached", "bench returns physical target evidence separately"),
     ("consume_current_revisions", "maintenance consumes pending output revisions"),
     ("siren_command_revision_ = siren.command_revision", "maintenance consumes pending siren revision"),
     ("state_.cold_valve.command_revision = cold_valve.command_revision", "maintenance consumes pending cold-valve revision"),
@@ -144,7 +151,6 @@ require(supervisor, "runtime_->synchronize(*model_, now_ms)", "supervisor uses a
 require(app, "g_output_supervisor.start(\n            &g_physical_outputs,\n            &g_system_model)", "two-argument actuator-local supervisor wiring")
 require(app, "&g_system_bus, &g_system_model, &g_hardware, &g_control_state_mutex", "commissioning runtime wiring")
 
-# Exact field-test order must remain visible and test-covered.
 sequence = [
     "BlockedDryRunRequired",
     "BlockedValveSafetyProfileRequired",
@@ -160,8 +166,11 @@ require(t47, "commissioning_state_persistable", "unit test covers partial persis
 require(t54, "kMaxBenchPulseMs + 1U", "unit test rejects overlong bench pulse")
 require(t54, "before_dry_run.successful_dry_runs = 0", "unit test blocks bench before dry-run")
 require(t54, "dry_run_only.valve_limit_polarity_verified = false", "unit test blocks valve bench before profile")
+require(t54, "bool bench_evidence = true", "unit test tracks evidence separately from pulse success")
+require(t54, "TEST_CHECK(!bench_evidence)", "unit test accepts safe partial pulse without evidence")
 require(t54, "bench_transition_backend = &bench_backend", "unit test changes target end stop during pulse")
 require(t54, "bench_transition_cold_open = true", "unit test drives cold-open end-stop transition")
+require(t54, "TEST_CHECK(bench_evidence)", "unit test requires target transition for evidence")
 require(t54, "TEST_CHECK(bench_delay_seen == 0U)", "unit test proves active target prevents energizing")
 require(t54, "PhysicalOutputStatus::ValveSafetyFault", "unit test latches contradictory bench limits")
 require(t54, "set_maintenance_mode(true, model)", "unit test covers model-aware maintenance gate")
@@ -170,8 +179,6 @@ require(t54, "runtime.synchronize(model, 102)", "unit test verifies queued valve
 require(t54, "model.set_output_active(1, false, 104)", "unit test queues command during maintenance")
 require(t54, "runtime.synchronize(model, 105)", "unit test verifies in-maintenance command is discarded")
 
-# Destructive operations use sticky fail-closed. Factory reset always reboots;
-# commissioning invalidation must reboot too, otherwise same-boot recommissioning cannot legally clear the latch.
 if service.count("lockout_fail_closed()") < 2:
     errors.append("commissioning contract regressed: destructive routes are not sticky fail-closed")
 require(service, "nvs_flash_erase()", "whole-NVS factory reset")
