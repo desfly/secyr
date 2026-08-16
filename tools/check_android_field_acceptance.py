@@ -5,7 +5,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 ANDROID = ROOT / "android/app/src/main/java/ua/homeguard/s3"
+main_activity = (ANDROID / "MainActivity.kt").read_text(encoding="utf-8")
 list_screen = (ANDROID / "ui/screens/DeviceListScreen.kt").read_text(encoding="utf-8")
+dashboard_screen = (ANDROID / "ui/screens/DashboardScreen.kt").read_text(encoding="utf-8")
 add_screen = (ANDROID / "ui/screens/AddDeviceScreen.kt").read_text(encoding="utf-8")
 store = (ANDROID / "storage/RegisteredDeviceStore.kt").read_text(encoding="utf-8")
 settings = (ANDROID / "storage/SettingsStore.kt").read_text(encoding="utf-8")
@@ -29,6 +31,12 @@ require('Text("+ Додати")' not in list_screen and 'Text("+ Додати п
         "old Add Device action is visible in main list")
 require("Додавання пристроїв тимчасово сховане" in list_screen,
         "empty list does not preserve hidden-Add contract")
+require("onAddDevice:" not in list_screen and "onAddDevice:" not in dashboard_screen,
+        "visible screen still exposes an Add Device callback")
+require("onAddDevice =" not in main_activity and "navigation.showAddDevice()" not in main_activity,
+        "MainActivity still wires a visible Add Device entry point")
+require("currentScreen == AppScreen.ADD_DEVICE -> AddDeviceScreen(" in main_activity,
+        "hidden Add flow was deleted instead of being retained for later redesign")
 
 # Friendly names only on cards; technical data belongs in Properties.
 require('var deviceName by remember { mutableStateOf("") }' in add_screen,
@@ -117,7 +125,7 @@ if errors:
     sys.exit(1)
 
 print("Android field acceptance PASS")
-print(" - device list primary; Add flow hidden")
+print(" - device list primary; Add flow hidden with no visible callbacks")
 print(" - mandatory friendly names; ID/IP only in Properties")
 print(" - duplicate physical ESP records merged with canonical identity")
 print(" - compact icon + LAN/CLOUD/online picons")
