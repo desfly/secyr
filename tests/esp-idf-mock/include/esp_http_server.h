@@ -5,10 +5,11 @@
 #include <cstring>
 using ssize_t = std::ptrdiff_t;
 using httpd_handle_t = void*;
-struct httpd_req_t { void* user_ctx{}; std::size_t content_len{}; const char* mock_body{}; int method{}; const char* mock_authorization{}; };
+struct httpd_req_t { void* user_ctx{}; std::size_t content_len{}; const char* mock_body{}; int method{}; const char* mock_authorization{}; const char* mock_query{}; };
 using httpd_uri_func_t = esp_err_t(*)(httpd_req_t*);
 using httpd_work_fn_t = void(*)(void*);
 enum { HTTP_GET=0, HTTP_POST=1, HTTPD_500_INTERNAL_SERVER_ERROR=500, HTTPD_WS_TYPE_TEXT=1, HTTPD_WS_TYPE_CLOSE=2, HTTPD_WS_TYPE_PING=3, HTTPD_WS_TYPE_PONG=4 };
+inline constexpr std::ptrdiff_t HTTPD_RESP_USE_STRLEN=-1;
 struct httpd_uri_t { const char* uri; int method; httpd_uri_func_t handler; void* user_ctx; bool is_websocket=false; };
 struct httpd_ws_frame_t { int type{}; std::uint8_t* payload{}; std::size_t len{}; };
 struct httpd_config_t { int max_uri_handlers; int stack_size; bool lru_purge_enable; };
@@ -28,3 +29,5 @@ inline esp_err_t httpd_queue_work(httpd_handle_t,httpd_work_fn_t fn,void* arg){ 
 inline std::size_t httpd_req_get_hdr_value_len(httpd_req_t* req,const char* name){ if(req==nullptr || name==nullptr || req->mock_authorization==nullptr || std::strcmp(name,"Authorization")!=0) return 0; return std::strlen(req->mock_authorization); }
 inline esp_err_t httpd_req_get_hdr_value_str(httpd_req_t* req,const char* name,char* buffer,std::size_t length){ if(req==nullptr || name==nullptr || buffer==nullptr || req->mock_authorization==nullptr || std::strcmp(name,"Authorization")!=0) return ESP_FAIL; const auto n=std::strlen(req->mock_authorization); if(n+1U>length) return ESP_FAIL; std::memcpy(buffer,req->mock_authorization,n+1U); return ESP_OK; }
 inline int httpd_req_recv(httpd_req_t* req, char* buffer, std::size_t length){ if(req==nullptr || buffer==nullptr || req->mock_body==nullptr) return -1; const auto n=req->content_len<length?req->content_len:length; std::memcpy(buffer,req->mock_body,n); return static_cast<int>(n); }
+inline esp_err_t httpd_req_get_url_query_str(httpd_req_t* req,char* buffer,std::size_t length){ if(req==nullptr || buffer==nullptr || req->mock_query==nullptr) return ESP_FAIL; const auto n=std::strlen(req->mock_query); if(n+1U>length) return ESP_FAIL; std::memcpy(buffer,req->mock_query,n+1U); return ESP_OK; }
+inline esp_err_t httpd_query_key_value(const char* query,const char* key,char* value,std::size_t length){ if(query==nullptr || key==nullptr || value==nullptr || length==0U) return ESP_FAIL; const auto key_len=std::strlen(key); const char* p=query; while(*p){ if(std::strncmp(p,key,key_len)==0 && p[key_len]=='='){ const char* start=p+key_len+1U; const char* end=std::strchr(start,'&'); const auto n=end?static_cast<std::size_t>(end-start):std::strlen(start); if(n+1U>length) return ESP_FAIL; std::memcpy(value,start,n); value[n]='\0'; return ESP_OK; } const char* next=std::strchr(p,'&'); if(!next) break; p=next+1; } return ESP_FAIL; }
