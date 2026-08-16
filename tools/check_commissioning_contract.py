@@ -74,6 +74,19 @@ for token, label in [
 ]:
     require(service, token, label)
 
+# Optional modules may make bootstrap Degraded but cannot deadlock the actuator
+# commissioning sequence. Only the I2C/MCP fail-closed core is mandatory here.
+dry_start = service.find("bool dry_run_hardware_ready")
+dry_end = service.find("bool target_channel", dry_start)
+if dry_start < 0 or dry_end < 0:
+    errors.append("commissioning contract regressed: dry-run readiness helper missing")
+else:
+    dry_helper = service[dry_start:dry_end]
+    require(dry_helper, "return live_mcp_ready(hardware);", "dry-run requires only actuator safety core")
+    for forbidden in ["ads1115", "ina226", "ds3231", "storage", "ethernet", "w5500"]:
+        if forbidden in dry_helper.lower():
+            errors.append(f"commissioning contract regressed: optional module '{forbidden}' blocks dry-run")
+
 require(state_h, "commissioning_state_persistable", "partial commissioning persistence API")
 require(state_cpp, "bool commissioning_state_persistable", "partial commissioning persistence implementation")
 require(nvs, "commissioning_state_persistable(state)", "NVS accepts safe partial progress")
@@ -120,10 +133,22 @@ require(t47, "commissioning_state_persistable", "unit test covers partial persis
 require(t54, "kMaxBenchPulseMs + 1U", "unit test rejects overlong bench pulse")
 require(t54, "set_maintenance_mode(true)", "unit test covers maintenance bench gate")
 
-# Destructive reset remains a separate, sticky fail-closed path.
+# Destructive operations use sticky fail-closed. Factory reset always reboots;
+# commissioning invalidation must reboot too, otherwise the sticky latch cannot
+# be legally cleared by a same-boot recommissioning attempt.
 if service.count("lockout_fail_closed()") < 2:
     errors.append("commissioning contract regressed: destructive routes are not sticky fail-closed")
 require(service, "nvs_flash_erase()", "whole-NVS factory reset")
+if service.count("esp_restart();") < 2:
+    errors.append("commissioning contract regressed: invalidate and factory-reset do not both reboot after sticky lockout")
+invalidate_start = service.find("esp_err_t ServiceHttp::invalidate_post")
+invalidate_end = service.find("esp_err_t ServiceHttp::factory_reset_post", invalidate_start)
+if invalidate_start < 0 or invalidate_end < 0:
+    errors.append("commissioning contract regressed: invalidate route implementation missing")
+else:
+    invalidate_body = service[invalidate_start:invalidate_end]
+    require(invalidate_body, '"state\\\":\\\"restarting"', "commissioning invalidation reports restart")
+    require(invalidate_body, "esp_restart();", "commissioning invalidation reboots after sticky lockout")
 
 if errors:
     for error in errors:
