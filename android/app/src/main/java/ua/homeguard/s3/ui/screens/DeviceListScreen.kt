@@ -31,6 +31,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.R
+import ua.homeguard.s3.model.DeviceIdentity
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.storage.RegisteredDevice
@@ -48,6 +49,21 @@ private fun isLegacyGeneratedName(name: String): Boolean {
 
 private fun visibleDeviceName(name: String): String =
     if (isLegacyGeneratedName(name)) "Без назви" else name.trim()
+
+private fun newestDiscoveryFor(
+    device: RegisteredDevice,
+    discovered: List<DiscoveredDevice>,
+): DiscoveredDevice? = discovered
+    .asSequence()
+    .filter { candidate ->
+        DeviceIdentity.samePhysicalDevice(
+            device.deviceId,
+            device.baseUrl,
+            candidate.deviceId,
+            candidate.baseUrl,
+        )
+    }
+    .maxByOrNull { it.seenAtMs }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Suppress("UNUSED_PARAMETER")
@@ -123,14 +139,7 @@ fun DeviceListScreen(
     }
 
     propertiesDevice?.let { device ->
-        val endpoint = device.baseUrl.trim().trimEnd('/').lowercase()
-        val found = discovered
-            .filter { candidate ->
-                candidate.deviceId.equals(device.deviceId, ignoreCase = true) ||
-                    (endpoint.isNotBlank() &&
-                        candidate.baseUrl.trim().trimEnd('/').lowercase() == endpoint)
-            }
-            .maxByOrNull { it.seenAtMs }
+        val found = newestDiscoveryFor(device, discovered)
         val cloudText = when {
             found?.cloudConnected == true -> "підключено"
             found?.cloudConfigured == true -> "налаштовано, немає зв’язку"
@@ -196,14 +205,7 @@ fun DeviceListScreen(
             }
         } else {
             items(devices, key = { it.deviceId }) { device ->
-                val endpoint = device.baseUrl.trim().trimEnd('/').lowercase()
-                val found = discovered
-                    .filter { candidate ->
-                        candidate.deviceId.equals(device.deviceId, ignoreCase = true) ||
-                            (endpoint.isNotBlank() &&
-                                candidate.baseUrl.trim().trimEnd('/').lowercase() == endpoint)
-                    }
-                    .maxByOrNull { it.seenAtMs }
+                val found = newestDiscoveryFor(device, discovered)
                 val lanOnline = found != null
                 val cloudOnline = found?.cloudConnected == true
                 val online = lanOnline || cloudOnline
