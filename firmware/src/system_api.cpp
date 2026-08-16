@@ -63,14 +63,18 @@ std::string system_status_json(const SystemModel& model, const SystemEventBus& b
 std::string system_zones_json(const SystemModel& model) {
     std::ostringstream out;
     out << "{\"zones\":[";
-    for (std::size_t i = 0; i < model.zone_count(); ++i) {
-        if (i != 0U) out << ',';
-        const auto* z = model.zone_at(i);
-        out << "{\"id\":" << z->id << ",\"name\":\"" << z->name.data()
-            << "\",\"state\":\"" << zone_state_name(z->state)
-            << "\",\"enabled\":" << (z->enabled ? "true" : "false")
-            << ",\"bypassed\":" << (z->bypassed ? "true" : "false")
-            << ",\"alwaysOn\":" << (z->always_on ? "true" : "false") << '}';
+    bool first = true;
+    const auto count = model.zone_count();
+    for (std::size_t i = 0; i < count; ++i) {
+        ZoneRecord z{};
+        if (!model.zone_at_snapshot(i, z)) continue;
+        if (!first) out << ',';
+        first = false;
+        out << "{\"id\":" << z.id << ",\"name\":\"" << z.name.data()
+            << "\",\"state\":\"" << zone_state_name(z.state)
+            << "\",\"enabled\":" << (z.enabled ? "true" : "false")
+            << ",\"bypassed\":" << (z.bypassed ? "true" : "false")
+            << ",\"alwaysOn\":" << (z.always_on ? "true" : "false") << '}';
     }
     out << "]}";
     return out.str();
@@ -79,12 +83,16 @@ std::string system_zones_json(const SystemModel& model) {
 std::string system_outputs_json(const SystemModel& model) {
     std::ostringstream out;
     out << "{\"outputs\":[";
-    for (std::size_t i = 0; i < model.output_count(); ++i) {
-        if (i != 0U) out << ',';
-        const auto* item = model.output_at(i);
-        out << "{\"id\":" << item->id << ",\"type\":\"" << output_type_name(item->type)
-            << "\",\"active\":" << (item->active ? "true" : "false")
-            << ",\"timeoutMs\":" << item->timeout_ms << '}';
+    bool first = true;
+    const auto count = model.output_count();
+    for (std::size_t i = 0; i < count; ++i) {
+        OutputRecord item{};
+        if (!model.output_at_snapshot(i, item)) continue;
+        if (!first) out << ',';
+        first = false;
+        out << "{\"id\":" << item.id << ",\"type\":\"" << output_type_name(item.type)
+            << "\",\"active\":" << (item.active ? "true" : "false")
+            << ",\"timeoutMs\":" << item.timeout_ms << '}';
     }
     out << "]}";
     return out.str();
@@ -93,11 +101,15 @@ std::string system_outputs_json(const SystemModel& model) {
 std::string system_partitions_json(const SystemModel& model) {
     std::ostringstream out;
     out << "{\"partitions\":[";
-    for (std::size_t i = 0; i < model.partition_count(); ++i) {
-        if (i != 0U) out << ',';
-        const auto* item = model.partition_at(i);
-        out << "{\"id\":" << item->id << ",\"armState\":\"" << arm_state_name(item->arm_state)
-            << "\",\"zoneCount\":" << item->zone_count << '}';
+    bool first = true;
+    const auto count = model.partition_count();
+    for (std::size_t i = 0; i < count; ++i) {
+        PartitionRecord item{};
+        if (!model.partition_at_snapshot(i, item)) continue;
+        if (!first) out << ',';
+        first = false;
+        out << "{\"id\":" << item.id << ",\"armState\":\"" << arm_state_name(item.arm_state)
+            << "\",\"zoneCount\":" << item.zone_count << '}';
     }
     out << "]}";
     return out.str();
