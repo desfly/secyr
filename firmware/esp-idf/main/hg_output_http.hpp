@@ -6,6 +6,8 @@
 #include "homeguard/system_model.hpp"
 #include "esp_http_server.h"
 
+#include <mutex>
+
 namespace homeguard::idf {
 
 class OutputHttp {
@@ -15,7 +17,8 @@ public:
         hg::SystemModel* model,
         hg::BootReadinessReport* readiness,
         hg::PhysicalOutputRuntime* physical,
-        hg::SystemEventBus* bus);
+        hg::SystemEventBus* bus,
+        std::mutex* control_state_mutex);
 
     void set_access_control(homeguard::AccessControl* access_control) {
         access_control_ = access_control;
@@ -29,6 +32,7 @@ private:
     hg::BootReadinessReport* readiness_{};
     hg::PhysicalOutputRuntime* physical_{};
     hg::SystemEventBus* bus_{};
+    std::mutex* control_state_mutex_{};
     homeguard::AccessControl* access_control_{};
 };
 
