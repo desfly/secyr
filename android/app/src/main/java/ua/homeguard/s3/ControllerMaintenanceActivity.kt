@@ -33,10 +33,12 @@ import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceEndpoint
 import ua.homeguard.s3.network.HttpDeviceApi
+import ua.homeguard.s3.storage.RegisteredDeviceStore
 import ua.homeguard.s3.storage.SettingsStore
 
 class ControllerMaintenanceActivity : ComponentActivity() {
     private lateinit var settings: SettingsStore
+    private lateinit var registeredDevices: RegisteredDeviceStore
     private lateinit var endpoint: MutableStateFlow<DeviceEndpoint>
     private lateinit var maintenance: DeviceConfigMaintenanceClient
     private var pendingBackupText = ""
@@ -63,6 +65,7 @@ class ControllerMaintenanceActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = SettingsStore(this)
+        registeredDevices = RegisteredDeviceStore(this)
         val current = settings.settings.value
         endpoint = MutableStateFlow(
             DeviceEndpoint(
@@ -126,11 +129,22 @@ class ControllerMaintenanceActivity : ComponentActivity() {
                             onClick = {
                                 confirmReset = false
                                 val authenticated = session ?: return@TextButton
+                                val resetDeviceId = endpoint.value.deviceId
                                 lifecycleScope.launch {
                                     status = "Виконується Factory Reset…"
                                     runCatching { maintenance.factoryReset(authenticated, pin) }
                                         .onSuccess {
-                                            settings.selectDevice("")
+                                            if (resetDeviceId.isNotBlank()) {
+                                                registeredDevices.markAuthorization(resetDeviceId, false)
+                                            }
+                                            settings.clearControllerSessionAfterFactoryReset()
+                                            endpoint.value = DeviceEndpoint(
+                                                deviceId = "",
+                                                apiBaseUrl = "",
+                                                websocketUrl = "",
+                                                path = ControlPath.OFFLINE,
+                                                certificateSha256 = "",
+                                            )
                                             session = null
                                             pin = ""
                                             pinVisible = false
