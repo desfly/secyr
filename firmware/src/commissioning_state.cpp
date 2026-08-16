@@ -22,14 +22,20 @@ CommissioningStateValidation validate_commissioning_state(
 bool commissioning_state_allows_physical_outputs(
     const CommissioningPersistentState& state) noexcept
 {
+    // Both stages are mandatory for the MCP23017 architecture: dry-run proves
+    // the controller/sensor path, actuator test proves real output polarity,
+    // interlock and connected actuator behavior. A dry-run alone is never a
+    // permission to energize physical outputs.
     return validate_commissioning_state(state) == CommissioningStateValidation::Valid &&
-           state.successful_dry_runs > 0;
+           state.successful_dry_runs > 0U &&
+           state.successful_actuator_tests > 0U;
 }
 
 std::string commissioning_state_json(const CommissioningPersistentState& state)
 {
     std::ostringstream out;
     out << "{\"schemaVersion\":" << state.schema_version
+        << ",\"outputArchitecture\":\"mcp23017_port_a\""
         << ",\"gpioMapVerified\":" << (state.gpio_map_verified ? "true" : "false")
         << ",\"activePolarityVerified\":" << (state.active_polarity_verified ? "true" : "false")
         << ",\"successfulDryRuns\":" << state.successful_dry_runs
