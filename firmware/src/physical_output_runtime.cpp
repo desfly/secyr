@@ -245,6 +245,17 @@ bool PhysicalOutputRuntime::force_safe()
     return ok;
 }
 
+bool PhysicalOutputRuntime::lockout_fail_closed()
+{
+    std::scoped_lock lock(mutex_);
+    const bool ok = force_safe_locked();
+    // Latch first-class service lockout so the supervisor returns before it
+    // reads mutable readiness/commissioning state during destructive updates.
+    state_.safety_fault_latched = true;
+    state_.status = ok ? PhysicalOutputStatus::FailClosed : PhysicalOutputStatus::BackendError;
+    return ok;
+}
+
 bool PhysicalOutputRuntime::synchronize(
     const SystemModel& model,
     const BootReadinessReport& readiness,
@@ -252,6 +263,13 @@ bool PhysicalOutputRuntime::synchronize(
 {
     std::scoped_lock lock(mutex_);
     if (backend_ == nullptr || commissioning_ == nullptr) return false;
+
+    // A latched hardware/service lockout is checked before any shared mutable
+    // readiness/commissioning data is read. This prevents destructive service
+    // operations from racing the 20 ms supervisor and re-applying stale commands.
+    if (state_.safety_fault_latched) {
+        return false;
+    }
 
     if (!readiness.outputs_allowed() ||
         !commissioning_state_allows_physical_outputs(*commissioning_)) {
@@ -261,12 +279,8 @@ bool PhysicalOutputRuntime::synchronize(
             siren_active_) {
             if (!force_safe_locked()) return false;
         }
-        if (!state_.safety_fault_latched) state_.status = PhysicalOutputStatus::FailClosed;
-        return !state_.safety_fault_latched;
-    }
-
-    if (state_.safety_fault_latched) {
-        return false;
+        state_.status = PhysicalOutputStatus::FailClosed;
+        return true;
     }
 
     LimitSnapshot limits{};
