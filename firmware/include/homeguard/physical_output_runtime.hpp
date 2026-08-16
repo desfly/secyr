@@ -80,22 +80,26 @@ class PhysicalOutputRuntime {
 public:
     static constexpr std::uint32_t kMaxBenchPulseMs = 1000U;
 
+    // A successfully configured MCP backend is a usable fail-safe runtime even
+    // when hardware verification is missing. In that case initialize() returns
+    // true with InvalidHardware and keeps every output OFF; verification only
+    // controls permission to energize outputs.
     bool initialize(
         PhysicalOutputBackend& backend,
         const HardwareVerificationRecord& hardware,
         const CommissioningPersistentState& commissioning,
         const BootReadinessReport& readiness);
 
-    bool synchronize(
-        const SystemModel& model,
-        const BootReadinessReport& readiness,
-        std::uint64_t now_ms);
+    // Update verified commissioning/readiness atomically inside the actuator
+    // runtime. The supervisor never reads mutable global records directly.
+    bool update_control_state(
+        const HardwareVerificationRecord& hardware,
+        const CommissioningPersistentState& commissioning,
+        const BootReadinessReport& readiness);
+
+    bool synchronize(const SystemModel& model, std::uint64_t now_ms);
     bool force_safe();
 
-    // Commissioning-only bypass of normal readiness. It is available only
-    // after the fixed HW-678 verification record is valid, is hard-bounded to
-    // one second, holds the actuator mutex for the complete pulse, and forces
-    // all channels OFF both before and after energizing the selected channel.
     bool bench_pulse(
         PhysicalOutputChannel channel,
         std::uint32_t duration_ms,
@@ -135,7 +139,9 @@ private:
     bool latch_fault_locked(PhysicalOutputStatus status);
 
     PhysicalOutputBackend* backend_{};
-    const CommissioningPersistentState* commissioning_{};
+    HardwareVerificationRecord hardware_{};
+    CommissioningPersistentState commissioning_{};
+    BootReadinessReport readiness_{};
     mutable std::mutex mutex_;
     PhysicalOutputRuntimeState state_{};
     bool hardware_verified_{};
