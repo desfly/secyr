@@ -14,7 +14,6 @@ hg::HardwareVerificationRecord valid_hardware() {
     r.pins.w5500_int = 9;
     r.pins.w5500_rst = 8;
     r.pins.service_button = 21;
-    // HW-678 schema v2 uses MCP23017 Port A for actuator outputs.
     r.pins.siren = hg::gpio_unassigned;
     r.pins.valve1 = hg::gpio_unassigned;
     r.pins.valve2 = hg::gpio_unassigned;
@@ -43,6 +42,7 @@ void test_build0049() {
     auto commissioning = valid_commissioning();
 
     CHECK(hg::HardwareVerificationRecord::kSchemaVersion == 2U);
+    CHECK(hg::CommissioningPersistentState::kSchemaVersion == 2U);
     CHECK(!hg::gpio_number_valid(22));
     CHECK(!hg::gpio_number_valid(23));
     CHECK(!hg::gpio_number_valid(24));
@@ -98,4 +98,11 @@ void test_build0049() {
     report = hg::evaluate_boot_readiness({&hardware, &no_dry_run});
     CHECK(report.status == hg::BootReadinessStatus::BlockedDryRunRequired);
     CHECK(!report.outputs_allowed());
+
+    auto no_actuator_test = commissioning;
+    no_actuator_test.successful_actuator_tests = 0U;
+    report = hg::evaluate_boot_readiness({&hardware, &no_actuator_test});
+    CHECK(report.status == hg::BootReadinessStatus::BlockedActuatorTestRequired);
+    CHECK(!report.outputs_allowed());
+    CHECK(hg::boot_readiness_json(report).find("actuator_test_required") != std::string::npos);
 }
