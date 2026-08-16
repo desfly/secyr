@@ -48,6 +48,7 @@ fun DeviceListScreen(
     var renameText by remember { mutableStateOf("") }
     var deleteDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
     val onlineIds = discovered.mapTo(hashSetOf()) { it.deviceId }
+    val onlineHosts = discovered.mapTo(hashSetOf()) { it.host.trim().trim('[', ']').lowercase() }
 
     renameDevice?.let { device ->
         AlertDialog(
@@ -121,8 +122,10 @@ fun DeviceListScreen(
             }
         } else {
             items(devices, key = { it.deviceId }) { device ->
-                val online = device.deviceId in onlineIds || (device.deviceId == activeDeviceId && snapshot.sequence > 0)
+                val deviceHost = device.baseUrl.substringAfter("://", "").substringBefore('/').substringBefore(':').trim('[', ']').lowercase()
+                val online = device.deviceId in onlineIds || deviceHost in onlineHosts || (device.deviceId == activeDeviceId && snapshot.sequence > 0)
                 val expanded = expandedId == device.deviceId
+                val active = device.deviceId == activeDeviceId
                 val titleColor = if (device.authorized) Color.Unspecified else MaterialTheme.colorScheme.error
 
                 Card(
@@ -135,10 +138,11 @@ fun DeviceListScreen(
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Text(device.name, style = MaterialTheme.typography.titleMedium, color = titleColor)
-                        Text(
-                            if (online) "● online" else "○ offline",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        DeviceStatePicons(
+                            online = online,
+                            authorized = device.authorized,
+                            active = active,
+                            snapshot = snapshot,
                         )
 
                         if (!device.authorized) {
@@ -146,7 +150,7 @@ fun DeviceListScreen(
                         }
 
                         if (expanded) {
-                            if (device.deviceId == activeDeviceId) {
+                            if (active) {
                                 val problemZones = snapshot.zones.filter {
                                     it.state.contains("alarm", true) || it.state.contains("open", true) || it.state.contains("tamper", true) || it.state.contains("fault", true)
                                 }
@@ -212,6 +216,52 @@ fun DeviceListScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DeviceStatePicons(
+    online: Boolean,
+    authorized: Boolean,
+    active: Boolean,
+    snapshot: SystemSnapshot,
+) {
+    val problemZones = if (active) snapshot.zones.count {
+        it.state.contains("alarm", true) || it.state.contains("open", true) || it.state.contains("tamper", true) || it.state.contains("fault", true)
+    } else 0
+    val alarm = active && (
+        problemZones > 0 || snapshot.health.name.contains("alarm", true) || snapshot.health.name.contains("critical", true)
+    )
+    val armed = active && snapshot.mode.name.contains("arm", true) && !snapshot.mode.name.contains("disarm", true)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            if (online) "📶 online" else "📵 offline",
+            color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            when {
+                !authorized -> "🔒 доступ"
+                armed -> "🛡 охорона"
+                active -> "🛡 знято"
+                else -> "🛡 —"
+            },
+            color = if (!authorized) MaterialTheme.colorScheme.error else Color.Unspecified,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            when {
+                alarm -> "⚠ тривога"
+                active -> "✓ норма"
+                else -> "⚠ —"
+            },
+            color = if (alarm) MaterialTheme.colorScheme.error else Color.Unspecified,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 
