@@ -32,6 +32,10 @@ hg::CommissioningPersistentState valid_commissioning() {
     s.successful_dry_runs = 2U;
     s.successful_actuator_tests = 1U;
     s.last_verified_at_ms = 1000U;
+    s.valve_limit_polarity_verified = true;
+    s.valve_limits_active_low = true;
+    s.cold_valve_travel_timeout_ms = 12000U;
+    s.hot_valve_travel_timeout_ms = 13000U;
     return s;
 }
 
@@ -91,6 +95,12 @@ void test_build0049() {
     bad_commissioning.gpio_map_verified = false;
     report = hg::evaluate_boot_readiness({&hardware, &bad_commissioning});
     CHECK(report.status == hg::BootReadinessStatus::BlockedCommissioningState);
+
+    auto missing_valve_safety = commissioning;
+    missing_valve_safety.valve_limit_polarity_verified = false;
+    report = hg::evaluate_boot_readiness({&hardware, &missing_valve_safety});
+    CHECK(report.status == hg::BootReadinessStatus::BlockedCommissioningState);
+    CHECK(!report.outputs_allowed());
 
     auto no_dry_run = commissioning;
     no_dry_run.successful_dry_runs = 0U;
