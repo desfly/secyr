@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <string_view>
 
 namespace hg {
@@ -34,11 +35,12 @@ public:
     bool publish(SystemEvent event);
     bool dispatch_one();
     std::size_t dispatch_all();
-    [[nodiscard]] std::size_t queued() const { return queue_size_; }
-    [[nodiscard]] std::uint64_t published() const { return published_; }
-    [[nodiscard]] std::uint64_t dropped() const { return dropped_; }
+    [[nodiscard]] std::size_t queued() const;
+    [[nodiscard]] std::uint64_t published() const;
+    [[nodiscard]] std::uint64_t dropped() const;
 private:
     struct Subscriber { SystemEventCallback callback{}; void* context{}; };
+    mutable std::mutex mutex_;
     std::array<SystemEvent, queue_capacity> queue_{};
     std::array<Subscriber, subscriber_capacity> subscribers_{};
     std::size_t queue_head_{};
@@ -101,6 +103,24 @@ public:
     bool set_zone_state(std::uint16_t id, ModelZoneState state, std::uint64_t now_ms);
     bool set_output_active(std::uint16_t id, bool active, std::uint64_t now_ms);
     bool set_partition_arm(std::uint16_t id, PartitionArmState state, std::uint64_t now_ms);
+
+    // Thread-safe copy views for all runtime/API readers. Never retain a raw
+    // pointer into the model across a task boundary.
+    [[nodiscard]] bool zone_snapshot(std::uint16_t id, ZoneRecord& out) const;
+    [[nodiscard]] bool sensor_snapshot(std::uint16_t id, SensorRecord& out) const;
+    [[nodiscard]] bool output_snapshot(std::uint16_t id, OutputRecord& out) const;
+    [[nodiscard]] bool partition_snapshot(std::uint16_t id, PartitionRecord& out) const;
+    [[nodiscard]] bool zone_at_snapshot(std::size_t index, ZoneRecord& out) const;
+    [[nodiscard]] bool sensor_at_snapshot(std::size_t index, SensorRecord& out) const;
+    [[nodiscard]] bool output_at_snapshot(std::size_t index, OutputRecord& out) const;
+    [[nodiscard]] bool partition_at_snapshot(std::size_t index, PartitionRecord& out) const;
+    [[nodiscard]] std::size_t zone_count() const;
+    [[nodiscard]] std::size_t sensor_count() const;
+    [[nodiscard]] std::size_t output_count() const;
+    [[nodiscard]] std::size_t partition_count() const;
+
+    // Legacy startup/test views. Runtime code must use the snapshot API above;
+    // returned pointers are not protected after this call returns.
     [[nodiscard]] const ZoneRecord* zone(std::uint16_t id) const;
     [[nodiscard]] const SensorRecord* sensor(std::uint16_t id) const;
     [[nodiscard]] const OutputRecord* output(std::uint16_t id) const;
@@ -109,14 +129,11 @@ public:
     [[nodiscard]] const SensorRecord* sensor_at(std::size_t index) const { return index < sensor_count_ ? &sensors_[index] : nullptr; }
     [[nodiscard]] const OutputRecord* output_at(std::size_t index) const { return index < output_count_ ? &outputs_[index] : nullptr; }
     [[nodiscard]] const PartitionRecord* partition_at(std::size_t index) const { return index < partition_count_ ? &partitions_[index] : nullptr; }
-    [[nodiscard]] std::size_t zone_count() const { return zone_count_; }
-    [[nodiscard]] std::size_t sensor_count() const { return sensor_count_; }
-    [[nodiscard]] std::size_t output_count() const { return output_count_; }
-    [[nodiscard]] std::size_t partition_count() const { return partition_count_; }
 private:
     static void copy_name(std::array<char, 24>& destination, std::string_view source);
     bool emit(SystemEventType type, std::uint16_t source_id, std::uint64_t now_ms, std::int32_t value = 0);
     SystemEventBus& bus_;
+    mutable std::mutex mutex_;
     std::array<ZoneRecord, max_zones> zones_{};
     std::array<SensorRecord, max_sensors> sensors_{};
     std::array<OutputRecord, max_outputs> outputs_{};
