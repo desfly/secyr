@@ -42,9 +42,10 @@ fun AddDeviceScreen(
     var manualExpanded by remember { mutableStateOf(false) }
     var manualAddress by remember { mutableStateOf("192.168.4.1") }
     var manualDeviceId by remember { mutableStateOf("") }
-    var manualName by remember { mutableStateOf("HomeGuard") }
+    var manualName by remember { mutableStateOf("") }
     var manualAddressTouched by remember { mutableStateOf(false) }
     var selectedDiscoveredDevice by remember { mutableStateOf<DiscoveredDevice?>(null) }
+    val cleanName = manualName.trim()
     val progress = scanStatus.progress.coerceIn(0f, 1f)
     val progressPercent = (progress * 100f).toInt()
 
@@ -167,6 +168,7 @@ fun AddDeviceScreen(
                 value = manualName,
                 onValueChange = { manualName = it.take(40) },
                 label = { Text("Назва пристрою") },
+                supportingText = { Text("Обов’язково задайте власну назву перед збереженням") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -189,17 +191,18 @@ fun AddDeviceScreen(
             )
             selectedDiscoveredDevice?.let { selected ->
                 Button(
-                    onClick = { onUseDevice(selected, manualName.trim().ifBlank { selected.serviceName.ifBlank { "HomeGuard" } }) },
+                    onClick = { onUseDevice(selected, cleanName) },
+                    enabled = cleanName.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Додати знайдений пристрій") }
                 Text(
-                    "Знайдено: ${selected.host}:${selected.port}. Назву можна змінити перед додаванням.",
+                    "Знайдено: ${selected.host}:${selected.port}. Перед додаванням задайте власну назву.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
             Button(
-                onClick = { onUseManualAddress(manualName.trim().ifBlank { "HomeGuard" }, manualAddress) },
-                enabled = manualAddress.isNotBlank(),
+                onClick = { onUseManualAddress(cleanName, manualAddress) },
+                enabled = cleanName.isNotBlank() && manualAddress.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Додати за IP") }
 
@@ -213,14 +216,14 @@ fun AddDeviceScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
             Button(
-                onClick = { onUseDeviceId(manualName.trim().ifBlank { "HomeGuard" }, manualDeviceId) },
-                enabled = manualDeviceId.isNotBlank(),
+                onClick = { onUseDeviceId(cleanName, manualDeviceId) },
+                enabled = cleanName.isNotBlank() && manualDeviceId.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Знайти за ID") }
         }
 
         Text(
-            "Після додавання ID у списку показується вибрана назва пристрою, а не технічний ID.",
+            "Після додавання у списку показується тільки вибрана вами назва пристрою, а не технічний ID чи адреса.",
             style = MaterialTheme.typography.bodySmall,
         )
     }
