@@ -32,6 +32,23 @@ bool bit_active(std::uint8_t value, int bit, bool active_low) noexcept
     return active_low ? !high : high;
 }
 
+bool valve_bench_channel(PhysicalOutputChannel channel) noexcept
+{
+    switch (channel) {
+        case PhysicalOutputChannel::ColdValveOpen:
+        case PhysicalOutputChannel::ColdValveClose:
+        case PhysicalOutputChannel::HotValveOpen:
+        case PhysicalOutputChannel::HotValveClose:
+            return true;
+        case PhysicalOutputChannel::CorridorLight:
+        case PhysicalOutputChannel::Siren:
+        case PhysicalOutputChannel::Reserve1:
+        case PhysicalOutputChannel::Reserve2:
+            return false;
+    }
+    return false;
+}
+
 }  // namespace
 
 bool PhysicalOutputRuntime::initialize(
@@ -322,6 +339,25 @@ bool PhysicalOutputRuntime::bench_pulse(
     if (backend_ == nullptr || state_.safety_fault_latched || !state_.maintenance_mode ||
         delay_fn == nullptr || duration_ms == 0U || duration_ms > kMaxBenchPulseMs ||
         !bench_channel_allowed(channel)) {
+        return false;
+    }
+
+    // A maintenance endpoint is not itself proof that energizing hardware is
+    // safe. Every bench pulse therefore requires a signed HW-678 verification
+    // plus a completed dry-run. Valve directions additionally require the
+    // measured limit polarity and non-zero travel timeouts before any coil can
+    // be energized. Normal outputs remain fail-closed throughout commissioning.
+    const bool dry_run_verified =
+        hardware_verified_ &&
+        commissioning_.gpio_map_verified &&
+        commissioning_.active_polarity_verified &&
+        commissioning_.successful_dry_runs > 0U;
+    if (!dry_run_verified) return false;
+
+    if (valve_bench_channel(channel) &&
+        (!commissioning_.valve_limit_polarity_verified ||
+         commissioning_.cold_valve_travel_timeout_ms == 0U ||
+         commissioning_.hot_valve_travel_timeout_ms == 0U)) {
         return false;
     }
 
