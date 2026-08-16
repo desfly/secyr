@@ -7,6 +7,7 @@ nsd = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/NsdDeviceDiscov
 http = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/HttpSubnetDiscovery.kt").read_text(encoding="utf-8")
 coordinator = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/LocalDiscoveryCoordinator.kt").read_text(encoding="utf-8")
 models = (ROOT / "android/app/src/main/java/ua/homeguard/s3/model/ConnectivityModels.kt").read_text(encoding="utf-8")
+identity = (ROOT / "android/app/src/main/java/ua/homeguard/s3/model/DeviceIdentity.kt").read_text(encoding="utf-8")
 add_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/AddDeviceScreen.kt").read_text(encoding="utf-8")
 list_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/DeviceListScreen.kt").read_text(encoding="utf-8")
 dashboard_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/DashboardScreen.kt").read_text(encoding="utf-8")
@@ -49,6 +50,7 @@ checks = {
     "Single navigation state machine": all(token not in main_activity for token in ("addDeviceOpen", "provisioningOpen", "deviceListOpen")) and "val screen: StateFlow<AppScreen>" in navigation,
     "Factory reset navigation is safe": "fun onFactoryResetDisconnect()" in navigation and "AppScreen.DEVICE_LIST" in navigation,
     "Add action hidden from main list": 'Text("+ Додати")' not in list_screen and 'Text("+ Додати пристрій")' not in list_screen,
+    "Add callback absent from visible screens": "onAddDevice:" not in list_screen and "onAddDevice:" not in dashboard_screen and "onAddDevice =" not in main_activity,
     "Add action hidden from full monitor": 'Text("+ Додати пристрій")' not in dashboard_screen,
     "Empty list does not expose add action": "Додавання пристроїв тимчасово сховане" in list_screen,
     "Operator ID is not forced to admin": 'private val operatorId = MutableStateFlow("")' in main_activity,
@@ -57,18 +59,22 @@ checks = {
     # New devices require an owner-assigned name. The temporary Add screen remains
     # structurally intact for the later redesign, but these safety rules cannot regress.
     "Device name starts empty": 'var deviceName by remember { mutableStateOf("") }' in add_screen,
-    "Device name is required": 'label = { Text("Назва пристрою *") }' in add_screen and "val nameValid = cleanName.isNotBlank()" in add_screen,
-    "Found device save requires name": "onUseDevice(selected, cleanName)" in add_screen and "enabled = nameValid" in add_screen,
-    "Manual IP save requires name": "enabled = nameValid && manualAddress.isNotBlank()" in add_screen,
-    "Manual ID save requires name": "enabled = nameValid && manualDeviceId.isNotBlank()" in add_screen,
+    "Shared friendly-name validator exists": "fun isForbiddenFriendlyName(" in identity,
+    "Friendly-name validator rejects generic names": 'clean.equals("HomeGuard", ignoreCase = true)' in identity and 'clean.equals("HomeGuard-S3", ignoreCase = true)' in identity,
+    "Friendly-name validator rejects ID": "clean.equals(deviceId.trim(), ignoreCase = true)" in identity,
+    "Friendly-name validator rejects endpoint/host": "clean.equals(endpoint, ignoreCase = true)" in identity and "endpointHost(endpoint)" in identity and "clean.equals(host, ignoreCase = true)" in identity,
+    "Device name is required": 'label = { Text("Назва пристрою *") }' in add_screen and "val nameValid = !DeviceIdentity.isForbiddenFriendlyName(cleanName)" in add_screen,
+    "Found device save requires safe name": "onUseDevice(selected, cleanName)" in add_screen and "enabled = selectedNameValid" in add_screen,
+    "Manual IP save requires safe name": "enabled = manualAddressNameValid && manualAddress.isNotBlank()" in add_screen,
+    "Manual ID save requires safe name": "enabled = manualIdNameValid && manualDeviceId.isNotBlank()" in add_screen,
+    "Rename requires safe name": "val renameValid = !DeviceIdentity.isForbiddenFriendlyName(" in list_screen and "enabled = renameValid" in list_screen,
     "Manual IP autofill preserved": "LaunchedEffect(devices)" in add_screen and "manualAddress = devices.first().host" in add_screen,
     "Store rejects unnamed/generated discovery names": "displayName.isBlank() || isGeneratedName(displayName, device.deviceId, device.baseUrl)" in store and "device.serviceName.takeIf" not in store,
+    "Store uses shared friendly-name validator": "DeviceIdentity.isForbiddenFriendlyName(value, deviceId, baseUrl)" in store,
     "Manual store has no generated default name": 'suspend fun addManual(deviceId: String, baseUrl: String, name: String = "")' in store,
     "Owner name wins during reconciliation": "val named = matching.firstOrNull { !isGeneratedName(it.name, it.deviceId, it.baseUrl) }" in store and "val previous = named ?: exact" in store,
     "Dedup preserves owner name": "!isGeneratedName(existing.name, existing.deviceId, existing.baseUrl) -> existing.name" in store and "!isGeneratedName(candidate.name, candidate.deviceId, candidate.baseUrl) -> candidate.name" in store,
     "Stored technical names are sanitized": 'name = if (isGeneratedName(storedName, id, baseUrl)) "" else storedName' in store,
-    "ID is rejected as a display name": "clean.equals(deviceId.trim(), ignoreCase = true)" in store,
-    "IP/endpoint is rejected as a display name": "clean.equals(endpoint, ignoreCase = true)" in store and "DeviceIdentity.endpointHost(endpoint)" in store and "clean.equals(host, ignoreCase = true)" in store,
     "Legacy service names are not shown as user names": "isLegacyGeneratedName" in list_screen and 'clean.equals("HomeGuard-S3", ignoreCase = true)' in list_screen and '"Без назви"' in list_screen,
 
     # Main cards are friendly-name/state only; technical identity belongs in Properties.
