@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,6 +103,28 @@ if app_main.count("&g_control_state_mutex") < 2:
     errors.append("runtime concurrency contract regressed: shared control mutex not wired to both HTTP modules")
 if service_http.count("std::scoped_lock lock(*self->control_state_mutex_)") < 3:
     errors.append("runtime concurrency contract regressed: service readiness/invalidate/reset are not all serialized")
+
+# HTTP server capacity is a runtime resource, not a compile-time guarantee. The
+# commissioning service added several handlers, so count all literal URI
+# registrations and keep explicit spare capacity for optional/runtime handlers.
+max_handlers_match = re.search(r"config\.max_uri_handlers\s*=\s*(\d+)", app_main)
+if max_handlers_match is None:
+    errors.append("runtime contract regressed: app_main does not set max_uri_handlers explicitly")
+else:
+    max_handlers = int(max_handlers_match.group(1))
+    main_dir = ROOT / "firmware" / "esp-idf" / "main"
+    literal_routes = 0
+    for path in main_dir.glob("*.cpp"):
+        body = path.read_text(encoding="utf-8")
+        literal_routes += len(re.findall(r"\.uri\s*=\s*\"[^\"]+\"", body))
+    required_capacity = literal_routes + 4
+    if max_handlers < required_capacity:
+        errors.append(
+            f"runtime contract regressed: HTTP handler capacity {max_handlers} < "
+            f"{literal_routes} literal routes + 4 spare"
+        )
+    else:
+        print(f"HTTP handler budget: {literal_routes}/{max_handlers} literal routes, spare={max_handlers-literal_routes}")
 
 # Runtime SystemModel readers must use copy snapshots. Avoid broad '.output('
 # matching because unrelated classes may legitimately expose output() methods.
