@@ -13,6 +13,7 @@ enum class BootReadinessStatus {
     BlockedHardwareVerification,
     BlockedCommissioningState,
     BlockedDryRunRequired,
+    BlockedActuatorTestRequired,
     ReadyForPhysicalOutputs,
 };
 
