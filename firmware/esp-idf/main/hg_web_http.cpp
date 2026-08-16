@@ -356,7 +356,7 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     if (bootstrapAvailable !== null || bootstrapProbeInFlight) return;
     bootstrapProbeInFlight = true;
     try {
-      const response = await fetch("/api/v1/access/status", {
+      const response = await fetch(`/api/v1/access/status?ts=${Date.now()}`, {
         method: "GET",
         cache: "no-store",
         headers: { "Accept": "application/json" }
@@ -367,8 +367,9 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
       if (!response.ok || body.ok === false) throw new Error(body.reason || `HTTP ${response.status}`);
       bootstrapAvailable = body.bootstrapAllowed === true && Number(body.userCount || 0) === 0;
     } catch (_) {
-      // Fail closed: never expose bootstrap unless firmware explicitly confirms it.
-      bootstrapAvailable = false;
+      // Fail closed, but keep the state unknown so the 500 ms acceptance loop
+      // retries. A single boot-time HTTP race must not hide first-Admin forever.
+      bootstrapAvailable = null;
     } finally {
       bootstrapProbeInFlight = false;
       applyBootstrapVisibility(button);
