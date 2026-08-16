@@ -46,9 +46,11 @@ private fun isLegacyGeneratedName(name: String): Boolean {
         clean.equals("HomeGuard-S3", ignoreCase = true)
 }
 
-private fun visibleDeviceName(name: String): String = if (isLegacyGeneratedName(name)) "Без назви" else name.trim()
+private fun visibleDeviceName(name: String): String =
+    if (isLegacyGeneratedName(name)) "Без назви" else name.trim()
 
 @OptIn(ExperimentalFoundationApi::class)
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun DeviceListScreen(
     devices: List<RegisteredDevice>,
@@ -76,6 +78,7 @@ fun DeviceListScreen(
                     onValueChange = { renameText = it.take(40) },
                     singleLine = true,
                     label = { Text("Назва") },
+                    supportingText = { Text("У списку показується тільки ваша назва") },
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
@@ -99,7 +102,10 @@ fun DeviceListScreen(
             onDismissRequest = { deleteDevice = null },
             title = { Text("Видалити пристрій?") },
             text = {
-                Text("«${visibleDeviceName(device.name)}» буде видалено зі списку цього телефону. Сам контролер HomeGuard не скидається і не видаляється з мережі.")
+                Text(
+                    "«${visibleDeviceName(device.name)}» буде видалено зі списку цього телефону. " +
+                        "Сам контролер HomeGuard не скидається і не видаляється з мережі.",
+                )
             },
             confirmButton = {
                 TextButton(
@@ -121,7 +127,8 @@ fun DeviceListScreen(
         val found = discovered
             .filter { candidate ->
                 candidate.deviceId.equals(device.deviceId, ignoreCase = true) ||
-                    (endpoint.isNotBlank() && candidate.baseUrl.trim().trimEnd('/').lowercase() == endpoint)
+                    (endpoint.isNotBlank() &&
+                        candidate.baseUrl.trim().trimEnd('/').lowercase() == endpoint)
             }
             .maxByOrNull { it.seenAtMs }
         val cloudText = when {
@@ -165,7 +172,10 @@ fun DeviceListScreen(
             ) {
                 BruceBrand(showTitle = true)
                 Text("Пристрої: ${devices.size}", style = MaterialTheme.typography.titleMedium)
-                Text("У списку показуються тільки ваші назви та стан системи", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "У списку показуються тільки ваші назви та короткий стан зв’язку",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
 
@@ -177,7 +187,10 @@ fun DeviceListScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text("Пристроїв ще немає", style = MaterialTheme.typography.titleMedium)
-                        Text("Додавання пристроїв тимчасово сховане. Структура цього кроку буде змінена окремо.")
+                        Text(
+                            "Додавання пристроїв тимчасово сховане. " +
+                                "Застосунок не повинен автоматично відкривати старий Add Device flow.",
+                        )
                     }
                 }
             }
@@ -187,15 +200,18 @@ fun DeviceListScreen(
                 val found = discovered
                     .filter { candidate ->
                         candidate.deviceId.equals(device.deviceId, ignoreCase = true) ||
-                            (endpoint.isNotBlank() && candidate.baseUrl.trim().trimEnd('/').lowercase() == endpoint)
+                            (endpoint.isNotBlank() &&
+                                candidate.baseUrl.trim().trimEnd('/').lowercase() == endpoint)
                     }
                     .maxByOrNull { it.seenAtMs }
-                val cloudConnected = found?.cloudConnected == true
-                val online = found != null || cloudConnected
+                val lanOnline = found != null
+                val cloudOnline = found?.cloudConnected == true
+                val online = lanOnline || cloudOnline
                 val expanded = expandedId == device.deviceId
                 val legacyName = isLegacyGeneratedName(device.name)
                 val visibleName = visibleDeviceName(device.name)
-                val titleColor = if (device.authorized && !legacyName) Color.Unspecified else MaterialTheme.colorScheme.error
+                val titleColor =
+                    if (device.authorized && !legacyName) Color.Unspecified else MaterialTheme.colorScheme.error
 
                 Card(
                     modifier = Modifier
@@ -203,32 +219,48 @@ fun DeviceListScreen(
                         .combinedClickable(
                             onClick = { expandedId = if (expanded) null else device.deviceId },
                             onDoubleClick = { onOpenDevice(device) },
-                        )
+                        ),
                 ) {
                     Column(
                         modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(9.dp),
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Image(
                                 painter = painterResource(R.drawable.ic_homeguard_device),
                                 contentDescription = "HomeGuard",
-                                modifier = Modifier.size(58.dp),
+                                modifier = Modifier.size(36.dp),
                             )
                             Column(
                                 modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
                             ) {
-                                Text(visibleName, style = MaterialTheme.typography.titleMedium, color = titleColor)
                                 Text(
-                                    if (online) "● online" else "○ offline",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = if (online) StatusGreen else StatusIdle,
+                                    visibleName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = titleColor,
                                 )
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Text(
+                                        if (lanOnline) "● LAN" else "○ LAN",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (lanOnline) StatusGreen else StatusIdle,
+                                    )
+                                    Text(
+                                        "☁ CLOUD",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (cloudOnline) StatusGreen else StatusIdle,
+                                    )
+                                    Text(
+                                        if (online) "● online" else "○ offline",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (online) StatusGreen else StatusIdle,
+                                    )
+                                }
                             }
                         }
 
@@ -282,7 +314,11 @@ fun DeviceListScreen(
                                 if (snapshot.pressures.isNotEmpty()) {
                                     StatusLine(
                                         "Тиски",
-                                        if (abnormalPressures == 0) "норма (${snapshot.pressures.size})" else "проблем: $abnormalPressures",
+                                        if (abnormalPressures == 0) {
+                                            "норма (${snapshot.pressures.size})"
+                                        } else {
+                                            "проблем: $abnormalPressures"
+                                        },
                                     )
                                 }
                                 if (snapshot.temperatures.isNotEmpty()) {
@@ -291,7 +327,11 @@ fun DeviceListScreen(
                                         "Температура",
                                         "%.1f °C%s".format(
                                             primary.celsius,
-                                            if (abnormalTemperatures > 0) " · проблем: $abnormalTemperatures" else "",
+                                            if (abnormalTemperatures > 0) {
+                                                " · проблем: $abnormalTemperatures"
+                                            } else {
+                                                ""
+                                            },
                                         ),
                                     )
                                 }
@@ -331,18 +371,27 @@ fun DeviceListScreen(
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Перейменувати") }
+
                             OutlinedButton(
                                 onClick = { propertiesDevice = device },
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Властивості") }
+
                             Button(
                                 onClick = { onOpenDevice(device) },
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Відкрити") }
+
                             OutlinedButton(
                                 onClick = { deleteDevice = device },
                                 modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Видалити зі списку", color = MaterialTheme.colorScheme.error) }
+                            ) {
+                                Text(
+                                    "Видалити зі списку",
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+
                             Text(
                                 "Подвійне торкання також відкриває повний моніторинг",
                                 style = MaterialTheme.typography.bodySmall,
@@ -366,7 +415,11 @@ private fun StatusLine(label: String, value: String) {
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+        )
         Text(
             value,
             modifier = Modifier.weight(1f),
