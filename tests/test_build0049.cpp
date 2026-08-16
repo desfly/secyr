@@ -99,8 +99,9 @@ void test_build0049() {
     auto missing_valve_safety = commissioning;
     missing_valve_safety.valve_limit_polarity_verified = false;
     report = hg::evaluate_boot_readiness({&hardware, &missing_valve_safety});
-    CHECK(report.status == hg::BootReadinessStatus::BlockedCommissioningState);
+    CHECK(report.status == hg::BootReadinessStatus::BlockedValveSafetyProfileRequired);
     CHECK(!report.outputs_allowed());
+    CHECK(hg::boot_readiness_json(report).find("valve_safety_profile_required") != std::string::npos);
 
     auto no_dry_run = commissioning;
     no_dry_run.successful_dry_runs = 0U;
