@@ -24,8 +24,6 @@ std::size_t text_asset_size(const uint8_t* start, const uint8_t* end)
 {
     if (start == nullptr || end == nullptr || end < start) return 0;
     std::size_t size = static_cast<std::size_t>(end - start);
-    // EMBED_TXTFILES may append a terminating NUL. Never place injected CSS/JS
-    // after that byte: browsers can treat the remainder as unreachable text.
     while (size > 0 && start[size - 1U] == 0U) --size;
     return size;
 }
@@ -79,8 +77,6 @@ esp_err_t WebHttp::send_asset(httpd_req_t* request,
 {
     if (request == nullptr || start == nullptr || end == nullptr || end < start) return ESP_ERR_INVALID_ARG;
 
-    // HomeGuard is repeatedly reflashed during commissioning. Stable asset
-    // URLs must never let an old browser cache mask a freshly flashed UI.
     httpd_resp_set_hdr(request, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     httpd_resp_set_hdr(request, "Pragma", "no-cache");
     httpd_resp_set_hdr(request, "Expires", "0");
@@ -98,12 +94,18 @@ esp_err_t WebHttp::index_get(httpd_req_t* request)
 
 esp_err_t WebHttp::css_get(httpd_req_t* request)
 {
-    // Critical phone layout lives in the firmware-served CSS itself. Do not
-    // depend on the secondary access-session script to repair the viewport.
     static constexpr char kFirmwareCssFix[] = R"CSS(
 
 [hidden]{display:none!important}
 .mobile-menu-toggle{display:none}
+.hg-factory-panel{max-width:920px;margin-top:18px}
+.hg-factory-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-top:12px}
+.hg-factory-fields label{display:block}
+.hg-factory-fields input{display:block;width:100%;margin-top:6px;padding:11px;border:1px solid #d7deea;border-radius:8px;box-sizing:border-box}
+.hg-secret-wrap{position:relative}
+.hg-secret-wrap input{padding-right:52px!important}
+.hg-secret-toggle{position:absolute;right:7px;bottom:6px;width:40px;height:34px;padding:0;border:0;background:transparent;cursor:pointer;font-size:18px;line-height:34px;text-align:center}
+.hg-danger{border-color:#b42318!important;color:#b42318!important}
 @media (max-width:760px){
   html,body{max-width:100%;overflow-x:hidden}
   .shell{display:block!important;min-height:100vh}
@@ -126,7 +128,7 @@ esp_err_t WebHttp::css_get(httpd_req_t* request)
   .status-grid,.two-col{grid-template-columns:1fr!important;gap:10px!important}
   .status-grid article,.panel{min-width:0!important}
   .quick{grid-template-columns:repeat(2,minmax(0,1fr))!important}
-  .cloud-fields{grid-template-columns:1fr!important}
+  .cloud-fields,.hg-factory-fields{grid-template-columns:1fr!important}
   .lan-device{grid-template-columns:1fr!important;gap:6px!important}
   #networkPage .panel>div[style*="grid-template-columns:repeat(3"]{grid-template-columns:1fr!important}
   #networkPage .panel>div[style*="grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto"]{grid-template-columns:1fr!important}
@@ -148,8 +150,6 @@ esp_err_t WebHttp::css_get(httpd_req_t* request)
 
 esp_err_t WebHttp::js_get(httpd_req_t* request)
 {
-    // Embedded-browser fixes live in one suffix so the flashed controller does
-    // not depend on user-agent quirks or the secondary access-session script.
     static constexpr char kEmbeddedViewFix[] = R"JS(
 
 ;(() => {
@@ -157,7 +157,7 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
   const dashboardBody = document.querySelector(".two-col");
   const network = document.getElementById("networkPage");
   const system = document.getElementById("system");
-  let lastSidebarLink = null;
+  let lastSidebarLink = document.querySelector(".sidebar nav a.active") || null;
 
   function applyEmbeddedView() {
     const hash = window.location.hash || "#overview";
@@ -165,7 +165,7 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     const isSystem = hash === "#system";
     const hideDashboard = isNetwork || isSystem;
 
-    [dashboardStatus, dashboardBody].forEach((section) => {
+    [dashboardStatus, dashboardBody].forEach(section => {
       if (!section) return;
       section.hidden = hideDashboard;
       if (hideDashboard) section.style.setProperty("display", "none", "important");
@@ -190,10 +190,16 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     if (!links.length) return;
     const hash = window.location.hash || "#overview";
     const matches = links.filter(link => link.getAttribute("href") === hash);
-    const preferred = lastSidebarLink && lastSidebarLink.isConnected && lastSidebarLink.getAttribute("href") === hash
-      ? lastSidebarLink
-      : (matches[0] || links[0]);
+
+    let preferred = null;
+    if (lastSidebarLink && lastSidebarLink.isConnected && links.includes(lastSidebarLink)) {
+      if (lastSidebarLink.getAttribute("href") === hash) preferred = lastSidebarLink;
+    }
+    if (!preferred && matches.length) preferred = matches[0];
+    if (!preferred) preferred = links.find(link => link.classList.contains("active")) || links[0];
+
     links.forEach(link => link.classList.toggle("active", link === preferred));
+    lastSidebarLink = preferred;
   }
 
   function ensureFirmwareMobileNavigation() {
@@ -221,18 +227,22 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
       });
     }
 
-    document.addEventListener("click", event => {
-      const link = event.target.closest?.(".sidebar nav a");
-      if (!link) return;
-      lastSidebarLink = link;
-      queueMicrotask(enforceSingleActiveNav);
-      setTimeout(enforceSingleActiveNav, 0);
-      if (window.matchMedia("(max-width:760px)").matches) {
-        sidebar.classList.remove("mobile-menu-open");
-        toggle.setAttribute("aria-expanded", "false");
-        if (toggle.lastElementChild) toggle.lastElementChild.textContent = "⌄";
-      }
-    });
+    if (nav.dataset.hgActiveBound !== "1") {
+      nav.dataset.hgActiveBound = "1";
+      nav.addEventListener("click", event => {
+        const link = event.target.closest?.("a");
+        if (!link) return;
+        lastSidebarLink = link;
+        [...nav.querySelectorAll("a")].forEach(item => item.classList.toggle("active", item === link));
+        queueMicrotask(enforceSingleActiveNav);
+        setTimeout(enforceSingleActiveNav, 0);
+        if (window.matchMedia("(max-width:760px)").matches) {
+          sidebar.classList.remove("mobile-menu-open");
+          toggle.setAttribute("aria-expanded", "false");
+          if (toggle.lastElementChild) toggle.lastElementChild.textContent = "⌄";
+        }
+      });
+    }
 
     window.addEventListener("resize", () => {
       if (!window.matchMedia("(max-width:760px)").matches) {
@@ -242,35 +252,106 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     }, { passive: true });
   }
 
-  function ensureWifiPasswordToggle() {
-    const password = document.getElementById("wifiPassword");
-    if (!password || document.getElementById("wifiPasswordToggle")) return;
-
-    const label = password.parentElement;
-    if (!label) return;
-    label.style.position = "relative";
-    password.style.paddingRight = "52px";
+  function addSecretToggle(input) {
+    if (!input || input.dataset.hgSecretToggle === "1") return;
+    input.dataset.hgSecretToggle = "1";
+    const parent = input.parentElement;
+    if (!parent) return;
+    parent.classList.add("hg-secret-wrap");
 
     const toggle = document.createElement("button");
-    toggle.id = "wifiPasswordToggle";
     toggle.type = "button";
+    toggle.className = "hg-secret-toggle";
     toggle.textContent = "👁";
-    toggle.setAttribute("aria-label", "Показати пароль Wi-Fi");
-    toggle.setAttribute("aria-pressed", "false");
-    toggle.title = "Показати пароль";
-    toggle.style.cssText = "position:absolute;right:7px;bottom:6px;width:40px;height:34px;padding:0;border:0;background:transparent;cursor:pointer;font-size:18px;line-height:34px;text-align:center";
-    toggle.addEventListener("click", () => {
-      const show = password.type === "password";
-      password.type = show ? "text" : "password";
-      toggle.setAttribute("aria-pressed", show ? "true" : "false");
-      toggle.setAttribute("aria-label", show ? "Сховати пароль Wi-Fi" : "Показати пароль Wi-Fi");
-      toggle.title = show ? "Сховати пароль" : "Показати пароль";
+    toggle.setAttribute("aria-label", "Показати");
+    toggle.title = "Показати";
+    toggle.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
       toggle.textContent = show ? "◉" : "👁";
-      password.focus();
-      const end = password.value.length;
-      if (typeof password.setSelectionRange === "function") password.setSelectionRange(end, end);
+      toggle.title = show ? "Сховати" : "Показати";
+      toggle.setAttribute("aria-label", toggle.title);
+      input.focus();
+      const end = input.value.length;
+      if (typeof input.setSelectionRange === "function") input.setSelectionRange(end, end);
     });
-    label.appendChild(toggle);
+    parent.appendChild(toggle);
+  }
+
+  function ensureSecretToggles() {
+    ["operatorPin", "wifiPassword", "cloudPassword", "cloudCredential", "networkCredential", "accessCredential", "factoryCredential"]
+      .forEach(id => addSecretToggle(document.getElementById(id)));
+  }
+
+  function ensureFactoryResetUi() {
+    if (!system || document.getElementById("firmwareFactoryResetPanel")) return;
+
+    const panel = document.createElement("article");
+    panel.id = "firmwareFactoryResetPanel";
+    panel.className = "panel hg-factory-panel";
+    panel.innerHTML = `
+      <h3>Повне заводське скидання</h3>
+      <p><small>Видаляє користувачів, Wi-Fi, Cloud та всі змінні налаштування. Прошивка і hardware identity залишаються.</small></p>
+      <div class="hg-factory-fields">
+        <label>Admin ID<input id="factoryActor" type="text" maxlength="23" autocomplete="username" placeholder="Admin ID"></label>
+        <label>Admin PIN<input id="factoryCredential" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password" placeholder="4–12 цифр"></label>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px">
+        <button id="firmwareFactoryReset" type="button" class="hg-danger">Factory Reset</button>
+        <span id="firmwareFactoryResetState">Потрібні Admin ID та PIN</span>
+      </div>`;
+    system.appendChild(panel);
+
+    const actor = panel.querySelector("#factoryActor");
+    const credential = panel.querySelector("#factoryCredential");
+    const button = panel.querySelector("#firmwareFactoryReset");
+    const state = panel.querySelector("#firmwareFactoryResetState");
+    addSecretToggle(credential);
+
+    button?.addEventListener("click", async () => {
+      const actorValue = actor?.value.trim() || "";
+      const credentialValue = credential?.value.trim() || "";
+      if (!actorValue || !/^[0-9]{4,12}$/.test(credentialValue)) {
+        if (state) state.textContent = "Введіть Admin ID та PIN 4–12 цифр";
+        return;
+      }
+
+      if (!window.confirm("Factory Reset видалить користувачів, Wi-Fi, Cloud та всі змінні налаштування. Продовжити?")) return;
+      if (!window.confirm("Підтвердьте ПОВНЕ СКИДАННЯ ще раз. Цю дію неможливо скасувати.")) return;
+
+      button.disabled = true;
+      if (state) state.textContent = "Виконується Factory Reset…";
+      try {
+        const response = await fetch("/api/v1/system/factory-reset", {
+          method: "POST",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ actor: actorValue, credential: credentialValue, confirm: "ERASE_ALL" })
+        });
+        const text = await response.text();
+        let body = {};
+        try { body = text ? JSON.parse(text) : {}; } catch (_) { body = {}; }
+        if (!response.ok || body.ok === false || body.rebooting !== true) {
+          throw new Error(body.reason || `${response.status} ${response.statusText}`);
+        }
+        if (credential) credential.value = "";
+        if (state) state.textContent = "Factory Reset прийнято. Контролер перезавантажується…";
+      } catch (error) {
+        if (state) state.textContent = `Factory Reset не виконано: ${error.message}`;
+        button.disabled = false;
+      }
+    });
+  }
+
+  function dedupeFactoryResetControls() {
+    const legacy = document.getElementById("factoryReset");
+    if (legacy) {
+      legacy.hidden = true;
+      legacy.setAttribute("aria-hidden", "true");
+      legacy.tabIndex = -1;
+    }
   }
 
   function installWifiConnectHandoverFetchGuard() {
@@ -280,18 +361,14 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     window.fetch = async (input, init = {}) => {
       const url = typeof input === "string" ? input : (input && typeof input.url === "string" ? input.url : "");
       const method = String(init.method || (input && input.method) || "GET").toUpperCase();
-      const isWifiConnect = method === "POST" && (url === "/api/v1/network/connect" || url.endsWith("/api/v1/network/connect"));
+      const isWifiConnect = method === "POST" &&
+        (url === "/api/v1/network/connect" || url.endsWith("/api/v1/network/connect"));
 
       try {
         return await nativeFetch(input, init);
       } catch (error) {
         if (!isWifiConnect) throw error;
 
-        // AP+STA may briefly retune the radio while the controller starts the
-        // new STA association. That can tear down the HTTP socket even though
-        // the command was accepted. Treat only this endpoint as transitional;
-        // app.js will poll /network/status and still report a real timeout if
-        // the controller never connects.
         const result = document.getElementById("wifiResult");
         if (result) result.textContent = "Wi-Fi перемикається, перевіряємо підключення…";
         return new Response(
@@ -304,16 +381,24 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     window.__homeguardWifiConnectFetchGuard = true;
   }
 
+  function enforceAcceptanceUi() {
+    applyEmbeddedView();
+    ensureFirmwareMobileNavigation();
+    ensureFactoryResetUi();
+    ensureSecretToggles();
+    dedupeFactoryResetControls();
+    enforceSingleActiveNav();
+  }
+
   window.addEventListener("hashchange", () => {
     applyEmbeddedView();
     queueMicrotask(enforceSingleActiveNav);
     setTimeout(enforceSingleActiveNav, 0);
   });
-  applyEmbeddedView();
-  ensureFirmwareMobileNavigation();
-  ensureWifiPasswordToggle();
+
   installWifiConnectHandoverFetchGuard();
-  enforceSingleActiveNav();
+  enforceAcceptanceUi();
+  setInterval(enforceAcceptanceUi, 500);
 })();
 )JS";
 
