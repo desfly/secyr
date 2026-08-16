@@ -90,8 +90,8 @@ void test_build0054() {
     ready.status = hg::BootReadinessStatus::ReadyForPhysicalOutputs;
 
     // Fresh/unverified hardware is still a successfully initialized OFF-only
-    // runtime. This is what makes Factory Reset and commissioning bench pulses
-    // usable without opening the normal actuator gate.
+    // runtime. This keeps Factory Reset/service safe, but commissioning cannot
+    // energize anything before signed hardware verification.
     FakeBackend unverified_backend;
     hg::PhysicalOutputRuntime unverified_runtime;
     hg::HardwareVerificationRecord missing_hardware{};
@@ -102,26 +102,58 @@ void test_build0054() {
         TEST_CHECK(unverified_backend.levels.count(channel) == 1U);
         TEST_CHECK(!unverified_backend.levels[channel]);
     }
-
-    // Bench pulse is impossible outside maintenance, then works pre-verification
-    // with the hard 1-second ceiling and returns to all-OFF.
+    TEST_CHECK(unverified_runtime.set_maintenance_mode(true));
     bench_delay_seen = 0;
     TEST_CHECK(!unverified_runtime.bench_pulse(
         hg::PhysicalOutputChannel::Siren, 100, &fake_bench_delay));
-    TEST_CHECK(unverified_runtime.set_maintenance_mode(true));
-    TEST_CHECK(unverified_runtime.state().maintenance_mode);
-    TEST_CHECK(unverified_runtime.bench_pulse(
+    TEST_CHECK(bench_delay_seen == 0U);
+    TEST_CHECK(unverified_runtime.lockout_fail_closed());
+    TEST_CHECK(unverified_runtime.state().safety_fault_latched);
+
+    // Hardware verification alone is still not permission to energize a bench
+    // output. A successful dry-run is mandatory for every bench channel.
+    auto before_dry_run = commissioning;
+    before_dry_run.successful_dry_runs = 0;
+    before_dry_run.successful_actuator_tests = 0;
+    FakeBackend bench_backend;
+    hg::PhysicalOutputRuntime bench_runtime;
+    TEST_CHECK(bench_runtime.initialize(bench_backend, hardware, before_dry_run, blocked));
+    TEST_CHECK(bench_runtime.set_maintenance_mode(true));
+    TEST_CHECK(!bench_runtime.bench_pulse(
+        hg::PhysicalOutputChannel::Siren, 100, &fake_bench_delay));
+
+    // After dry-run, non-valve bench channels are allowed, but valve coils stay
+    // blocked until the measured limit polarity + both travel timeouts exist.
+    auto dry_run_only = commissioning;
+    dry_run_only.successful_actuator_tests = 0;
+    dry_run_only.valve_limit_polarity_verified = false;
+    dry_run_only.cold_valve_travel_timeout_ms = 0;
+    dry_run_only.hot_valve_travel_timeout_ms = 0;
+    TEST_CHECK(bench_runtime.update_control_state(hardware, dry_run_only, blocked));
+    bench_delay_seen = 0;
+    TEST_CHECK(bench_runtime.bench_pulse(
         hg::PhysicalOutputChannel::Siren, 100, &fake_bench_delay));
     TEST_CHECK(bench_delay_seen == 100U);
-    TEST_CHECK(!unverified_runtime.bench_pulse(
+    TEST_CHECK(!bench_runtime.bench_pulse(
+        hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
+
+    // Valve profile unlocks bounded valve-direction bench pulses, but normal
+    // outputs remain fail-closed until actuator acceptance completes.
+    auto profiled = commissioning;
+    profiled.successful_actuator_tests = 0;
+    TEST_CHECK(bench_runtime.update_control_state(hardware, profiled, blocked));
+    bench_delay_seen = 0;
+    TEST_CHECK(bench_runtime.bench_pulse(
+        hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
+    TEST_CHECK(bench_delay_seen == 100U);
+    TEST_CHECK(!bench_runtime.bench_pulse(
         hg::PhysicalOutputChannel::Siren,
         hg::PhysicalOutputRuntime::kMaxBenchPulseMs + 1U,
         &fake_bench_delay));
     for (int channel = 0; channel < 8; ++channel) {
-        TEST_CHECK(!unverified_backend.levels[channel]);
+        TEST_CHECK(!bench_backend.levels[channel]);
     }
-    TEST_CHECK(unverified_runtime.lockout_fail_closed());
-    TEST_CHECK(unverified_runtime.state().safety_fault_latched);
+    TEST_CHECK(!bench_runtime.state().outputs_enabled);
 
     FakeBackend backend;
     hg::PhysicalOutputRuntime runtime;
