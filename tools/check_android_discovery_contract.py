@@ -7,6 +7,15 @@ nsd = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/NsdDeviceDiscov
 http = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/HttpSubnetDiscovery.kt").read_text(encoding="utf-8")
 coordinator = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/LocalDiscoveryCoordinator.kt").read_text(encoding="utf-8")
 models = (ROOT / "android/app/src/main/java/ua/homeguard/s3/model/ConnectivityModels.kt").read_text(encoding="utf-8")
+identity = (ROOT / "android/app/src/main/java/ua/homeguard/s3/model/DeviceIdentity.kt").read_text(encoding="utf-8")
+add_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/AddDeviceScreen.kt").read_text(encoding="utf-8")
+list_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/DeviceListScreen.kt").read_text(encoding="utf-8")
+dashboard_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/DashboardScreen.kt").read_text(encoding="utf-8")
+provisioning_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/ProvisioningScreen.kt").read_text(encoding="utf-8")
+bruce_brand = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/components/BruceBrand.kt").read_text(encoding="utf-8")
+main_activity = (ROOT / "android/app/src/main/java/ua/homeguard/s3/MainActivity.kt").read_text(encoding="utf-8")
+navigation = (ROOT / "android/app/src/main/java/ua/homeguard/s3/navigation/AppNavigation.kt").read_text(encoding="utf-8")
+store = (ROOT / "android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt").read_text(encoding="utf-8")
 
 checks = {
     "UDP discovery port": "const val PORT = 45678" in udp,
@@ -16,16 +25,60 @@ checks = {
     "Wi-Fi transport selection": "NetworkCapabilities.TRANSPORT_WIFI" in udp,
     "Wi-Fi interface broadcast": "connectivity.getLinkProperties(it)?.interfaceName" in udp,
     "UDP diagnostics counters": all(token in udp for token in ("sent: Int", "received: Int", "accepted: Int", "lastResponder: String", "network: String", "error: String")),
+    "UDP stale entries expire": "System.currentTimeMillis() - 30_000L" in udp and "found.entries.removeIf" in udp,
     "mDNS service type": 'SERVICE_TYPE = "_homeguard._tcp."' in nsd,
     "mDNS concrete IP preference": "info.host?.hostAddress" in nsd,
     "mDNS independent resolver": "private fun resolve(serviceInfo: NsdServiceInfo)" in nsd and "val listener = object : NsdManager.ResolveListener" in nsd,
     "mDNS shared resolver removed": "private val resolveListener" not in nsd,
+    "mDNS serviceLost removal preserved": "onServiceLost" in nsd and "keys.forEach(found::remove)" in nsd,
     "HTTP subnet discovery source": "class HttpSubnetDiscovery" in http,
     "HTTP HomeGuard identity endpoint": "/api/v1/cloud/status" in http,
     "HTTP discovery source model": "enum class DiscoverySource { MDNS, UDP, HTTP }" in models,
-    "Coordinator combines mDNS+UDP+HTTP": "combine(nsd.devices, udp.devices, http.devices)" in coordinator,
+    "Coordinator combines mDNS+UDP+HTTP": "combine(" in coordinator and all(token in coordinator for token in ("nsd.devices", "udp.devices", "http.devices")),
+    "Coordinator identity-deduplicates transports": "DeviceIdentity.samePhysicalDevice(" in coordinator,
     "Coordinator triggers HTTP fallback": "http.scanOnce()" in coordinator,
     "Coordinator exposes scan status": "val scanStatus" in coordinator and "udp.status" in coordinator,
+    "Coordinator uses scan heartbeat for stale state": "udp.status," in coordinator and "val now = System.currentTimeMillis()" in coordinator,
+    "Coordinator expires active discovery": "ACTIVE_DISCOVERY_TTL_MS = 30_000L" in coordinator and "age <= ttl" in coordinator,
+    "Coordinator bounds stale mDNS": "MDNS_DISCOVERY_TTL_MS = 90_000L" in coordinator,
+    "Coordinator clears HTTP state on stop": "http.clear()" in coordinator,
+    "Device list is primary screen": "AppNavigation(initial: AppScreen = AppScreen.DEVICE_LIST)" in navigation and "private val navigation = AppNavigation()" in main_activity,
+    "Fresh app does not force Add screen": "currentScreen == AppScreen.ADD_DEVICE -> AddDeviceScreen(" in main_activity and "showAddDevice || appSettings.deviceId.isBlank()" not in main_activity,
+    "Single navigation state machine": all(token not in main_activity for token in ("addDeviceOpen", "provisioningOpen", "deviceListOpen")) and "val screen: StateFlow<AppScreen>" in navigation,
+    "Factory reset navigation is safe": "fun onFactoryResetDisconnect()" in navigation and "AppScreen.DEVICE_LIST" in navigation,
+    "Add action hidden from main list": 'Text("+ Додати")' not in list_screen and 'Text("+ Додати пристрій")' not in list_screen,
+    "Add callback absent from visible screens": "onAddDevice:" not in list_screen and "onAddDevice:" not in dashboard_screen and "onAddDevice =" not in main_activity,
+    "Add action hidden from full monitor": 'Text("+ Додати пристрій")' not in dashboard_screen,
+    "Empty list does not expose add action": "Додавання пристроїв тимчасово сховане" in list_screen,
+    "Operator ID is not forced to admin": 'private val operatorId = MutableStateFlow("")' in main_activity,
+    "Bruce header stays compact": "Modifier.size(56.dp)" in bruce_brand,
+    "Device name starts empty": 'var deviceName by remember { mutableStateOf("") }' in add_screen,
+    "Shared friendly-name validator exists": "fun isForbiddenFriendlyName(" in identity,
+    "Friendly-name validator rejects generic names": 'clean.equals("HomeGuard", ignoreCase = true)' in identity and 'clean.equals("HomeGuard-S3", ignoreCase = true)' in identity,
+    "Friendly-name validator rejects ID": "clean.equals(deviceId.trim(), ignoreCase = true)" in identity,
+    "Friendly-name validator rejects endpoint/host": "clean.equals(endpoint, ignoreCase = true)" in identity and "endpointHost(endpoint)" in identity and "clean.equals(host, ignoreCase = true)" in identity,
+    "Device name is required": 'label = { Text("Назва пристрою *") }' in add_screen and "val nameValid = !DeviceIdentity.isForbiddenFriendlyName(cleanName)" in add_screen,
+    "Found device save requires safe name": "onUseDevice(selected, cleanName)" in add_screen and "enabled = selectedNameValid" in add_screen,
+    "Manual IP save requires safe name": "enabled = manualAddressNameValid && manualAddress.isNotBlank()" in add_screen,
+    "Manual ID save requires safe name": "enabled = manualIdNameValid && manualDeviceId.isNotBlank()" in add_screen,
+    "Rename requires safe name": "val renameValid = !DeviceIdentity.isForbiddenFriendlyName(" in list_screen and "enabled = renameValid" in list_screen,
+    "Manual IP autofill preserved": "LaunchedEffect(devices)" in add_screen and "manualAddress = devices.first().host" in add_screen,
+    "Store rejects unnamed/generated discovery names": "displayName.isBlank() || isGeneratedName(displayName, device.deviceId, device.baseUrl)" in store and "device.serviceName.takeIf" not in store,
+    "Store uses shared friendly-name validator": "DeviceIdentity.isForbiddenFriendlyName(value, deviceId, baseUrl)" in store,
+    "Manual store has no generated default name": 'suspend fun addManual(deviceId: String, baseUrl: String, name: String = "")' in store,
+    "Owner name wins during reconciliation": "val named = matching.firstOrNull { !isGeneratedName(it.name, it.deviceId, it.baseUrl) }" in store and "val previous = named ?: exact" in store,
+    "Dedup preserves owner name": "!isGeneratedName(existing.name, existing.deviceId, existing.baseUrl) -> existing.name" in store and "!isGeneratedName(candidate.name, candidate.deviceId, candidate.baseUrl) -> candidate.name" in store,
+    "Stored technical names are sanitized": 'name = if (isGeneratedName(storedName, id, baseUrl)) "" else storedName' in store,
+    "Legacy service names are not shown as user names": "isLegacyGeneratedName" in list_screen and 'clean.equals("HomeGuard-S3", ignoreCase = true)' in list_screen and '"Без назви"' in list_screen,
+    "Device cards hide raw endpoint": "Text(device.baseUrl" not in list_screen,
+    "Device cards hide technical channel strip": "LinkIndicator(" not in list_screen,
+    "Properties exposes ID": 'StatusLine("ID", device.deviceId)' in list_screen,
+    "Properties exposes endpoint": 'StatusLine("Адреса", device.baseUrl.ifBlank { "—" })' in list_screen,
+    "Properties action exists": 'Text("Властивості")' in list_screen,
+    "Rename action exists": 'Text("Перейменувати")' in list_screen,
+    "Delete action exists": '"Видалити зі списку"' in list_screen and "deleteDevice = device" in list_screen,
+    "Operator PIN visibility toggle": "var pinVisible by remember" in dashboard_screen and 'Text(if (pinVisible) "Сховати" else "Показати")' in dashboard_screen,
+    "Wi-Fi password visibility toggle": "var wifiPasswordVisible by remember" in provisioning_screen and "PasswordVisualTransformation()" in provisioning_screen and "wifiPasswordVisible = !wifiPasswordVisible" in provisioning_screen,
 }
 
 failed = [name for name, ok in checks.items() if not ok]

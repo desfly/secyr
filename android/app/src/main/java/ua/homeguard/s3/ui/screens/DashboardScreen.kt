@@ -54,7 +54,6 @@ fun DashboardScreen(
     statusNotificationsEnabled: Boolean,
     zoneNotificationsEnabled: Boolean,
     onBackToDevices: () -> Unit,
-    onAddDevice: () -> Unit,
     onOperatorIdChange: (String) -> Unit,
     onOperatorPinChange: (String) -> Unit,
     onLogin: () -> Unit,
@@ -67,20 +66,16 @@ fun DashboardScreen(
     onShareEvents: () -> Unit,
     onExportSettings: () -> Unit,
     onImportSettings: () -> Unit,
-    onFactoryReset: () -> Unit,
     onCommand: (CommandType) -> Unit,
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
     var confirmClearHistory by remember { mutableStateOf(false) }
-    var confirmFactoryReset by remember { mutableStateOf(false) }
-    var factoryResetPhrase by remember { mutableStateOf("") }
     var eventCategory by remember { mutableStateOf(EventLogCategory.ALL) }
     var eventQuery by remember { mutableStateOf("") }
     var eventSourceText by remember { mutableStateOf("") }
     var pinVisible by remember { mutableStateOf(false) }
     val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12 && operatorPin.all(Char::isDigit)
     val authenticated = accessSession != null
-    val adminAuthenticated = accessSession?.role?.name == "ADMIN"
     val canCommand: (CommandType) -> Boolean = { command -> accessSession?.allows(command) == true }
     val sourceFilter = eventSourceText.trim().toIntOrNull()
     val filteredEvents = EventLogFilterEngine.apply(events, EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter))
@@ -108,38 +103,6 @@ fun DashboardScreen(
             dismissButton = { TextButton(onClick = { confirmClearHistory = false }) { Text("Скасувати") } },
         )
     }
-    if (confirmFactoryReset) {
-        AlertDialog(
-            onDismissRequest = { confirmFactoryReset = false; factoryResetPhrase = "" },
-            title = { Text("Повне заводське скидання") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Будуть стерті користувачі, Wi-Fi, Cloud/MQTT і користувацькі налаштування. Апаратна identity та прошивка залишаться.")
-                    Text("Для підтвердження введіть ERASE_ALL")
-                    OutlinedTextField(
-                        value = factoryResetPhrase,
-                        onValueChange = { factoryResetPhrase = it.take(9) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("ERASE_ALL") },
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = adminAuthenticated && factoryResetPhrase == "ERASE_ALL",
-                    onClick = {
-                        confirmFactoryReset = false
-                        factoryResetPhrase = ""
-                        onFactoryReset()
-                    },
-                ) { Text("СТЕРТИ ВСЕ") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmFactoryReset = false; factoryResetPhrase = "" }) { Text("Скасувати") }
-            },
-        )
-    }
 
     LazyColumn(
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -152,7 +115,6 @@ fun DashboardScreen(
                 Text("Версія $versionName", style = MaterialTheme.typography.bodySmall)
                 Text("Канал: $route", style = MaterialTheme.typography.bodyMedium)
                 Text("Знайдено локально: $localDevices", style = MaterialTheme.typography.bodySmall)
-                Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати пристрій") }
             }
         }
 
@@ -163,20 +125,6 @@ fun DashboardScreen(
                 onExportSettings = onExportSettings,
                 onImportSettings = onImportSettings,
             )
-        }
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Заводське скидання", style = MaterialTheme.typography.titleMedium)
-                    Text("Доступно тільки після входу Admin. Потрібне ручне підтвердження ERASE_ALL.", style = MaterialTheme.typography.bodySmall)
-                    OutlinedButton(
-                        enabled = adminAuthenticated,
-                        onClick = { confirmFactoryReset = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Повне заводське скидання") }
-                }
-            }
         }
 
         item {

@@ -22,12 +22,12 @@ fun BruceBrand(
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Image(
             painter = painterResource(R.drawable.bruce_launcher),
             contentDescription = "Bruce",
-            modifier = Modifier.size(88.dp),
+            modifier = Modifier.size(56.dp),
         )
         if (showTitle) {
             Text("MyFist · HomeGuard-S3", style = MaterialTheme.typography.titleMedium)

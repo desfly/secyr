@@ -1,5 +1,6 @@
 package ua.homeguard.s3.ui.components
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,7 +15,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import ua.homeguard.s3.ControllerMaintenanceActivity
 import ua.homeguard.s3.diagnostics.SystemDiagnostics
 
 @Composable
@@ -27,6 +30,7 @@ fun MaintenancePanel(
     var detailsExpanded by remember { mutableStateOf(false) }
     val connectionProblems = diagnostics.connectionItems.count { !it.ok }
     val hardwareProblems = diagnostics.hardwareItems.count { !it.ok }
+    val context = LocalContext.current
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -68,14 +72,20 @@ fun MaintenancePanel(
             }
 
             OutlinedButton(onClick = onExportSettings, modifier = Modifier.fillMaxWidth()) {
-                Text("Backup налаштувань")
+                Text("Backup налаштувань застосунку")
             }
             OutlinedButton(onClick = onImportSettings, modifier = Modifier.fillMaxWidth()) {
-                Text("Restore налаштувань")
+                Text("Restore налаштувань застосунку")
+            }
+            OutlinedButton(
+                onClick = { context.startActivity(Intent(context, ControllerMaintenanceActivity::class.java)) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Конфігурація контролера")
             }
             Text(backupStatus, style = MaterialTheme.typography.bodySmall)
             Text(
-                "API token не входить у backup і не замінюється під час restore.",
+                "Backup застосунку не містить API token. Backup контролера, імпорт і Factory Reset доступні окремо після повторного входу Admin.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }

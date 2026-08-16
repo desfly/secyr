@@ -3,6 +3,7 @@
 #include "homeguard/access_control.hpp"
 #include "esp_err.h"
 #include "esp_http_server.h"
+#include "nvs.h"
 
 #include <string>
 
@@ -13,6 +14,37 @@ public:
     esp_err_t begin();
     void set_access_control(AccessControl* access) { access_ = access; }
     esp_err_t register_handlers(httpd_handle_t server);
+
+    // Backup/restore accessors. These touch persisted credentials only and do
+    // not change the live STA connection; imported settings become active after
+    // the controlled reboot performed by the configuration API.
+    bool load_persisted_credentials(std::string& ssid, std::string& password) const {
+        return load_credentials(ssid, password);
+    }
+    // Snapshot accessor used by transactional config import. Unlike the legacy
+    // bool loader it distinguishes "not configured" from a real NVS/read error.
+    esp_err_t snapshot_persisted_credentials(
+        std::string& ssid,
+        std::string& password,
+        bool& present) const;
+    bool save_persisted_credentials(const std::string& ssid, const std::string& password) const {
+        if (ssid.empty() || ssid.size() > 32 || password.size() > 64 ||
+            (!password.empty() && password.size() < 8)) {
+            return false;
+        }
+        return save_credentials(ssid, password);
+    }
+    bool clear_persisted_credentials() const {
+        nvs_handle_t handle{};
+        auto error = nvs_open("hg_wifi", NVS_READWRITE, &handle);
+        if (error == ESP_ERR_NVS_NOT_FOUND) return true;
+        if (error != ESP_OK) return false;
+        error = nvs_erase_key(handle, "credentials");
+        if (error == ESP_ERR_NVS_NOT_FOUND) error = ESP_OK;
+        if (error == ESP_OK) error = nvs_commit(handle);
+        nvs_close(handle);
+        return error == ESP_OK;
+    }
 
 private:
     static esp_err_t status_get(httpd_req_t* request);

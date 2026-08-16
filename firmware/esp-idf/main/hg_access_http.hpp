@@ -15,8 +15,10 @@ public:
                                 bool bootstrap_allowed);
 
 private:
+    static esp_err_t status_get(httpd_req_t* request);
     static esp_err_t users_post(httpd_req_t* request);
     static esp_err_t login_post(httpd_req_t* request);
+    esp_err_t handle_status(httpd_req_t* request);
     esp_err_t handle_users(httpd_req_t* request);
     esp_err_t handle_login(httpd_req_t* request);
 

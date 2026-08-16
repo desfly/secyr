@@ -97,10 +97,34 @@ async function refreshNetwork() {
   }
 }
 
+function renderAccessStatus(status) {
+  const button = document.querySelector("#accessBootstrap");
+  const hint = document.querySelector("#accessBootstrapHint");
+  const allowed = status?.bootstrapAllowed === true && Number(status?.userCount || 0) === 0;
+  if (button) {
+    button.hidden = !allowed;
+    button.disabled = !allowed;
+    button.setAttribute("aria-hidden", allowed ? "false" : "true");
+  }
+  if (hint) {
+    hint.hidden = !allowed;
+    hint.setAttribute("aria-hidden", allowed ? "false" : "true");
+  }
+}
+
+async function refreshAccessStatus() {
+  try {
+    renderAccessStatus(await api("/api/v1/access/status"));
+  } catch (_) {
+    // Fail closed: never offer first-Admin bootstrap unless firmware explicitly allows it.
+    renderAccessStatus({ bootstrapAllowed: false, userCount: 0 });
+  }
+}
+
 async function refresh() {
   const requests = await Promise.allSettled([
     api("/api/v1/system/zones"), api("/api/v1/system/partitions"), api("/api/v1/system/outputs"),
-    api("/api/v1/system/events"), api("/api/v1/build"), api("/api/v1/network/status")
+    api("/api/v1/system/events"), api("/api/v1/build"), api("/api/v1/network/status"), api("/api/v1/access/status")
   ]);
   if (requests[0].status === "fulfilled") renderZones(requests[0].value);
   if (requests[1].status === "fulfilled") renderPartitions(requests[1].value);
@@ -108,6 +132,8 @@ async function refresh() {
   if (requests[3].status === "fulfilled") renderEvents(requests[3].value);
   if (requests[4].status === "fulfilled") document.querySelector("#buildInfo").textContent = JSON.stringify(requests[4].value, null, 2);
   if (requests[5].status === "fulfilled") renderNetwork(requests[5].value);
+  if (requests[6].status === "fulfilled") renderAccessStatus(requests[6].value);
+  else renderAccessStatus({ bootstrapAllowed: false, userCount: 0 });
 }
 
 async function scanWifi() {
@@ -249,14 +275,15 @@ function ensureAccessPanel() {
     <div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap">
       <label><input id="managedUserEnabled" type="checkbox" checked> Активний</label>
       <button id="accessSave" type="button">Зберегти користувача</button>
-      <button id="accessBootstrap" type="button">Створити першого Admin</button>
+      <button id="accessBootstrap" type="button" hidden aria-hidden="true">Створити першого Admin</button>
       <span id="accessResult">—</span>
     </div>
-    <small style="display:block;margin-top:10px">«Створити першого Admin» працює тільки один раз — на чистому контролері без користувачів.</small>`;
+    <small id="accessBootstrapHint" hidden aria-hidden="true" style="display:block;margin-top:10px">«Створити першого Admin» доступно тільки на чистому контролері без користувачів.</small>`;
   systemPage.appendChild(panel);
   document.querySelector("#accessLoad").onclick = loadAccessUsers;
   document.querySelector("#accessSave").onclick = saveAccessUser;
   document.querySelector("#accessBootstrap").onclick = bootstrapAccessAdmin;
+  refreshAccessStatus();
 }
 
 function accessAdminCredentials() {
@@ -293,8 +320,9 @@ async function bootstrapAccessAdmin() {
   const name = document.querySelector("#managedUserName").value.trim();
   const pin = document.querySelector("#managedUserPin").value.trim();
   const result = document.querySelector("#accessResult");
-  if (!id || !name || !validPin(pin)) { result.textContent = "Для першого Admin введіть ID, ім'я та PIN 4–12 цифр"; return; }
   const button = document.querySelector("#accessBootstrap");
+  if (!button || button.hidden || button.disabled) { result.textContent = "Bootstrap першого Admin зараз недоступний"; return; }
+  if (!id || !name || !validPin(pin)) { result.textContent = "Для першого Admin введіть ID, ім'я та PIN 4–12 цифр"; return; }
   button.disabled = true;
   result.textContent = "Створення першого Admin…";
   try {
@@ -306,7 +334,7 @@ async function bootstrapAccessAdmin() {
     result.textContent = `Bootstrap відхилено: ${error.message}`;
   } finally {
     document.querySelector("#managedUserPin").value = "";
-    button.disabled = false;
+    await refreshAccessStatus();
   }
 }
 
@@ -326,6 +354,7 @@ async function loadAccessUsers() {
   } finally {
     document.querySelector("#accessCredential").value = "";
     button.disabled = false;
+    await refreshAccessStatus();
   }
 }
 
@@ -351,6 +380,7 @@ async function saveAccessUser() {
   } finally {
     document.querySelector("#accessCredential").value = "";
     button.disabled = false;
+    await refreshAccessStatus();
   }
 }
 
@@ -364,7 +394,7 @@ function setView(view, targetId = "overview") {
     requestAnimationFrame(() => document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" }));
   } else { window.scrollTo({ top: 0, behavior: "smooth" }); }
   if (isNetwork) refreshNetwork();
-  if (isSystem) { ensureAccessPanel(); refresh(); }
+  if (isSystem) { ensureAccessPanel(); refreshAccessStatus(); refresh(); }
 }
 
 function routeFromHash() {

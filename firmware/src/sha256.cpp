@@ -3,9 +3,57 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 
+#if defined(ESP_PLATFORM)
+#include "esp_log.h"
+#include "esp_timer.h"
+#include "mbedtls/sha256.h"
+#endif
+
 namespace hg {
+
+#if defined(ESP_PLATFORM)
+namespace {
+constexpr const char* kAccessDiagTag = "homeguard_access";
+constexpr char kPinKdfPrefix[] = "HomeGuard-S3|PIN|";
+std::uint32_t g_kdf_hash_index = 0U;
+std::int64_t g_kdf_started_us = 0;
+
+void trace_pin_kdf(std::span<const std::byte> data) {
+    const auto prefix_len = sizeof(kPinKdfPrefix) - 1U;
+    const bool initial = data.size() >= prefix_len &&
+        std::memcmp(data.data(), kPinKdfPrefix, prefix_len) == 0;
+
+    if (initial) {
+        g_kdf_hash_index = 1U;
+        g_kdf_started_us = esp_timer_get_time();
+        ESP_LOGI(kAccessDiagTag, "PIN KDF SHA begin hash=1 input=%u",
+                 static_cast<unsigned>(data.size()));
+        return;
+    }
+
+    // For the field bootstrap test the user id is "admin" (5 chars), so each
+    // iterative KDF input is 64 digest-hex chars + 5 id chars + 32 salt chars.
+    // This keeps diagnostics isolated from unrelated SHA traffic.
+    if (g_kdf_hash_index != 0U && data.size() == 101U) {
+        ++g_kdf_hash_index;
+        if ((g_kdf_hash_index % 512U) == 0U || g_kdf_hash_index == 4096U) {
+            const auto elapsed_ms = (esp_timer_get_time() - g_kdf_started_us) / 1000;
+            ESP_LOGI(kAccessDiagTag, "PIN KDF SHA progress hash=%u elapsed=%lld ms",
+                     static_cast<unsigned>(g_kdf_hash_index),
+                     static_cast<long long>(elapsed_ms));
+        }
+        if (g_kdf_hash_index >= 4096U) {
+            g_kdf_hash_index = 0U;
+        }
+    }
+}
+}  // namespace
+#endif
+
+#if !defined(ESP_PLATFORM)
 namespace {
 constexpr std::array<uint32_t, 64> k{
     0x428a2f98U,0x71374491U,0xb5c0fbcfU,0xe9b5dba5U,0x3956c25bU,0x59f111f1U,0x923f82a4U,0xab1c5ed5U,
@@ -52,9 +100,19 @@ void compress_block(std::array<uint32_t, 8>& h, const uint8_t* block) {
     h[0] += a; h[1] += b; h[2] += c; h[3] += d;
     h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
 }
-}
+}  // namespace
+#endif
 
 Sha256Digest sha256(std::span<const std::byte> data) {
+#if defined(ESP_PLATFORM)
+    trace_pin_kdf(data);
+    Sha256Digest digest{};
+    const auto* input = reinterpret_cast<const unsigned char*>(data.data());
+    if (mbedtls_sha256(input, data.size(), digest.data(), 0) != 0) {
+        digest.fill(0U);
+    }
+    return digest;
+#else
     std::array<uint32_t, 8> h{
         0x6a09e667U,0xbb67ae85U,0x3c6ef372U,0xa54ff53aU,
         0x510e527fU,0x9b05688cU,0x1f83d9abU,0x5be0cd19U
@@ -94,6 +152,7 @@ Sha256Digest sha256(std::span<const std::byte> data) {
         digest[i * 4U + 3U] = static_cast<uint8_t>(h[i]);
     }
     return digest;
+#endif
 }
 
 Sha256Digest sha256(std::string_view text) {
@@ -117,4 +176,4 @@ std::string sha256_hex(const Sha256Digest& digest) {
     }
     return out;
 }
-}
+}  // namespace hg

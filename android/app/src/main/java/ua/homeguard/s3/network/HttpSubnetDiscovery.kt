@@ -30,7 +30,7 @@ class HttpSubnetDiscovery(context: Context) {
         private const val READ_TIMEOUT_MS = 320
         private const val SETUP_CONNECT_TIMEOUT_MS = 1_200
         private const val SETUP_READ_TIMEOUT_MS = 1_500
-        private const val MAX_PARALLEL = 32
+        private const val MAX_PARALLEL = 8
         private const val SETUP_PREFIX = "192.168.4"
         private const val SETUP_CONTROLLER_IP = "192.168.4.1"
     }
@@ -39,7 +39,13 @@ class HttpSubnetDiscovery(context: Context) {
     private val _devices = MutableStateFlow<List<DiscoveredDevice>>(emptyList())
     val devices: StateFlow<List<DiscoveredDevice>> = _devices.asStateFlow()
 
+    fun clear() {
+        _devices.value = emptyList()
+    }
+
     suspend fun scanOnce() = withContext(Dispatchers.IO) {
+        _devices.value = emptyList()
+
         val network = findWifiNetwork() ?: return@withContext
         val local = connectivity.getLinkProperties(network)
             ?.linkAddresses
@@ -52,16 +58,18 @@ class HttpSubnetDiscovery(context: Context) {
         val prefix = "${bytes[0].toInt() and 0xff}.${bytes[1].toInt() and 0xff}.${bytes[2].toInt() and 0xff}"
         val ownHost = bytes[3].toInt() and 0xff
 
-        val setupDevice = if (prefix == SETUP_PREFIX && ownHost != 1) {
-            probe(
+        if (prefix == SETUP_PREFIX && ownHost != 1) {
+            val setupDevice = probe(
                 network = network,
                 ip = SETUP_CONTROLLER_IP,
                 connectTimeoutMs = SETUP_CONNECT_TIMEOUT_MS,
                 readTimeoutMs = SETUP_READ_TIMEOUT_MS,
                 allowNetworkStatusFallback = true,
             )
-        } else {
-            null
+            if (setupDevice != null) {
+                _devices.value = listOf(setupDevice)
+                return@withContext
+            }
         }
 
         val semaphore = Semaphore(MAX_PARALLEL)
@@ -86,7 +94,7 @@ class HttpSubnetDiscovery(context: Context) {
                 .filterNotNull()
         }
 
-        _devices.value = (listOfNotNull(setupDevice) + found)
+        _devices.value = found
             .associateBy { it.baseUrl.trimEnd('/').lowercase() }
             .values
             .sortedBy { it.deviceId }
@@ -115,8 +123,15 @@ class HttpSubnetDiscovery(context: Context) {
         if (cloud?.optBoolean("ok", false) == true) {
             val deviceId = cloud.optString("deviceId").trim()
             if (deviceId.startsWith("HG-") && deviceId.length >= 5) {
-                Log.i(TAG, "HomeGuard HTTP fallback found: id=$deviceId ip=$ip")
-                return discovered(deviceId, ip)
+                val configured = cloud.optBoolean("configured", false)
+                val connected = cloud.optBoolean("connected", false)
+                Log.i(TAG, "HomeGuard HTTP fallback found: id=$deviceId ip=$ip cloudConfigured=$configured cloudConnected=$connected")
+                return discovered(
+                    deviceId = deviceId,
+                    ip = ip,
+                    cloudConfigured = configured,
+                    cloudConnected = connected,
+                )
             }
         }
 
@@ -152,6 +167,7 @@ class HttpSubnetDiscovery(context: Context) {
             connection.readTimeout = readTimeoutMs
             connection.useCaches = false
             connection.instanceFollowRedirects = false
+            connection.setRequestProperty("Connection", "close")
             if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
             val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             JSONObject(body)
@@ -166,6 +182,8 @@ class HttpSubnetDiscovery(context: Context) {
         deviceId: String,
         ip: String,
         serviceName: String = deviceId,
+        cloudConfigured: Boolean? = null,
+        cloudConnected: Boolean? = null,
     ) = DiscoveredDevice(
         deviceId = deviceId,
         serviceName = serviceName,
@@ -176,5 +194,7 @@ class HttpSubnetDiscovery(context: Context) {
         transport = Transport.NONE,
         pairingRequired = false,
         source = DiscoverySource.HTTP,
+        cloudConfigured = cloudConfigured,
+        cloudConnected = cloudConnected,
     )
 }

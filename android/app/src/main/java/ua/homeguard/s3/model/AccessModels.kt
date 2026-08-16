@@ -30,7 +30,9 @@ data class AccessSession(
     val capabilities: AccessCapabilities,
 ) {
     fun allows(command: CommandType): Boolean = when (role) {
-        AccessRole.ADMIN -> true
+        // Admin still has the broadest firmware permissions, but the UI must not
+        // enable commands that the active runtime does not implement yet.
+        AccessRole.ADMIN -> capabilities.allowsOperatorCommand(command)
         AccessRole.USER -> capabilities.allowsOperatorCommand(command)
         AccessRole.GUEST -> false
     }

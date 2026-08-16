@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import ua.homeguard.s3.model.DeviceIdentity
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.network.UdpDeviceDiscovery
 
@@ -42,12 +43,18 @@ fun AddDeviceScreen(
     var manualExpanded by remember { mutableStateOf(false) }
     var manualAddress by remember { mutableStateOf("192.168.4.1") }
     var manualDeviceId by remember { mutableStateOf("") }
-    var manualName by remember { mutableStateOf("") }
+    var deviceName by remember { mutableStateOf("") }
     var manualAddressTouched by remember { mutableStateOf(false) }
     var selectedDiscoveredDevice by remember { mutableStateOf<DiscoveredDevice?>(null) }
-    val cleanName = manualName.trim()
     val progress = scanStatus.progress.coerceIn(0f, 1f)
     val progressPercent = (progress * 100f).toInt()
+    val cleanName = deviceName.trim()
+    val nameValid = !DeviceIdentity.isForbiddenFriendlyName(cleanName)
+    val selectedNameValid = selectedDiscoveredDevice?.let { selected ->
+        !DeviceIdentity.isForbiddenFriendlyName(cleanName, selected.deviceId, selected.baseUrl)
+    } ?: nameValid
+    val manualAddressNameValid = !DeviceIdentity.isForbiddenFriendlyName(cleanName, baseUrl = manualAddress)
+    val manualIdNameValid = !DeviceIdentity.isForbiddenFriendlyName(cleanName, deviceId = manualDeviceId)
 
     LaunchedEffect(devices) {
         if (!manualAddressTouched && devices.isNotEmpty()) {
@@ -104,13 +111,12 @@ fun AddDeviceScreen(
                         "listening" -> "Слухаємо відповіді"
                         "done" -> "Результати оновлено"
                         "error" -> "Помилка пошуку"
-                        else -> "UDP + mDNS"
+                        else -> "UDP + mDNS + HTTP"
                     },
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text("Прогрес: $progressPercent%", style = MaterialTheme.typography.titleSmall)
                 LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-
                 Text("Надіслано: ${scanStatus.sent}", style = MaterialTheme.typography.bodySmall)
                 Text("Отримано: ${scanStatus.received}", style = MaterialTheme.typography.bodySmall)
                 Text("Прийнято: ${scanStatus.accepted}", style = MaterialTheme.typography.bodySmall)
@@ -124,7 +130,6 @@ fun AddDeviceScreen(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-
                 Button(onClick = onRescan, enabled = !isScanning, modifier = Modifier.fillMaxWidth()) {
                     Text(if (isScanning) "Пошук виконується…" else "Шукати знову")
                 }
@@ -145,6 +150,7 @@ fun AddDeviceScreen(
                         manualAddress = device.host
                         manualAddressTouched = false
                         manualExpanded = true
+                        deviceName = ""
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -159,19 +165,48 @@ fun AddDeviceScreen(
             }
         }
 
-        OutlinedButton(onClick = { manualExpanded = !manualExpanded }, modifier = Modifier.fillMaxWidth()) {
-            Text(if (manualExpanded) "Сховати ручне додавання" else "+ Додати вручну")
+        OutlinedButton(
+            onClick = {
+                manualExpanded = !manualExpanded
+                if (!manualExpanded) selectedDiscoveredDevice = null
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (manualExpanded) "Сховати додавання" else "+ Додати вручну")
         }
 
         if (manualExpanded) {
+            Text(
+                "Перед збереженням обов’язково дайте пристрою власну назву. Саме вона буде показуватись у списку.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
             OutlinedTextField(
-                value = manualName,
-                onValueChange = { manualName = it.take(40) },
-                label = { Text("Назва пристрою") },
-                supportingText = { Text("Обов’язково задайте власну назву перед збереженням") },
+                value = deviceName,
+                onValueChange = { deviceName = it.take(40) },
+                label = { Text("Назва пристрою *") },
+                supportingText = {
+                    Text(
+                        if (nameValid) "Буде показано як: $cleanName"
+                        else "Введіть власну назву, не HomeGuard, ID або IP",
+                    )
+                },
+                isError = deviceName.isNotEmpty() && !nameValid,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            selectedDiscoveredDevice?.let { selected ->
+                Button(
+                    onClick = { onUseDevice(selected, cleanName) },
+                    enabled = selectedNameValid,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Зберегти знайдений пристрій") }
+                Text(
+                    "Знайдений контролер: ${selected.host}:${selected.port}. Після збереження ця адреса зі списку буде прихована.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
             OutlinedTextField(
                 value = manualAddress,
                 onValueChange = {
@@ -189,20 +224,9 @@ fun AddDeviceScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            selectedDiscoveredDevice?.let { selected ->
-                Button(
-                    onClick = { onUseDevice(selected, cleanName) },
-                    enabled = cleanName.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Додати знайдений пристрій") }
-                Text(
-                    "Знайдено: ${selected.host}:${selected.port}. Перед додаванням задайте власну назву.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
             Button(
                 onClick = { onUseManualAddress(cleanName, manualAddress) },
-                enabled = cleanName.isNotBlank() && manualAddress.isNotBlank(),
+                enabled = manualAddressNameValid && manualAddress.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Додати за IP") }
 
@@ -211,19 +235,19 @@ fun AddDeviceScreen(
                 value = manualDeviceId,
                 onValueChange = { manualDeviceId = it.trim().take(64) },
                 label = { Text("ID пристрою") },
-                supportingText = { Text("Для пошуку цього HomeGuard у LAN або через Internet/Cloud") },
+                supportingText = { Text("Для пошуку HomeGuard у LAN або через Internet/Cloud") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             Button(
                 onClick = { onUseDeviceId(cleanName, manualDeviceId) },
-                enabled = cleanName.isNotBlank() && manualDeviceId.isNotBlank(),
+                enabled = manualIdNameValid && manualDeviceId.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Знайти за ID") }
         }
 
         Text(
-            "Після додавання у списку показується тільки вибрана вами назва пристрою, а не технічний ID чи адреса.",
+            "Правило HomeGuard: у списку пристроїв показується ваша назва, а ID/IP доступні тільки у «Властивостях».",
             style = MaterialTheme.typography.bodySmall,
         )
     }

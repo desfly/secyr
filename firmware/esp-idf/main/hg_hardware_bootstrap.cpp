@@ -1,4 +1,5 @@
 #include "hg_hardware_bootstrap.hpp"
+#include "hg_rgb_diagnostic.hpp"
 
 namespace homeguard::idf {
 
@@ -24,6 +25,12 @@ HardwareModuleStatus HardwareBootstrap::module_status(
 esp_err_t HardwareBootstrap::initialize()
 {
     status_.safe_outputs_forced = true;
+
+    // Cemented field requirement: the onboard WS2812 on GPIO48 must light
+    // solid white for five seconds on every controller boot/reset. Keep this
+    // diagnostic independent from the rest of hardware bring-up so missing
+    // peripherals cannot suppress the boot indication.
+    (void)RgbDiagnostic::test_white(48, 5000U);
 
     auto error = i2c_.initialize();
     status_.i2c = module_status(

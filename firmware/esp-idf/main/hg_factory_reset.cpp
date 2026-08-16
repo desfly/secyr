@@ -1,6 +1,7 @@
 #include "hg_factory_reset.hpp"
 
 #include "hg_commissioning_nvs.hpp"
+#include "hg_rgb_diagnostic.hpp"
 
 #include "esp_wifi.h"
 #include "nvs.h"
@@ -26,19 +27,34 @@ esp_err_t erase_namespace(const char* name) {
 FactoryResetReport FactoryResetManager::erase_mutable_state() const {
     FactoryResetReport report{};
 
+    // Cemented field requirement: every Factory Reset path (hardware triple-RST,
+    // Web UI, or Android API) must visibly identify the destructive operation.
+    // Factory Reset is deliberately different from normal boot: five different
+    // colors, one second each, before mutable state is erased and the caller reboots.
+    (void)RgbDiagnostic::factory_reset_sequence(48);
+
+    // Access users/Admin state.
     report.access = erase_namespace("hg_access");
 
+    // HomeGuard Wi-Fi credentials plus any legacy ESP-IDF driver persistence
+    // left by builds that used the default WIFI_STORAGE_FLASH mode.
     report.wifi = erase_namespace("hg_wifi");
     if (report.wifi == ESP_OK) {
         report.wifi = esp_wifi_restore();
     }
 
+    // Cloud broker credentials/session configuration.
     report.cloud = erase_namespace("hg_cloud");
+
+    // User-editable controller configuration.
     report.controller_config = erase_namespace("hg-config");
+
+    // Provisioning payload (Wi-Fi/cloud/API token/owner label). The immutable
+    // factory identity lives separately in hg-factory and is intentionally kept.
     report.provisioning = erase_namespace("hg-provision");
 
-    // Preserve immutable hardware verification/identity and erase only the
-    // user-owned commissioning progress.
+    // Preserve hardware_v1 identity/verification; reset only mutable
+    // commissioning progress/state.
     report.commissioning = CommissioningNvsStore{}.erase_commissioning_state();
 
     return report;

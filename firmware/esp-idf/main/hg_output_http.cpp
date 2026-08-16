@@ -1,6 +1,7 @@
 #include "hg_output_http.hpp"
 #include "homeguard/output_command.hpp"
 
+#include <cctype>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
@@ -12,11 +13,23 @@ OutputHttp* self_from(httpd_req_t* request) {
     return static_cast<OutputHttp*>(request->user_ctx);
 }
 
-bool parse_uint(const std::string& body, const char* key, std::uint16_t& value) {
-    const std::string marker = std::string{"\""} + key + "\":";
-    const auto pos = body.find(marker);
+bool find_json_value(const std::string& body, const char* key, std::size_t& value_pos) {
+    const std::string marker = std::string{"\""} + key + "\"";
+    auto pos = body.find(marker);
     if (pos == std::string::npos) return false;
-    const auto first = body.data() + pos + marker.size();
+    pos = body.find(':', pos + marker.size());
+    if (pos == std::string::npos) return false;
+    ++pos;
+    while (pos < body.size() && std::isspace(static_cast<unsigned char>(body[pos]))) ++pos;
+    if (pos >= body.size()) return false;
+    value_pos = pos;
+    return true;
+}
+
+bool parse_uint(const std::string& body, const char* key, std::uint16_t& value) {
+    std::size_t pos{};
+    if (!find_json_value(body, key, pos)) return false;
+    const auto first = body.data() + pos;
     const auto last = body.data() + body.size();
     unsigned parsed{};
     const auto result = std::from_chars(first, last, parsed);
@@ -26,12 +39,10 @@ bool parse_uint(const std::string& body, const char* key, std::uint16_t& value) 
 }
 
 bool parse_bool(const std::string& body, const char* key, bool& value) {
-    const std::string marker = std::string{"\""} + key + "\":";
-    const auto pos = body.find(marker);
-    if (pos == std::string::npos) return false;
-    const auto value_pos = pos + marker.size();
-    if (body.compare(value_pos, 4, "true") == 0) { value = true; return true; }
-    if (body.compare(value_pos, 5, "false") == 0) { value = false; return true; }
+    std::size_t pos{};
+    if (!find_json_value(body, key, pos)) return false;
+    if (body.compare(pos, 4, "true") == 0) { value = true; return true; }
+    if (body.compare(pos, 5, "false") == 0) { value = false; return true; }
     return false;
 }
 
@@ -46,6 +57,18 @@ bool parse_json_string(const std::string& body, const char* key, std::string& va
     const auto end = body.find('"', pos + 1U);
     if (end == std::string::npos) return false;
     value.assign(body, pos + 1U, end - pos - 1U);
+    return true;
+}
+
+bool read_request_body(httpd_req_t* request, std::size_t limit, std::string& body) {
+    if (request == nullptr || request->content_len == 0 || request->content_len > limit) return false;
+    body.assign(request->content_len, '\0');
+    std::size_t offset = 0;
+    while (offset < body.size()) {
+        const auto received = httpd_req_recv(request, body.data() + offset, body.size() - offset);
+        if (received <= 0) return false;
+        offset += static_cast<std::size_t>(received);
+    }
     return true;
 }
 }
@@ -79,18 +102,11 @@ esp_err_t OutputHttp::command_post(httpd_req_t* request) {
 }
 
 esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
-    if (request->content_len == 0 || request->content_len > 384) {
+    std::string body;
+    if (!read_request_body(request, 384U, body)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_body\"}", -1);
     }
-
-    std::string body(request->content_len, '\0');
-    const auto received = httpd_req_recv(request, body.data(), body.size());
-    if (received <= 0) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"read_failed\"}", -1);
-    }
-    body.resize(static_cast<std::size_t>(received));
 
     std::uint16_t output_id{};
     bool active{};

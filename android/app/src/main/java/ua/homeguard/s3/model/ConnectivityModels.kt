@@ -12,7 +12,9 @@ data class DiscoveredDevice(
     val transport: Transport = Transport.NONE,
     val pairingRequired: Boolean = false,
     val source: DiscoverySource,
-    val seenAtMs: Long = System.currentTimeMillis()
+    val seenAtMs: Long = System.currentTimeMillis(),
+    val cloudConfigured: Boolean? = null,
+    val cloudConnected: Boolean? = null,
 ) {
     val baseUrl: String
         get() {

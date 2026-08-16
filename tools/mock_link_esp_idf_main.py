@@ -12,6 +12,7 @@ INCLUDE = ROOT / "firmware" / "include"
 CORE_SRC = ROOT / "firmware" / "src"
 COMPONENTS = ROOT / "firmware" / "esp-idf" / "components"
 HARNESS = ROOT / "tests" / "esp-idf-mock" / "mock_main.cpp"
+CJSON_MOCK = ROOT / "tests" / "esp-idf-mock" / "cJSON_mock.cpp"
 BUILD = ROOT / "mock-link-build"
 REPORT = ROOT / "mock-link-report.json"
 
@@ -61,6 +62,11 @@ for filename in (
     path = CORE_SRC / filename
     if path.exists():
         sources.append(path.resolve())
+
+# cJSON is supplied by ESP-IDF on target. The host link gate needs only symbol
+# stubs so it can prove HomeGuard's own objects compile and resolve correctly.
+if CJSON_MOCK.exists():
+    sources.append(CJSON_MOCK.resolve())
 
 sources = sorted(dict.fromkeys(sources))
 objects = []

@@ -18,6 +18,7 @@
 #include "hg_access_http.hpp"
 #include "hg_access_time.hpp"
 #include "hg_commissioning_nvs.hpp"
+#include "hg_config_http.hpp"
 #include "hg_reset_sequence.hpp"
 #include "device_discovery.hpp"
 #include "nvs_config_store.hpp"
@@ -31,6 +32,7 @@
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "esp_netif.h"
 #include "nvs_flash.h"
 
@@ -62,6 +64,7 @@ homeguard::idf::GpioOutputBackend g_gpio_outputs;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::AccessHttp g_access_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
+homeguard::idf::ConfigHttp g_config_http;
 NvsConfigStore g_provisioning_store;
 WebsocketTelemetry g_websocket_telemetry;
 DeviceDiscoveryService g_device_discovery;
@@ -165,13 +168,15 @@ esp_err_t start_http_server()
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 48;
-    config.stack_size = 8192;
+    config.max_open_sockets = 10;
+    config.stack_size = 16384;
     config.lru_purge_enable = true;
 
     ESP_RETURN_ON_ERROR(httpd_start(&g_http_server, &config), kTag, "httpd_start");
     ESP_RETURN_ON_ERROR(g_web_http.register_handlers(g_http_server), kTag, "web routes");
     g_network_http.set_access_control(&g_access_control);
     ESP_RETURN_ON_ERROR(g_network_http.register_handlers(g_http_server), kTag, "network routes");
+    ESP_RETURN_ON_ERROR(g_config_http.register_handlers(g_http_server, &g_access_control, &g_access_store, &g_network_http, &g_cloud_store, &g_commissioning_store), kTag, "config routes");
     ESP_RETURN_ON_ERROR(g_lan_http.register_handlers(g_http_server), kTag, "LAN discovery routes");
     ESP_RETURN_ON_ERROR(g_cloud_http.register_handlers(g_http_server, &g_cloud_link, &g_cloud_store, &g_access_control), kTag, "cloud routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
@@ -236,6 +241,7 @@ void start_device_discovery()
 
 extern "C" void app_main()
 {
+    esp_log_set_vprintf(esp_rom_vprintf);
     ESP_ERROR_CHECK(initialize_nvs());
     if (homeguard::idf::handle_triple_rst_factory_reset()) return;
 

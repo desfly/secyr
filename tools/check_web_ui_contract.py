@@ -34,6 +34,7 @@ def text(path: Path) -> str:
 html = text(WEB / "index.html")
 css = text(WEB / "app.css")
 js = text(WEB / "app.js")
+access_session = text(WEB / "access-session.js")
 cmake = text(MAIN / "CMakeLists.txt")
 web_http = text(MAIN / "hg_web_http.cpp")
 network = text(MAIN / "hg_network_http.cpp")
@@ -44,9 +45,9 @@ app_main = text(MAIN / "app_main.cpp")
 build_info = text(MAIN / "hg_build_info.cpp")
 access_core = text(CORE / "access_control.cpp")
 
-for asset in ("web/index.html", "web/app.css", "web/app.js", "web/bruce.jpg"):
+for asset in ("web/index.html", "web/app.css", "web/app.js", "web/access-session.js", "web/bruce.jpg"):
     require(asset in cmake, f"CMake does not embed/copy {asset}")
-for route in ('"/"', '"/index.html"', '"/app.css"', '"/app.js"', '"/bruce.jpg"'):
+for route in ('"/"', '"/index.html"', '"/app.css"', '"/app.js"', '"/access-session.js"', '"/bruce.jpg"'):
     require(route in web_http, f"WebHttp route missing: {route}")
 for header in ("Cache-Control", "no-store", "Pragma", "Expires"):
     require(header in web_http, f"WebHttp cache prevention missing: {header}")
@@ -77,6 +78,38 @@ for needle in (
     'document.documentElement.dataset.homeguardUi = "ready"',
 ):
     require(needle in js, f"app.js contract missing: {needle}")
+
+# Cemented mobile Web UI contract. The final firmware-served CSS/JS is
+# authoritative because the field failure in run 877 came from a firmware CSS
+# suffix overriding otherwise-correct access-session rules.
+for needle in (
+    "mobile-menu-toggle",
+    "mobile-menu-open",
+    "object-fit:contain!important",
+    "ensureFirmwareMobileNavigation",
+    "enforceSingleActiveNav",
+    "mobileMenuToggle",
+):
+    require(needle in web_http, f"firmware mobile Web UI contract missing: {needle}")
+require('.sidebar nav{display:none!important' in web_http,
+        "firmware mobile menu is not collapsed by default")
+require('.sidebar.mobile-menu-open nav{display:grid!important' in web_http,
+        "firmware mobile menu does not expand below Bruce")
+require('.bruce{height:150px!important' in web_http,
+        "firmware mobile Bruce frame is not the full portrait layout")
+require('object-position:center center!important' in web_http,
+        "firmware mobile Bruce portrait is not centered")
+require('.bruce{height:86px!important' not in web_http,
+        "regression: old 86px cropped Bruce rule returned")
+require('object-fit:cover!important' not in web_http,
+        "regression: firmware crops Bruce with object-fit:cover")
+require('.sidebar nav{display:grid!important' not in web_http,
+        "regression: mobile menu is forced open by default")
+
+# Secondary access-session behavior must remain compatible, but the firmware
+# no longer relies on it as the only protection against crop/overlay regressions.
+for needle in ("ensureMobileNavigation", "enforceSingleSidebarActive"):
+    require(needle in access_session, f"access-session navigation compatibility missing: {needle}")
 
 require("sendSecurityCommand" in js and "JSON.stringify({ command, actor, credential })" in js,
         "security buttons are not posting command + operator credentials")
@@ -144,17 +177,22 @@ require("ip" in network, "Wi-Fi status backend does not expose IP")
 require("save_credentials" in network and "load_credentials" in network,
         "Wi-Fi reconnect persistence missing")
 
-require((WEB / "bruce.jpg").is_file(), "Bruce JPEG asset missing")
-require((WEB / "bruce.jpg").stat().st_size > 1024 if (WEB / "bruce.jpg").exists() else False,
-        "Bruce JPEG asset is unexpectedly small")
+bruce_path = WEB / "bruce.jpg"
+require(bruce_path.is_file(), "Bruce asset missing")
+require(bruce_path.stat().st_size > 1024 if bruce_path.exists() else False,
+        "Bruce asset is unexpectedly small")
+require(bruce_path.read_bytes().startswith(b"\xff\xd8\xff") if bruce_path.exists() else False,
+        "approved Bruce asset is no longer JPEG")
 require('class="bruce"' in html, "Bruce DOM container missing")
 require('<img id="bruceArt"' in html, "Bruce portrait image element missing")
 require('/bruce.jpg?v=' in html, "Bruce portrait cache-busted URL missing")
 require('<svg id="bruceArt"' not in html, "old drawn Bruce SVG placeholder still present")
 require(".bruce img{" in html, "Bruce portrait sizing rule missing")
 require("EMBED_FILES" in cmake and '"web/bruce.jpg"' in cmake,
-        "Bruce JPEG is not embedded as a binary ESP-IDF asset")
-require('"image/jpeg"' in web_http, "Bruce route does not use image/jpeg")
+        "Bruce asset is not embedded as a binary ESP-IDF asset")
+require('"image/png"' in web_http, "Bruce compatibility route media type missing")
+require("send_binary_chunked" in web_http,
+        "Bruce route is not streamed in bounded chunks")
 require("bruce_jpg_start" in web_http and "bruce_jpg_end" in web_http,
         "Bruce embedded linker symbols missing")
 
@@ -171,11 +209,12 @@ if errors:
 
 print("Web UI contract PASS")
 print(f" - DOM ids checked: {len(required_ids)}")
+print(" - mobile menu: firmware-collapsed; Bruce contain; one active item")
 print(" - quick security buttons -> authorized firmware route: 4")
 print(" - live valve buttons -> authorized firmware route: present")
 print(" - first Admin bootstrap: factory-fresh NVS only; corruption stays fail-closed")
 print(" - Wi-Fi configuration: Admin-authorized; status/scan + RSSI/IP/persistence present")
 print(" - roles: Admin full; User arm/disarm + valves; Guest control denied")
-print(" - Bruce: approved JPEG embedded and served as a firmware asset")
+print(" - Bruce: approved artwork embedded and streamed in bounded chunks")
 print(" - embedded assets + anti-cache headers: present")
 print(" - runtime build number sourced from GitHub Actions run number")

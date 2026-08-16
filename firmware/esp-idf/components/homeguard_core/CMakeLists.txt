@@ -38,6 +38,10 @@ set(HOMEGUARD_BUILD0017_SOURCES
     "../../../src/temperature_statistics.cpp"
 )
 
-idf_component_register(SRCS ${HG_CORE_SRCS} INCLUDE_DIRS "../../../include")
+idf_component_register(
+    SRCS ${HG_CORE_SRCS}
+    INCLUDE_DIRS "../../../include"
+    PRIV_REQUIRES mbedtls esp_timer
+)
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)
-target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Wpedantic -O3)

@@ -1,0 +1,37 @@
+name: Release Acceptance Matrix
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "firmware/**"
+      - "android/**"
+      - "web/**"
+      - "tools/**"
+      - "tests/**"
+      - ".github/workflows/release-acceptance-matrix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance-matrix:
+    name: 23 cemented acceptance items
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Build code-vs-field acceptance matrix
+        run: python tools/release_acceptance_matrix.py
+      - name: Upload acceptance matrix
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuard-S3-release-acceptance-matrix
+          path: release-acceptance-matrix.json
+          if-no-files-found: error

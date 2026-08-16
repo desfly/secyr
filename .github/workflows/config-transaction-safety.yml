@@ -1,0 +1,48 @@
+name: Config Transaction Safety
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "firmware/CMakeLists.txt"
+      - "firmware/esp-idf/main/hg_config_backup.*"
+      - "firmware/esp-idf/main/hg_config_transaction.*"
+      - "firmware/esp-idf/main/hg_config_http.*"
+      - "firmware/esp-idf/main/hg_access_nvs.*"
+      - "firmware/esp-idf/main/hg_cloud_nvs.*"
+      - "firmware/esp-idf/main/hg_commissioning_nvs.*"
+      - "firmware/esp-idf/main/hg_network_http.*"
+      - "firmware/esp-idf/main/hg_network_persistence.cpp"
+      - "tests/test_config_transaction_host.cpp"
+      - "tests/esp-idf-mock/include/nvs.h"
+      - "tools/check_config_transaction_contract.py"
+      - ".github/workflows/config-transaction-safety.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  config-transaction-safety:
+    name: Lockout guard and rollback
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ ninja-build
+      - name: Verify config transaction contract
+        run: python tools/check_config_transaction_contract.py
+      - name: Build and execute config transaction host test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S firmware -B build-config-transaction -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-config-transaction --target config_transaction_host_test
+          ctest --test-dir build-config-transaction --output-on-failure -R '^config_transaction_host_test$'

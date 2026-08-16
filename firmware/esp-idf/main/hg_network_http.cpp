@@ -24,6 +24,7 @@ constexpr char kNvsNamespace[] = "hg_wifi";
 constexpr char kNvsKey[] = "credentials";
 constexpr std::size_t kMaxScanRecords = 20;
 constexpr TickType_t kStaHandoverDelay = pdMS_TO_TICKS(400);
+constexpr TickType_t kSetupApRetireDelay = pdMS_TO_TICKS(120);
 
 struct CredentialsRecord {
     std::uint32_t magic{};
@@ -102,6 +103,19 @@ std::string ssid_from_bytes(const std::uint8_t* bytes, std::size_t capacity)
     return std::string(reinterpret_cast<const char*>(bytes), length);
 }
 
+bool read_request_body(httpd_req_t* request, std::size_t limit, std::string& body)
+{
+    if (request == nullptr || request->content_len == 0 || request->content_len > limit) return false;
+    body.assign(request->content_len, '\0');
+    std::size_t offset = 0;
+    while (offset < body.size()) {
+        const auto received = httpd_req_recv(request, body.data() + offset, body.size() - offset);
+        if (received <= 0) return false;
+        offset += static_cast<std::size_t>(received);
+    }
+    return true;
+}
+
 esp_err_t send_json(httpd_req_t* request, const std::string& body)
 {
     httpd_resp_set_type(request, "application/json");
@@ -121,6 +135,12 @@ esp_err_t NetworkHttp::begin()
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     auto error = esp_wifi_init(&init);
+    if (error != ESP_OK) return error;
+
+    // HomeGuard owns persistence in hg_wifi. Keep the ESP-IDF Wi-Fi driver's
+    // runtime STA/AP configuration in RAM so there is no second hidden copy of
+    // user SSID/password outside the namespace erased by Factory Reset.
+    error = esp_wifi_set_storage(WIFI_STORAGE_RAM);
     if (error != ESP_OK) return error;
 
     error = esp_wifi_set_mode(WIFI_MODE_APSTA);
@@ -197,7 +217,22 @@ esp_err_t NetworkHttp::connect_post(httpd_req_t* request)
 
 esp_err_t NetworkHttp::handle_status(httpd_req_t* request)
 {
-    return send_json(request, status_json());
+    const auto response_error = send_json(request, status_json());
+    if (response_error != ESP_OK) return response_error;
+
+    // The setup AP exists only as a commissioning/recovery path. Once the STA
+    // has a real LAN address, retire 192.168.4.1 after the status response has
+    // been delivered so the controller has one normal Web UI endpoint.
+    wifi_ap_record_t ap_info{};
+    esp_netif_ip_info_t ip_info{};
+    if (sta_netif_ != nullptr && esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK &&
+        esp_netif_get_ip_info(static_cast<esp_netif_t*>(sta_netif_), &ip_info) == ESP_OK &&
+        ip_info.ip.addr != 0U) {
+        vTaskDelay(kSetupApRetireDelay);
+        (void)esp_wifi_set_mode(WIFI_MODE_STA);
+    }
+
+    return ESP_OK;
 }
 
 esp_err_t NetworkHttp::handle_scan(httpd_req_t* request)
@@ -207,18 +242,11 @@ esp_err_t NetworkHttp::handle_scan(httpd_req_t* request)
 
 esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
 {
-    if (request->content_len == 0 || request->content_len > 384) {
+    std::string body;
+    if (!read_request_body(request, 384U, body)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"invalid_body\"}");
     }
-
-    std::string body(request->content_len, '\0');
-    const auto received = httpd_req_recv(request, body.data(), body.size());
-    if (received <= 0) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"read_failed\"}");
-    }
-    body.resize(static_cast<std::size_t>(received));
 
     std::string actor;
     std::string credential;
@@ -243,6 +271,14 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"invalid_credentials\"}");
     }
 
+    // Re-enable the setup AP while changing credentials. If the new network
+    // details are wrong the user still has the recovery path at 192.168.4.1.
+    if (esp_wifi_set_mode(WIFI_MODE_APSTA) != ESP_OK) {
+        std::fill(password.begin(), password.end(), '\0');
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_mode_failed\"}");
+    }
+
     wifi_config_t sta{};
     std::memcpy(sta.sta.ssid, ssid.data(), std::min(ssid.size(), sizeof(sta.sta.ssid)));
     std::memcpy(sta.sta.password, password.data(), std::min(password.size(), sizeof(sta.sta.password)));
@@ -259,11 +295,14 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
 
     const auto response_error = send_json(request,
         std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) + "\"}");
-    if (response_error != ESP_OK) return response_error;
 
+    // A Wi-Fi channel handover can tear down the HTTP socket. The accepted
+    // configuration must still be applied even if the response write fails.
     vTaskDelay(kStaHandoverDelay);
     (void)esp_wifi_disconnect();
-    return esp_wifi_connect();
+    const auto connect_error = esp_wifi_connect();
+
+    return response_error != ESP_OK ? response_error : connect_error;
 }
 
 bool NetworkHttp::apply_sta(const std::string& ssid, const std::string& password, bool persist)
@@ -355,22 +394,27 @@ std::string NetworkHttp::status_json() const
 
 std::string NetworkHttp::scan_json() const
 {
-    wifi_ap_record_t current_ap{};
-    const bool sta_was_connected = esp_wifi_sta_get_ap_info(&current_ap) == ESP_OK;
-    if (sta_was_connected) {
-        (void)esp_wifi_disconnect();
-        vTaskDelay(pdMS_TO_TICKS(120));
-    }
+    // A connected ESP32-S3 can perform a background scan without tearing down
+    // the STA association. Build 877 explicitly disconnected here and relied on
+    // a later esp_wifi_connect(); field testing proved that recovery path can
+    // fail and leave the controller permanently off-LAN. Scanning is therefore
+    // forbidden from changing STA connection state.
+    wifi_scan_config_t scan_config{};
+    scan_config.ssid = nullptr;
+    scan_config.bssid = nullptr;
+    scan_config.channel = 0;
+    scan_config.show_hidden = true;
+    scan_config.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+    scan_config.scan_time.active.min = 20;
+    scan_config.scan_time.active.max = 60;
 
-    const auto start_error = esp_wifi_scan_start(nullptr, true);
+    const auto start_error = esp_wifi_scan_start(&scan_config, true);
     if (start_error != ESP_OK) {
-        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_start_failed\",\"networks\":[]}";
     }
 
     std::uint16_t count = 0;
     if (esp_wifi_scan_get_ap_num(&count) != ESP_OK) {
-        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_count_failed\",\"networks\":[]}";
     }
 
@@ -378,7 +422,6 @@ std::string NetworkHttp::scan_json() const
     std::array<wifi_ap_record_t, kMaxScanRecords> records{};
     std::uint16_t returned = count;
     if (returned != 0 && esp_wifi_scan_get_ap_records(&returned, records.data()) != ESP_OK) {
-        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_records_failed\",\"networks\":[]}";
     }
 
@@ -390,8 +433,6 @@ std::string NetworkHttp::scan_json() const
                std::to_string(static_cast<int>(records[i].rssi)) + "}";
     }
     out += "]}";
-
-    if (sta_was_connected) (void)esp_wifi_connect();
     return out;
 }
 

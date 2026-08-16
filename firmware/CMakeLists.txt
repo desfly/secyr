@@ -57,7 +57,6 @@ add_executable(homeguard_tests
     ../tests/test_controller.cpp
     ../tests/test_connectivity.cpp
     ../tests/test_provisioning.cpp
-    ../tests/test_reset_sequence.cpp
     ../tests/test_build0009.cpp
     ../tests/test_build0013.cpp
     ../tests/test_build0032.cpp
@@ -77,7 +76,47 @@ add_executable(homeguard_tests
     ../tests/test_build0056.cpp
     ../tests/test_build0057.cpp
     ../tests/test_build0058.cpp
+    ../tests/test_reset_sequence.cpp
 )
 target_link_libraries(homeguard_tests PRIVATE homeguard_core)
+
+# Exercise the actual ESP-IDF FactoryResetManager against an in-memory NVS/Wi-Fi
+# mock. This is intentionally separate from the pure core test binary so the
+# release gate validates namespace erasure and immutable-state preservation,
+# not merely static source strings. The RGB indicator is stubbed here because
+# host validation has no ESP32 RMT peripheral; the real firmware links the
+# hardware-backed hg_rgb_diagnostic.cpp implementation.
+add_executable(factory_reset_host_test
+    ../tests/test_factory_reset_host.cpp
+    ../tests/esp-idf-mock/hg_rgb_diagnostic_host.cpp
+    esp-idf/main/hg_factory_reset.cpp
+    esp-idf/main/hg_commissioning_nvs.cpp
+)
+target_include_directories(factory_reset_host_test PRIVATE
+    esp-idf/main
+    ../tests/esp-idf-mock/include
+)
+target_link_libraries(factory_reset_host_test PRIVATE homeguard_core)
+
+# Apply a decoded backup through the real persistence stores. A one-shot NVS
+# write fault after Access/Wi-Fi mutation must roll every earlier write back,
+# while the same transaction without the injected fault must commit normally.
+add_executable(config_transaction_host_test
+    ../tests/test_config_transaction_host.cpp
+    esp-idf/main/hg_config_transaction.cpp
+    esp-idf/main/hg_access_nvs.cpp
+    esp-idf/main/hg_cloud_nvs.cpp
+    esp-idf/main/hg_commissioning_nvs.cpp
+    esp-idf/main/hg_network_http.cpp
+    esp-idf/main/hg_network_persistence.cpp
+)
+target_include_directories(config_transaction_host_test PRIVATE
+    esp-idf/main
+    ../tests/esp-idf-mock/include
+)
+target_link_libraries(config_transaction_host_test PRIVATE homeguard_core)
+
 enable_testing()
 add_test(NAME homeguard_tests COMMAND homeguard_tests)
+add_test(NAME factory_reset_host_test COMMAND factory_reset_host_test)
+add_test(NAME config_transaction_host_test COMMAND config_transaction_host_test)

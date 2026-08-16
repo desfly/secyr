@@ -8,6 +8,8 @@
 using wifi_interface_t = int;
 using wifi_mode_t = int;
 using wifi_auth_mode_t = int;
+using wifi_scan_type_t = int;
+using wifi_storage_t = int;
 
 constexpr wifi_interface_t WIFI_IF_STA = 0;
 constexpr wifi_interface_t WIFI_IF_AP = 1;
@@ -16,6 +18,9 @@ constexpr wifi_mode_t WIFI_MODE_AP = 2;
 constexpr wifi_mode_t WIFI_MODE_APSTA = 3;
 constexpr wifi_auth_mode_t WIFI_AUTH_OPEN = 0;
 constexpr wifi_auth_mode_t WIFI_AUTH_WPA2_PSK = 3;
+constexpr wifi_scan_type_t WIFI_SCAN_TYPE_ACTIVE = 0;
+constexpr wifi_storage_t WIFI_STORAGE_FLASH = 0;
+constexpr wifi_storage_t WIFI_STORAGE_RAM = 1;
 
 struct wifi_pmf_config_t {
     bool capable{};
@@ -51,7 +56,23 @@ struct wifi_config_t {
 struct wifi_init_config_t {};
 #define WIFI_INIT_CONFIG_DEFAULT() wifi_init_config_t{}
 
-struct wifi_scan_config_t {};
+struct wifi_active_scan_time_t {
+    std::uint32_t min{};
+    std::uint32_t max{};
+};
+
+struct wifi_scan_time_t {
+    wifi_active_scan_time_t active{};
+};
+
+struct wifi_scan_config_t {
+    std::uint8_t* ssid{};
+    std::uint8_t* bssid{};
+    std::uint8_t channel{};
+    bool show_hidden{};
+    wifi_scan_type_t scan_type{};
+    wifi_scan_time_t scan_time{};
+};
 
 struct wifi_ap_record_t {
     std::uint8_t ssid[33]{};
@@ -66,12 +87,16 @@ inline wifi_config_t& mock_wifi_sta_config() {
 
 inline esp_err_t esp_wifi_init(const wifi_init_config_t*) { return ESP_OK; }
 inline esp_err_t esp_wifi_deinit() { return ESP_OK; }
+inline esp_err_t esp_wifi_set_storage(wifi_storage_t) { return ESP_OK; }
+inline esp_err_t esp_wifi_restore() {
+    mock_wifi_sta_config() = {};
+    return ESP_OK;
+}
 inline esp_err_t esp_wifi_set_mode(wifi_mode_t) { return ESP_OK; }
 inline esp_err_t esp_wifi_start() { return ESP_OK; }
 inline esp_err_t esp_wifi_stop() { return ESP_OK; }
 inline esp_err_t esp_wifi_connect() { return ESP_OK; }
 inline esp_err_t esp_wifi_disconnect() { return ESP_OK; }
-inline esp_err_t esp_wifi_restore() { mock_wifi_sta_config() = {}; return ESP_OK; }
 
 inline esp_err_t esp_wifi_set_config(wifi_interface_t interface, const wifi_config_t* config) {
     if (config == nullptr) return ESP_ERR_INVALID_ARG;

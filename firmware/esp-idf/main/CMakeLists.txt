@@ -4,7 +4,11 @@
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/web")
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/index.html" "${CMAKE_CURRENT_LIST_DIR}/web/index.html" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.css" "${CMAKE_CURRENT_LIST_DIR}/web/app.css" COPYONLY)
+file(READ "${CMAKE_CURRENT_LIST_DIR}/../../../web/mobile-bruce-fix.css" HG_MOBILE_BRUCE_FIX_CSS)
+file(APPEND "${CMAKE_CURRENT_LIST_DIR}/web/app.css" "\n${HG_MOBILE_BRUCE_FIX_CSS}\n")
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.js" "${CMAKE_CURRENT_LIST_DIR}/web/app.js" COPYONLY)
+file(READ "${CMAKE_CURRENT_LIST_DIR}/../../../web/first-admin-hint.js" HG_FIRST_ADMIN_HINT_JS)
+file(APPEND "${CMAKE_CURRENT_LIST_DIR}/web/app.js" "\n${HG_FIRST_ADMIN_HINT_JS}\n")
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/access-session.js" "${CMAKE_CURRENT_LIST_DIR}/web/access-session.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/factory-reset.js" "${CMAKE_CURRENT_LIST_DIR}/web/factory-reset.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/bruce.jpg" "${CMAKE_CURRENT_LIST_DIR}/web/bruce.jpg" COPYONLY)
@@ -14,6 +18,7 @@ idf_component_register(
         "app_main.cpp"
         "hg_web_http.cpp"
         "hg_network_http.cpp"
+        "hg_network_persistence.cpp"
         "hg_lan_http.cpp"
         "hg_cloud_link.cpp"
         "hg_cloud_http.cpp"
@@ -43,6 +48,9 @@ idf_component_register(
         "hg_commissioning_nvs.cpp"
         "hg_factory_reset.cpp"
         "hg_reset_sequence.cpp"
+        "hg_config_backup.cpp"
+        "hg_config_transaction.cpp"
+        "hg_config_http.cpp"
         "../../src/system_model.cpp"
         "../../src/system_api.cpp"
         "../../src/output_interlock.cpp"
@@ -81,6 +89,7 @@ idf_component_register(
         esp_timer
         esp_wifi
         fatfs
+        json
         mqtt
         nvs_flash
         sdmmc
@@ -97,6 +106,12 @@ idf_component_register(
 )
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)
+
+# The access KDF deliberately performs 4096 SHA-256 rounds. Build the C++
+# component with release optimization on ESP32-S3 so bootstrap/login cannot
+# monopolize the HTTP task for tens of seconds. The KDF and persisted digest
+# format remain unchanged.
+target_compile_options(${COMPONENT_LIB} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-O3>")
 
 if(DEFINED ENV{GITHUB_SHA})
     set(HG_GIT_REVISION "$ENV{GITHUB_SHA}")

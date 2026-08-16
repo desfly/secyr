@@ -1,0 +1,27 @@
+name: Wi-Fi Scan Safety
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "firmware/esp-idf/main/hg_network_http.cpp"
+      - "tools/check_wifi_scan_safety.py"
+      - ".github/workflows/wifi-scan-safety.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wifi-scan-safety:
+    name: Preserve STA during scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Verify Wi-Fi scan safety contract
+        run: python tools/check_wifi_scan_safety.py
