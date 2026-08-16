@@ -1,5 +1,10 @@
 #include "hg_system_http.hpp"
+#include "hg_factory_reset.hpp"
 #include "homeguard/system_api.hpp"
+
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -46,6 +51,11 @@ bool parse_json_string(const std::string& body, const char* key, std::string& va
     return true;
 }
 
+void delayed_factory_reboot(void*) {
+    vTaskDelay(pdMS_TO_TICKS(350));
+    esp_restart();
+}
+
 const char* arm_state_name(hg::PartitionArmState state) {
     switch (state) {
         case hg::PartitionArmState::Stay: return "stay";
@@ -77,6 +87,7 @@ esp_err_t SystemHttp::register_handlers(
         {.uri="/api/v1/system/partitions", .method=HTTP_GET, .handler=&SystemHttp::partitions_get, .user_ctx=this},
         {.uri="/api/v1/system/events", .method=HTTP_GET, .handler=&SystemHttp::events_get, .user_ctx=this},
         {.uri="/api/v1/system/security-command", .method=HTTP_POST, .handler=&SystemHttp::security_command_post, .user_ctx=this},
+        {.uri="/api/v1/system/factory-reset", .method=HTTP_POST, .handler=&SystemHttp::factory_reset_post, .user_ctx=this},
         {.uri="/ws/system", .method=HTTP_GET, .handler=&SystemHttp::websocket, .user_ctx=this, .is_websocket=true},
     };
     for (const auto& route : routes) {
@@ -129,6 +140,66 @@ esp_err_t SystemHttp::events_get(httpd_req_t* request) {
 esp_err_t SystemHttp::security_command_post(httpd_req_t* request) {
     auto* self = self_from(request);
     return self == nullptr ? ESP_FAIL : self->handle_security_command(request);
+}
+
+esp_err_t SystemHttp::factory_reset_post(httpd_req_t* request) {
+    auto* self = self_from(request);
+    return self == nullptr ? ESP_FAIL : self->handle_factory_reset(request);
+}
+
+esp_err_t SystemHttp::handle_factory_reset(httpd_req_t* request) {
+    if (access_control_ == nullptr) return ESP_FAIL;
+    if (request->content_len == 0 || request->content_len > 512) {
+        httpd_resp_set_status(request, "400 Bad Request");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_body\"}", -1);
+    }
+
+    std::string body(request->content_len, '\0');
+    const auto received = httpd_req_recv(request, body.data(), body.size());
+    if (received <= 0) {
+        httpd_resp_set_status(request, "400 Bad Request");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"read_failed\"}", -1);
+    }
+    body.resize(static_cast<std::size_t>(received));
+
+    std::string actor;
+    std::string credential;
+    std::string confirm;
+    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
+        httpd_resp_set_status(request, "401 Unauthorized");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"credential_required\"}", -1);
+    }
+    if (!parse_json_string(body, "confirm", confirm) || confirm != "ERASE_ALL") {
+        httpd_resp_set_status(request, "409 Conflict");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"explicit_confirmation_required\"}", -1);
+    }
+
+    const auto decision = access_control_->authorize(actor, credential, "system.factory_reset");
+    if (decision != homeguard::AuditDecision::Allowed) {
+        httpd_resp_set_status(request, "403 Forbidden");
+        const std::string response = std::string{"{\"ok\":false,\"reason\":\""} +
+            homeguard::to_string(decision) + "\"}";
+        return send_json(request, response.c_str(), response.size());
+    }
+
+    const auto report = FactoryResetManager{}.erase_mutable_state();
+    if (!report.ok()) {
+        httpd_resp_set_status(request, "500 Internal Server Error");
+        const std::string response = std::string{"{\"ok\":false,\"reason\":\"erase_failed\",\"access\":"} +
+            std::to_string(report.access) + ",\"wifi\":" + std::to_string(report.wifi) +
+            ",\"cloud\":" + std::to_string(report.cloud) +
+            ",\"commissioning\":" + std::to_string(report.commissioning) + "}";
+        return send_json(request, response.c_str(), response.size());
+    }
+
+    access_control_->clear_users();
+    static constexpr char response[] =
+        "{\"ok\":true,\"state\":\"factory_reset_complete\",\"rebooting\":true}";
+    const auto send_error = send_json(request, response, sizeof(response) - 1U);
+    if (send_error == ESP_OK) {
+        (void)xTaskCreate(&delayed_factory_reboot, "hg_factory_reset", 2048, nullptr, 5, nullptr);
+    }
+    return send_error;
 }
 
 esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
