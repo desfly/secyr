@@ -299,19 +299,8 @@ class RegisteredDeviceStore(context: Context) {
             discovered.baseUrl,
         )
 
-    private fun isGeneratedName(value: String, deviceId: String = "", baseUrl: String = ""): Boolean {
-        val clean = value.trim()
-        if (clean.isBlank()) return true
-        if (clean.equals("HomeGuard", ignoreCase = true)) return true
-        if (clean.equals("HomeGuard-S3", ignoreCase = true)) return true
-        if (deviceId.isNotBlank() && clean.equals(deviceId.trim(), ignoreCase = true)) return true
-
-        val endpoint = baseUrl.trim().trimEnd('/').lowercase()
-        if (endpoint.isNotBlank() && clean.equals(endpoint, ignoreCase = true)) return true
-        val host = DeviceIdentity.endpointHost(endpoint)
-        if (host.isNotBlank() && clean.equals(host, ignoreCase = true)) return true
-        return false
-    }
+    private fun isGeneratedName(value: String, deviceId: String = "", baseUrl: String = ""): Boolean =
+        DeviceIdentity.isForbiddenFriendlyName(value, deviceId, baseUrl)
 
     private fun visibleSortName(device: RegisteredDevice): String =
         if (isGeneratedName(device.name, device.deviceId, device.baseUrl)) "~" else device.name.trim().lowercase()
