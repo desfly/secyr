@@ -364,8 +364,11 @@ bool PhysicalOutputRuntime::bench_channel_allowed(PhysicalOutputChannel channel)
 bool PhysicalOutputRuntime::bench_pulse(
     PhysicalOutputChannel channel,
     std::uint32_t duration_ms,
-    BenchDelayFn delay_fn)
+    BenchDelayFn delay_fn,
+    bool* target_evidence)
 {
+    if (target_evidence != nullptr) *target_evidence = false;
+
     std::scoped_lock lock(mutex_);
     if (backend_ == nullptr || state_.safety_fault_latched || !state_.maintenance_mode ||
         delay_fn == nullptr || duration_ms == 0U || duration_ms > kMaxBenchPulseMs ||
@@ -417,7 +420,7 @@ bool PhysicalOutputRuntime::bench_pulse(
 
     delay_fn(duration_ms);
 
-    bool target_limit_reached = true;
+    bool target_limit_reached = false;
     if (is_valve) {
         LimitSnapshot after{};
         if (!read_limits_locked(after)) {
@@ -442,9 +445,12 @@ bool PhysicalOutputRuntime::bench_pulse(
         : PhysicalOutputStatus::InvalidHardware;
     state_.outputs_enabled = false;
 
-    // For valves, success is evidence: the target was inactive before the
-    // pulse and the matching physical GPB end switch is active afterwards.
-    return target_limit_reached;
+    if (target_evidence != nullptr) *target_evidence = target_limit_reached;
+
+    // A safe bounded pulse is successful even when a valve has not reached its
+    // target yet. The caller may repeat another <=1 s pulse. Evidence remains
+    // false until the matching physical GPB end switch is observed afterwards.
+    return true;
 }
 
 bool PhysicalOutputRuntime::force_safe()
