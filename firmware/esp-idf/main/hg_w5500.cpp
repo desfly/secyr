@@ -6,7 +6,6 @@
 #include "esp_eth_mac_spi.h"
 #include "esp_eth_phy.h"
 #include "esp_event.h"
-#include "esp_check.h"
 #include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
 
@@ -18,6 +17,11 @@ esp_err_t W5500::initialize()
 {
     if (status_.initialized) {
         return ESP_OK;
+    }
+
+    const auto isr_error = gpio_install_isr_service(0);
+    if (isr_error != ESP_OK && isr_error != ESP_ERR_INVALID_STATE) {
+        return isr_error;
     }
 
     const spi_bus_config_t bus_config{
@@ -39,8 +43,9 @@ esp_err_t W5500::initialize()
         SPI2_HOST,
         &bus_config,
         SPI_DMA_CH_AUTO);
-    if (error != ESP_OK &&
-        error != ESP_ERR_INVALID_STATE) {
+    if (error == ESP_OK) {
+        spi_bus_owned_ = true;
+    } else if (error != ESP_ERR_INVALID_STATE) {
         return error;
     }
 
@@ -78,24 +83,24 @@ esp_err_t W5500::initialize()
     phy_config.reset_gpio_num =
         board::kW5500Reset;
 
-    esp_eth_mac_t* mac =
-        esp_eth_mac_new_w5500(
-            &w5500_config,
-            &mac_config);
-    esp_eth_phy_t* phy =
-        esp_eth_phy_new_w5500(
-            &phy_config);
+    mac_ = esp_eth_mac_new_w5500(
+        &w5500_config,
+        &mac_config);
+    phy_ = esp_eth_phy_new_w5500(
+        &phy_config);
 
-    if (mac == nullptr || phy == nullptr) {
+    if (mac_ == nullptr || phy_ == nullptr) {
+        (void)deinitialize();
         return ESP_ERR_NO_MEM;
     }
 
     esp_eth_config_t eth_config =
-        ETH_DEFAULT_CONFIG(mac, phy);
+        ETH_DEFAULT_CONFIG(mac_, phy_);
     error = esp_eth_driver_install(
         &eth_config,
         &eth_);
     if (error != ESP_OK) {
+        (void)deinitialize();
         return error;
     }
 
@@ -103,27 +108,43 @@ esp_err_t W5500::initialize()
         ESP_NETIF_DEFAULT_ETH();
     netif_ = esp_netif_new(&netif_config);
     if (netif_ == nullptr) {
+        (void)deinitialize();
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_ERROR_CHECK(
-        esp_netif_attach(
-            netif_,
-            esp_eth_new_netif_glue(eth_)));
+    glue_ = esp_eth_new_netif_glue(eth_);
+    if (glue_ == nullptr) {
+        (void)deinitialize();
+        return ESP_ERR_NO_MEM;
+    }
 
-    ESP_ERROR_CHECK(
-        esp_event_handler_register(
-            ETH_EVENT,
-            ESP_EVENT_ANY_ID,
-            &W5500::on_eth_event,
-            this));
+    error = esp_netif_attach(netif_, glue_);
+    if (error != ESP_OK) {
+        (void)deinitialize();
+        return error;
+    }
 
-    ESP_ERROR_CHECK(
-        esp_event_handler_register(
-            IP_EVENT,
-            IP_EVENT_ETH_GOT_IP,
-            &W5500::on_ip_event,
-            this));
+    error = esp_event_handler_register(
+        ETH_EVENT,
+        ESP_EVENT_ANY_ID,
+        &W5500::on_eth_event,
+        this);
+    if (error != ESP_OK) {
+        (void)deinitialize();
+        return error;
+    }
+    eth_event_registered_ = true;
+
+    error = esp_event_handler_register(
+        IP_EVENT,
+        IP_EVENT_ETH_GOT_IP,
+        &W5500::on_ip_event,
+        this);
+    if (error != ESP_OK) {
+        (void)deinitialize();
+        return error;
+    }
+    ip_event_registered_ = true;
 
     status_.initialized = true;
     return ESP_OK;
@@ -134,7 +155,11 @@ esp_err_t W5500::start()
     if (!status_.initialized || eth_ == nullptr) {
         return ESP_ERR_INVALID_STATE;
     }
-    return esp_eth_start(eth_);
+    const auto error = esp_eth_start(eth_);
+    if (error != ESP_OK) {
+        (void)deinitialize();
+    }
+    return error;
 }
 
 esp_err_t W5500::stop()
@@ -143,6 +168,63 @@ esp_err_t W5500::stop()
         return ESP_OK;
     }
     return esp_eth_stop(eth_);
+}
+
+esp_err_t W5500::deinitialize()
+{
+    esp_err_t first_error = ESP_OK;
+    auto capture = [&first_error](esp_err_t error) {
+        if (error != ESP_OK && error != ESP_ERR_INVALID_STATE && first_error == ESP_OK) {
+            first_error = error;
+        }
+    };
+
+    if (eth_ != nullptr && status_.initialized) {
+        capture(esp_eth_stop(eth_));
+    }
+
+    if (ip_event_registered_) {
+        capture(esp_event_handler_unregister(
+            IP_EVENT,
+            IP_EVENT_ETH_GOT_IP,
+            &W5500::on_ip_event));
+        ip_event_registered_ = false;
+    }
+    if (eth_event_registered_) {
+        capture(esp_event_handler_unregister(
+            ETH_EVENT,
+            ESP_EVENT_ANY_ID,
+            &W5500::on_eth_event));
+        eth_event_registered_ = false;
+    }
+
+    if (glue_ != nullptr) {
+        capture(esp_eth_del_netif_glue(glue_));
+        glue_ = nullptr;
+    }
+    if (netif_ != nullptr) {
+        esp_netif_destroy(netif_);
+        netif_ = nullptr;
+    }
+    if (eth_ != nullptr) {
+        capture(esp_eth_driver_uninstall(eth_));
+        eth_ = nullptr;
+    }
+    if (phy_ != nullptr) {
+        capture(phy_->del(phy_));
+        phy_ = nullptr;
+    }
+    if (mac_ != nullptr) {
+        capture(mac_->del(mac_));
+        mac_ = nullptr;
+    }
+    if (spi_bus_owned_) {
+        capture(spi_bus_free(SPI2_HOST));
+        spi_bus_owned_ = false;
+    }
+
+    status_ = {};
+    return first_error;
 }
 
 void W5500::on_eth_event(
