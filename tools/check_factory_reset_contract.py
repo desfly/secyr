@@ -37,6 +37,9 @@ checks = {
     "Factory Reset clears live access state": "access_control_->clear_users();" in system,
     "Reset failure reports every mutable namespace": all(key in system for key in ('\\"access\\"', '\\"wifi\\"', '\\"cloud\\"', '\\"controllerConfig\\"', '\\"provisioning\\"', '\\"commissioning\\"')),
     "Factory Reset reboots only after successful erase": "if (!report.ok())" in system and "delayed_factory_reboot" in system and "esp_restart();" in system,
+    "Reboot is scheduled before success response": system.find("xTaskCreate(") != -1 and system.find("xTaskCreate(") < system.find("factory_reset_complete"),
+    "Socket write cannot cancel reboot": "if (send_error == ESP_OK)" not in system and "return send_json(request, response" in system,
+    "Reboot scheduler failure is fail-safe": "if (reboot_task != pdPASS)" in system and system.count("esp_restart();") >= 2,
 }
 
 failed = [name for name, ok in checks.items() if not ok]
