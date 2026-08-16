@@ -7,6 +7,8 @@ on:
       - "firmware/esp-idf/main/hg_factory_reset.*"
       - "firmware/esp-idf/main/hg_commissioning_nvs.*"
       - "firmware/esp-idf/main/hg_system_http.*"
+      - "firmware/esp-idf/main/hg_network_http.*"
+      - "tests/esp-idf-mock/include/esp_wifi.h"
       - "tools/check_factory_reset_contract.py"
       - ".github/workflows/factory-reset-safety.yml"
   workflow_dispatch:
