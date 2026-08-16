@@ -149,8 +149,171 @@
     });
   }
 
+  function adminSession() {
+    return session && session.role === "admin" ? session : null;
+  }
+
+  async function parseApiResponse(response) {
+    const text = await response.text();
+    let body = {};
+    try { body = text ? JSON.parse(text) : {}; } catch (_) { body = {}; }
+    if (!response.ok || body.ok === false) throw new Error(body.reason || `${response.status} ${response.statusText}`);
+    return body;
+  }
+
+  async function exportConfig() {
+    const admin = adminSession();
+    if (!admin) {
+      if (typeof showToast === "function") showToast("Export конфігурації доступний тільки Admin");
+      return;
+    }
+    if (!window.confirm("Експорт міститиме Wi-Fi та Cloud паролі. Створити повну резервну копію?")) return;
+
+    const button = document.querySelector("#configExport");
+    if (button) button.disabled = true;
+    try {
+      const response = await fetch("/api/v1/config/export", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actor: admin.actor, credential: admin.credential, confirm: "INCLUDE_SECRETS" })
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        let errorBody = {};
+        try { errorBody = text ? JSON.parse(text) : {}; } catch (_) { errorBody = {}; }
+        throw new Error(errorBody.reason || `${response.status} ${response.statusText}`);
+      }
+      const backup = JSON.parse(text);
+      if (backup.format !== "homeguard-config" || backup.version !== 1 || backup.secretsIncluded !== true) {
+        throw new Error("invalid_export_format");
+      }
+      const blob = new Blob([text], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "homeguard-config-v1.json";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      if (typeof showToast === "function") showToast("Резервну копію конфігурації створено");
+    } catch (error) {
+      if (typeof showToast === "function") showToast(`Export не виконано: ${error.message}`);
+    } finally {
+      applyRoleUi();
+    }
+  }
+
+  async function importConfigFile(file) {
+    const admin = adminSession();
+    if (!admin || !file) return;
+    if (file.size === 0 || file.size > 8192) {
+      if (typeof showToast === "function") showToast("Файл конфігурації має неправильний розмір");
+      return;
+    }
+
+    let backup;
+    try {
+      backup = JSON.parse(await file.text());
+    } catch (_) {
+      if (typeof showToast === "function") showToast("Файл не є коректним JSON");
+      return;
+    }
+    if (backup?.format !== "homeguard-config" || backup?.version !== 1 || backup?.secretsIncluded !== true) {
+      if (typeof showToast === "function") showToast("Цей backup не можна відновити: потрібен HomeGuard Config v1 із секретами");
+      return;
+    }
+    if (!window.confirm("Імпорт замінить користувачів, Wi-Fi, Cloud і commissioning state та перезавантажить контролер. Продовжити?")) return;
+
+    const button = document.querySelector("#configImport");
+    if (button) button.disabled = true;
+    try {
+      const response = await fetch("/api/v1/config/import", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actor: admin.actor, credential: admin.credential, confirm: "APPLY_CONFIG", backup })
+      });
+      const body = await parseApiResponse(response);
+      if (body.rebooting !== true) throw new Error("reboot_not_confirmed");
+      if (typeof showToast === "function") showToast("Конфігурацію відновлено. Контролер перезавантажується…");
+      session = null;
+      applyRoleUi();
+    } catch (error) {
+      if (typeof showToast === "function") showToast(`Import не виконано: ${error.message}`);
+      applyRoleUi();
+    }
+  }
+
+  async function factoryReset() {
+    const admin = adminSession();
+    if (!admin) {
+      if (typeof showToast === "function") showToast("Factory Reset доступний тільки Admin");
+      return;
+    }
+    if (!window.confirm("Factory Reset видалить користувачів, Wi-Fi, Cloud та всі змінні налаштування. Firmware і hardware identity залишаться. Продовжити?")) return;
+    if (!window.confirm("Підтвердьте ПОВНЕ СКИДАННЯ ще раз. Цю дію неможливо скасувати.")) return;
+
+    const button = document.querySelector("#factoryReset");
+    if (button) button.disabled = true;
+    try {
+      const response = await fetch("/api/v1/system/factory-reset", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actor: admin.actor, credential: admin.credential, confirm: "ERASE_ALL" })
+      });
+      const body = await parseApiResponse(response);
+      if (body.rebooting !== true) throw new Error("reboot_not_confirmed");
+      session = null;
+      applyRoleUi();
+      if (typeof showToast === "function") showToast("Factory Reset виконано. Контролер перезавантажується…");
+    } catch (error) {
+      if (typeof showToast === "function") showToast(`Factory Reset не виконано: ${error.message}`);
+      applyRoleUi();
+    }
+  }
+
+  function ensureConfigToolsUi() {
+    if (document.querySelector("#configTools")) return;
+    const system = document.querySelector("#system");
+    if (!system) return;
+
+    const panel = document.createElement("article");
+    panel.id = "configTools";
+    panel.className = "panel cloud-config";
+    panel.innerHTML = `
+      <h3>Резервна копія та повне скидання</h3>
+      <p><small>Тільки Admin. Export містить секрети. Import застосовується транзакційно з rollback і перезавантаженням.</small></p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px">
+        <button id="configExport" type="button">Export config</button>
+        <button id="configImport" type="button">Import config</button>
+        <button id="factoryReset" type="button">Factory Reset</button>
+        <input id="configImportFile" type="file" accept="application/json,.json" hidden>
+        <span id="configToolsState">Увійдіть як Admin</span>
+      </div>`;
+    system.appendChild(panel);
+
+    panel.querySelector("#configExport")?.addEventListener("click", exportConfig);
+    panel.querySelector("#configImport")?.addEventListener("click", () => {
+      if (!adminSession()) return;
+      const input = panel.querySelector("#configImportFile");
+      if (input) {
+        input.value = "";
+        input.click();
+      }
+    });
+    panel.querySelector("#configImportFile")?.addEventListener("change", event => {
+      const file = event.target.files?.[0] || null;
+      importConfigFile(file);
+    });
+    panel.querySelector("#factoryReset")?.addEventListener("click", factoryReset);
+  }
+
   function applyRoleUi() {
     ensureSessionUi();
+    ensureConfigToolsUi();
     const caps = session?.capabilities || {};
     const loggedIn = Boolean(session);
     const isAdmin = session?.role === "admin";
@@ -195,6 +358,15 @@
         button.title = button.disabled ? "Керування користувачами доступне тільки Admin" : "";
       }
     });
+
+    ["#configExport", "#configImport", "#factoryReset"].forEach(selector => {
+      const button = document.querySelector(selector);
+      if (button) {
+        button.disabled = !isAdmin;
+        button.title = isAdmin ? "" : "Доступно тільки Admin";
+      }
+    });
+    setText(document.querySelector("#configToolsState"), isAdmin ? "Admin · готово" : "Увійдіть як Admin");
 
     const networkAuth = document.querySelector("#networkAuth");
     if (networkAuth) networkAuth.hidden = loggedIn && isAdmin;
@@ -257,6 +429,7 @@
     if (control.matches("[data-output-id]")) return caps.valves === true;
     if (control.matches("#wifiConnect")) return caps.networkConfigure === true;
     if (control.matches("#accessLoad,#accessSave")) return caps.accessManage === true;
+    if (control.matches("#configExport,#configImport,#factoryReset")) return session.role === "admin";
     return false;
   }
 
@@ -292,7 +465,7 @@
   }
 
   document.addEventListener("click", event => {
-    const protectedControl = event.target.closest?.("[data-command],[data-output-id],#wifiConnect,#accessLoad,#accessSave");
+    const protectedControl = event.target.closest?.("[data-command],[data-output-id],#wifiConnect,#accessLoad,#accessSave,#configExport,#configImport,#factoryReset");
     if (!protectedControl) return;
     if (!protectedActionAllowed(protectedControl)) {
       event.preventDefault();
@@ -344,6 +517,7 @@
 
   ensureSessionUi();
   ensureMobileNavigation();
+  ensureConfigToolsUi();
   hideRawBuildInfo();
   applyRoleUi();
   enforceSingleSidebarActive();
