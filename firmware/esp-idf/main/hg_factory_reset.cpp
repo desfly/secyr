@@ -1,7 +1,6 @@
 #include "hg_factory_reset.hpp"
 
 #include "hg_commissioning_nvs.hpp"
-#include "hg_rgb_diagnostic.hpp"
 
 #include "esp_wifi.h"
 #include "nvs.h"
@@ -26,13 +25,6 @@ esp_err_t erase_namespace(const char* name) {
 
 FactoryResetReport FactoryResetManager::erase_mutable_state() const {
     FactoryResetReport report{};
-
-    // Cemented field requirement: every Factory Reset path (hardware triple-RST,
-    // Web UI, or Android API) must visibly identify the destructive operation.
-    // Keep the same onboard WS2812/GPIO48 indication already field-proven at boot:
-    // solid white for five seconds before mutable state is erased and the caller
-    // reboots the controller.
-    (void)RgbDiagnostic::test_white(48, 5000U);
 
     // Access users/Admin state.
     report.access = erase_namespace("hg_access");
