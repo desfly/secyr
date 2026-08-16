@@ -21,18 +21,35 @@ BootReadinessReport evaluate_boot_readiness(const BootReadinessInput& input) noe
         return report;
     }
 
-    report.commissioning_status = validate_commissioning_state(*input.commissioning);
-    if (report.commissioning_status == CommissioningStateValidation::ValveSafetyUnverified) {
-        report.status = BootReadinessStatus::BlockedValveSafetyProfileRequired;
-        return report;
-    }
-    if (report.commissioning_status != CommissioningStateValidation::Valid) {
+    // Commissioning is a staged process. Preserve the real field-test order in
+    // the status API instead of letting a later missing valve profile hide an
+    // earlier required dry run.
+    if (input.commissioning->schema_version != CommissioningPersistentState::kSchemaVersion ||
+        input.commissioning->successful_actuator_tests > input.commissioning->successful_dry_runs ||
+        !input.commissioning->gpio_map_verified ||
+        !input.commissioning->active_polarity_verified) {
+        report.commissioning_status = validate_commissioning_state(*input.commissioning);
         report.status = BootReadinessStatus::BlockedCommissioningState;
         return report;
     }
 
     if (input.commissioning->successful_dry_runs == 0U) {
+        report.commissioning_status = validate_commissioning_state(*input.commissioning);
         report.status = BootReadinessStatus::BlockedDryRunRequired;
+        return report;
+    }
+
+    if (!input.commissioning->valve_limit_polarity_verified ||
+        input.commissioning->cold_valve_travel_timeout_ms == 0U ||
+        input.commissioning->hot_valve_travel_timeout_ms == 0U) {
+        report.commissioning_status = CommissioningStateValidation::ValveSafetyUnverified;
+        report.status = BootReadinessStatus::BlockedValveSafetyProfileRequired;
+        return report;
+    }
+
+    report.commissioning_status = validate_commissioning_state(*input.commissioning);
+    if (report.commissioning_status != CommissioningStateValidation::Valid) {
+        report.status = BootReadinessStatus::BlockedCommissioningState;
         return report;
     }
 
@@ -70,7 +87,7 @@ std::string boot_readiness_json(const BootReadinessReport& report) {
     out << "{\"status\":\"" << to_string(report.status)
         << "\",\"outputsAllowed\":" << (report.outputs_allowed() ? "true" : "false")
         << ",\"hardwareStatus\":\"" << to_string(report.hardware_status)
-        << "\",\"commissioningStatus\":\"" << to_string(report.commissioning_status)
+        << ",\"commissioningStatus\":\"" << to_string(report.commissioning_status)
         << "\"}";
     return out.str();
 }
