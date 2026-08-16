@@ -37,11 +37,29 @@ void reset_sequence_state() {
 }  // namespace
 
 bool handle_triple_rst_factory_reset() {
-    if (g_reset_magic != kMagic) reset_sequence_state();
+    // On this ESP32-S3 board the physical EN/RST button is reported by the ROM
+    // as ESP_RST_POWERON (rst:0x1), not ESP_RST_EXT. A genuine cold power-on is
+    // still distinguishable because RTC_NOINIT sequence state is not valid yet.
+    // Therefore count POWERON only when the sequence marker survived a previous
+    // boot, while keeping ESP_RST_EXT support for boards that report it directly.
+    const bool retained_sequence_state = g_reset_magic == kMagic;
+    if (!retained_sequence_state) reset_sequence_state();
+
+    const auto reset_reason = esp_reset_reason();
+    const bool physical_reset_press =
+        reset_reason == ESP_RST_EXT ||
+        (reset_reason == ESP_RST_POWERON && retained_sequence_state);
+
+    ESP_LOGI(kTag,
+             "RST classify reason=%d retained=%u count=%u physical=%u",
+             static_cast<int>(reset_reason),
+             retained_sequence_state ? 1U : 0U,
+             static_cast<unsigned>(g_external_reset_count),
+             physical_reset_press ? 1U : 0U);
 
     const auto step = hg::advance_reset_sequence(
         g_external_reset_count,
-        esp_reset_reason() == ESP_RST_EXT,
+        physical_reset_press,
         kRequiredPresses);
     g_external_reset_count = step.count;
 
