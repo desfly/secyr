@@ -215,13 +215,23 @@ esp_err_t ConfigHttp::handle_import(httpd_req_t* request) {
         return send_json(request, std::string{"{\"ok\":false,\"reason\":\""} + reason + "\"}");
     }
 
+    // The transaction is already committed. Schedule reboot before replying so
+    // a disappearing socket cannot leave live runtime state inconsistent with NVS.
+    const auto reboot_task = xTaskCreate(
+        &delayed_config_reboot,
+        "hg_cfg_reboot",
+        2048,
+        nullptr,
+        5,
+        nullptr);
+    if (reboot_task != pdPASS) {
+        esp_restart();
+        return ESP_FAIL;
+    }
+
     static constexpr char response[] =
         "{\"ok\":true,\"state\":\"config_imported\",\"rebooting\":true}";
-    const auto send_error = httpd_resp_send(request, response, sizeof(response) - 1U);
-    if (send_error == ESP_OK) {
-        (void)xTaskCreate(&delayed_config_reboot, "hg_cfg_reboot", 2048, nullptr, 5, nullptr);
-    }
-    return send_error;
+    return httpd_resp_send(request, response, sizeof(response) - 1U);
 }
 
 }  // namespace homeguard::idf
