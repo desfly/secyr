@@ -32,6 +32,7 @@ private:
 
     i2c_master_dev_handle_t device_{nullptr};
     std::uint8_t address_{0};
+    bool initialized_{};
 };
 
 }  // namespace homeguard::idf
