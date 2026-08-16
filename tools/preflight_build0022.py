@@ -8,8 +8,11 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-ESP = ROOT / "firmware" / "esp-idf"
+FIRMWARE = ROOT / "firmware"
+ESP = FIRMWARE / "esp-idf"
 MAIN = ESP / "main"
+CORE_INCLUDE = FIRMWARE / "include" / "homeguard"
+CORE_SRC = FIRMWARE / "src"
 WEB = ROOT / "web"
 
 errors = []
@@ -94,6 +97,13 @@ def source_text(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def project_text(path: Path, label: str) -> str:
+    if not path.is_file():
+        errors.append(f"field runtime contract missing source: {label}")
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
 def require_token(text: str, token: str, label: str) -> None:
     if token not in text:
         errors.append(f"field runtime contract regressed: {label}")
@@ -104,13 +114,23 @@ i2c = source_text("hg_i2c_bus.cpp")
 ads = source_text("hg_ads1115.cpp")
 ina = source_text("hg_ina226.cpp")
 mcp = source_text("hg_mcp23017.cpp")
+mcp_backend = source_text("hg_mcp23017_output_backend.cpp")
 rtc = source_text("hg_ds3231.cpp")
 w5500 = source_text("hg_w5500.cpp")
 sd = source_text("hg_sd_storage.cpp")
 telemetry = source_text("hg_telemetry_runtime.cpp")
 bootstrap = source_text("hg_hardware_bootstrap.cpp")
 service = source_text("hg_service_http.cpp")
+commissioning_nvs = source_text("hg_commissioning_nvs.cpp")
 app_main = source_text("app_main.cpp")
+hardware_runtime_hpp = project_text(CORE_INCLUDE / "hardware_runtime.hpp", "hardware_runtime.hpp")
+hardware_profile_cpp = project_text(CORE_SRC / "hardware_profile.cpp", "hardware_profile.cpp")
+hardware_verification_hpp = project_text(CORE_INCLUDE / "hardware_verification.hpp", "hardware_verification.hpp")
+commissioning_state_hpp = project_text(CORE_INCLUDE / "commissioning_state.hpp", "commissioning_state.hpp")
+commissioning_state_cpp = project_text(CORE_SRC / "commissioning_state.cpp", "commissioning_state.cpp")
+boot_readiness_cpp = project_text(CORE_SRC / "boot_readiness.cpp", "boot_readiness.cpp")
+physical_runtime = project_text(CORE_SRC / "physical_output_runtime.cpp", "physical_output_runtime.cpp")
+system_model_hpp = project_text(CORE_INCLUDE / "system_model.hpp", "system_model.hpp")
 
 # 1: Wi-Fi reconnect/recovery must be event-driven; status GET must be side-effect free;
 # scanning must not deliberately disconnect an established STA. Reconnect retries use
@@ -181,6 +201,60 @@ for text, label in [
 # 6: MCP23017 initialization is transactional and safe outputs are part of successful init.
 require_token(mcp, "remove_device(&device_)", "MCP23017 failed-init cleanup")
 require_token(mcp, "kOlatA, 0x00", "MCP23017 safe-output initialization")
+olat_pos = mcp.find("write_register(kOlatA, 0x00)")
+iodir_pos = mcp.find("write_register(kIodirA, 0x00)")
+if olat_pos < 0 or iodir_pos < 0 or olat_pos > iodir_pos:
+    errors.append("field runtime contract regressed: MCP23017 output driver enabled before OFF latch preload")
+require_token(hardware_runtime_hpp, "bool safe_outputs_forced{false}", "safe-output evidence defaults false")
+require_token(bootstrap, "status_.safe_outputs_forced = false", "bootstrap clears safe-output evidence")
+require_token(bootstrap, "safe OFF latch could not be confirmed", "MCP safe-output failure becomes Fault")
+
+# HW-678 actuator architecture: outputs are MCP23017 Port A, never arbitrary ESP GPIO.
+require_token(cmake, '"hg_mcp23017_output_backend.cpp"', "MCP23017 output backend included in ESP-IDF build")
+require_token(app_main, "Mcp23017OutputBackend g_mcp_outputs", "HW-678 uses MCP23017 physical backend")
+require_token(app_main, "g_mcp_outputs.attach(&g_hardware.io_expander())", "physical runtime attaches real MCP23017")
+if "GpioOutputBackend g_gpio_outputs" in app_main:
+    errors.append("field runtime contract regressed: legacy direct-GPIO backend restored to HW-678 boot path")
+hardware_init_pos = app_main.find("const auto hardware_error = g_hardware.initialize()")
+physical_init_pos = app_main.find("initialize_physical_outputs();", hardware_init_pos)
+if hardware_init_pos < 0 or physical_init_pos < 0 or physical_init_pos < hardware_init_pos:
+    errors.append("field runtime contract regressed: physical outputs initialized before hardware bootstrap")
+for token, label in [
+    ("kColdOpen = 2", "cold-valve OPEN MCP channel"),
+    ("kColdClose = 3", "cold-valve CLOSE MCP channel"),
+    ("kHotOpen = 4", "hot-valve OPEN MCP channel"),
+    ("kHotClose = 5", "hot-valve CLOSE MCP channel"),
+    ("next &= static_cast<std::uint8_t>(~bit_for(kColdClose))", "cold-valve atomic OPEN/CLOSE interlock"),
+    ("next &= static_cast<std::uint8_t>(~bit_for(kHotClose))", "hot-valve atomic OPEN/CLOSE interlock"),
+    ("expander_->force_safe_outputs()", "MCP backend fail-write all-OFF attempt"),
+]:
+    require_token(mcp_backend, token, label)
+require_token(system_model_hpp, "bool commanded{}", "valve command distinguished from default false state")
+require_token(physical_runtime, "No command since boot: STOP", "valves do not move merely on boot/synchronize")
+require_token(physical_runtime, "Break-before-make", "valve core break-before-make interlock")
+
+# Schema-v2 pins are the fixed HW-678 wiring, not a user-selected output GPIO map.
+require_token(hardware_verification_hpp, "kSchemaVersion = 2", "hardware verification schema v2")
+for token, label in [
+    ("gpio >= 0 && gpio <= 21", "ESP32-S3 lower GPIO range"),
+    ("gpio >= 26 && gpio <= 48", "ESP32-S3 upper GPIO range"),
+    ("pins.i2c_sda == 4 && pins.i2c_scl == 5", "fixed HW-678 I2C map"),
+    ("pins.w5500_mosi == 11", "fixed HW-678 W5500 MOSI"),
+    ("pins.w5500_cs == 10", "fixed HW-678 W5500 CS"),
+    ("legacy_direct_outputs_unassigned", "legacy direct output GPIOs forbidden"),
+]:
+    require_token(hardware_profile_cpp, token, label)
+
+# Commissioning results are architecture-specific. Schema-v1 dry-runs/actuator
+# tests cannot unlock the schema-v2 MCP backend; a real actuator test is mandatory.
+require_token(commissioning_state_hpp, "kSchemaVersion = 2", "commissioning schema v2")
+require_token(commissioning_nvs, 'kHardwareKey = "hardware_v2"', "hardware verification NVS v2 key")
+require_token(commissioning_nvs, 'kCommissioningKey = "state_v2"', "commissioning NVS v2 key")
+require_token(commissioning_nvs, 'kLegacyHardwareKey = "hardware_v1"', "legacy hardware key cleanup")
+require_token(commissioning_nvs, 'kLegacyCommissioningKey = "state_v1"', "legacy commissioning key cleanup")
+require_token(commissioning_state_cpp, "state.successful_actuator_tests > 0U", "commissioning requires actuator test")
+require_token(boot_readiness_cpp, "BlockedActuatorTestRequired", "boot exposes actuator-test-required gate")
+require_token(boot_readiness_cpp, "successful_actuator_tests == 0U", "boot blocks before actuator test")
 
 # 7: degraded bootstrap must be visible instead of a false all-good completion.
 require_token(app_main, "Hardware bootstrap completed DEGRADED", "degraded hardware bootstrap reporting")
