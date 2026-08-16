@@ -2,8 +2,8 @@ package ua.homeguard.s3.network
 
 /**
  * Canonical identity helpers for a physical HomeGuard controller.
- * Discovery transports may disagree about scheme, port or temporary ID,
- * but one LAN host still represents one ESP controller.
+ * Discovery transports may disagree about scheme, port, letter case or temporary ID,
+ * but one LAN host/stable ID still represents one ESP controller.
  */
 object ControllerIdentity {
     fun normalizeHost(host: String): String = host.trim().trim('[', ']').lowercase()
@@ -32,9 +32,12 @@ object ControllerIdentity {
         rightDeviceId: String,
         rightBaseUrl: String,
     ): Boolean {
-        if (leftDeviceId.isNotBlank() && leftDeviceId == rightDeviceId) return true
+        val leftId = leftDeviceId.trim()
+        val rightId = rightDeviceId.trim()
+        if (leftId.isNotBlank() && rightId.isNotBlank() && leftId.equals(rightId, ignoreCase = true)) return true
+
         val leftHost = hostFromBaseUrl(leftBaseUrl)
         val rightHost = hostFromBaseUrl(rightBaseUrl)
-        return leftHost.isNotBlank() && leftHost == rightHost
+        return leftHost.isNotBlank() && rightHost.isNotBlank() && leftHost == rightHost
     }
 }
