@@ -48,6 +48,7 @@ fun DeviceListScreen(
     var renameDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
     var renameText by remember { mutableStateOf("") }
     var deleteDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
+    var propertiesDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
 
     renameDevice?.let { device ->
         AlertDialog(
@@ -90,6 +91,32 @@ fun DeviceListScreen(
                 ) { Text("Видалити", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { deleteDevice = null }) { Text("Скасувати") } },
+        )
+    }
+
+    propertiesDevice?.let { device ->
+        val discoveredDevice = discovered.firstOrNull { candidate ->
+            ControllerIdentity.sameController(device.deviceId, device.baseUrl, candidate.deviceId, candidate.baseUrl)
+        }
+        val active = device.deviceId.trim().equals(activeDeviceId.trim(), ignoreCase = true)
+        AlertDialog(
+            onDismissRequest = { propertiesDevice = null },
+            title = { Text("Властивості · ${device.name}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    StatusLine("ID", device.deviceId)
+                    StatusLine("Адреса", device.baseUrl.ifBlank { "—" })
+                    StatusLine("LAN", if (discoveredDevice != null) "доступний" else "не знайдено")
+                    StatusLine("Discovery", discoveredDevice?.source?.name ?: "—")
+                    StatusLine(
+                        "Transport",
+                        discoveredDevice?.transport?.name ?: if (active && snapshot.sequence > 0) snapshot.transport.name else "—",
+                    )
+                    StatusLine("HTTPS", if (discoveredDevice?.secure == true || device.baseUrl.startsWith("https://", true)) "так" else "ні")
+                    StatusLine("Авторизація", if (device.authorized) "активна" else "втрачена")
+                }
+            },
+            confirmButton = { TextButton(onClick = { propertiesDevice = null }) { Text("Закрити") } },
         )
     }
 
@@ -209,6 +236,10 @@ fun DeviceListScreen(
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Перейменувати") }
+                            OutlinedButton(
+                                onClick = { propertiesDevice = device },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Властивості") }
                             Button(onClick = { onOpenDevice(device) }, modifier = Modifier.fillMaxWidth()) { Text("Відкрити") }
                             OutlinedButton(
                                 onClick = { deleteDevice = device },
