@@ -31,14 +31,18 @@ esp_err_t Mcp23017::initialize(
         return error;
     }
 
-    if ((error = write_register(kIodirA, 0x00)) == ESP_OK) {
+    // Fail-closed ordering is deliberate: preload the output latch LOW while
+    // Port A is still in its reset/input state, then enable the output drivers.
+    // This avoids a transient active level if the expander retained/stumbled
+    // into a non-zero latch value before firmware took ownership.
+    if ((error = write_register(kOlatA, 0x00)) == ESP_OK) {
+        error = write_register(kIodirA, 0x00);
+    }
+    if (error == ESP_OK) {
         error = write_register(kIodirB, 0xFF);
     }
     if (error == ESP_OK) {
         error = write_register(kGppuB, 0xFF);
-    }
-    if (error == ESP_OK) {
-        error = write_register(kOlatA, 0x00);
     }
 
     if (error != ESP_OK) {
