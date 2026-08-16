@@ -158,6 +158,8 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
   const network = document.getElementById("networkPage");
   const system = document.getElementById("system");
   let lastSidebarLink = document.querySelector(".sidebar nav a.active") || null;
+  let bootstrapProbeInFlight = false;
+  let bootstrapAvailable = null;
 
   function applyEmbeddedView() {
     const hash = window.location.hash || "#overview";
@@ -285,6 +287,56 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
       .forEach(id => addSecretToggle(document.getElementById(id)));
   }
 
+  async function syncBootstrapAvailability() {
+    const button = document.getElementById("accessBootstrap");
+    if (!button) return;
+
+    button.hidden = bootstrapAvailable !== true;
+    button.setAttribute("aria-hidden", button.hidden ? "true" : "false");
+    if (button.hidden) button.tabIndex = -1;
+    else button.removeAttribute("tabindex");
+
+    if (bootstrapAvailable !== null || bootstrapProbeInFlight) return;
+    bootstrapProbeInFlight = true;
+    try {
+      // Safe capability probe: the firmware checks the one-time gate before it
+      // validates bootstrap fields. An empty bootstrap body can therefore tell
+      // us whether the controller is factory-fresh without creating a user.
+      const response = await fetch("/api/v1/access/users", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bootstrap" })
+      });
+      const text = await response.text();
+      let body = {};
+      try { body = text ? JSON.parse(text) : {}; } catch (_) { body = {}; }
+
+      if (response.status === 400 && body.reason === "invalid_bootstrap_admin") {
+        bootstrapAvailable = true;
+      } else if (response.status === 409 &&
+                 (body.reason === "bootstrap_unavailable" || body.reason === "already_provisioned")) {
+        bootstrapAvailable = false;
+      }
+    } catch (_) {
+      bootstrapAvailable = null;
+    } finally {
+      bootstrapProbeInFlight = false;
+      button.hidden = bootstrapAvailable !== true;
+      button.setAttribute("aria-hidden", button.hidden ? "true" : "false");
+      if (button.hidden) button.tabIndex = -1;
+      else button.removeAttribute("tabindex");
+    }
+
+    if (button.dataset.hgBootstrapRefreshBound !== "1") {
+      button.dataset.hgBootstrapRefreshBound = "1";
+      button.addEventListener("click", () => {
+        bootstrapAvailable = null;
+        setTimeout(syncBootstrapAvailability, 900);
+      }, true);
+    }
+  }
+
   function ensureFactoryResetUi() {
     if (!system || document.getElementById("firmwareFactoryResetPanel")) return;
 
@@ -386,6 +438,7 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     ensureFirmwareMobileNavigation();
     ensureFactoryResetUi();
     ensureSecretToggles();
+    syncBootstrapAvailability();
     dedupeFactoryResetControls();
     enforceSingleActiveNav();
   }
