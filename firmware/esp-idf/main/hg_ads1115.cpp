@@ -26,22 +26,43 @@ esp_err_t Ads1115::initialize(
     if (address < 0x48 || address > 0x4B) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (initialized_) {
+        return address_ == address ? ESP_OK : ESP_ERR_INVALID_STATE;
+    }
 
-    const auto error = bus.add_device(
+    initialized_ = false;
+    address_ = 0;
+    device_ = nullptr;
+
+    auto error = bus.add_device(
         address,
         400000,
         &device_);
-
-    if (error == ESP_OK) {
-        address_ = address;
+    if (error != ESP_OK) {
+        return error;
     }
-    return error;
+
+    // A successful handle allocation is not sufficient to declare the ADC
+    // operational. Read a real register so initialization is transactional.
+    std::uint16_t config = 0;
+    error = read_register(kConfigRegister, &config);
+    if (error != ESP_OK) {
+        (void)bus.remove_device(&device_);
+        return error;
+    }
+
+    address_ = address;
+    initialized_ = true;
+    return ESP_OK;
 }
 
 esp_err_t Ads1115::write_register(
     std::uint8_t reg,
     std::uint16_t value)
 {
+    if (device_ == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
     const std::uint8_t data[]{
         reg,
         static_cast<std::uint8_t>(value >> 8),
@@ -58,8 +79,8 @@ esp_err_t Ads1115::read_register(
     std::uint8_t reg,
     std::uint16_t* value)
 {
-    if (value == nullptr) {
-        return ESP_ERR_INVALID_ARG;
+    if (device_ == nullptr || value == nullptr) {
+        return ESP_ERR_INVALID_STATE;
     }
 
     std::uint8_t bytes[2]{};
@@ -83,8 +104,8 @@ esp_err_t Ads1115::read_single_ended_mv(
     std::uint8_t channel,
     float* millivolts)
 {
-    if (device_ == nullptr || millivolts == nullptr || channel > 3) {
-        return ESP_ERR_INVALID_ARG;
+    if (!initialized_ || device_ == nullptr || millivolts == nullptr || channel > 3) {
+        return ESP_ERR_INVALID_STATE;
     }
 
     const std::uint16_t mux =
@@ -113,7 +134,7 @@ esp_err_t Ads1115::read_single_ended_mv(
 
 bool Ads1115::ready() const noexcept
 {
-    return device_ != nullptr;
+    return initialized_ && device_ != nullptr;
 }
 
 std::uint8_t Ads1115::address() const noexcept
