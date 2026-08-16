@@ -220,3 +220,38 @@
   applyRoleUi();
   setInterval(applyRoleUi, 1000);
 })();
+
+// Navigation links intentionally share some dashboard targets (Zones/Sensors,
+// Inputs/Outputs, Events/History). Keep the UI invariant that exactly one item
+// is highlighted: the item the user actually selected.
+(() => {
+  const links = [...document.querySelectorAll(".sidebar nav a")];
+  if (!links.length) return;
+  let preferred = null;
+  let queued = false;
+
+  const enforceSingleActive = () => {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => {
+      queued = false;
+      const active = links.filter(link => link.classList.contains("active"));
+      if (active.length <= 1) return;
+      const keep = preferred && active.includes(preferred) ? preferred : active[0];
+      active.forEach(link => link.classList.toggle("active", link === keep));
+    });
+  };
+
+  links.forEach(link => {
+    link.addEventListener("click", () => {
+      preferred = link;
+      enforceSingleActive();
+      setTimeout(enforceSingleActive, 0);
+    });
+  });
+  window.addEventListener("hashchange", enforceSingleActive);
+
+  const navObserver = new MutationObserver(enforceSingleActive);
+  links.forEach(link => navObserver.observe(link, { attributes: true, attributeFilter: ["class"] }));
+  enforceSingleActive();
+})();
