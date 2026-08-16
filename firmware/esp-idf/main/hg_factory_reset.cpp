@@ -2,6 +2,7 @@
 
 #include "hg_commissioning_nvs.hpp"
 
+#include "esp_wifi.h"
 #include "nvs.h"
 
 namespace homeguard::idf {
@@ -28,8 +29,12 @@ FactoryResetReport FactoryResetManager::erase_mutable_state() const {
     // Access users/Admin state.
     report.access = erase_namespace("hg_access");
 
-    // Runtime Wi-Fi credentials and network setup.
+    // HomeGuard Wi-Fi credentials plus any legacy ESP-IDF driver persistence
+    // left by builds that used the default WIFI_STORAGE_FLASH mode.
     report.wifi = erase_namespace("hg_wifi");
+    if (report.wifi == ESP_OK) {
+        report.wifi = esp_wifi_restore();
+    }
 
     // Cloud broker credentials/session configuration.
     report.cloud = erase_namespace("hg_cloud");
