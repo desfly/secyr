@@ -6,6 +6,7 @@ on:
     paths:
       - "firmware/esp-idf/main/hg_web_http.cpp"
       - "firmware/esp-idf/main/hg_system_http.cpp"
+      - "firmware/esp-idf/main/hg_access_http.*"
       - "web/**"
       - "tools/check_field_acceptance_web.py"
       - ".github/workflows/web-field-acceptance.yml"
