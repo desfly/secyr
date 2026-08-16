@@ -189,6 +189,7 @@ esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
 
 void SystemHttp::remember_client(int socket_fd) {
     if (socket_fd < 0) return;
+    std::scoped_lock lock(event_mutex_);
     for (const int client : clients_) if (client == socket_fd) return;
     for (auto& client : clients_) {
         if (client < 0) { client = socket_fd; return; }
@@ -211,6 +212,7 @@ void SystemHttp::on_event(const hg::SystemEvent& event, void* context) {
 }
 
 void SystemHttp::record(const hg::SystemEvent& event) {
+    std::scoped_lock lock(event_mutex_);
     event_log_.append(
         event.timestamp_ms,
         severity_for(event.type),
@@ -219,6 +221,7 @@ void SystemHttp::record(const hg::SystemEvent& event) {
 }
 
 std::string SystemHttp::events_json() const {
+    std::scoped_lock lock(event_mutex_);
     std::ostringstream out;
     out << "{\"capacity\":" << hg::EventLog::capacity << ",\"events\":[";
     for (std::size_t i = 0; i < event_log_.size(); ++i) {
@@ -236,14 +239,25 @@ std::string SystemHttp::events_json() const {
 
 void SystemHttp::broadcast(const hg::SystemEvent& event) {
     if (server_ == nullptr) return;
+    std::array<int, 4> clients{};
+    {
+        std::scoped_lock lock(event_mutex_);
+        clients = clients_;
+    }
+
     const std::string payload = hg::system_event_json(event);
     httpd_ws_frame_t frame{};
     frame.type = HTTPD_WS_TYPE_TEXT;
     frame.payload = reinterpret_cast<std::uint8_t*>(const_cast<char*>(payload.data()));
     frame.len = payload.size();
-    for (auto& client : clients_) {
+
+    for (const int client : clients) {
         if (client < 0) continue;
-        if (httpd_ws_send_frame_async(server_, client, &frame) != ESP_OK) client = -1;
+        if (httpd_ws_send_frame_async(server_, client, &frame) == ESP_OK) continue;
+        std::scoped_lock lock(event_mutex_);
+        for (auto& live : clients_) {
+            if (live == client) live = -1;
+        }
     }
 }
 
