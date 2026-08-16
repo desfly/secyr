@@ -1,6 +1,7 @@
 #include "hg_output_http.hpp"
 #include "homeguard/output_command.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
@@ -109,6 +110,7 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"credential_required\"}", -1);
     }
     if (access_control_ == nullptr) {
+        std::fill(credential.begin(), credential.end(), '\0');
         httpd_resp_set_status(request, "503 Service Unavailable");
         httpd_resp_set_type(request, "application/json");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"access_unavailable\"}", -1);
@@ -119,6 +121,7 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         ? (active ? "valve.open" : "valve.close")
         : "output.control";
     const auto decision = access_control_->authorize(actor, credential, command);
+    std::fill(credential.begin(), credential.end(), '\0');
     if (decision != homeguard::AuditDecision::Allowed) {
         httpd_resp_set_status(request, "403 Forbidden");
         httpd_resp_set_type(request, "application/json");
@@ -127,23 +130,28 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         return httpd_resp_send(request, response.c_str(), static_cast<ssize_t>(response.size()));
     }
 
-    const auto result = hg::apply_output_command(
-        *model_, *readiness_, {output_id, active, alarm_active, 0});
-
-    if (result.status == hg::OutputCommandStatus::Applied && !physical_->synchronize(*model_, *readiness_)) {
-        (void)model_->set_output_active(output_id, false, 0);
-        (void)physical_->force_safe();
+    // Only the output supervisor may touch the physical MCP/I2C backend. HTTP
+    // commands are rejected when that supervisor/runtime is not healthy.
+    const auto physical_state = physical_->state();
+    if (physical_state.safety_fault_latched ||
+        physical_state.status != hg::PhysicalOutputStatus::Ready ||
+        !physical_state.outputs_enabled) {
         httpd_resp_set_status(request, "503 Service Unavailable");
         httpd_resp_set_type(request, "application/json");
-        return httpd_resp_send(request,
-            "{\"ok\":false,\"reason\":\"physical_output_failure\",\"active\":false}", -1);
+        const std::string response = std::string{"{\"ok\":false,\"reason\":\"physical_output_not_ready\",\"physicalStatus\":\""} +
+            hg::to_string(physical_state.status) + "\"}";
+        return httpd_resp_send(request, response.c_str(), static_cast<ssize_t>(response.size()));
     }
+
+    const auto result = hg::apply_output_command(
+        *model_, *readiness_, {output_id, active, alarm_active, 0});
 
     std::string response = std::string{"{\"ok\":"} +
         (result.status == hg::OutputCommandStatus::Applied ? "true" : "false") +
         ",\"status\":\"" + hg::to_string(result.status) +
         "\",\"interlock\":\"" + hg::to_string(result.interlock) +
-        "\",\"active\":" + (result.resulting_active ? "true" : "false") + "}";
+        "\",\"active\":" + (result.resulting_active ? "true" : "false") +
+        ",\"physical\":\"supervised\"}";
 
     if (result.status != hg::OutputCommandStatus::Applied) {
         httpd_resp_set_status(request, "409 Conflict");
