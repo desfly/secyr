@@ -6,6 +6,7 @@
 #include "esp_http_server.h"
 #include <array>
 #include <cstddef>
+#include <mutex>
 
 namespace homeguard::idf {
 
@@ -38,6 +39,7 @@ private:
     hg::SystemModel* model_{};
     hg::SystemEventBus* bus_{};
     homeguard::AccessControl* access_control_{};
+    mutable std::mutex event_mutex_;
     hg::EventLog event_log_{};
     std::array<int, 4> clients_{{-1, -1, -1, -1}};
 };
