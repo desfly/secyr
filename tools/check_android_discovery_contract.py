@@ -25,10 +25,12 @@ checks = {
     "Wi-Fi transport selection": "NetworkCapabilities.TRANSPORT_WIFI" in udp,
     "Wi-Fi interface broadcast": "connectivity.getLinkProperties(it)?.interfaceName" in udp,
     "UDP diagnostics counters": all(token in udp for token in ("sent: Int", "received: Int", "accepted: Int", "lastResponder: String", "network: String", "error: String")),
+    "UDP stale entries expire": "System.currentTimeMillis() - 30_000L" in udp and "found.entries.removeIf" in udp,
     "mDNS service type": 'SERVICE_TYPE = "_homeguard._tcp."' in nsd,
     "mDNS concrete IP preference": "info.host?.hostAddress" in nsd,
     "mDNS independent resolver": "private fun resolve(serviceInfo: NsdServiceInfo)" in nsd and "val listener = object : NsdManager.ResolveListener" in nsd,
     "mDNS shared resolver removed": "private val resolveListener" not in nsd,
+    "mDNS serviceLost removal preserved": "onServiceLost" in nsd and "keys.forEach(found::remove)" in nsd,
     "HTTP subnet discovery source": "class HttpSubnetDiscovery" in http,
     "HTTP HomeGuard identity endpoint": "/api/v1/cloud/status" in http,
     "HTTP discovery source model": "enum class DiscoverySource { MDNS, UDP, HTTP }" in models,
@@ -36,6 +38,10 @@ checks = {
     "Coordinator identity-deduplicates transports": "DeviceIdentity.samePhysicalDevice(" in coordinator,
     "Coordinator triggers HTTP fallback": "http.scanOnce()" in coordinator,
     "Coordinator exposes scan status": "val scanStatus" in coordinator and "udp.status" in coordinator,
+    "Coordinator uses scan heartbeat for stale state": "udp.status," in coordinator and "val now = System.currentTimeMillis()" in coordinator,
+    "Coordinator expires active discovery": "ACTIVE_DISCOVERY_TTL_MS = 30_000L" in coordinator and "age <= ttl" in coordinator,
+    "Coordinator bounds stale mDNS": "MDNS_DISCOVERY_TTL_MS = 90_000L" in coordinator,
+    "Coordinator clears HTTP state on stop": "http.clear()" in coordinator,
 
     # Cemented product rule: exactly one navigation state exists and fresh Android starts on the device list.
     "Device list is primary screen": "AppNavigation(initial: AppScreen = AppScreen.DEVICE_LIST)" in navigation and "private val navigation = AppNavigation()" in main_activity,
