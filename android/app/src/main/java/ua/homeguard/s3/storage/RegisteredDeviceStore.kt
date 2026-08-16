@@ -17,13 +17,22 @@ data class RegisteredDevice(
     val authorized: Boolean = true,
 )
 
+/**
+ * Persistent owner-facing device registry.
+ *
+ * Invariants are enforced here, not in individual screens:
+ *  - one physical controller -> one registry entry;
+ *  - owner-assigned names are the only display names we persist;
+ *  - technical identity (ID/IP/service name) can never become a display name;
+ *  - discovery may refresh technical fields, but never overwrite the owner's name;
+ *  - manual records are atomically replaced by the real discovered identity.
+ */
 class RegisteredDeviceStore(context: Context) {
     companion object {
         @Volatile private var activeStore: RegisteredDeviceStore? = null
 
         suspend fun markActiveAuthorization(deviceId: String, authorized: Boolean) {
-            if (deviceId.isBlank()) return
-            activeStore?.markAuthorization(deviceId, authorized)
+            if (deviceId.isNotBlank()) activeStore?.markAuthorization(deviceId, authorized)
         }
 
         suspend fun reconcileActiveManual(manualDeviceId: String, discovered: DiscoveredDevice): Boolean =
@@ -32,149 +41,188 @@ class RegisteredDeviceStore(context: Context) {
         suspend fun refreshActiveDiscovered(discovered: DiscoveredDevice): Boolean =
             activeStore?.refreshDiscovered(discovered) ?: false
 
-        suspend fun removeActive(deviceId: String): Boolean {
-            if (deviceId.isBlank()) return false
-            return activeStore?.remove(deviceId) ?: false
-        }
+        suspend fun removeActive(deviceId: String): Boolean =
+            if (deviceId.isBlank()) false else activeStore?.remove(deviceId) ?: false
     }
 
-    private val preferences = context.applicationContext.getSharedPreferences("homeguard_devices", Context.MODE_PRIVATE)
-    private val _devices = MutableStateFlow(load())
+    private val preferences = context.applicationContext.getSharedPreferences(
+        "homeguard_devices",
+        Context.MODE_PRIVATE,
+    )
+
+    private val _devices = MutableStateFlow(readCanonicalRegistry())
     val devices: StateFlow<List<RegisteredDevice>> = _devices.asStateFlow()
 
-    init { activeStore = this }
+    init {
+        activeStore = this
+    }
 
     suspend fun addOrUpdate(device: DiscoveredDevice, requestedName: String? = null) {
-        val current = _devices.value.toMutableList()
-        val matching = current.filter { sameDevice(it, device) }
-        val exact = matching.firstOrNull { it.deviceId.equals(device.deviceId, ignoreCase = true) }
-        val named = matching.firstOrNull { !isGeneratedName(it.name, it.deviceId, it.baseUrl) }
-        val previous = named ?: exact ?: matching.maxByOrNull { it.lastSeenAtMs }
-        val requested = requestedName?.trim()?.take(40).orEmpty()
-        val displayName = requested.ifBlank { previous?.name.orEmpty() }
-        if (displayName.isBlank() || isGeneratedName(displayName, device.deviceId, device.baseUrl)) return
+        val requested = ownerNameOrNull(requestedName.orEmpty(), device.deviceId, device.baseUrl)
+        val current = physicalMatches(_devices.value, device.deviceId, device.baseUrl)
+        val previous = preferredOwnerRecord(current)
+        val ownerName = requested ?: previous?.let { ownerNameOrNull(it.name, it.deviceId, it.baseUrl) } ?: return
 
-        val registered = RegisteredDevice(
+        replacePhysicalDevice(
             deviceId = device.deviceId,
-            name = displayName,
             baseUrl = device.baseUrl,
-            lastSeenAtMs = device.seenAtMs,
-            authorized = exact?.authorized ?: previous?.authorized ?: true,
+            replacement = RegisteredDevice(
+                deviceId = device.deviceId,
+                name = ownerName,
+                baseUrl = device.baseUrl,
+                lastSeenAtMs = device.seenAtMs,
+                authorized = current.firstOrNull { it.deviceId.equals(device.deviceId, true) }?.authorized
+                    ?: previous?.authorized
+                    ?: true,
+            ),
         )
-        current.removeAll { sameDevice(it, device) }
-        current += registered
-        persist(current)
     }
 
     suspend fun addManual(deviceId: String, baseUrl: String, name: String = "") {
-        val current = _devices.value.toMutableList()
-        val previous = current.firstOrNull {
-            DeviceIdentity.samePhysicalDevice(it.deviceId, it.baseUrl, deviceId, baseUrl)
-        }
-        val requested = name.trim().take(40)
-        val displayName = when {
-            requested.isNotBlank() && !isGeneratedName(requested, deviceId, baseUrl) -> requested
-            previous != null && !isGeneratedName(previous.name, previous.deviceId, previous.baseUrl) -> previous.name
-            else -> ""
-        }
-        if (displayName.isBlank()) return
+        val current = physicalMatches(_devices.value, deviceId, baseUrl)
+        val previous = preferredOwnerRecord(current)
+        val ownerName = ownerNameOrNull(name, deviceId, baseUrl)
+            ?: previous?.let { ownerNameOrNull(it.name, it.deviceId, it.baseUrl) }
+            ?: return
 
-        val registered = RegisteredDevice(
+        replacePhysicalDevice(
             deviceId = deviceId,
-            name = displayName,
             baseUrl = baseUrl,
-            lastSeenAtMs = System.currentTimeMillis(),
-            authorized = previous?.authorized ?: true,
+            replacement = RegisteredDevice(
+                deviceId = deviceId,
+                name = ownerName,
+                baseUrl = baseUrl,
+                lastSeenAtMs = System.currentTimeMillis(),
+                authorized = previous?.authorized ?: true,
+            ),
         )
-        current.removeAll {
-            DeviceIdentity.samePhysicalDevice(it.deviceId, it.baseUrl, deviceId, baseUrl)
-        }
-        current += registered
-        persist(current)
     }
 
     suspend fun reconcileManual(manualDeviceId: String, discovered: DiscoveredDevice): Boolean {
         if (!manualDeviceId.startsWith("manual-") || discovered.deviceId.isBlank()) return false
-        val current = _devices.value.toMutableList()
-        val manual = current.firstOrNull {
-            it.deviceId == manualDeviceId &&
-                DeviceIdentity.samePhysicalDevice(it.deviceId, it.baseUrl, discovered.deviceId, discovered.baseUrl)
-        } ?: current.firstOrNull { it.deviceId == manualDeviceId } ?: return false
-        val real = current.firstOrNull { sameDevice(it, discovered) && it.deviceId != manualDeviceId }
-        val ownerName = when {
-            !isGeneratedName(manual.name, manual.deviceId, manual.baseUrl) -> manual.name
-            real != null && !isGeneratedName(real.name, real.deviceId, real.baseUrl) -> real.name
-            else -> ""
-        }
-        if (ownerName.isBlank()) return false
 
-        val merged = RegisteredDevice(
+        val snapshot = _devices.value
+        val manual = snapshot.firstOrNull { it.deviceId == manualDeviceId } ?: return false
+        if (!samePhysical(manual, discovered.deviceId, discovered.baseUrl)) return false
+
+        val matches = physicalMatches(snapshot, discovered.deviceId, discovered.baseUrl)
+        val real = matches.firstOrNull { it.deviceId.equals(discovered.deviceId, true) }
+        val ownerName = ownerNameOrNull(manual.name, manual.deviceId, manual.baseUrl)
+            ?: real?.let { ownerNameOrNull(it.name, it.deviceId, it.baseUrl) }
+            ?: return false
+
+        replacePhysicalDevice(
             deviceId = discovered.deviceId,
-            name = ownerName,
             baseUrl = discovered.baseUrl,
-            lastSeenAtMs = discovered.seenAtMs,
-            authorized = real?.authorized ?: manual.authorized,
+            replacement = RegisteredDevice(
+                deviceId = discovered.deviceId,
+                name = ownerName,
+                baseUrl = discovered.baseUrl,
+                lastSeenAtMs = discovered.seenAtMs,
+                authorized = real?.authorized ?: manual.authorized,
+            ),
         )
-        current.removeAll { it.deviceId == manualDeviceId || sameDevice(it, discovered) }
-        current += merged
-        persist(current)
         return true
     }
 
     suspend fun refreshDiscovered(discovered: DiscoveredDevice): Boolean {
-        val current = _devices.value.toMutableList()
-        val matching = current.filter { sameDevice(it, discovered) }
-        if (matching.isEmpty()) return false
+        val matches = physicalMatches(_devices.value, discovered.deviceId, discovered.baseUrl)
+        if (matches.isEmpty()) return false
 
-        val exact = matching.firstOrNull { it.deviceId.equals(discovered.deviceId, ignoreCase = true) }
-        val named = matching.firstOrNull { !isGeneratedName(it.name, it.deviceId, it.baseUrl) }
-        val previous = named ?: exact ?: matching.maxByOrNull { it.lastSeenAtMs } ?: return false
-        if (isGeneratedName(previous.name, previous.deviceId, previous.baseUrl)) return false
-
-        val updated = RegisteredDevice(
+        val previous = preferredOwnerRecord(matches) ?: return false
+        val ownerName = ownerNameOrNull(previous.name, previous.deviceId, previous.baseUrl) ?: return false
+        val exact = matches.firstOrNull { it.deviceId.equals(discovered.deviceId, true) }
+        val refreshed = RegisteredDevice(
             deviceId = discovered.deviceId,
-            name = previous.name,
+            name = ownerName,
             baseUrl = discovered.baseUrl,
             lastSeenAtMs = discovered.seenAtMs,
             authorized = exact?.authorized ?: previous.authorized,
         )
-        val alreadyCanonical = matching.size == 1 && previous == updated
-        if (alreadyCanonical) return false
-        current.removeAll { sameDevice(it, discovered) }
-        current += updated
-        persist(current)
+
+        if (matches.size == 1 && matches.single() == refreshed) return false
+        replacePhysicalDevice(discovered.deviceId, discovered.baseUrl, refreshed)
         return true
     }
 
     suspend fun rename(deviceId: String, name: String) {
-        val clean = name.trim().take(40)
-        val current = _devices.value.firstOrNull { it.deviceId == deviceId }
-        if (clean.isBlank() || isGeneratedName(clean, deviceId, current?.baseUrl.orEmpty())) return
-        persist(_devices.value.map { if (it.deviceId == deviceId) it.copy(name = clean) else it })
+        val target = _devices.value.firstOrNull { it.deviceId == deviceId } ?: return
+        val ownerName = ownerNameOrNull(name, target.deviceId, target.baseUrl) ?: return
+        writeCanonicalRegistry(
+            _devices.value.map { candidate ->
+                if (samePhysical(candidate, target.deviceId, target.baseUrl)) {
+                    candidate.copy(name = ownerName)
+                } else {
+                    candidate
+                }
+            },
+        )
     }
 
     suspend fun remove(deviceId: String): Boolean {
         val target = _devices.value.firstOrNull { it.deviceId == deviceId } ?: return false
-        val updated = _devices.value.filterNot {
-            DeviceIdentity.samePhysicalDevice(it.deviceId, it.baseUrl, target.deviceId, target.baseUrl)
-        }
-        persist(updated)
+        writeCanonicalRegistry(
+            _devices.value.filterNot { samePhysical(it, target.deviceId, target.baseUrl) },
+        )
         return true
     }
 
     suspend fun markAuthorization(deviceId: String, authorized: Boolean) {
         val target = _devices.value.firstOrNull { it.deviceId == deviceId } ?: return
-        persist(_devices.value.map {
-            if (DeviceIdentity.samePhysicalDevice(it.deviceId, it.baseUrl, target.deviceId, target.baseUrl)) {
-                it.copy(authorized = authorized)
-            } else it
-        })
+        writeCanonicalRegistry(
+            _devices.value.map { candidate ->
+                if (samePhysical(candidate, target.deviceId, target.baseUrl)) {
+                    candidate.copy(authorized = authorized)
+                } else {
+                    candidate
+                }
+            },
+        )
     }
 
-    private suspend fun persist(value: List<RegisteredDevice>) {
-        val clean = deduplicate(value)
+    private suspend fun replacePhysicalDevice(
+        deviceId: String,
+        baseUrl: String,
+        replacement: RegisteredDevice,
+    ) {
+        writeCanonicalRegistry(
+            _devices.value.filterNot { samePhysical(it, deviceId, baseUrl) } + replacement,
+        )
+    }
+
+    private suspend fun writeCanonicalRegistry(value: List<RegisteredDevice>) {
+        val canonical = canonicalize(value)
+        preferences.edit().putString("devices", encode(canonical)).apply()
+        _devices.emit(canonical)
+    }
+
+    private fun readCanonicalRegistry(): List<RegisteredDevice> = runCatching {
+        val raw = preferences.getString("devices", "[]").orEmpty()
+        val array = JSONArray(raw)
+        val loaded = buildList {
+            for (index in 0 until array.length()) {
+                val item = array.getJSONObject(index)
+                val deviceId = item.optString("device_id").trim()
+                if (deviceId.isBlank()) continue
+                val baseUrl = item.optString("base_url").trim()
+                val ownerName = ownerNameOrNull(item.optString("name", ""), deviceId, baseUrl).orEmpty()
+                add(
+                    RegisteredDevice(
+                        deviceId = deviceId,
+                        name = ownerName,
+                        baseUrl = baseUrl,
+                        lastSeenAtMs = item.optLong("last_seen_at_ms"),
+                        authorized = item.optBoolean("authorized", true),
+                    ),
+                )
+            }
+        }
+        canonicalize(loaded)
+    }.getOrDefault(emptyList())
+
+    private fun encode(value: List<RegisteredDevice>): String {
         val json = JSONArray()
-        clean.forEach { device ->
+        value.forEach { device ->
             json.put(JSONObject().apply {
                 put("device_id", device.deviceId)
                 put("name", device.name)
@@ -183,87 +231,72 @@ class RegisteredDeviceStore(context: Context) {
                 put("authorized", device.authorized)
             })
         }
-        preferences.edit().putString("devices", json.toString()).apply()
-        _devices.emit(clean.sortedBy { visibleSortName(it) })
+        return json.toString()
     }
 
-    private fun load(): List<RegisteredDevice> = runCatching {
-        val raw = preferences.getString("devices", "[]").orEmpty()
-        val array = JSONArray(raw)
-        val loaded = buildList {
-            for (index in 0 until array.length()) {
-                val item = array.getJSONObject(index)
-                val id = item.optString("device_id")
-                if (id.isBlank()) continue
-                val baseUrl = item.optString("base_url")
-                val storedName = item.optString("name", "")
-                add(
-                    RegisteredDevice(
-                        deviceId = id,
-                        name = if (isGeneratedName(storedName, id, baseUrl)) "" else storedName,
-                        baseUrl = baseUrl,
-                        lastSeenAtMs = item.optLong("last_seen_at_ms"),
-                        authorized = item.optBoolean("authorized", true),
-                    )
-                )
+    private fun canonicalize(value: List<RegisteredDevice>): List<RegisteredDevice> {
+        val groups = mutableListOf<MutableList<RegisteredDevice>>()
+        value.forEach { candidate ->
+            val group = groups.firstOrNull { members ->
+                members.any { samePhysical(it, candidate.deviceId, candidate.baseUrl) }
             }
+            if (group == null) groups += mutableListOf(candidate) else group += candidate
         }
-        deduplicate(loaded).sortedBy { visibleSortName(it) }
-    }.getOrDefault(emptyList())
 
-    private fun deduplicate(value: List<RegisteredDevice>): List<RegisteredDevice> {
-        val result = mutableListOf<RegisteredDevice>()
-        value.sortedByDescending { it.lastSeenAtMs }.forEach { candidate ->
-            val duplicateIndex = result.indexOfFirst { existing ->
-                DeviceIdentity.samePhysicalDevice(
-                    existing.deviceId,
-                    existing.baseUrl,
-                    candidate.deviceId,
-                    candidate.baseUrl,
-                )
-            }
-            if (duplicateIndex < 0) {
-                result += candidate
-                return@forEach
-            }
-
-            val existing = result[duplicateIndex]
-            val ownerName = when {
-                !isGeneratedName(existing.name, existing.deviceId, existing.baseUrl) -> existing.name
-                !isGeneratedName(candidate.name, candidate.deviceId, candidate.baseUrl) -> candidate.name
-                else -> ""
-            }
-            val latest = if (existing.lastSeenAtMs >= candidate.lastSeenAtMs) existing else candidate
-            result[duplicateIndex] = latest.copy(name = ownerName, authorized = existing.authorized && candidate.authorized)
-        }
-        return result
+        return groups.mapNotNull(::mergePhysicalGroup)
+            .sortedWith(compareBy<RegisteredDevice> { visibleSortName(it) }.thenBy { it.deviceId.lowercase() })
     }
 
-    private fun sameDevice(registered: RegisteredDevice, discovered: DiscoveredDevice): Boolean =
-        DeviceIdentity.samePhysicalDevice(
-            registered.deviceId,
-            registered.baseUrl,
-            discovered.deviceId,
-            discovered.baseUrl,
+    private fun mergePhysicalGroup(group: List<RegisteredDevice>): RegisteredDevice? {
+        if (group.isEmpty()) return null
+        val latest = group.maxByOrNull { it.lastSeenAtMs } ?: return null
+        val named = preferredOwnerRecord(group)
+        val ownerName = named?.let { ownerNameOrNull(it.name, it.deviceId, it.baseUrl) }.orEmpty()
+
+        // A legacy unnamed record may remain internally so discovery can reconcile it,
+        // but no technical identifier is promoted into a visible name.
+        return latest.copy(
+            name = ownerName,
+            authorized = group.all { it.authorized },
         )
+    }
 
-    private fun isGeneratedName(value: String, deviceId: String = "", baseUrl: String = ""): Boolean {
-        val clean = value.trim()
-        if (
-            clean.isBlank() ||
-            clean.equals("HomeGuard", ignoreCase = true) ||
-            clean.equals("HomeGuard-S3", ignoreCase = true) ||
-            (deviceId.isNotBlank() && clean.equals(deviceId.trim(), ignoreCase = true))
-        ) return true
+    private fun preferredOwnerRecord(records: List<RegisteredDevice>): RegisteredDevice? =
+        records
+            .filter { ownerNameOrNull(it.name, it.deviceId, it.baseUrl) != null }
+            .maxByOrNull { it.lastSeenAtMs }
+            ?: records.maxByOrNull { it.lastSeenAtMs }
+
+    private fun physicalMatches(
+        value: List<RegisteredDevice>,
+        deviceId: String,
+        baseUrl: String,
+    ): List<RegisteredDevice> = value.filter { samePhysical(it, deviceId, baseUrl) }
+
+    private fun samePhysical(
+        registered: RegisteredDevice,
+        deviceId: String,
+        baseUrl: String,
+    ): Boolean = DeviceIdentity.samePhysicalDevice(
+        registered.deviceId,
+        registered.baseUrl,
+        deviceId,
+        baseUrl,
+    )
+
+    private fun ownerNameOrNull(value: String, deviceId: String, baseUrl: String): String? {
+        val clean = value.trim().take(40)
+        if (clean.isBlank()) return null
+        if (clean.equals("HomeGuard", true) || clean.equals("HomeGuard-S3", true)) return null
+        if (deviceId.isNotBlank() && clean.equals(deviceId.trim(), true)) return null
 
         val endpoint = baseUrl.trim().trimEnd('/').lowercase()
-        if (endpoint.isBlank()) return false
-        if (clean.equals(endpoint, ignoreCase = true)) return true
-
+        if (endpoint.isNotBlank() && clean.equals(endpoint, true)) return null
         val host = DeviceIdentity.endpointHost(endpoint)
-        return host.isNotBlank() && clean.equals(host, ignoreCase = true)
+        if (host.isNotBlank() && clean.equals(host, true)) return null
+        return clean
     }
 
     private fun visibleSortName(device: RegisteredDevice): String =
-        if (isGeneratedName(device.name, device.deviceId, device.baseUrl)) "~" else device.name.trim().lowercase()
+        ownerNameOrNull(device.name, device.deviceId, device.baseUrl)?.lowercase() ?: "~"
 }
