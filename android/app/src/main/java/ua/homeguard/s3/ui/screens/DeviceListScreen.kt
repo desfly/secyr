@@ -83,6 +83,12 @@ fun DeviceListScreen(
     var propertiesDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
 
     renameDevice?.let { device ->
+        val cleanRename = renameText.trim()
+        val renameValid = !DeviceIdentity.isForbiddenFriendlyName(
+            cleanRename,
+            device.deviceId,
+            device.baseUrl,
+        )
         AlertDialog(
             onDismissRequest = { renameDevice = null },
             title = { Text("Перейменувати пристрій") },
@@ -92,15 +98,21 @@ fun DeviceListScreen(
                     onValueChange = { renameText = it.take(40) },
                     singleLine = true,
                     label = { Text("Назва") },
-                    supportingText = { Text("У списку показується тільки ваша назва") },
+                    supportingText = {
+                        Text(
+                            if (renameValid) "У списку буде показано: $cleanRename"
+                            else "Введіть власну назву, не HomeGuard, ID або IP",
+                        )
+                    },
+                    isError = renameText.isNotEmpty() && !renameValid,
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
             confirmButton = {
                 TextButton(
-                    enabled = renameText.trim().isNotBlank(),
+                    enabled = renameValid,
                     onClick = {
-                        onRenameDevice(device, renameText.trim())
+                        onRenameDevice(device, cleanRename)
                         renameDevice = null
                     },
                 ) { Text("Зберегти") }
