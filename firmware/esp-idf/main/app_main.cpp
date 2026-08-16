@@ -181,7 +181,7 @@ esp_err_t start_http_server()
     ESP_RETURN_ON_ERROR(g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed), kTag, "access routes");
     ESP_RETURN_ON_ERROR(g_telemetry_session_http.register_handlers(g_http_server, &g_access_control, &g_websocket_telemetry), kTag, "telemetry session route");
     g_service_http.set_access_control(&g_access_control);
-    ESP_RETURN_ON_ERROR(g_service_http.register_handlers(g_http_server, &g_commissioning_store, &g_hardware_verification, &g_commissioning_state, &g_boot_readiness, &g_system_bus), kTag, "service routes");
+    ESP_RETURN_ON_ERROR(g_service_http.register_handlers(g_http_server, &g_commissioning_store, &g_hardware_verification, &g_commissioning_state, &g_boot_readiness, &g_physical_outputs, &g_system_bus), kTag, "service routes");
     return g_build_http.register_handlers(g_http_server);
 }
 
