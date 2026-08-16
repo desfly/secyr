@@ -7,7 +7,8 @@
 namespace homeguard::idf {
 namespace {
 constexpr const char* kNamespace = "hg_commission";
-constexpr const char* kHardwareKey = "hardware_v1";
+constexpr const char* kHardwareKey = "hardware_v2";
+constexpr const char* kLegacyHardwareKey = "hardware_v1";
 constexpr const char* kCommissioningKey = "state_v1";
 
 template <typename T>
@@ -36,6 +37,9 @@ esp_err_t save_blob(const char* key, const T& value) {
 }  // namespace
 
 esp_err_t CommissioningNvsStore::load_hardware(hg::HardwareVerificationRecord& record) const {
+    // Never auto-upgrade schema-v1 records: those encoded actuator outputs as
+    // direct ESP GPIOs. Absence of hardware_v2 intentionally keeps outputs
+    // fail-closed until the HW-678 MCP23017 profile is re-verified.
     const auto error = load_blob(kHardwareKey, record);
     if (error != ESP_OK) return error;
     return hg::validate_hardware_verification(record) == hg::HardwareVerificationStatus::Valid
@@ -74,6 +78,7 @@ esp_err_t CommissioningNvsStore::erase_all() const {
     };
 
     error = erase_one(kHardwareKey);
+    if (error == ESP_OK) error = erase_one(kLegacyHardwareKey);
     if (error == ESP_OK) error = erase_one(kCommissioningKey);
     if (error == ESP_OK) error = nvs_commit(handle);
     nvs_close(handle);
