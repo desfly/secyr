@@ -21,6 +21,10 @@ public:
         return load_credentials(ssid, password);
     }
     bool save_persisted_credentials(const std::string& ssid, const std::string& password) const {
+        if (ssid.empty() || ssid.size() > 32 || password.size() > 64 ||
+            (!password.empty() && password.size() < 8)) {
+            return false;
+        }
         return save_credentials(ssid, password);
     }
 
