@@ -40,8 +40,9 @@ private:
     void handle_ip_event(std::int32_t id, void* data);
     void handle_reconnect_timer();
     void schedule_reconnect();
+    void clear_pending_credentials();
 
-    bool apply_sta(const std::string& ssid, const std::string& password, bool persist);
+    bool apply_sta(const std::string& ssid, const std::string& password);
     bool load_credentials(std::string& ssid, std::string& password) const;
     bool save_credentials(const std::string& ssid, const std::string& password) const;
     std::string status_json() const;
@@ -51,8 +52,11 @@ private:
     void* sta_netif_{};
     esp_timer_handle_t reconnect_timer_{};
     std::string ap_ssid_;
+    std::string pending_ssid_;
+    std::string pending_password_;
     bool initialized_{};
     bool sta_credentials_configured_{};
+    bool pending_credentials_{};
     std::uint32_t reconnect_count_{};
 };
 
