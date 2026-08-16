@@ -173,57 +173,87 @@ esp_err_t W5500::stop()
 esp_err_t W5500::deinitialize()
 {
     esp_err_t first_error = ESP_OK;
-    auto capture = [&first_error](esp_err_t error) {
-        if (error != ESP_OK && error != ESP_ERR_INVALID_STATE && first_error == ESP_OK) {
+    auto capture = [&first_error](esp_err_t error, bool invalid_state_ok = false) {
+        if (error == ESP_OK || (invalid_state_ok && error == ESP_ERR_INVALID_STATE)) {
+            return;
+        }
+        if (first_error == ESP_OK) {
             first_error = error;
         }
     };
 
-    if (eth_ != nullptr && status_.initialized) {
-        capture(esp_eth_stop(eth_));
+    // Stopping an installed-but-never-started driver can legitimately report
+    // INVALID_STATE. That is different from an uninstall ownership failure.
+    if (eth_ != nullptr) {
+        capture(esp_eth_stop(eth_), true);
     }
 
     if (ip_event_registered_) {
         capture(esp_event_handler_unregister(
             IP_EVENT,
             IP_EVENT_ETH_GOT_IP,
-            &W5500::on_ip_event));
+            &W5500::on_ip_event), true);
         ip_event_registered_ = false;
     }
     if (eth_event_registered_) {
         capture(esp_event_handler_unregister(
             ETH_EVENT,
             ESP_EVENT_ANY_ID,
-            &W5500::on_eth_event));
+            &W5500::on_eth_event), true);
         eth_event_registered_ = false;
     }
 
     if (glue_ != nullptr) {
-        capture(esp_eth_del_netif_glue(glue_));
-        glue_ = nullptr;
+        const auto glue_error = esp_eth_del_netif_glue(glue_);
+        capture(glue_error);
+        if (glue_error == ESP_OK) {
+            glue_ = nullptr;
+        }
     }
-    if (netif_ != nullptr) {
+    if (netif_ != nullptr && glue_ == nullptr) {
         esp_netif_destroy(netif_);
         netif_ = nullptr;
     }
-    if (eth_ != nullptr) {
-        capture(esp_eth_driver_uninstall(eth_));
-        eth_ = nullptr;
-    }
-    if (phy_ != nullptr) {
-        capture(phy_->del(phy_));
-        phy_ = nullptr;
-    }
-    if (mac_ != nullptr) {
-        capture(mac_->del(mac_));
-        mac_ = nullptr;
-    }
-    if (spi_bus_owned_) {
-        capture(spi_bus_free(SPI2_HOST));
-        spi_bus_owned_ = false;
+
+    // Do not destroy MAC/PHY or free the SPI bus unless the Ethernet driver
+    // really released its final reference. ESP_ERR_INVALID_STATE here means
+    // the driver is still alive and still owns those objects.
+    if (eth_ != nullptr && glue_ == nullptr) {
+        const auto uninstall_error = esp_eth_driver_uninstall(eth_);
+        capture(uninstall_error);
+        if (uninstall_error == ESP_OK) {
+            eth_ = nullptr;
+        }
     }
 
-    status_ = {};
+    if (eth_ == nullptr) {
+        if (phy_ != nullptr) {
+            const auto error = phy_->del(phy_);
+            capture(error);
+            if (error == ESP_OK) {
+                phy_ = nullptr;
+            }
+        }
+        if (mac_ != nullptr) {
+            const auto error = mac_->del(mac_);
+            capture(error);
+            if (error == ESP_OK) {
+                mac_ = nullptr;
+            }
+        }
+        if (spi_bus_owned_ && mac_ == nullptr && phy_ == nullptr) {
+            const auto error = spi_bus_free(SPI2_HOST);
+            capture(error);
+            if (error == ESP_OK) {
+                spi_bus_owned_ = false;
+            }
+        }
+    }
+
+    status_.initialized = false;
+    status_.link_up = false;
+    status_.has_ip = false;
+    status_.ipv4.clear();
     return first_error;
 }
 
