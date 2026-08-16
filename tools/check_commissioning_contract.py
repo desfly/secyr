@@ -118,14 +118,18 @@ for token, label in [
     ("commissioning_.valve_limit_polarity_verified", "valve bench requires verified limit polarity"),
     ("commissioning_.cold_valve_travel_timeout_ms == 0U", "valve bench rejects missing cold timeout"),
     ("commissioning_.hot_valve_travel_timeout_ms == 0U", "valve bench rejects missing hot timeout"),
-    ("if (!read_limits_locked(limits))", "valve bench reads physical GPB limits"),
-    ("limits.cold_open && limits.cold_closed", "valve bench detects contradictory cold limits"),
-    ("limits.hot_open && limits.hot_closed", "valve bench detects contradictory hot limits"),
-    ("target_limit_reached = limits.cold_open", "cold OPEN evidence requires open limit"),
-    ("target_limit_reached = limits.cold_closed", "cold CLOSE evidence requires closed limit"),
-    ("target_limit_reached = limits.hot_open", "hot OPEN evidence requires open limit"),
-    ("target_limit_reached = limits.hot_closed", "hot CLOSE evidence requires closed limit"),
-    ("return target_limit_reached", "valve pulse success means physical end-switch evidence"),
+    ("bool target_limit_active(", "central target end-stop mapping"),
+    ("LimitSnapshot before{}", "valve bench samples limits before energizing"),
+    ("if (!read_limits_locked(before))", "pre-pulse physical GPB read"),
+    ("before.cold_open && before.cold_closed", "pre-pulse contradictory cold limits"),
+    ("before.hot_open && before.hot_closed", "pre-pulse contradictory hot limits"),
+    ("if (target_limit_active(", "already-active target blocks energizing"),
+    ("LimitSnapshot after{}", "valve bench samples limits after pulse"),
+    ("if (!read_limits_locked(after))", "post-pulse physical GPB read"),
+    ("after.cold_open && after.cold_closed", "post-pulse contradictory cold limits"),
+    ("after.hot_open && after.hot_closed", "post-pulse contradictory hot limits"),
+    ("target_limit_reached = target_limit_active(", "post-pulse target evidence"),
+    ("return target_limit_reached", "valve pulse success means physical end-stop transition evidence"),
 ]:
     require(physical, token, label)
 
@@ -151,13 +155,14 @@ require(t47, "commissioning_state_persistable", "unit test covers partial persis
 require(t54, "kMaxBenchPulseMs + 1U", "unit test rejects overlong bench pulse")
 require(t54, "before_dry_run.successful_dry_runs = 0", "unit test blocks bench before dry-run")
 require(t54, "dry_run_only.valve_limit_polarity_verified = false", "unit test blocks valve bench before profile")
-require(t54, "ColdValveOpenLimit, true", "unit test requires physical target limit for valve evidence")
+require(t54, "bench_transition_backend = &bench_backend", "unit test changes target end stop during pulse")
+require(t54, "bench_transition_cold_open = true", "unit test drives cold-open end-stop transition")
+require(t54, "TEST_CHECK(bench_delay_seen == 0U)", "unit test proves active target prevents energizing")
 require(t54, "PhysicalOutputStatus::ValveSafetyFault", "unit test latches contradictory bench limits")
 require(t54, "set_maintenance_mode(true)", "unit test covers maintenance bench gate")
 
 # Destructive operations use sticky fail-closed. Factory reset always reboots;
-# commissioning invalidation must reboot too, otherwise the sticky latch cannot
-# be legally cleared by a same-boot recommissioning attempt.
+# commissioning invalidation must reboot too, otherwise same-boot recommissioning cannot legally clear the latch.
 if service.count("lockout_fail_closed()") < 2:
     errors.append("commissioning contract regressed: destructive routes are not sticky fail-closed")
 require(service, "nvs_flash_erase()", "whole-NVS factory reset")
