@@ -12,3 +12,4 @@ struct spi_device_interface_config_t {
     int flags,queue_size; void* pre_cb; void* post_cb;
 };
 inline esp_err_t spi_bus_initialize(int,const spi_bus_config_t*,int){return ESP_OK;}
+inline esp_err_t spi_bus_free(int){return ESP_OK;}
