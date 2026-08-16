@@ -49,6 +49,22 @@ bool valve_bench_channel(PhysicalOutputChannel channel) noexcept
     return false;
 }
 
+bool target_limit_active(
+    PhysicalOutputChannel channel,
+    bool cold_open,
+    bool cold_closed,
+    bool hot_open,
+    bool hot_closed) noexcept
+{
+    switch (channel) {
+        case PhysicalOutputChannel::ColdValveOpen: return cold_open;
+        case PhysicalOutputChannel::ColdValveClose: return cold_closed;
+        case PhysicalOutputChannel::HotValveOpen: return hot_open;
+        case PhysicalOutputChannel::HotValveClose: return hot_closed;
+        default: return false;
+    }
+}
+
 }  // namespace
 
 bool PhysicalOutputRuntime::initialize(
@@ -342,11 +358,6 @@ bool PhysicalOutputRuntime::bench_pulse(
         return false;
     }
 
-    // A maintenance endpoint is not itself proof that energizing hardware is
-    // safe. Every bench pulse therefore requires a signed HW-678 verification
-    // plus a completed dry-run. Valve directions additionally require the
-    // measured limit polarity and non-zero travel timeouts before any coil can
-    // be energized. Normal outputs remain fail-closed throughout commissioning.
     const bool is_valve = valve_bench_channel(channel);
     const bool dry_run_verified =
         hardware_verified_ &&
@@ -362,6 +373,28 @@ bool PhysicalOutputRuntime::bench_pulse(
         return false;
     }
 
+    // Never energize a valve toward an already-active mechanical end stop. It
+    // is not valid actuator evidence and risks holding the coil against the
+    // stop for the full bench interval. Contradictory inputs are a sticky fault.
+    if (is_valve) {
+        LimitSnapshot before{};
+        if (!read_limits_locked(before)) {
+            return latch_fault_locked(PhysicalOutputStatus::BackendError);
+        }
+        if ((before.cold_open && before.cold_closed) ||
+            (before.hot_open && before.hot_closed)) {
+            return latch_fault_locked(PhysicalOutputStatus::ValveSafetyFault);
+        }
+        if (target_limit_active(
+                channel,
+                before.cold_open,
+                before.cold_closed,
+                before.hot_open,
+                before.hot_closed)) {
+            return false;
+        }
+    }
+
     if (!force_safe_locked()) return false;
     if (!write_logical_locked(channel, true)) {
         return latch_fault_locked(PhysicalOutputStatus::BackendError);
@@ -371,21 +404,20 @@ bool PhysicalOutputRuntime::bench_pulse(
 
     bool target_limit_reached = true;
     if (is_valve) {
-        LimitSnapshot limits{};
-        if (!read_limits_locked(limits)) {
+        LimitSnapshot after{};
+        if (!read_limits_locked(after)) {
             return latch_fault_locked(PhysicalOutputStatus::BackendError);
         }
-        if ((limits.cold_open && limits.cold_closed) ||
-            (limits.hot_open && limits.hot_closed)) {
+        if ((after.cold_open && after.cold_closed) ||
+            (after.hot_open && after.hot_closed)) {
             return latch_fault_locked(PhysicalOutputStatus::ValveSafetyFault);
         }
-        switch (channel) {
-            case PhysicalOutputChannel::ColdValveOpen: target_limit_reached = limits.cold_open; break;
-            case PhysicalOutputChannel::ColdValveClose: target_limit_reached = limits.cold_closed; break;
-            case PhysicalOutputChannel::HotValveOpen: target_limit_reached = limits.hot_open; break;
-            case PhysicalOutputChannel::HotValveClose: target_limit_reached = limits.hot_closed; break;
-            default: target_limit_reached = false; break;
-        }
+        target_limit_reached = target_limit_active(
+            channel,
+            after.cold_open,
+            after.cold_closed,
+            after.hot_open,
+            after.hot_closed);
     }
 
     if (!force_safe_locked()) return false;
@@ -395,10 +427,8 @@ bool PhysicalOutputRuntime::bench_pulse(
         : PhysicalOutputStatus::InvalidHardware;
     state_.outputs_enabled = false;
 
-    // For valves, success is evidence: the requested direction was pulsed and
-    // the corresponding physical GPB end switch was observed active. A pulse
-    // that did not yet reach the target is still safely turned OFF but cannot
-    // count toward actuator acceptance.
+    // For valves, success is evidence: the target was inactive before the
+    // pulse and the matching physical GPB end switch is active afterwards.
     return target_limit_reached;
 }
 
