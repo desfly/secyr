@@ -124,13 +124,34 @@ void AccessControl::clear_users() {
 
 const AccessUser* AccessControl::user_at(std::size_t index) const {
     std::scoped_lock lock(g_access_control_mutex);
-    return index < user_count_ ? &users_[index] : nullptr;
+    if (index >= user_count_) return nullptr;
+    thread_local AccessUser snapshot{};
+    snapshot = users_[index];
+    return &snapshot;
 }
 
 const AccessUser* AccessControl::find_user(std::string_view id) const {
     std::scoped_lock lock(g_access_control_mutex);
     const auto index = user_index(id);
-    return index < user_count_ ? &users_[index] : nullptr;
+    if (index >= user_count_) return nullptr;
+    thread_local AccessUser snapshot{};
+    snapshot = users_[index];
+    return &snapshot;
+}
+
+void AccessControl::set_auth_clock(AuthClock clock) {
+    std::scoped_lock lock(g_access_control_mutex);
+    auth_clock_ = clock;
+}
+
+bool AccessControl::auth_throttle_enabled() const {
+    std::scoped_lock lock(g_access_control_mutex);
+    return auth_clock_ != nullptr;
+}
+
+std::size_t AccessControl::user_count() const {
+    std::scoped_lock lock(g_access_control_mutex);
+    return user_count_;
 }
 
 std::size_t AccessControl::enabled_admin_count() const {
@@ -327,11 +348,18 @@ AuditDecision AccessControl::authorize(
     return decision;
 }
 
+std::size_t AccessControl::audit_size() const {
+    std::scoped_lock lock(g_access_control_mutex);
+    return audit_size_;
+}
+
 const AccessAuditRecord* AccessControl::audit_at_oldest(std::size_t index) const {
     std::scoped_lock lock(g_access_control_mutex);
     if (index >= audit_size_) return nullptr;
     const auto oldest = (audit_head_ + audit_capacity - audit_size_) % audit_capacity;
-    return &audit_[(oldest + index) % audit_capacity];
+    thread_local AccessAuditRecord snapshot{};
+    snapshot = audit_[(oldest + index) % audit_capacity];
+    return &snapshot;
 }
 
 const char* to_string(AccessRole role) noexcept {
