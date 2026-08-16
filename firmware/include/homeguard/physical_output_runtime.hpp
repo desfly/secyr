@@ -66,6 +66,7 @@ struct PhysicalOutputRuntimeState {
     PhysicalOutputStatus status{PhysicalOutputStatus::FailClosed};
     bool outputs_enabled{};
     bool safety_fault_latched{};
+    bool maintenance_mode{};
     std::uint32_t writes{};
     std::uint32_t failures{};
     std::uint32_t limit_stops{};
@@ -80,22 +81,21 @@ class PhysicalOutputRuntime {
 public:
     static constexpr std::uint32_t kMaxBenchPulseMs = 1000U;
 
-    // A successfully configured MCP backend is a usable fail-safe runtime even
-    // when hardware verification is missing. In that case initialize() returns
-    // true with InvalidHardware and keeps every output OFF; verification only
-    // controls permission to energize outputs.
     bool initialize(
         PhysicalOutputBackend& backend,
         const HardwareVerificationRecord& hardware,
         const CommissioningPersistentState& commissioning,
         const BootReadinessReport& readiness);
 
-    // Update verified commissioning/readiness atomically inside the actuator
-    // runtime. The supervisor never reads mutable global records directly.
     bool update_control_state(
         const HardwareVerificationRecord& hardware,
         const CommissioningPersistentState& commissioning,
         const BootReadinessReport& readiness);
+
+    // Maintenance mode is a non-sticky service gate. Entering it forces all
+    // outputs OFF and prevents normal supervisor commands from energizing them.
+    // Bench pulses are the only permitted ON path until maintenance is exited.
+    bool set_maintenance_mode(bool active);
 
     bool synchronize(const SystemModel& model, std::uint64_t now_ms);
     bool force_safe();
@@ -145,8 +145,7 @@ private:
     mutable std::mutex mutex_;
     PhysicalOutputRuntimeState state_{};
     bool hardware_verified_{};
-    bool siren_known_{};
-    bool siren_active_{};
+    std::uint32_t siren_command_revision_{};
 };
 
 [[nodiscard]] const char* to_string(PhysicalOutputStatus status);
