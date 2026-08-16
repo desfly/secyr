@@ -137,11 +137,19 @@ void test_build0054() {
     TEST_CHECK(!bench_runtime.bench_pulse(
         hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
 
-    // Valve profile unlocks bounded valve-direction bench pulses, but normal
-    // outputs remain fail-closed until actuator acceptance completes.
+    // Valve profile permits a bounded physical pulse, but a direction only
+    // counts as successful evidence when the matching GPB end switch is read
+    // active after the pulse. A pulse alone is never actuator proof.
     auto profiled = commissioning;
     profiled.successful_actuator_tests = 0;
     TEST_CHECK(bench_runtime.update_control_state(hardware, profiled, blocked));
+    bench_delay_seen = 0;
+    TEST_CHECK(!bench_runtime.bench_pulse(
+        hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
+    TEST_CHECK(bench_delay_seen == 100U);
+    for (int channel = 0; channel < 8; ++channel) TEST_CHECK(!bench_backend.levels[channel]);
+
+    bench_backend.set_limit(hg::PhysicalInputChannel::ColdValveOpenLimit, true);
     bench_delay_seen = 0;
     TEST_CHECK(bench_runtime.bench_pulse(
         hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
@@ -154,6 +162,15 @@ void test_build0054() {
         TEST_CHECK(!bench_backend.levels[channel]);
     }
     TEST_CHECK(!bench_runtime.state().outputs_enabled);
+
+    // Contradictory end switches during commissioning are a latched physical
+    // safety fault, exactly as in normal runtime supervision.
+    bench_backend.set_limit(hg::PhysicalInputChannel::ColdValveClosedLimit, true);
+    TEST_CHECK(!bench_runtime.bench_pulse(
+        hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
+    TEST_CHECK(bench_runtime.state().status == hg::PhysicalOutputStatus::ValveSafetyFault);
+    TEST_CHECK(bench_runtime.state().safety_fault_latched);
+    for (int channel = 0; channel < 8; ++channel) TEST_CHECK(!bench_backend.levels[channel]);
 
     FakeBackend backend;
     hg::PhysicalOutputRuntime runtime;
