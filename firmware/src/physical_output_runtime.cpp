@@ -50,8 +50,6 @@ bool PhysicalOutputRuntime::initialize(
     siren_known_ = true;
     siren_active_ = false;
 
-    // The OFF path exists before verification. This lets a clean/uncommissioned
-    // controller remain safely resettable while still forbidding any ON path.
     for (const auto channel : kAllChannels) {
         if (!backend_->configure_output(channel_number(channel), false)) {
             ++state_.failures;
@@ -65,8 +63,6 @@ bool PhysicalOutputRuntime::initialize(
     if (!hardware_verified_) {
         state_.status = PhysicalOutputStatus::InvalidHardware;
         state_.outputs_enabled = false;
-        // Backend initialization succeeded and is useful as a fail-safe OFF
-        // runtime. Missing verification is a permission state, not init failure.
         return true;
     }
 
@@ -95,8 +91,6 @@ bool PhysicalOutputRuntime::update_control_state(
     readiness_ = readiness;
     hardware_verified_ = hardware_verification_allows_outputs(hardware_);
 
-    // A destructive-service or hardware safety fault is sticky until reboot.
-    // Updating commissioning records must never clear that latch.
     if (state_.safety_fault_latched) return false;
 
     if (!hardware_verified_) {
@@ -114,8 +108,6 @@ bool PhysicalOutputRuntime::update_control_state(
         return true;
     }
 
-    // Permission is ready; all physical channels remain OFF until the supervisor
-    // consumes an explicit model command revision.
     if (!force_safe_locked()) return false;
     state_.status = PhysicalOutputStatus::Ready;
     state_.outputs_enabled = true;
@@ -299,14 +291,15 @@ bool PhysicalOutputRuntime::bench_pulse(
     BenchDelayFn delay_fn)
 {
     std::scoped_lock lock(mutex_);
-    if (backend_ == nullptr || !hardware_verified_ || state_.safety_fault_latched ||
+    if (backend_ == nullptr || state_.safety_fault_latched ||
         delay_fn == nullptr || duration_ms == 0U || duration_ms > kMaxBenchPulseMs ||
         !bench_channel_allowed(channel)) {
         return false;
     }
 
-    // The supervisor blocks on this mutex for the entire pulse. Every bench
-    // operation starts and ends from an all-OFF state.
+    // This is the only intentional pre-verification ON path. It remains bounded
+    // and serialized; authorization/maintenance/disarmed/live-MCP requirements
+    // are enforced by ServiceHttp before this call.
     if (!force_safe_locked()) return false;
     if (!write_logical_locked(channel, true)) {
         return latch_fault_locked(PhysicalOutputStatus::BackendError);
@@ -315,8 +308,11 @@ bool PhysicalOutputRuntime::bench_pulse(
     delay_fn(duration_ms);
 
     if (!force_safe_locked()) return false;
-    if (hardware_verified_ && readiness_.outputs_allowed() &&
-        commissioning_state_allows_physical_outputs(commissioning_)) {
+    if (!hardware_verified_) {
+        state_.status = PhysicalOutputStatus::InvalidHardware;
+        state_.outputs_enabled = false;
+    } else if (readiness_.outputs_allowed() &&
+               commissioning_state_allows_physical_outputs(commissioning_)) {
         state_.status = PhysicalOutputStatus::Ready;
         state_.outputs_enabled = true;
     } else {
