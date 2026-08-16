@@ -43,6 +43,26 @@ require('method: "POST"' in web_http,
 require('body: JSON.stringify({ actor: actorValue, credential: credentialValue, confirm: "ERASE_ALL" })' in web_http,
         "Factory Reset UI does not submit Admin credentials plus ERASE_ALL")
 
+# The primary firmware-owned reset UI must distinguish an explicit HTTP reject
+# from transport loss while the controller is erasing Wi-Fi/rebooting. A socket
+# loss is indeterminate, not proof that the destructive command failed.
+for needle in (
+    "let responseReceived = false",
+    "responseReceived = true",
+    "if (!responseReceived)",
+    "Зв’язок обірвався під час Factory Reset",
+    "Factory Reset відхилено:",
+):
+    require(needle in web_http, f"Factory Reset transport-loss UX missing: {needle}")
+require(
+    web_http.find("if (!responseReceived)") < web_http.find("button.disabled = false;", web_http.find("if (!responseReceived)")),
+    "transport-loss path can re-enable destructive reset button before controller state is known",
+)
+require(
+    'if (credential) credential.value = "";' in web_http,
+    "Factory Reset does not clear Admin PIN after success/loss/rejection",
+)
+
 # The first-Admin action is allowed only on a truly factory-fresh controller.
 # The browser must use a read-only status endpoint; fake/partial bootstrap POSTs
 # are forbidden because they pollute logs and couple UX to error ordering.
@@ -116,9 +136,13 @@ for needle in (
 ):
     require(needle in web_http, f"navigation/mobile field contract missing: {needle}")
 
-# The base access/session layer must repair duplicate-href navigation in the
-# same event turn, not only via microtask/timer. Otherwise Build-948 style
-# double highlighting can still be painted for one frame.
+# Firmware suffix also repairs hash navigation synchronously; the source
+# access/session layer performs the same guarantee around duplicate href links.
+require(
+    'window.addEventListener("hashchange", () => {' in web_http and
+    "applyEmbeddedView();\n    enforceSingleActiveNav();\n    queueMicrotask(enforceSingleActiveNav);" in web_http,
+    "firmware hashchange repair is not synchronous",
+)
 require("function enforceSingleSidebarActive()" in access_session,
         "base access-session navigation repair is missing")
 require(
@@ -154,6 +178,7 @@ if errors:
 
 print("Field Web acceptance PASS")
 print(" - Factory Reset: firmware-visible + Admin credentials + double confirm")
+print(" - reset transport loss is indeterminate/offline; explicit HTTP rejection remains retryable")
 print(" - first Admin: read-only status API; button/hint fail-closed unless factory-fresh")
 print(" - fake bootstrap POST capability probes are forbidden")
 print(" - password/PIN show-hide controls: firmware-owned")
