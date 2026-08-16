@@ -138,6 +138,28 @@ require("/api/v1/system/factory-reset" in client and "ERASE_ALL" in client,
 require('optBoolean("rebooting", false)' in client,
         "Android treats reset as success without controller reboot acknowledgement")
 
+# Acceptance item 23: an expected connection loss during destructive reset
+# must never leave stale authorization/endpoint/tokens in the UI. Explicit HTTP
+# rejection remains a different path and must not wipe local registration.
+require("class FactoryResetTransportException" in client and
+        "class FactoryResetRejectedException" in client,
+        "Factory Reset transport loss is not distinguished from explicit rejection")
+require("throw FactoryResetTransportException(error)" in client,
+        "Factory Reset request transport loss is not surfaced distinctly")
+require("throw FactoryResetRejectedException(" in client,
+        "Factory Reset explicit rejection does not stay distinct from transport loss")
+require("catch (error: FactoryResetTransportException)" in maintenance,
+        "maintenance screen does not handle expected reset disconnect explicitly")
+require("val leaveAfterReset: suspend" in maintenance and
+        maintenance.count("leaveAfterReset(") >= 3,
+        "confirmed reset and transport-loss reset do not share fail-closed cleanup")
+require("registeredDevices.markAuthorization(resetDeviceId, resetBaseUrl, false)" in maintenance and
+        "settings.clearControllerSessionAfterFactoryReset()" in maintenance and
+        "path = ControlPath.OFFLINE" in maintenance,
+        "reset disconnect path can leave stale authorized/online state")
+require('status = "Factory Reset: ${error.message ?: "rejected"}"' in maintenance,
+        "explicit reset rejection no longer preserves local state for retry")
+
 if errors:
     print("Android field acceptance FAIL")
     for error in errors:
@@ -152,5 +174,6 @@ print(" - duplicate physical ESP records merged with canonical identity")
 print(" - compact icon + LAN/CLOUD/online picons")
 print(" - unsupported runtime controls stay disabled even for Admin")
 print(" - PIN reveal + explicit Factory Reset")
-print(" - reset requires reboot acknowledgement and canonical authorization invalidation")
-print(" - reset clears endpoint/certificate/tokens and restarts a fresh Android task")
+print(" - reset confirms reboot when response arrives")
+print(" - reset transport loss fails closed to unauthorized/offline fresh task")
+print(" - explicit reset rejection preserves local state for retry")
