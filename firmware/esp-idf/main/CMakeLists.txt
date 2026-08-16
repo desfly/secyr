@@ -33,6 +33,7 @@ idf_component_register(
         "hg_telemetry_runtime.cpp"
         "hg_telemetry_session_http.cpp"
         "hg_infrastructure_http.cpp"
+        "hg_rgb_diagnostic.cpp"
         "hg_system_http.cpp"
         "hg_service_http.cpp"
         "hg_output_http.cpp"
