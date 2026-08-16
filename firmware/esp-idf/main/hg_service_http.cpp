@@ -1,6 +1,11 @@
 #include "hg_service_http.hpp"
 #include "homeguard/service_readiness.hpp"
 
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "nvs_flash.h"
+
 #include <cstddef>
 #include <string>
 
@@ -56,6 +61,7 @@ esp_err_t ServiceHttp::register_handlers(
     const httpd_uri_t routes[] = {
         {.uri="/api/v1/service/readiness", .method=HTTP_GET, .handler=&ServiceHttp::readiness_get, .user_ctx=this},
         {.uri="/api/v1/service/invalidate", .method=HTTP_POST, .handler=&ServiceHttp::invalidate_post, .user_ctx=this},
+        {.uri="/api/v1/service/factory-reset", .method=HTTP_POST, .handler=&ServiceHttp::factory_reset_post, .user_ctx=this},
     };
     for (const auto& route : routes) {
         const auto error = httpd_register_uri_handler(server, &route);
@@ -66,6 +72,7 @@ esp_err_t ServiceHttp::register_handlers(
 
 esp_err_t ServiceHttp::send_json(httpd_req_t* request, const std::string& body) const {
     httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, body.c_str(), static_cast<ssize_t>(body.size()));
 }
 
@@ -122,6 +129,70 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
     }
     return self->send_json(request,
         "{\"ok\":true,\"outputsAllowed\":false,\"reason\":\"commissioning_invalidated\"}");
+}
+
+esp_err_t ServiceHttp::factory_reset_post(httpd_req_t* request) {
+    auto* self = self_from(request);
+    if (self == nullptr || self->hardware_ == nullptr || self->commissioning_ == nullptr ||
+        self->readiness_ == nullptr) return ESP_FAIL;
+
+    if (self->access_control_ == nullptr) {
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return self->send_json(request, "{\"ok\":false,\"reason\":\"access_unavailable\"}");
+    }
+
+    std::string body;
+    if (!read_body(request, 512U, body)) {
+        httpd_resp_set_status(request, "401 Unauthorized");
+        return self->send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
+    }
+
+    std::string actor;
+    std::string credential;
+    std::string confirmation;
+    if (!parse_json_string(body, "actor", actor) ||
+        !parse_json_string(body, "credential", credential) ||
+        !parse_json_string(body, "confirm", confirmation)) {
+        httpd_resp_set_status(request, "400 Bad Request");
+        return self->send_json(request, "{\"ok\":false,\"reason\":\"confirmation_required\"}");
+    }
+
+    if (confirmation != "ERASE_ALL") {
+        httpd_resp_set_status(request, "409 Conflict");
+        return self->send_json(request, "{\"ok\":false,\"reason\":\"confirmation_mismatch\"}");
+    }
+
+    const auto decision = self->access_control_->authorize(actor, credential, "system.service.invalidate");
+    credential.assign(credential.size(), '\0');
+    if (decision != homeguard::AuditDecision::Allowed) {
+        httpd_resp_set_status(request, "403 Forbidden");
+        return self->send_json(request, std::string{"{\"ok\":false,\"reason\":\""} +
+            homeguard::to_string(decision) + "\"}");
+    }
+
+    // Factory reset intentionally erases the entire default NVS partition.
+    // This clears all mutable HomeGuard state in one atomic test boundary:
+    // Wi-Fi credentials, access users, commissioning/hardware verification,
+    // cloud configuration and provisioned local secrets. Firmware and eFuse
+    // hardware identity are outside NVS and therefore remain intact.
+    const auto erase_error = nvs_flash_erase();
+    if (erase_error != ESP_OK) {
+        httpd_resp_set_status(request, "500 Internal Server Error");
+        return self->send_json(request, "{\"ok\":false,\"reason\":\"factory_reset_erase_failed\"}");
+    }
+
+    *self->hardware_ = {};
+    *self->commissioning_ = {};
+    *self->readiness_ = hg::evaluate_boot_readiness({nullptr, nullptr});
+
+    const auto response_error = self->send_json(request,
+        "{\"ok\":true,\"state\":\"restarting\",\"factoryReset\":true,\"outputsAllowed\":false}");
+
+    // Let the HTTP response leave the socket, then reboot into a freshly
+    // initialized empty NVS partition. Do not continue running after erase.
+    vTaskDelay(pdMS_TO_TICKS(150));
+    esp_restart();
+    return response_error;
 }
 
 }  // namespace homeguard::idf
