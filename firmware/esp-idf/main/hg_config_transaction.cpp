@@ -85,6 +85,15 @@ bool ConfigTransaction::apply(const ConfigBackupV1& backup, std::string& reason)
 {
     reason.clear();
 
+    // Defense in depth: even callers that bypass ConfigBackupV1Codec must not
+    // persist an access database with no enabled Admin. Such a DB would exist
+    // after reboot (keeping first-Admin bootstrap disabled) but provide no
+    // credential capable of repairing controller configuration.
+    if (backup.access.enabled_admin_count() == 0U) {
+        reason = "access_admin_required";
+        return false;
+    }
+
     Snapshot before{};
     if (!capture(before, reason)) return false;
 
