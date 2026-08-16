@@ -287,15 +287,27 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
       .forEach(id => addSecretToggle(document.getElementById(id)));
   }
 
+  function applyBootstrapVisibility(button) {
+    if (!button) return;
+    const visible = bootstrapAvailable === true;
+    button.hidden = !visible;
+    button.setAttribute("aria-hidden", visible ? "false" : "true");
+    if (visible) button.removeAttribute("tabindex");
+    else button.tabIndex = -1;
+
+    const row = button.parentElement;
+    const hint = row?.nextElementSibling;
+    if (hint && hint.tagName === "SMALL" && hint.textContent?.includes("першого Admin")) {
+      hint.hidden = !visible;
+      hint.setAttribute("aria-hidden", visible ? "false" : "true");
+    }
+  }
+
   async function syncBootstrapAvailability() {
     const button = document.getElementById("accessBootstrap");
     if (!button) return;
 
-    button.hidden = bootstrapAvailable !== true;
-    button.setAttribute("aria-hidden", button.hidden ? "true" : "false");
-    if (button.hidden) button.tabIndex = -1;
-    else button.removeAttribute("tabindex");
-
+    applyBootstrapVisibility(button);
     if (bootstrapAvailable !== null || bootstrapProbeInFlight) return;
     bootstrapProbeInFlight = true;
     try {
@@ -322,16 +334,14 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
       bootstrapAvailable = null;
     } finally {
       bootstrapProbeInFlight = false;
-      button.hidden = bootstrapAvailable !== true;
-      button.setAttribute("aria-hidden", button.hidden ? "true" : "false");
-      if (button.hidden) button.tabIndex = -1;
-      else button.removeAttribute("tabindex");
+      applyBootstrapVisibility(button);
     }
 
     if (button.dataset.hgBootstrapRefreshBound !== "1") {
       button.dataset.hgBootstrapRefreshBound = "1";
       button.addEventListener("click", () => {
         bootstrapAvailable = null;
+        applyBootstrapVisibility(button);
         setTimeout(syncBootstrapAvailability, 900);
       }, true);
     }
