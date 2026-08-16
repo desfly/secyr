@@ -67,6 +67,12 @@ struct PhysicalOutputRuntimeState {
     bool outputs_enabled{};
     bool safety_fault_latched{};
     bool maintenance_mode{};
+    bool limit_inputs_valid{};
+    std::uint8_t raw_limit_inputs{};
+    bool cold_open_limit{};
+    bool cold_closed_limit{};
+    bool hot_open_limit{};
+    bool hot_closed_limit{};
     std::uint32_t writes{};
     std::uint32_t failures{};
     std::uint32_t limit_stops{};
@@ -92,21 +98,11 @@ public:
         const CommissioningPersistentState& commissioning,
         const BootReadinessReport& readiness);
 
-    // Maintenance is a non-sticky service gate. Both transitions force every
-    // channel OFF and consume the current SystemModel output revisions without
-    // executing them. This prevents a command queued just before/during service
-    // from waking up when maintenance is exited. Bench pulses are the only ON
-    // path while maintenance is active.
     bool set_maintenance_mode(bool active, const SystemModel& model);
 
     bool synchronize(const SystemModel& model, std::uint64_t now_ms);
     bool force_safe();
 
-    // Returns true when a bounded physical pulse was safely applied. For valve
-    // channels, target_evidence is set true only when the matching GPB end stop
-    // was inactive before the pulse and active afterwards. A safe partial move
-    // therefore returns true with target_evidence=false and may be repeated in
-    // another <=1 s pulse. Rejected/unsafe operations return false.
     bool bench_pulse(
         PhysicalOutputChannel channel,
         std::uint32_t duration_ms,
