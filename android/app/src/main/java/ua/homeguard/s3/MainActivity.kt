@@ -24,6 +24,7 @@ import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.network.ControllerIdentity
 import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
 import ua.homeguard.s3.network.DiscoveryInputValidator
@@ -93,16 +94,25 @@ class MainActivity : ComponentActivity() {
         telemetry = TelemetrySocket().apply { seedEvents(eventHistory.load()) }; session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry)
         commands = CommandController(resolver.endpoint, settings); notifications = HomeGuardNotifications(this); notifications.createChannels(); requestLocalNetworkPermission()
         lifecycleScope.launch { telemetry.liveEvents().collect { event -> eventHistory.append(event); notifications.notify(event, settings.settings.value) } }
-        // Keep registered entries synchronized with discovery. This also upgrades old
-        // manual-IP records to the controller's real deviceId, preventing duplicate cards.
+        // Keep registered entries synchronized with discovery. All reconciliation uses the
+        // same physical-controller identity rules as discovery and the registry itself.
         lifecycleScope.launch {
             discovery.devices.collect { found ->
                 found.forEach { device ->
-                    val manual = registeredDevices.devices.value.firstOrNull {
-                        it.deviceId.startsWith("manual-") && it.baseUrl.trimEnd('/') == device.baseUrl.trimEnd('/')
+                    val manual = registeredDevices.devices.value.firstOrNull { candidate ->
+                        candidate.deviceId.startsWith("manual-", ignoreCase = true) &&
+                            ControllerIdentity.sameController(
+                                candidate.deviceId,
+                                candidate.baseUrl,
+                                device.deviceId,
+                                device.baseUrl,
+                            )
                     }
                     if (manual != null) {
-                        if (registeredDevices.reconcileManual(manual.deviceId, device) && settings.settings.value.deviceId == manual.deviceId) settings.remember(device)
+                        if (registeredDevices.reconcileManual(manual.deviceId, device) &&
+                            settings.settings.value.deviceId.equals(manual.deviceId, ignoreCase = true)) {
+                            settings.remember(device)
+                        }
                     } else {
                         registeredDevices.refreshDiscovered(device)
                     }
