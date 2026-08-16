@@ -13,6 +13,13 @@ enum class HardwareModuleState {
     Fault,
 };
 
+enum class HardwareBootstrapState {
+    NotInitialized,
+    Ready,
+    Degraded,
+    Failed,
+};
+
 struct HardwareModuleStatus {
     HardwareModuleState state{HardwareModuleState::NotInitialized};
     std::string detail;
@@ -20,6 +27,7 @@ struct HardwareModuleStatus {
 };
 
 struct HardwareRuntimeStatus {
+    HardwareBootstrapState overall{HardwareBootstrapState::NotInitialized};
     HardwareModuleStatus i2c;
     HardwareModuleStatus ads1115_zones;
     HardwareModuleStatus ads1115_telemetry;
@@ -36,6 +44,7 @@ struct HardwareRuntimeStatus {
 };
 
 const char* to_string(HardwareModuleState state) noexcept;
+const char* to_string(HardwareBootstrapState state) noexcept;
 std::string hardware_runtime_json(const HardwareRuntimeStatus& status);
 
 }  // namespace homeguard
