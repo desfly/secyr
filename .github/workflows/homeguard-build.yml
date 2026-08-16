@@ -66,6 +66,8 @@ jobs:
         run: python tools/check_field_acceptance_web.py
       - name: Factory Reset contract
         run: python tools/check_factory_reset_contract.py
+      - name: Config transaction safety
+        run: python tools/check_config_transaction_contract.py
       - name: Wi-Fi scan/connect safety
         run: python tools/check_wifi_scan_safety.py
       - name: HTTP POST body safety
