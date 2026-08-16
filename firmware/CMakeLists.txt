@@ -83,9 +83,12 @@ target_link_libraries(homeguard_tests PRIVATE homeguard_core)
 # Exercise the actual ESP-IDF FactoryResetManager against an in-memory NVS/Wi-Fi
 # mock. This is intentionally separate from the pure core test binary so the
 # release gate validates namespace erasure and immutable-state preservation,
-# not merely static source strings.
+# not merely static source strings. The RGB indicator is stubbed here because
+# host validation has no ESP32 RMT peripheral; the real firmware links the
+# hardware-backed hg_rgb_diagnostic.cpp implementation.
 add_executable(factory_reset_host_test
     ../tests/test_factory_reset_host.cpp
+    ../tests/esp-idf-mock/hg_rgb_diagnostic_host.cpp
     esp-idf/main/hg_factory_reset.cpp
     esp-idf/main/hg_commissioning_nvs.cpp
 )
