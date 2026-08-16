@@ -13,6 +13,7 @@ dashboard_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens
 provisioning_screen = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/screens/ProvisioningScreen.kt").read_text(encoding="utf-8")
 bruce_brand = (ROOT / "android/app/src/main/java/ua/homeguard/s3/ui/components/BruceBrand.kt").read_text(encoding="utf-8")
 main_activity = (ROOT / "android/app/src/main/java/ua/homeguard/s3/MainActivity.kt").read_text(encoding="utf-8")
+navigation = (ROOT / "android/app/src/main/java/ua/homeguard/s3/navigation/AppNavigation.kt").read_text(encoding="utf-8")
 store = (ROOT / "android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt").read_text(encoding="utf-8")
 
 checks = {
@@ -36,9 +37,11 @@ checks = {
     "Coordinator triggers HTTP fallback": "http.scanOnce()" in coordinator,
     "Coordinator exposes scan status": "val scanStatus" in coordinator and "udp.status" in coordinator,
 
-    # Cemented product rule: start on the device list; unfinished Add UI stays hidden.
-    "Device list is primary screen": "private val deviceListOpen = MutableStateFlow(true)" in main_activity,
-    "Fresh app does not force Add screen": "showAddDevice || appSettings.deviceId.isBlank()" not in main_activity and "showAddDevice -> AddDeviceScreen(" in main_activity,
+    # Cemented product rule: exactly one navigation state exists and fresh Android starts on the device list.
+    "Device list is primary screen": "AppNavigation(initial: AppScreen = AppScreen.DEVICE_LIST)" in navigation and "private val navigation = AppNavigation()" in main_activity,
+    "Fresh app does not force Add screen": "currentScreen == AppScreen.ADD_DEVICE -> AddDeviceScreen(" in main_activity and "showAddDevice || appSettings.deviceId.isBlank()" not in main_activity,
+    "Single navigation state machine": all(token not in main_activity for token in ("addDeviceOpen", "provisioningOpen", "deviceListOpen")) and "val screen: StateFlow<AppScreen>" in navigation,
+    "Factory reset navigation is safe": "fun onFactoryResetDisconnect()" in navigation and "AppScreen.DEVICE_LIST" in navigation,
     "Add action hidden from main list": 'Text("+ Додати")' not in list_screen and 'Text("+ Додати пристрій")' not in list_screen,
     "Add action hidden from full monitor": 'Text("+ Додати пристрій")' not in dashboard_screen,
     "Empty list does not expose add action": "Додавання пристроїв тимчасово сховане" in list_screen,
