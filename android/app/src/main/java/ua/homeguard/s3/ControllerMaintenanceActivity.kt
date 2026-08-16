@@ -28,6 +28,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.diagnostics.DeviceConfigMaintenanceClient
+import ua.homeguard.s3.diagnostics.FactoryResetTransportException
 import ua.homeguard.s3.model.AccessRole
 import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.ControlPath
@@ -87,6 +88,34 @@ class ControllerMaintenanceActivity : ComponentActivity() {
             var confirmReset by remember { mutableStateOf(false) }
             var importReady by remember { mutableStateOf(false) }
 
+            val leaveAfterReset: suspend (String, String, String) -> Unit = { resetDeviceId, resetBaseUrl, message ->
+                // Once a destructive reset has either been confirmed or the
+                // controller disappears during submission, fail closed locally.
+                // Never leave stale tokens/green authorization on the phone.
+                if (resetDeviceId.isNotBlank() || resetBaseUrl.isNotBlank()) {
+                    registeredDevices.markAuthorization(resetDeviceId, resetBaseUrl, false)
+                }
+                settings.clearControllerSessionAfterFactoryReset()
+                endpoint.value = DeviceEndpoint(
+                    deviceId = "",
+                    apiBaseUrl = "",
+                    websocketUrl = "",
+                    path = ControlPath.OFFLINE,
+                    certificateSha256 = "",
+                )
+                session = null
+                pin = ""
+                pinVisible = false
+                status = message
+                startActivity(
+                    Intent(this@ControllerMaintenanceActivity, MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
+                        putExtra("homeguard_reset_notice", message)
+                    },
+                )
+                finish()
+            }
+
             fun login() {
                 lifecycleScope.launch {
                     status = "Перевірка доступу…"
@@ -133,33 +162,29 @@ class ControllerMaintenanceActivity : ComponentActivity() {
                                 val resetBaseUrl = endpoint.value.apiBaseUrl
                                 lifecycleScope.launch {
                                     status = "Виконується Factory Reset…"
-                                    runCatching { maintenance.factoryReset(authenticated, pin) }
-                                        .onSuccess {
-                                            if (resetDeviceId.isNotBlank() || resetBaseUrl.isNotBlank()) {
-                                                registeredDevices.markAuthorization(resetDeviceId, resetBaseUrl, false)
-                                            }
-                                            settings.clearControllerSessionAfterFactoryReset()
-                                            endpoint.value = DeviceEndpoint(
-                                                deviceId = "",
-                                                apiBaseUrl = "",
-                                                websocketUrl = "",
-                                                path = ControlPath.OFFLINE,
-                                                certificateSha256 = "",
-                                            )
-                                            session = null
-                                            pin = ""
-                                            pinVisible = false
-                                            status = "Factory Reset прийнято; контролер перезавантажується"
-                                            startActivity(
-                                                Intent(this@ControllerMaintenanceActivity, MainActivity::class.java).apply {
-                                                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                },
-                                            )
-                                            finish()
-                                        }
-                                        .onFailure { error ->
-                                            status = "Factory Reset: ${error.message ?: "network"}"
-                                        }
+                                    try {
+                                        maintenance.factoryReset(authenticated, pin)
+                                        leaveAfterReset(
+                                            resetDeviceId,
+                                            resetBaseUrl,
+                                            "Factory Reset прийнято; контролер перезавантажується",
+                                        )
+                                    } catch (error: FactoryResetTransportException) {
+                                        // A reset can intentionally destroy its own LAN
+                                        // connection before Android receives the JSON.
+                                        // Treat the controller state as unknown/offline,
+                                        // never as still authorized/connected.
+                                        leaveAfterReset(
+                                            resetDeviceId,
+                                            resetBaseUrl,
+                                            "Зв’язок обірвався під час Factory Reset; стан контролера перевірте після перезапуску",
+                                        )
+                                    } catch (error: Throwable) {
+                                        // Explicit HTTP/auth/server rejection: keep local
+                                        // registration/session because reset did not receive
+                                        // a success path from the controller.
+                                        status = "Factory Reset: ${error.message ?: "rejected"}"
+                                    }
                                 }
                             },
                         ) { Text("СТЕРТИ ВСЕ") }
