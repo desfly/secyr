@@ -5,6 +5,7 @@
 #include "homeguard/boot_readiness.hpp"
 #include "homeguard/commissioning_state.hpp"
 #include "homeguard/hardware_verification.hpp"
+#include "homeguard/physical_output_runtime.hpp"
 #include "homeguard/system_model.hpp"
 #include "esp_http_server.h"
 
@@ -20,6 +21,7 @@ public:
         hg::HardwareVerificationRecord* hardware,
         hg::CommissioningPersistentState* commissioning,
         hg::BootReadinessReport* readiness,
+        hg::PhysicalOutputRuntime* physical_outputs,
         hg::SystemEventBus* bus);
 
     void set_access_control(homeguard::AccessControl* access_control) {
@@ -36,6 +38,7 @@ private:
     hg::HardwareVerificationRecord* hardware_{};
     hg::CommissioningPersistentState* commissioning_{};
     hg::BootReadinessReport* readiness_{};
+    hg::PhysicalOutputRuntime* physical_outputs_{};
     hg::SystemEventBus* bus_{};
     homeguard::AccessControl* access_control_{};
 };
