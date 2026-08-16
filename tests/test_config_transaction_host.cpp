@@ -119,7 +119,7 @@ int main() {
     expect_access_user(access_store, "oldadmin", "newadmin");
     expect_wifi(network, "OldWifi", "oldpass88");
     expect_cloud(cloud_store, "mqtts://old-broker.local:8883", "old-user", "old-password");
-    homeguard::hg::CommissioningPersistentState unused{};
+    hg::CommissioningPersistentState unused{};
     expect(commissioning_store.load_commissioning(unused) == ESP_ERR_NVS_NOT_FOUND,
            "rollback created commissioning state that did not exist before");
 
