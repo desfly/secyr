@@ -28,6 +28,7 @@ private:
         std::uint8_t value) noexcept;
 
     i2c_master_dev_handle_t device_{nullptr};
+    bool initialized_{};
 };
 
 }  // namespace homeguard::idf
