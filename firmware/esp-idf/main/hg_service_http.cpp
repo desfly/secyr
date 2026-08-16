@@ -258,6 +258,21 @@ esp_err_t ServiceHttp::readiness_get(httpd_req_t* request) {
     body += std::string{",\"maintenanceActive\":"} + (maintenance ? "true" : "false") +
         ",\"benchValveMask\":" + std::to_string(bench_mask) +
         ",\"physicalStatus\":\"" + hg::to_string(physical.status) + "\"" +
+        ",\"physicalSafetyFaultLatched\":" + (physical.safety_fault_latched ? "true" : "false") +
+        ",\"physicalOutputsEnabled\":" + (physical.outputs_enabled ? "true" : "false") +
+        ",\"limitInputsValid\":" + (physical.limit_inputs_valid ? "true" : "false") +
+        ",\"rawLimitInputs\":" + std::to_string(static_cast<unsigned>(physical.raw_limit_inputs)) +
+        ",\"coldOpenLimit\":" + (physical.cold_open_limit ? "true" : "false") +
+        ",\"coldClosedLimit\":" + (physical.cold_closed_limit ? "true" : "false") +
+        ",\"hotOpenLimit\":" + (physical.hot_open_limit ? "true" : "false") +
+        ",\"hotClosedLimit\":" + (physical.hot_closed_limit ? "true" : "false") +
+        ",\"coldValveMotion\":\"" + hg::to_string(physical.cold_valve.direction) + "\"" +
+        ",\"hotValveMotion\":\"" + hg::to_string(physical.hot_valve.direction) + "\"" +
+        ",\"coldValveTimeoutMs\":" + std::to_string(physical.cold_valve.timeout_ms) +
+        ",\"hotValveTimeoutMs\":" + std::to_string(physical.hot_valve.timeout_ms) +
+        ",\"physicalFailures\":" + std::to_string(physical.failures) +
+        ",\"limitStops\":" + std::to_string(physical.limit_stops) +
+        ",\"valveTimeouts\":" + std::to_string(physical.valve_timeouts) +
         ",\"hardwareOverall\":\"" + to_string(self->hardware_runtime_->status().overall) + "\"" +
         ",\"hardwareVerification\":" + (hardware_error == ESP_OK ? hg::hardware_verification_json(hardware) : "null") +
         ",\"commissioning\":" + (commissioning_error == ESP_OK ? hg::commissioning_state_json(commissioning) : "null") +
