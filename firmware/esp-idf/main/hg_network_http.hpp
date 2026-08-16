@@ -3,6 +3,7 @@
 #include "homeguard/access_control.hpp"
 #include "esp_err.h"
 #include "esp_http_server.h"
+#include "nvs.h"
 
 #include <string>
 
@@ -27,7 +28,17 @@ public:
         }
         return save_credentials(ssid, password);
     }
-    bool clear_persisted_credentials() const;
+    bool clear_persisted_credentials() const {
+        nvs_handle_t handle{};
+        auto error = nvs_open("hg_wifi", NVS_READWRITE, &handle);
+        if (error == ESP_ERR_NVS_NOT_FOUND) return true;
+        if (error != ESP_OK) return false;
+        error = nvs_erase_key(handle, "credentials");
+        if (error == ESP_ERR_NVS_NOT_FOUND) error = ESP_OK;
+        if (error == ESP_OK) error = nvs_commit(handle);
+        nvs_close(handle);
+        return error == ESP_OK;
+    }
 
 private:
     static esp_err_t status_get(httpd_req_t* request);
