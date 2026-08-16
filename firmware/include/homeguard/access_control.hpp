@@ -62,8 +62,8 @@ public:
     // authenticate()/authorize() caller (HTTP, command router, MQTT, etc.) is
     // transparently protected by the same per-account throttle. Host/offline
     // users that do not install a clock keep deterministic untimed behavior.
-    void set_auth_clock(AuthClock clock) noexcept { auth_clock_ = clock; }
-    [[nodiscard]] bool auth_throttle_enabled() const noexcept { return auth_clock_ != nullptr; }
+    void set_auth_clock(AuthClock clock);
+    [[nodiscard]] bool auth_throttle_enabled() const;
 
     [[nodiscard]] AuditDecision authenticate(std::string_view actor, std::string_view pin);
     [[nodiscard]] AuditDecision authenticate(
@@ -83,13 +83,13 @@ public:
         std::string_view actor,
         std::uint64_t now_ms) const;
 
-    [[nodiscard]] std::size_t user_count() const { return user_count_; }
+    [[nodiscard]] std::size_t user_count() const;
     [[nodiscard]] std::size_t enabled_admin_count() const;
     [[nodiscard]] bool would_preserve_admin_access(
         std::string_view user_id,
         AccessRole replacement_role,
         bool replacement_enabled) const;
-    [[nodiscard]] std::size_t audit_size() const { return audit_size_; }
+    [[nodiscard]] std::size_t audit_size() const;
     [[nodiscard]] const AccessAuditRecord* audit_at_oldest(std::size_t index) const;
 
 private:
