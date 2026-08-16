@@ -44,7 +44,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++ ninja-build
       - name: Project preflight
-        run: python tools/preflight_build0022.py
+        run: python tools/preflight_source_freeze.py
       - name: HW-678 actuator safety contract
         run: python tools/check_hw678_actuator_contract.py
       - name: Runtime concurrency contract
