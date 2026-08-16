@@ -146,13 +146,27 @@ bool PhysicalOutputRuntime::update_control_state(
     return true;
 }
 
-bool PhysicalOutputRuntime::set_maintenance_mode(bool active)
+bool PhysicalOutputRuntime::set_maintenance_mode(bool active, const SystemModel& model)
 {
+    OutputRecord siren{};
+    OutputRecord cold_valve{};
+    OutputRecord hot_valve{};
+    const bool has_siren = model.output_snapshot(1, siren);
+    const bool has_cold_valve = model.output_snapshot(2, cold_valve);
+    const bool has_hot_valve = model.output_snapshot(3, hot_valve);
+
     std::scoped_lock lock(mutex_);
     if (backend_ == nullptr || state_.safety_fault_latched) return false;
 
+    const auto consume_current_revisions = [&]() {
+        if (has_siren) siren_command_revision_ = siren.command_revision;
+        if (has_cold_valve) state_.cold_valve.command_revision = cold_valve.command_revision;
+        if (has_hot_valve) state_.hot_valve.command_revision = hot_valve.command_revision;
+    };
+
     if (active) {
         if (!force_safe_locked()) return false;
+        consume_current_revisions();
         state_.maintenance_mode = true;
         state_.status = hardware_verified_
             ? PhysicalOutputStatus::FailClosed
@@ -161,8 +175,9 @@ bool PhysicalOutputRuntime::set_maintenance_mode(bool active)
         return true;
     }
 
-    state_.maintenance_mode = false;
     if (!force_safe_locked()) return false;
+    consume_current_revisions();
+    state_.maintenance_mode = false;
     if (!hardware_verified_) {
         state_.status = PhysicalOutputStatus::InvalidHardware;
         state_.outputs_enabled = false;
