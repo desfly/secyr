@@ -37,8 +37,6 @@ public:
     virtual ~PhysicalOutputBackend() = default;
     virtual bool configure_output(int channel, bool initial_level) = 0;
     virtual bool write_output(int channel, bool level) = 0;
-    // Backends without input capability remain fail-closed for supervised
-    // actuator movement. HW-678's MCP23017 backend overrides this.
     virtual bool read_inputs(std::uint8_t* value) { (void)value; return false; }
 };
 
@@ -76,27 +74,33 @@ struct PhysicalOutputRuntimeState {
     ValveMotionState hot_valve{};
 };
 
+using BenchDelayFn = void (*)(std::uint32_t duration_ms);
+
 class PhysicalOutputRuntime {
 public:
+    static constexpr std::uint32_t kMaxBenchPulseMs = 1000U;
+
     bool initialize(
         PhysicalOutputBackend& backend,
         const HardwareVerificationRecord& hardware,
         const CommissioningPersistentState& commissioning,
         const BootReadinessReport& readiness);
 
-    // Called by the dedicated output supervisor. Each output command revision is
-    // consumed once; valve motion is then independently stopped by end-switch or
-    // measured commissioning timeout even if no further HTTP/cloud command arrives.
     bool synchronize(
         const SystemModel& model,
         const BootReadinessReport& readiness,
         std::uint64_t now_ms);
     bool force_safe();
 
-    // Used before destructive service operations. Unlike force_safe(), this
-    // latches the runtime closed so the 20 ms supervisor cannot immediately
-    // re-apply an old model command while NVS/readiness is being invalidated.
-    // The lockout is cleared only by initialize() after reboot/recommissioning.
+    // Commissioning-only bypass of normal readiness. It is available only
+    // after the fixed HW-678 verification record is valid, is hard-bounded to
+    // one second, holds the actuator mutex for the complete pulse, and forces
+    // all channels OFF both before and after energizing the selected channel.
+    bool bench_pulse(
+        PhysicalOutputChannel channel,
+        std::uint32_t duration_ms,
+        BenchDelayFn delay_fn);
+
     bool lockout_fail_closed();
 
     [[nodiscard]] PhysicalOutputRuntimeState state() const;
@@ -109,6 +113,7 @@ private:
         bool hot_closed{};
     };
 
+    static bool bench_channel_allowed(PhysicalOutputChannel channel) noexcept;
     bool write_safe_locked(PhysicalOutputChannel channel);
     bool write_logical_locked(PhysicalOutputChannel channel, bool active);
     bool force_safe_locked();
@@ -133,6 +138,7 @@ private:
     const CommissioningPersistentState* commissioning_{};
     mutable std::mutex mutex_;
     PhysicalOutputRuntimeState state_{};
+    bool hardware_verified_{};
     bool siren_known_{};
     bool siren_active_{};
 };
