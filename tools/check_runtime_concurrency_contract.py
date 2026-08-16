@@ -22,6 +22,8 @@ header = text("firmware/include/homeguard/system_model.hpp")
 model = text("firmware/src/system_model.cpp")
 physical = text("firmware/src/physical_output_runtime.cpp")
 system_api = text("firmware/src/system_api.cpp")
+access_control = text("firmware/src/access_control.cpp")
+cloud_link = text("firmware/esp-idf/main/hg_cloud_link.cpp")
 telemetry = text("firmware/esp-idf/main/hg_telemetry_runtime.cpp")
 output_http_hpp = text("firmware/esp-idf/main/hg_output_http.hpp")
 output_http = text("firmware/esp-idf/main/hg_output_http.cpp")
@@ -65,6 +67,24 @@ for body, token, label in [
     (system_http, "clients = clients_", "WebSocket client copy-under-lock"),
 ]:
     require(body, token, label)
+
+# AccessControl is shared by the HTTP server and ESP-MQTT callback task. Both
+# authorization paths mutate throttle/audit state, so a real cross-task lock is
+# required; relying on the HTTP server's single task is insufficient.
+for token, label in [
+    ("std::recursive_mutex g_access_control_mutex", "cross-task AccessControl mutex"),
+    ("bool AccessControl::set_user", "AccessControl user mutation implementation"),
+    ("bool AccessControl::import_user", "AccessControl import implementation"),
+    ("void AccessControl::clear_users", "AccessControl clear implementation"),
+    ("AuditDecision AccessControl::authenticate(", "AccessControl authenticate implementation"),
+    ("AuditDecision AccessControl::authorize(", "AccessControl authorize implementation"),
+    ("const AccessAuditRecord* AccessControl::audit_at_oldest", "AccessControl audit reader implementation"),
+]:
+    require(access_control, token, label)
+
+if access_control.count("std::scoped_lock lock(g_access_control_mutex)") < 12:
+    errors.append("runtime concurrency contract regressed: AccessControl public state is not consistently serialized")
+require(cloud_link, "access_control_->authorize(actor, credential, command)", "MQTT authorization shares AccessControl")
 
 # Mutable hardware verification / commissioning / boot readiness are shared by
 # output and destructive-service HTTP paths. They must use one common lock.
