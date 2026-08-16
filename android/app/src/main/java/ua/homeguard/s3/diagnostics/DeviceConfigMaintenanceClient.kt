@@ -19,27 +19,33 @@ import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+class FactoryResetTransportException(cause: IOException) :
+    IOException("controller disconnected while Factory Reset was being submitted", cause)
+
+class FactoryResetRejectedException(message: String) : IOException(message)
+
 class DeviceConfigMaintenanceClient(
     private val endpoint: StateFlow<DeviceEndpoint>,
 ) {
     suspend fun exportConfig(session: AccessSession, credential: String): String {
         requireAdmin(session, credential)
         val target = localTarget()
-        val response = post(
+        return post(
             target,
             RuntimeApiContract.CONFIG_EXPORT_PATH,
             JSONObject()
                 .put("actor", session.actor)
                 .put("credential", credential)
                 .put("confirm", "INCLUDE_SECRETS"),
-        )
-        val text = response.body?.string().orEmpty()
-        if (!response.isSuccessful) throw IOException("HTTP ${response.code}: $text")
-        val backup = JSONObject(text)
-        require(backup.optString("format") == "homeguard-config") { "unsupported backup format" }
-        require(backup.optInt("version", -1) == 1) { "unsupported backup version" }
-        require(backup.optBoolean("secretsIncluded", false)) { "backup is not restorable" }
-        return text
+        ).use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IOException("HTTP ${response.code}: $text")
+            val backup = JSONObject(text)
+            require(backup.optString("format") == "homeguard-config") { "unsupported backup format" }
+            require(backup.optInt("version", -1) == 1) { "unsupported backup version" }
+            require(backup.optBoolean("secretsIncluded", false)) { "backup is not restorable" }
+            text
+        }
     }
 
     suspend fun importConfig(session: AccessSession, credential: String, backupText: String) {
@@ -50,7 +56,7 @@ class DeviceConfigMaintenanceClient(
         require(backup.optBoolean("secretsIncluded", false)) { "restorable secrets required" }
 
         val target = localTarget()
-        val response = post(
+        post(
             target,
             RuntimeApiContract.CONFIG_IMPORT_PATH,
             JSONObject()
@@ -58,34 +64,47 @@ class DeviceConfigMaintenanceClient(
                 .put("credential", credential)
                 .put("confirm", "APPLY_CONFIG")
                 .put("backup", backup),
-        )
-        val text = response.body?.string().orEmpty()
-        if (!response.isSuccessful) throw IOException("HTTP ${response.code}: $text")
-        val result = if (text.isBlank()) JSONObject() else JSONObject(text)
-        if (!result.optBoolean("ok", false)) {
-            throw IOException(result.optString("reason", "config import rejected"))
+        ).use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IOException("HTTP ${response.code}: $text")
+            val result = if (text.isBlank()) JSONObject() else JSONObject(text)
+            if (!result.optBoolean("ok", false)) {
+                throw IOException(result.optString("reason", "config import rejected"))
+            }
         }
     }
 
     suspend fun factoryReset(session: AccessSession, credential: String) {
         requireAdmin(session, credential)
         val target = localTarget()
-        val response = post(
-            target,
-            RuntimeApiContract.FACTORY_RESET_PATH,
-            JSONObject()
-                .put("actor", session.actor)
-                .put("credential", credential)
-                .put("confirm", "ERASE_ALL"),
-        )
-        val text = response.body?.string().orEmpty()
-        if (!response.isSuccessful) throw IOException("HTTP ${response.code}: $text")
-        val result = if (text.isBlank()) JSONObject() else JSONObject(text)
-        if (!result.optBoolean("ok", false)) {
-            throw IOException(result.optString("reason", "factory reset rejected"))
+        val response = try {
+            post(
+                target,
+                RuntimeApiContract.FACTORY_RESET_PATH,
+                JSONObject()
+                    .put("actor", session.actor)
+                    .put("credential", credential)
+                    .put("confirm", "ERASE_ALL"),
+            )
+        } catch (error: IOException) {
+            // A reset is intentionally connection-destructive. Distinguish a
+            // transport loss from an explicit HTTP rejection so the caller can
+            // fail closed instead of showing stale authorized/online state.
+            throw FactoryResetTransportException(error)
         }
-        if (!result.optBoolean("rebooting", false)) {
-            throw IOException("factory reset did not confirm reboot")
+
+        response.use {
+            val text = it.body?.string().orEmpty()
+            if (!it.isSuccessful) {
+                throw FactoryResetRejectedException("HTTP ${it.code}: $text")
+            }
+            val result = if (text.isBlank()) JSONObject() else JSONObject(text)
+            if (!result.optBoolean("ok", false)) {
+                throw FactoryResetRejectedException(result.optString("reason", "factory reset rejected"))
+            }
+            if (!result.optBoolean("rebooting", false)) {
+                throw FactoryResetRejectedException("factory reset did not confirm reboot")
+            }
         }
     }
 
@@ -124,7 +143,7 @@ class DeviceConfigMaintenanceClient(
             }
 
             override fun onResponse(call: Call, response: Response) {
-                continuation.resume(response)
+                if (continuation.isActive) continuation.resume(response) else response.close()
             }
         })
     }
