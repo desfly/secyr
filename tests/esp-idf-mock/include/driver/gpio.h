@@ -25,3 +25,4 @@ inline esp_err_t gpio_config(const gpio_config_t*) { return ESP_OK; }
 inline esp_err_t gpio_set_level(gpio_num_t,int){return ESP_OK;}
 inline esp_err_t gpio_set_direction(gpio_num_t,int){return ESP_OK;}
 inline int gpio_get_level(gpio_num_t){return 1;}
+inline esp_err_t gpio_install_isr_service(int){return ESP_OK;}
