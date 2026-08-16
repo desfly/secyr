@@ -169,6 +169,11 @@ bool ConfigBackupV1Codec::decode(std::string_view json, ConfigBackupV1& backup, 
     if (!hex_decode(access_hex, access_image) || !homeguard::AccessStoreCodec::decode(access_image, backup.access)) {
         return fail("invalid_access_image");
     }
+    // A syntactically valid access image with zero enabled Admin users is not a
+    // restorable controller configuration. Persisting it would make the access
+    // DB exist after reboot (so first-Admin bootstrap stays disabled) while no
+    // Admin credential can authorize repairs. Reject before any NVS mutation.
+    if (backup.access.enabled_admin_count() == 0U) return fail("access_admin_required");
 
     const auto* wifi = required(root, "wifi");
     if (!cJSON_IsObject(wifi) || !read_bool(wifi, "present", backup.wifi_present)) return fail("invalid_wifi");
