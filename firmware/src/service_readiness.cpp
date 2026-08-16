@@ -15,9 +15,13 @@ ServiceReadinessSnapshot make_service_readiness_snapshot(
         validate_hardware_verification(*hardware) == HardwareVerificationStatus::Valid;
     result.commissioning_record_valid = commissioning != nullptr &&
         validate_commissioning_state(*commissioning) == CommissioningStateValidation::Valid;
+
+    // Pass present schema-v2 commissioning progress to BootReadiness even when
+    // it is not yet fully Valid. That preserves dry_run_required ->
+    // valve_safety_profile_required -> actuator_test_required diagnostics.
     result.boot = evaluate_boot_readiness({
         result.hardware_record_valid ? hardware : nullptr,
-        result.commissioning_record_valid ? commissioning : nullptr,
+        commissioning,
     });
     return result;
 }
