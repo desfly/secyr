@@ -124,6 +124,7 @@ service = source_text("hg_service_http.cpp")
 commissioning_nvs = source_text("hg_commissioning_nvs.cpp")
 app_main = source_text("app_main.cpp")
 hardware_runtime_hpp = project_text(CORE_INCLUDE / "hardware_runtime.hpp", "hardware_runtime.hpp")
+hardware_runtime_cpp = project_text(CORE_SRC / "hardware_runtime.cpp", "hardware_runtime.cpp")
 hardware_profile_cpp = project_text(CORE_SRC / "hardware_profile.cpp", "hardware_profile.cpp")
 hardware_verification_hpp = project_text(CORE_INCLUDE / "hardware_verification.hpp", "hardware_verification.hpp")
 commissioning_state_hpp = project_text(CORE_INCLUDE / "commissioning_state.hpp", "commissioning_state.hpp")
@@ -230,8 +231,13 @@ for token, label in [
 ]:
     require_token(mcp_backend, token, label)
 require_token(system_model_hpp, "bool commanded{}", "valve command distinguished from default false state")
-require_token(physical_runtime, "No command since boot: STOP", "valves do not move merely on boot/synchronize")
-require_token(physical_runtime, "Break-before-make", "valve core break-before-make interlock")
+require_token(physical_runtime, "output == nullptr || !output->commanded", "valves do not move without an explicit command")
+require_token(physical_runtime, "write_logical_locked(close_channel, false)", "valve OPEN break-before-make")
+require_token(physical_runtime, "write_logical_locked(open_channel, false)", "valve CLOSE break-before-make")
+configure_off_pos = physical_runtime.find("for (const auto channel : kAllChannels)")
+verification_gate_pos = physical_runtime.find("if (!hardware_verification_allows_outputs(hardware))")
+if configure_off_pos < 0 or verification_gate_pos < 0 or configure_off_pos > verification_gate_pos:
+    errors.append("field runtime contract regressed: safe OFF channels not configured before verification gate")
 
 # Schema-v2 pins are the fixed HW-678 wiring, not a user-selected output GPIO map.
 require_token(hardware_verification_hpp, "kSchemaVersion = 2", "hardware verification schema v2")
@@ -256,12 +262,19 @@ require_token(commissioning_state_cpp, "state.successful_actuator_tests > 0U", "
 require_token(boot_readiness_cpp, "BlockedActuatorTestRequired", "boot exposes actuator-test-required gate")
 require_token(boot_readiness_cpp, "successful_actuator_tests == 0U", "boot blocks before actuator test")
 
-# 7: degraded bootstrap must be visible instead of a false all-good completion.
+# 7: bootstrap state must be explicit rather than a false all-good completion.
+require_token(hardware_runtime_hpp, "enum class HardwareBootstrapState", "aggregate hardware bootstrap state type")
+require_token(hardware_runtime_hpp, "HardwareBootstrapState overall", "aggregate hardware state field")
+require_token(hardware_runtime_cpp, '"overall"', "aggregate hardware state JSON")
+require_token(bootstrap, "HardwareBootstrapState::Failed", "platform bootstrap failure classification")
+require_token(bootstrap, "HardwareBootstrapState::Ready", "hardware ready classification")
+require_token(bootstrap, "HardwareBootstrapState::Degraded", "optional hardware degraded classification")
 require_token(app_main, "Hardware bootstrap completed DEGRADED", "degraded hardware bootstrap reporting")
-require_token(bootstrap, "HardwareModuleState::Fault", "hardware fault classification")
 
 # 8: absent SD card releases owned SPI resources and is not polled when unmounted.
 require_token(sd, "spi_bus_free(SPI3_HOST)", "microSD failed-mount SPI cleanup")
+require_token(bootstrap, "ESP_ERR_NOT_FOUND", "optional hardware missing classification")
+require_token(bootstrap, "ESP_ERR_TIMEOUT", "optional hardware timeout/missing classification")
 require_token(telemetry, "storage().status().mounted", "microSD runtime gating")
 
 # 9: telemetry respects bootstrap hardware state and does not hammer optional buses.
@@ -279,10 +292,12 @@ for token, label in [
     ("nvs_flash_erase()", "factory reset whole-NVS erase"),
     ("esp_restart()", "factory reset reboot"),
     ("factoryReset", "factory reset response marker"),
-    ("physical_outputs_->force_safe()", "destructive reset output fail-close"),
+    ("lockout_fail_closed()", "destructive reset sticky output lockout"),
     ("output_safe_failed", "destructive reset refuses unsafe erase"),
 ]:
     require_token(service, token, label)
+if service.count("lockout_fail_closed()") < 2:
+    errors.append("field runtime contract regressed: both destructive service routes must latch outputs fail-closed")
 require_token(app_main, "&g_physical_outputs, &g_system_bus", "service reset wired to physical output runtime")
 
 # 10 + 12: clean-state and fail-closed rules are persistent project contracts.
