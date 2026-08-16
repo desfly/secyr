@@ -6,7 +6,8 @@ OutputInterlockResult evaluate_output_interlock(
     const SystemModel& model,
     const OutputInterlockRequest& request)
 {
-    if (model.output(request.output_id) == nullptr) {
+    OutputRecord output{};
+    if (!model.output_snapshot(request.output_id, output)) {
         return {OutputInterlockDecision::InvalidOutput, false};
     }
 
