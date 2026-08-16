@@ -15,6 +15,16 @@ host_cmake = (FIRMWARE / "CMakeLists.txt").read_text(encoding="utf-8")
 host_test = (TESTS / "test_config_transaction_host.cpp").read_text(encoding="utf-8")
 nvs_mock = (TESTS / "esp-idf-mock/include/nvs.h").read_text(encoding="utf-8")
 
+rollback_reasons = (
+    'rollback("write_access_failed")',
+    'rollback("write_wifi_failed")',
+    'rollback("clear_wifi_failed")',
+    'rollback("write_cloud_failed")',
+    'rollback("clear_cloud_failed")',
+    'rollback("write_commissioning_failed")',
+    'rollback("clear_commissioning_failed")',
+)
+
 checks = {
     "Codec rejects access image without enabled Admin":
         'backup.access.enabled_admin_count() == 0U' in codec and 'fail("access_admin_required")' in codec,
@@ -37,7 +47,7 @@ checks = {
             'commissioning_store_.save_commissioning(snapshot.commissioning)',
         )),
     "Every mutating import step rolls back on failure":
-        transaction.count('return rollback(') >= 8,
+        all(reason in transaction for reason in rollback_reasons),
     "Rollback failure is surfaced distinctly":
         ':rollback_failed' in transaction,
     "NVS mock supports one-shot targeted write fault":
@@ -85,6 +95,7 @@ if failed:
 
 print("Config transaction contract PASS")
 print(" - codec + transaction reject Admin-less imports before persistence")
+print(" - all seven mutating write/clear failure paths invoke rollback")
 print(" - executable CTest fault-injects mid-transaction and proves rollback")
 print(" - executable CTest also proves normal commit path")
 print(" - successful HTTP import schedules reboot before response")
