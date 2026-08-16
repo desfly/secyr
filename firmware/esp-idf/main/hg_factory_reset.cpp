@@ -25,16 +25,24 @@ esp_err_t erase_namespace(const char* name) {
 FactoryResetReport FactoryResetManager::erase_mutable_state() const {
     FactoryResetReport report{};
 
-    // Access users/Admin bootstrap state.
+    // Access users/Admin state.
     report.access = erase_namespace("hg_access");
 
-    // Wi-Fi credentials and network setup.
+    // Runtime Wi-Fi credentials and network setup.
     report.wifi = erase_namespace("hg_wifi");
 
     // Cloud broker credentials/session configuration.
     report.cloud = erase_namespace("hg_cloud");
 
-    // Preserve hg_commission/hardware_v1; only user-owned commissioning state is reset.
+    // User-editable controller configuration.
+    report.controller_config = erase_namespace("hg-config");
+
+    // Provisioning payload (Wi-Fi/cloud/API token/owner label). The immutable
+    // factory identity lives separately in hg-factory and is intentionally kept.
+    report.provisioning = erase_namespace("hg-provision");
+
+    // Preserve hardware_v1 identity/verification; reset only mutable
+    // commissioning progress/state.
     report.commissioning = CommissioningNvsStore{}.erase_commissioning_state();
 
     return report;
