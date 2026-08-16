@@ -118,6 +118,14 @@ for token, label in [
     ("commissioning_.valve_limit_polarity_verified", "valve bench requires verified limit polarity"),
     ("commissioning_.cold_valve_travel_timeout_ms == 0U", "valve bench rejects missing cold timeout"),
     ("commissioning_.hot_valve_travel_timeout_ms == 0U", "valve bench rejects missing hot timeout"),
+    ("if (!read_limits_locked(limits))", "valve bench reads physical GPB limits"),
+    ("limits.cold_open && limits.cold_closed", "valve bench detects contradictory cold limits"),
+    ("limits.hot_open && limits.hot_closed", "valve bench detects contradictory hot limits"),
+    ("target_limit_reached = limits.cold_open", "cold OPEN evidence requires open limit"),
+    ("target_limit_reached = limits.cold_closed", "cold CLOSE evidence requires closed limit"),
+    ("target_limit_reached = limits.hot_open", "hot OPEN evidence requires open limit"),
+    ("target_limit_reached = limits.hot_closed", "hot CLOSE evidence requires closed limit"),
+    ("return target_limit_reached", "valve pulse success means physical end-switch evidence"),
 ]:
     require(physical, token, label)
 
@@ -143,6 +151,8 @@ require(t47, "commissioning_state_persistable", "unit test covers partial persis
 require(t54, "kMaxBenchPulseMs + 1U", "unit test rejects overlong bench pulse")
 require(t54, "before_dry_run.successful_dry_runs = 0", "unit test blocks bench before dry-run")
 require(t54, "dry_run_only.valve_limit_polarity_verified = false", "unit test blocks valve bench before profile")
+require(t54, "ColdValveOpenLimit, true", "unit test requires physical target limit for valve evidence")
+require(t54, "PhysicalOutputStatus::ValveSafetyFault", "unit test latches contradictory bench limits")
 require(t54, "set_maintenance_mode(true)", "unit test covers maintenance bench gate")
 
 # Destructive operations use sticky fail-closed. Factory reset always reboots;
