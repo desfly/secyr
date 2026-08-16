@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "firmware" / "esp-idf" / "main"
 web_http = (MAIN / "hg_web_http.cpp").read_text(encoding="utf-8")
 system_http = (MAIN / "hg_system_http.cpp").read_text(encoding="utf-8")
+access_http = (MAIN / "hg_access_http.cpp").read_text(encoding="utf-8")
 errors: list[str] = []
 
 
@@ -39,6 +40,27 @@ require('method: "POST"' in web_http,
         "Factory Reset UI is not posting to the controller")
 require('body: JSON.stringify({ actor: actorValue, credential: credentialValue, confirm: "ERASE_ALL" })' in web_http,
         "Factory Reset UI does not submit Admin credentials plus ERASE_ALL")
+
+# The first-Admin action is allowed only on a truly factory-fresh controller.
+# The Web UI probes the existing one-time bootstrap gate with an intentionally
+# incomplete bootstrap request. Firmware checks bootstrap_allowed_ before field
+# validation, so the probe is non-destructive and does not create a user.
+for needle in (
+    "syncBootstrapAvailability",
+    "bootstrapProbeInFlight",
+    "bootstrapAvailable",
+    'JSON.stringify({ action: "bootstrap" })',
+    'body.reason === "invalid_bootstrap_admin"',
+    'body.reason === "bootstrap_unavailable"',
+    'button.hidden = bootstrapAvailable !== true',
+):
+    require(needle in web_http, f"first-Admin visibility contract missing: {needle}")
+require("if (!bootstrap_allowed_)" in access_http,
+        "bootstrap capability probe is unsafe: firmware no longer checks the gate before fields")
+require("invalid_bootstrap_admin" in access_http,
+        "bootstrap capability probe cannot distinguish factory-fresh invalid fields")
+require("bootstrap_unavailable" in access_http,
+        "bootstrap capability probe cannot distinguish provisioned controllers")
 
 # Password/PIN reveal controls are release invariants, not optional polish.
 for needle in (
@@ -84,6 +106,7 @@ if errors:
 
 print("Field Web acceptance PASS")
 print(" - Factory Reset: firmware-visible + Admin credentials + double confirm")
+print(" - first Admin: hidden unless firmware reports factory-fresh bootstrap gate")
 print(" - password/PIN show-hide controls: firmware-owned")
 print(" - navigation: exactly-one-active enforcement + collapsed mobile menu")
 print(" - Bruce: contain, not cover")
