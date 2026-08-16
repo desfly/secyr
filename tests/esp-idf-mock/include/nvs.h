@@ -28,14 +28,23 @@ struct Namespace {
     std::unordered_map<std::string, Value> values;
 };
 
+struct WriteFault {
+    std::string namespace_name;
+    std::string key;
+    esp_err_t error{ESP_FAIL};
+    bool armed{};
+};
+
 inline std::unordered_map<std::string, Namespace> namespaces;
 inline std::unordered_map<nvs_handle_t, std::string> handles;
 inline nvs_handle_t next_handle = 1U;
+inline WriteFault write_fault{};
 
 inline void reset() {
     namespaces.clear();
     handles.clear();
     next_handle = 1U;
+    write_fault = {};
 }
 
 inline bool has_namespace(const std::string& name) {
@@ -61,6 +70,10 @@ inline void put_u8(const std::string& name, const std::string& key, std::uint8_t
     put_blob(name, key, &value, sizeof(value));
 }
 
+inline void fail_next_write(const std::string& name, const std::string& key, esp_err_t error = ESP_FAIL) {
+    write_fault = {name, key, error, true};
+}
+
 inline const std::string* namespace_for_handle(nvs_handle_t handle) {
     const auto found = handles.find(handle);
     return found == handles.end() ? nullptr : &found->second;
@@ -77,6 +90,15 @@ inline Value* value_for(nvs_handle_t handle, const char* key) {
 
 inline const Value* value_for(nvs_handle_t handle, const char* key, int) {
     return value_for(handle, key);
+}
+
+inline esp_err_t consume_write_fault(nvs_handle_t handle, const char* key) {
+    if (!write_fault.armed || key == nullptr) return ESP_OK;
+    const auto* name = namespace_for_handle(handle);
+    if (name == nullptr || *name != write_fault.namespace_name || key != write_fault.key) return ESP_OK;
+    const auto error = write_fault.error;
+    write_fault.armed = false;
+    return error;
 }
 
 }  // namespace mock_nvs
@@ -119,6 +141,8 @@ inline esp_err_t nvs_get_blob(nvs_handle_t handle, const char* key, void* data, 
 inline esp_err_t nvs_set_blob(nvs_handle_t handle, const char* key, const void* data, std::size_t size) {
     const auto* name = mock_nvs::namespace_for_handle(handle);
     if (name == nullptr || key == nullptr || (size != 0U && data == nullptr)) return ESP_ERR_INVALID_ARG;
+    const auto fault = mock_nvs::consume_write_fault(handle, key);
+    if (fault != ESP_OK) return fault;
     mock_nvs::put_blob(*name, key, data, size);
     return ESP_OK;
 }
