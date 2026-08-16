@@ -118,19 +118,63 @@ esp_err_t NetworkHttp::begin()
 
     auto* ap_netif = esp_netif_create_default_wifi_ap();
     auto* sta_netif = esp_netif_create_default_wifi_sta();
-    if (ap_netif == nullptr || sta_netif == nullptr) return ESP_FAIL;
+    if (ap_netif == nullptr || sta_netif == nullptr) {
+        esp_netif_destroy_default_wifi(sta_netif);
+        esp_netif_destroy_default_wifi(ap_netif);
+        return ESP_FAIL;
+    }
+
+    bool wifi_initialized = false;
+    bool wifi_handler_registered = false;
+    bool ip_handler_registered = false;
+    bool wifi_started = false;
+
+    auto rollback = [&]() {
+        if (wifi_started) {
+            (void)esp_wifi_stop();
+        }
+        if (ip_handler_registered) {
+            (void)esp_event_handler_unregister(
+                IP_EVENT,
+                IP_EVENT_STA_GOT_IP,
+                &NetworkHttp::ip_event_handler);
+        }
+        if (wifi_handler_registered) {
+            (void)esp_event_handler_unregister(
+                WIFI_EVENT,
+                ESP_EVENT_ANY_ID,
+                &NetworkHttp::wifi_event_handler);
+        }
+        // Default Wi-Fi netifs own default Wi-Fi handlers/driver bindings and
+        // must be destroyed with the matching ESP-IDF helper before deinit.
+        esp_netif_destroy_default_wifi(sta_netif);
+        esp_netif_destroy_default_wifi(ap_netif);
+        sta_netif_ = nullptr;
+        if (wifi_initialized) {
+            (void)esp_wifi_deinit();
+        }
+    };
+
     sta_netif_ = sta_netif;
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     auto error = esp_wifi_init(&init);
-    if (error != ESP_OK) return error;
+    if (error != ESP_OK) {
+        rollback();
+        return error;
+    }
+    wifi_initialized = true;
 
     error = esp_event_handler_register(
         WIFI_EVENT,
         ESP_EVENT_ANY_ID,
         &NetworkHttp::wifi_event_handler,
         this);
-    if (error != ESP_OK) return error;
+    if (error != ESP_OK) {
+        rollback();
+        return error;
+    }
+    wifi_handler_registered = true;
 
     error = esp_event_handler_register(
         IP_EVENT,
@@ -138,15 +182,16 @@ esp_err_t NetworkHttp::begin()
         &NetworkHttp::ip_event_handler,
         this);
     if (error != ESP_OK) {
-        (void)esp_event_handler_unregister(
-            WIFI_EVENT,
-            ESP_EVENT_ANY_ID,
-            &NetworkHttp::wifi_event_handler);
+        rollback();
         return error;
     }
+    ip_handler_registered = true;
 
     error = esp_wifi_set_mode(WIFI_MODE_APSTA);
-    if (error != ESP_OK) return error;
+    if (error != ESP_OK) {
+        rollback();
+        return error;
+    }
 
     std::uint8_t mac[6]{};
     if (esp_wifi_get_mac(WIFI_IF_AP, mac) == ESP_OK) {
@@ -165,10 +210,17 @@ esp_err_t NetworkHttp::begin()
     ap.ap.max_connection = 4;
     ap.ap.authmode = WIFI_AUTH_OPEN;
     error = esp_wifi_set_config(WIFI_IF_AP, &ap);
-    if (error != ESP_OK) return error;
+    if (error != ESP_OK) {
+        rollback();
+        return error;
+    }
 
     error = esp_wifi_start();
-    if (error != ESP_OK) return error;
+    if (error != ESP_OK) {
+        rollback();
+        return error;
+    }
+    wifi_started = true;
 
     initialized_ = true;
 
