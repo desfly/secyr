@@ -64,7 +64,10 @@ checks = {
 
     # Main cards are friendly-name/state only; technical identity belongs in Properties.
     "Device cards hide raw endpoint": "Text(device.baseUrl" not in list_screen,
-    "Device cards hide technical channel strip": "LinkIndicator(" not in list_screen,
+    "Legacy technical channel strip stays hidden": "LinkIndicator(" not in list_screen,
+    "Device cards expose LAN state indicator": 'ConnectionIndicator("LAN", lanState)' in list_screen,
+    "Device cards expose CLOUD state indicator": 'ConnectionIndicator("CLOUD", cloudState)' in list_screen,
+    "State indicators use compact glyphs": all(token in list_screen for token in ('LinkState.ACTIVE -> "●"', 'LinkState.INACTIVE -> "○"', 'LinkState.UNKNOWN -> "◌"')),
     "Properties exposes ID": 'StatusLine("ID", device.deviceId)' in list_screen,
     "Properties exposes endpoint": 'StatusLine("Адреса", device.baseUrl.ifBlank { "—" })' in list_screen,
     "Properties action exists": 'Text("Властивості")' in list_screen,
