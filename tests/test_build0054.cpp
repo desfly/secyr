@@ -36,8 +36,13 @@ public:
 };
 
 std::uint32_t bench_delay_seen{};
+FakeBackend* bench_transition_backend{};
+bool bench_transition_cold_open{};
 void fake_bench_delay(std::uint32_t duration_ms) {
     bench_delay_seen = duration_ms;
+    if (bench_transition_backend != nullptr && bench_transition_cold_open) {
+        bench_transition_backend->set_limit(hg::PhysicalInputChannel::ColdValveOpenLimit, true);
+    }
 }
 
 hg::HardwareVerificationRecord verified_hardware() {
@@ -138,8 +143,8 @@ void test_build0054() {
         hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
 
     // Valve profile permits a bounded physical pulse, but a direction only
-    // counts as successful evidence when the matching GPB end switch is read
-    // active after the pulse. A pulse alone is never actuator proof.
+    // counts when the target GPB end switch transitions from inactive before
+    // the pulse to active afterwards. A pulse alone is never actuator proof.
     auto profiled = commissioning;
     profiled.successful_actuator_tests = 0;
     TEST_CHECK(bench_runtime.update_control_state(hardware, profiled, blocked));
@@ -149,11 +154,22 @@ void test_build0054() {
     TEST_CHECK(bench_delay_seen == 100U);
     for (int channel = 0; channel < 8; ++channel) TEST_CHECK(!bench_backend.levels[channel]);
 
-    bench_backend.set_limit(hg::PhysicalInputChannel::ColdValveOpenLimit, true);
+    bench_transition_backend = &bench_backend;
+    bench_transition_cold_open = true;
     bench_delay_seen = 0;
     TEST_CHECK(bench_runtime.bench_pulse(
         hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
     TEST_CHECK(bench_delay_seen == 100U);
+    bench_transition_cold_open = false;
+    bench_transition_backend = nullptr;
+
+    // Once the target end stop is already active, another pulse toward that
+    // stop is rejected before energizing the coil and cannot become evidence.
+    bench_delay_seen = 0;
+    TEST_CHECK(!bench_runtime.bench_pulse(
+        hg::PhysicalOutputChannel::ColdValveOpen, 100, &fake_bench_delay));
+    TEST_CHECK(bench_delay_seen == 0U);
+
     TEST_CHECK(!bench_runtime.bench_pulse(
         hg::PhysicalOutputChannel::Siren,
         hg::PhysicalOutputRuntime::kMaxBenchPulseMs + 1U,
