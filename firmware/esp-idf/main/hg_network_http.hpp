@@ -14,6 +14,16 @@ public:
     void set_access_control(AccessControl* access) { access_ = access; }
     esp_err_t register_handlers(httpd_handle_t server);
 
+    // Backup/restore accessors. These touch persisted credentials only and do
+    // not change the live STA connection; imported settings become active after
+    // the controlled reboot performed by the configuration API.
+    bool load_persisted_credentials(std::string& ssid, std::string& password) const {
+        return load_credentials(ssid, password);
+    }
+    bool save_persisted_credentials(const std::string& ssid, const std::string& password) const {
+        return save_credentials(ssid, password);
+    }
+
 private:
     static esp_err_t status_get(httpd_req_t* request);
     static esp_err_t scan_get(httpd_req_t* request);
