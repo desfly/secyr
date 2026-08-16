@@ -43,6 +43,7 @@ idf_component_register(
         "hg_factory_reset.cpp"
         "hg_config_backup.cpp"
         "hg_config_transaction.cpp"
+        "hg_config_http.cpp"
         "../../src/system_model.cpp"
         "../../src/system_api.cpp"
         "../../src/output_interlock.cpp"
