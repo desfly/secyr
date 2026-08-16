@@ -47,12 +47,14 @@ require('body: JSON.stringify({ actor: actorValue, credential: credentialValue, 
 # validation, so the probe is non-destructive and does not create a user.
 for needle in (
     "syncBootstrapAvailability",
+    "applyBootstrapVisibility",
     "bootstrapProbeInFlight",
     "bootstrapAvailable",
     'JSON.stringify({ action: "bootstrap" })',
     'body.reason === "invalid_bootstrap_admin"',
     'body.reason === "bootstrap_unavailable"',
-    'button.hidden = bootstrapAvailable !== true',
+    'button.hidden = !visible',
+    'hint.hidden = !visible',
 ):
     require(needle in web_http, f"first-Admin visibility contract missing: {needle}")
 require("if (!bootstrap_allowed_)" in access_http,
@@ -106,7 +108,7 @@ if errors:
 
 print("Field Web acceptance PASS")
 print(" - Factory Reset: firmware-visible + Admin credentials + double confirm")
-print(" - first Admin: hidden unless firmware reports factory-fresh bootstrap gate")
+print(" - first Admin: button and hint hidden unless firmware reports factory-fresh bootstrap gate")
 print(" - password/PIN show-hide controls: firmware-owned")
 print(" - navigation: exactly-one-active enforcement + collapsed mobile menu")
 print(" - Bruce: contain, not cover")
