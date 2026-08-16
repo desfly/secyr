@@ -1,0 +1,25 @@
+/* Mobile Bruce acceptance fix: never crop the portrait on phone Web UI. */
+@media (max-width:760px){
+  .sidebar .bruce{
+    width:min(200px,58vw)!important;
+    height:auto!important;
+    aspect-ratio:156/280!important;
+    margin:4px auto 10px!important;
+    overflow:hidden!important;
+    background:none!important;
+  }
+  .sidebar .bruce img{
+    display:block!important;
+    width:100%!important;
+    height:100%!important;
+    object-fit:contain!important;
+    object-position:center center!important;
+  }
+}
+@media (max-width:430px){
+  .sidebar .bruce{
+    width:min(170px,50vw)!important;
+    height:auto!important;
+    aspect-ratio:156/280!important;
+  }
+}
