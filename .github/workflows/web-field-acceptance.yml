@@ -1,0 +1,29 @@
+name: Web Field Acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "firmware/esp-idf/main/hg_web_http.cpp"
+      - "firmware/esp-idf/main/hg_system_http.cpp"
+      - "web/**"
+      - "tools/check_field_acceptance_web.py"
+      - ".github/workflows/web-field-acceptance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web-field-acceptance:
+    name: Factory reset, mobile nav, Bruce, secret toggles
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Verify field Web acceptance contract
+        run: python tools/check_field_acceptance_web.py
