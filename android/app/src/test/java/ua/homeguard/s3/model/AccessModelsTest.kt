@@ -6,16 +6,45 @@ import org.junit.Test
 
 class AccessModelsTest {
     @Test
-    fun adminAllowsEveryCurrentCommandType() {
+    fun adminAllowsOnlyRuntimeSupportedCommandsWhenCapabilitiesPermitThem() {
         val session = AccessSession(
             actor = "admin",
             name = "Administrator",
             role = AccessRole.ADMIN,
-            capabilities = AccessCapabilities(),
+            capabilities = AccessCapabilities(
+                monitor = true,
+                armHome = true,
+                armAway = true,
+                disarm = true,
+                valves = true,
+            ),
+        )
+
+        assertTrue(session.allows(CommandType.ARM_HOME))
+        assertTrue(session.allows(CommandType.ARM_AWAY))
+        assertTrue(session.allows(CommandType.DISARM))
+        assertTrue(session.allows(CommandType.OPEN_VALVES))
+        assertTrue(session.allows(CommandType.CLOSE_VALVES))
+
+        // Admin authorization is broad, but Android must not enable commands
+        // that the current controller runtime does not implement yet.
+        assertFalse(session.allows(CommandType.SILENCE))
+        assertFalse(session.allows(CommandType.RESET_ALARM))
+        assertFalse(session.allows(CommandType.ENTER_MAINTENANCE))
+        assertFalse(session.allows(CommandType.EXIT_MAINTENANCE))
+    }
+
+    @Test
+    fun adminCannotBypassBackendCapabilities() {
+        val session = AccessSession(
+            actor = "admin",
+            name = "Administrator",
+            role = AccessRole.ADMIN,
+            capabilities = AccessCapabilities(monitor = true),
         )
 
         CommandType.entries.forEach { command ->
-            assertTrue("Admin must allow $command", session.allows(command))
+            assertFalse("Admin must respect runtime capability for $command", session.allows(command))
         }
     }
 
