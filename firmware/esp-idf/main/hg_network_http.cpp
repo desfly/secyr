@@ -103,6 +103,19 @@ std::string ssid_from_bytes(const std::uint8_t* bytes, std::size_t capacity)
     return std::string(reinterpret_cast<const char*>(bytes), length);
 }
 
+bool read_request_body(httpd_req_t* request, std::size_t limit, std::string& body)
+{
+    if (request == nullptr || request->content_len == 0 || request->content_len > limit) return false;
+    body.assign(request->content_len, '\0');
+    std::size_t offset = 0;
+    while (offset < body.size()) {
+        const auto received = httpd_req_recv(request, body.data() + offset, body.size() - offset);
+        if (received <= 0) return false;
+        offset += static_cast<std::size_t>(received);
+    }
+    return true;
+}
+
 esp_err_t send_json(httpd_req_t* request, const std::string& body)
 {
     httpd_resp_set_type(request, "application/json");
@@ -223,18 +236,11 @@ esp_err_t NetworkHttp::handle_scan(httpd_req_t* request)
 
 esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
 {
-    if (request->content_len == 0 || request->content_len > 384) {
+    std::string body;
+    if (!read_request_body(request, 384U, body)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"invalid_body\"}");
     }
-
-    std::string body(request->content_len, '\0');
-    const auto received = httpd_req_recv(request, body.data(), body.size());
-    if (received <= 0) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"read_failed\"}");
-    }
-    body.resize(static_cast<std::size_t>(received));
 
     std::string actor;
     std::string credential;
@@ -283,11 +289,14 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
 
     const auto response_error = send_json(request,
         std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) + "\"}");
-    if (response_error != ESP_OK) return response_error;
 
+    // A Wi-Fi channel handover can tear down the HTTP socket. The accepted
+    // configuration must still be applied even if the response write fails.
     vTaskDelay(kStaHandoverDelay);
     (void)esp_wifi_disconnect();
-    return esp_wifi_connect();
+    const auto connect_error = esp_wifi_connect();
+
+    return response_error != ESP_OK ? response_error : connect_error;
 }
 
 bool NetworkHttp::apply_sta(const std::string& ssid, const std::string& password, bool persist)
