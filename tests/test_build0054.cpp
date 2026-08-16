@@ -84,6 +84,25 @@ void test_build0054() {
     hg::BootReadinessReport ready{};
     ready.status = hg::BootReadinessStatus::ReadyForPhysicalOutputs;
 
+    // A fresh/uncommissioned controller may not energize outputs, but its OFF
+    // path must still be usable by Factory Reset/service invalidation. All MCP
+    // channels are configured OFF before the hardware-verification gate.
+    FakeBackend unverified_backend;
+    hg::PhysicalOutputRuntime unverified_runtime;
+    hg::HardwareVerificationRecord missing_hardware{};
+    TEST_CHECK(!unverified_runtime.initialize(
+        unverified_backend, missing_hardware, commissioning, blocked));
+    TEST_CHECK(unverified_runtime.state().status == hg::PhysicalOutputStatus::InvalidHardware);
+    for (int channel = 0; channel < 8; ++channel) {
+        TEST_CHECK(unverified_backend.levels.count(channel) == 1U);
+        TEST_CHECK(!unverified_backend.levels[channel]);
+    }
+    TEST_CHECK(unverified_runtime.lockout_fail_closed());
+    TEST_CHECK(unverified_runtime.state().safety_fault_latched);
+    for (int channel = 0; channel < 8; ++channel) {
+        TEST_CHECK(!unverified_backend.levels[channel]);
+    }
+
     FakeBackend backend;
     hg::PhysicalOutputRuntime runtime;
     TEST_CHECK(runtime.initialize(backend, hardware, commissioning, blocked));
