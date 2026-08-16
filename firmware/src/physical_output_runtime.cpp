@@ -93,11 +93,16 @@ bool PhysicalOutputRuntime::write_valve(
         return ok;
     }
 
-    // active=true means OPEN; active=false means CLOSE. The MCP backend also
-    // atomically clears the opposite line, providing a second software interlock.
-    return output->active
-        ? write_logical(open_channel, true)
-        : write_logical(close_channel, true);
+    // Break-before-make in the core runtime first; the MCP backend additionally
+    // clears the opposite bit in the same OLAT byte. The two layers make it
+    // impossible for normal firmware sequencing to request OPEN+CLOSE together.
+    if (output->active) {
+        if (!write_logical(close_channel, false)) return false;
+        return write_logical(open_channel, true);
+    }
+
+    if (!write_logical(open_channel, false)) return false;
+    return write_logical(close_channel, true);
 }
 
 bool PhysicalOutputRuntime::force_safe()
