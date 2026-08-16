@@ -9,6 +9,7 @@ main_activity = (ANDROID / "MainActivity.kt").read_text(encoding="utf-8")
 list_screen = (ANDROID / "ui/screens/DeviceListScreen.kt").read_text(encoding="utf-8")
 dashboard_screen = (ANDROID / "ui/screens/DashboardScreen.kt").read_text(encoding="utf-8")
 add_screen = (ANDROID / "ui/screens/AddDeviceScreen.kt").read_text(encoding="utf-8")
+maintenance_panel = (ANDROID / "ui/components/MaintenancePanel.kt").read_text(encoding="utf-8")
 identity = (ANDROID / "model/DeviceIdentity.kt").read_text(encoding="utf-8")
 store = (ANDROID / "storage/RegisteredDeviceStore.kt").read_text(encoding="utf-8")
 settings = (ANDROID / "storage/SettingsStore.kt").read_text(encoding="utf-8")
@@ -108,7 +109,14 @@ require("CommandType.ARM_HOME -> runtimeSecurityCommand" in http_api and
         "CommandType.OPEN_VALVES -> runtimeValveCommand" in http_api,
         "supported runtime command wiring is missing")
 
-# Controller maintenance must expose PIN reveal and explicit destructive reset.
+# Controller maintenance must be reachable from the normal dashboard and must
+# expose PIN reveal plus explicit destructive reset. This guards against the
+# Build-948 class of bug where backend code existed but the user had no control.
+require('Text("Конфігурація контролера")' in maintenance_panel,
+        "Dashboard maintenance panel does not expose controller configuration")
+require("ControllerMaintenanceActivity::class.java" in maintenance_panel and
+        "context.startActivity(Intent(context, ControllerMaintenanceActivity::class.java))" in maintenance_panel,
+        "Controller maintenance Activity is not reachable from the visible dashboard")
 require("var pinVisible by remember" in maintenance and
         'Text(if (pinVisible) "Сховати" else "Показати")' in maintenance,
         "maintenance PIN show/hide control missing")
@@ -173,6 +181,7 @@ print(" - technical ID/IP only in Properties")
 print(" - duplicate physical ESP records merged with canonical identity")
 print(" - compact icon + LAN/CLOUD/online picons")
 print(" - unsupported runtime controls stay disabled even for Admin")
+print(" - visible dashboard path opens controller maintenance")
 print(" - PIN reveal + explicit Factory Reset")
 print(" - reset confirms reboot when response arrives")
 print(" - reset transport loss fails closed to unauthorized/offline fresh task")
