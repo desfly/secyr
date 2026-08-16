@@ -28,7 +28,7 @@ HardwareModuleStatus HardwareBootstrap::module_status(
 
 esp_err_t HardwareBootstrap::initialize()
 {
-    status_.safe_outputs_forced = true;
+    status_.safe_outputs_forced = false;
 
     auto error = i2c_.initialize();
     status_.i2c = module_status(
@@ -62,8 +62,15 @@ esp_err_t HardwareBootstrap::initialize()
         "MCP23017 0x20 not detected");
 
     if (mcp_error == ESP_OK) {
-        status_.safe_outputs_forced =
-            mcp23017_.force_safe_outputs() == ESP_OK;
+        const auto safe_error = mcp23017_.force_safe_outputs();
+        status_.safe_outputs_forced = safe_error == ESP_OK;
+        if (safe_error != ESP_OK) {
+            status_.mcp23017 = {
+                HardwareModuleState::Fault,
+                "MCP23017 detected but safe OFF latch could not be confirmed",
+                1,
+            };
+        }
     }
 
     const auto ina_error =
