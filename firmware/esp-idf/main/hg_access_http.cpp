@@ -83,6 +83,7 @@ AccessRole parse_role(std::string_view role, bool& valid) {
 
 esp_err_t send_json(httpd_req_t* request, const std::string& body) {
     httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, body.c_str(), static_cast<ssize_t>(body.size()));
 }
 
@@ -128,6 +129,7 @@ esp_err_t AccessHttp::register_handlers(httpd_handle_t server,
     store_ = store;
     bootstrap_allowed_ = bootstrap_allowed;
     const httpd_uri_t routes[] = {
+        {.uri = "/api/v1/access/status", .method = HTTP_GET, .handler = &AccessHttp::status_get, .user_ctx = this},
         {.uri = "/api/v1/access/users", .method = HTTP_POST, .handler = &AccessHttp::users_post, .user_ctx = this},
         {.uri = "/api/v1/access/login", .method = HTTP_POST, .handler = &AccessHttp::login_post, .user_ctx = this},
     };
@@ -138,6 +140,11 @@ esp_err_t AccessHttp::register_handlers(httpd_handle_t server,
     return ESP_OK;
 }
 
+esp_err_t AccessHttp::status_get(httpd_req_t* request) {
+    auto* self = self_from(request);
+    return self == nullptr ? ESP_FAIL : self->handle_status(request);
+}
+
 esp_err_t AccessHttp::users_post(httpd_req_t* request) {
     auto* self = self_from(request);
     return self == nullptr ? ESP_FAIL : self->handle_users(request);
@@ -146,6 +153,13 @@ esp_err_t AccessHttp::users_post(httpd_req_t* request) {
 esp_err_t AccessHttp::login_post(httpd_req_t* request) {
     auto* self = self_from(request);
     return self == nullptr ? ESP_FAIL : self->handle_login(request);
+}
+
+esp_err_t AccessHttp::handle_status(httpd_req_t* request) {
+    const bool allowed = bootstrap_allowed_ && access_ != nullptr && access_->user_count() == 0U;
+    return send_json(request,
+        std::string{"{\"ok\":true,\"bootstrapAllowed\":"} + (allowed ? "true" : "false") +
+        ",\"userCount\":" + std::to_string(access_ == nullptr ? 0U : access_->user_count()) + "}");
 }
 
 esp_err_t AccessHttp::handle_login(httpd_req_t* request) {
