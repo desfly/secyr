@@ -35,8 +35,9 @@ esp_err_t SdStorage::mount()
         SPI3_HOST,
         &bus_config,
         SPI_DMA_CH_AUTO);
-    if (error != ESP_OK &&
-        error != ESP_ERR_INVALID_STATE) {
+    if (error == ESP_OK) {
+        spi_bus_owned_ = true;
+    } else if (error != ESP_ERR_INVALID_STATE) {
         return error;
     }
 
@@ -56,6 +57,7 @@ esp_err_t SdStorage::mount()
         .use_one_fat = false,
     };
 
+    card_ = nullptr;
     error = esp_vfs_fat_sdspi_mount(
         status_.mount_point.c_str(),
         &host,
@@ -63,30 +65,46 @@ esp_err_t SdStorage::mount()
         &mount_config,
         &card_);
 
-    if (error == ESP_OK) {
-        status_.mounted = true;
-        refresh_space();
+    if (error != ESP_OK) {
+        card_ = nullptr;
+        status_.mounted = false;
+        status_.total_bytes = 0;
+        status_.free_bytes = 0;
+        if (spi_bus_owned_) {
+            (void)spi_bus_free(SPI3_HOST);
+            spi_bus_owned_ = false;
+        }
+        return error;
     }
-    return error;
+
+    status_.mounted = true;
+    (void)refresh_space();
+    return ESP_OK;
 }
 
 esp_err_t SdStorage::unmount()
 {
-    if (!status_.mounted) {
-        return ESP_OK;
-    }
-
-    const auto error =
-        esp_vfs_fat_sdcard_unmount(
+    esp_err_t first_error = ESP_OK;
+    if (status_.mounted && card_ != nullptr) {
+        first_error = esp_vfs_fat_sdcard_unmount(
             status_.mount_point.c_str(),
             card_);
+    }
 
-    if (error == ESP_OK) {
+    if (first_error == ESP_OK) {
         status_ = {};
         status_.mount_point = "/sdcard";
         card_ = nullptr;
+        if (spi_bus_owned_) {
+            const auto bus_error = spi_bus_free(SPI3_HOST);
+            if (bus_error != ESP_OK && bus_error != ESP_ERR_INVALID_STATE) {
+                first_error = bus_error;
+            } else {
+                spi_bus_owned_ = false;
+            }
+        }
     }
-    return error;
+    return first_error;
 }
 
 esp_err_t SdStorage::refresh_space()
