@@ -187,6 +187,7 @@ jobs:
 
   android-build:
     name: Android debug APK
+    needs: host-gates
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
