@@ -3,6 +3,8 @@
 #include "hg_rgb_diagnostic.hpp"
 #include "homeguard/hardware_runtime.hpp"
 
+#include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 
 namespace homeguard::idf {
