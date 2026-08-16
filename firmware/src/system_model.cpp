@@ -112,6 +112,10 @@ bool SystemModel::set_output_active(std::uint16_t id, bool active, std::uint64_t
         const bool changed = item.active != active;
         item.active = active;
         item.commanded = true;
+        ++item.command_revision;
+        // A repeated OPEN/CLOSE is still a new physical command revision even
+        // when the logical active flag does not change. No duplicate event is
+        // needed, but actuator runtime will see and consume the new revision.
         if (!changed) return true;
         return emit(active ? SystemEventType::OutputOn : SystemEventType::OutputOff, id, now_ms);
     }
