@@ -26,14 +26,6 @@ void append_i32(std::vector<std::byte>& out, int value) {
     append_u32(out, static_cast<std::uint32_t>(static_cast<std::int32_t>(value)));
 }
 
-bool required_outputs_assigned(const BoardPinMap& pins) {
-    return pins.siren != gpio_unassigned &&
-        pins.valve1 != gpio_unassigned &&
-        pins.valve2 != gpio_unassigned &&
-        pins.aux1 != gpio_unassigned &&
-        pins.aux2 != gpio_unassigned;
-}
-
 }  // namespace
 
 std::uint32_t hardware_profile_crc32(const HardwareVerificationRecord& record) noexcept {
@@ -49,6 +41,8 @@ std::uint32_t hardware_profile_crc32(const HardwareVerificationRecord& record) n
     append_i32(bytes, record.pins.w5500_int);
     append_i32(bytes, record.pins.w5500_rst);
     append_i32(bytes, record.pins.service_button);
+    // Legacy direct-output slots stay in the CRC as explicit -1 values. This
+    // makes any schema-v1 style GPIO output assignment fail schema-v2 validation.
     append_i32(bytes, record.pins.siren);
     append_i32(bytes, record.pins.valve1);
     append_i32(bytes, record.pins.valve2);
@@ -66,9 +60,6 @@ HardwareVerificationStatus validate_hardware_verification(
     }
     if (!validate_pin_map(record.pins).ok()) {
         return HardwareVerificationStatus::InvalidPinMap;
-    }
-    if (!required_outputs_assigned(record.pins)) {
-        return HardwareVerificationStatus::UnassignedRequiredOutput;
     }
     if (!record.active_polarity_verified) {
         return HardwareVerificationStatus::PolarityUnverified;
@@ -91,6 +82,7 @@ std::string hardware_verification_json(const HardwareVerificationRecord& record)
     std::ostringstream out;
     out << "{\"status\":\"" << to_string(status)
         << "\",\"schemaVersion\":" << record.schema_version
+        << ",\"outputBackend\":\"mcp23017_port_a\""
         << ",\"polarityVerified\":" << (record.active_polarity_verified ? "true" : "false")
         << ",\"verifiedAtMs\":" << record.verified_at_ms
         << ",\"profileCrc32\":" << record.profile_crc32
@@ -104,7 +96,7 @@ const char* to_string(const HardwareVerificationStatus status) noexcept {
         case HardwareVerificationStatus::Valid: return "valid";
         case HardwareVerificationStatus::InvalidSchema: return "invalid_schema";
         case HardwareVerificationStatus::InvalidPinMap: return "invalid_pin_map";
-        case HardwareVerificationStatus::UnassignedRequiredOutput: return "unassigned_required_output";
+        case HardwareVerificationStatus::UnassignedRequiredOutput: return "legacy_unassigned_required_output";
         case HardwareVerificationStatus::PolarityUnverified: return "polarity_unverified";
         case HardwareVerificationStatus::MissingTimestamp: return "missing_timestamp";
         case HardwareVerificationStatus::CrcMismatch: return "crc_mismatch";
