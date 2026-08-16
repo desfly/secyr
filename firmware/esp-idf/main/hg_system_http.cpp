@@ -186,8 +186,11 @@ esp_err_t SystemHttp::handle_factory_reset(httpd_req_t* request) {
     if (!report.ok()) {
         httpd_resp_set_status(request, "500 Internal Server Error");
         const std::string response = std::string{"{\"ok\":false,\"reason\":\"erase_failed\",\"access\":"} +
-            std::to_string(report.access) + ",\"wifi\":" + std::to_string(report.wifi) +
+            std::to_string(report.access) +
+            ",\"wifi\":" + std::to_string(report.wifi) +
             ",\"cloud\":" + std::to_string(report.cloud) +
+            ",\"controllerConfig\":" + std::to_string(report.controller_config) +
+            ",\"provisioning\":" + std::to_string(report.provisioning) +
             ",\"commissioning\":" + std::to_string(report.commissioning) + "}";
         return send_json(request, response.c_str(), response.size());
     }
