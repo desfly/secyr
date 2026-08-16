@@ -1,5 +1,7 @@
 ;(() => {
   const bannerId = "firstAdminBanner";
+  let statusTimer = null;
+  let bruceRetry = 0;
 
   function removeBanner() {
     document.getElementById(bannerId)?.remove();
@@ -19,7 +21,7 @@
       <div style="display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap">
         <div>
           <strong style="display:block;font-size:18px;margin-bottom:4px">Перший запуск після заводського скидання</strong>
-          <small>Створіть першого Admin перед налаштуванням Wi‑Fi та інших параметрів.</small>
+          <small>Створіть першого Admin перед налаштуванням Wi-Fi та інших параметрів.</small>
         </div>
         <button id="firstAdminOpen" type="button">Створити першого Admin</button>
       </div>`;
@@ -27,27 +29,73 @@
 
     banner.querySelector("#firstAdminOpen")?.addEventListener("click", () => {
       window.location.hash = "#system";
-      setTimeout(() => document.getElementById("accessPanel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+      setTimeout(() => {
+        const panel = document.getElementById("accessPanel");
+        panel?.scrollIntoView({ behavior: "smooth", block: "start" });
+        document.getElementById("managedUserId")?.focus();
+      }, 180);
     });
   }
 
   async function refreshFirstAdminHint() {
     try {
-      const response = await fetch("/api/v1/access/status", { cache: "no-store" });
+      const response = await fetch(`/api/v1/access/status?ts=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Accept": "application/json" }
+      });
       const body = await response.json().catch(() => ({}));
-      const allowed = response.ok && body?.bootstrapAllowed === true && Number(body?.userCount || 0) === 0;
+      if (!response.ok || body?.ok === false) throw new Error("status unavailable");
+
+      const allowed = body?.bootstrapAllowed === true && Number(body?.userCount || 0) === 0;
       if (allowed) showBanner();
       else removeBanner();
     } catch (_) {
-      removeBanner();
+      // Do not turn a transient boot-time HTTP race into a permanent missing
+      // bootstrap control. Keep the previous UI state and retry shortly.
     }
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", refreshFirstAdminHint, { once: true });
-  } else {
-    refreshFirstAdminHint();
+  function scheduleStatusRefresh() {
+    if (statusTimer !== null) return;
+    statusTimer = window.setInterval(refreshFirstAdminHint, 1500);
   }
-  window.addEventListener("focus", refreshFirstAdminHint);
-  setTimeout(refreshFirstAdminHint, 1200);
+
+  function refreshBruceSource() {
+    const image = document.getElementById("bruceArt");
+    if (!image || image.dataset.hgBruceBound === "1") return;
+    image.dataset.hgBruceBound = "1";
+
+    const loadFresh = () => {
+      image.src = `/bruce.jpg?rev=${Date.now()}`;
+    };
+
+    image.addEventListener("error", () => {
+      if (bruceRetry >= 4) return;
+      bruceRetry += 1;
+      window.setTimeout(loadFresh, 350 * bruceRetry);
+    });
+    image.addEventListener("load", () => { bruceRetry = 0; });
+
+    // The image response is deliberately no-store. A unique query also avoids
+    // a browser retaining an earlier failed /bruce.jpg request across firmware
+    // revisions while preserving the approved image bytes unchanged.
+    loadFresh();
+  }
+
+  function start() {
+    refreshBruceSource();
+    refreshFirstAdminHint();
+    scheduleStatusRefresh();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
+
+  window.addEventListener("focus", () => {
+    refreshBruceSource();
+    refreshFirstAdminHint();
+  });
 })();
