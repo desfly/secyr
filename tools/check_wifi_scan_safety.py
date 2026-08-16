@@ -14,13 +14,19 @@ if match is None:
     raise SystemExit("FAIL: NetworkHttp::scan_json() not found")
 
 body = match.group("body")
+# Comments explain the Build-877 regression and intentionally mention the old API
+# calls. Remove comments before checking executable source so documentation cannot
+# create a false failure.
+code = re.sub(r"//.*?$", "", body, flags=re.M)
+code = re.sub(r"/\*.*?\*/", "", code, flags=re.S)
+
 checks = {
-    "scan never disconnects STA": "esp_wifi_disconnect" not in body,
-    "scan never forces reconnect": "esp_wifi_connect" not in body,
-    "scan uses explicit bounded config": "wifi_scan_config_t scan_config" in body,
-    "scan is active": "WIFI_SCAN_TYPE_ACTIVE" in body,
-    "active scan dwell is bounded": "scan_config.scan_time.active.max = 60" in body,
-    "scan preserves result limit": "kMaxScanRecords" in body,
+    "scan never disconnects STA": "esp_wifi_disconnect" not in code,
+    "scan never forces reconnect": "esp_wifi_connect" not in code,
+    "scan uses explicit bounded config": "wifi_scan_config_t scan_config" in code,
+    "scan is active": "WIFI_SCAN_TYPE_ACTIVE" in code,
+    "active scan dwell is bounded": "scan_config.scan_time.active.max = 60" in code,
+    "scan preserves result limit": "kMaxScanRecords" in code,
 }
 
 failed = [name for name, ok in checks.items() if not ok]
