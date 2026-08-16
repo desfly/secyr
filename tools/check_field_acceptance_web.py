@@ -42,9 +42,6 @@ require('body: JSON.stringify({ actor: actorValue, credential: credentialValue, 
         "Factory Reset UI does not submit Admin credentials plus ERASE_ALL")
 
 # The first-Admin action is allowed only on a truly factory-fresh controller.
-# The Web UI probes the existing one-time bootstrap gate with an intentionally
-# incomplete bootstrap request. Firmware checks bootstrap_allowed_ before field
-# validation, so the probe is non-destructive and does not create a user.
 for needle in (
     "syncBootstrapAvailability",
     "applyBootstrapVisibility",
@@ -80,6 +77,10 @@ for needle in (
 for needle in (
     "enforceSingleActiveNav",
     "lastSidebarLink",
+    "installNavMutationGuard",
+    "MutationObserver",
+    "navRepairQueued",
+    'attributeFilter: ["class"]',
     "classList.toggle(\"active\"",
     "mobile-menu-toggle",
     "mobile-menu-open",
@@ -110,6 +111,6 @@ print("Field Web acceptance PASS")
 print(" - Factory Reset: firmware-visible + Admin credentials + double confirm")
 print(" - first Admin: button and hint hidden unless firmware reports factory-fresh bootstrap gate")
 print(" - password/PIN show-hide controls: firmware-owned")
-print(" - navigation: exactly-one-active enforcement + collapsed mobile menu")
+print(" - navigation: exactly-one-active + immediate mutation repair + collapsed mobile menu")
 print(" - Bruce: contain, not cover")
 print(" - backend: ERASE_ALL + access authorization + erase + reboot")
