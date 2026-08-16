@@ -28,10 +28,14 @@ checks = {
     "Hardware verification key remains separate": 'kHardwareKey = "hardware_v1"' in commissioning,
     "Selective commissioning erase targets only state_v1": "return erase_key(kCommissioningKey);" in commissioning,
     "Factory Reset API route exists": '"/api/v1/system/factory-reset"' in system,
+    "Control requests are fully read": "read_request_body" in system and "while (offset < body.size())" in system and "offset += static_cast<std::size_t>(received);" in system,
+    "Factory Reset uses complete bounded body": "read_request_body(request, 512U, body)" in system,
+    "Security command uses complete bounded body": "read_request_body(request, 384U, body)" in system,
     "Factory Reset requires credentials": 'parse_json_string(body, "actor", actor)' in system and 'parse_json_string(body, "credential", credential)' in system,
     "Factory Reset requires explicit destructive confirmation": 'confirm != "ERASE_ALL"' in system and 'explicit_confirmation_required' in system,
     "Factory Reset is Admin-authorized": 'authorize(actor, credential, "system.factory_reset")' in system,
     "Factory Reset clears live access state": "access_control_->clear_users();" in system,
+    "Reset failure reports every mutable namespace": all(key in system for key in ('\\"access\\"', '\\"wifi\\"', '\\"cloud\\"', '\\"controllerConfig\\"', '\\"provisioning\\"', '\\"commissioning\\"')),
     "Factory Reset reboots only after successful erase": "if (!report.ok())" in system and "delayed_factory_reboot" in system and "esp_restart();" in system,
 }
 
