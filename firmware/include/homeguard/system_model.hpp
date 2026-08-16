@@ -75,6 +75,9 @@ struct OutputRecord {
     // bit distinguishes a real CLOSE command from the harmless power-on
     // default false state so boot never moves a valve merely by synchronizing.
     bool commanded{};
+    // Incremented for every explicit command, even if it repeats the same
+    // direction. Physical actuator runtime consumes each revision exactly once.
+    std::uint32_t command_revision{};
     std::uint32_t timeout_ms{};
 };
 struct PartitionRecord {
