@@ -101,12 +101,15 @@ def require_token(text: str, token: str, label: str) -> None:
 
 network = source_text("hg_network_http.cpp")
 i2c = source_text("hg_i2c_bus.cpp")
+ads = source_text("hg_ads1115.cpp")
 ina = source_text("hg_ina226.cpp")
 mcp = source_text("hg_mcp23017.cpp")
+rtc = source_text("hg_ds3231.cpp")
 w5500 = source_text("hg_w5500.cpp")
 sd = source_text("hg_sd_storage.cpp")
 telemetry = source_text("hg_telemetry_runtime.cpp")
 bootstrap = source_text("hg_hardware_bootstrap.cpp")
+service = source_text("hg_service_http.cpp")
 app_main = source_text("app_main.cpp")
 
 # 1: Wi-Fi reconnect/recovery must be event-driven; status GET must be side-effect free;
@@ -129,6 +132,8 @@ for token, label in [
     ("phy_->del", "W5500 PHY rollback"),
     ("mac_->del", "W5500 MAC rollback"),
     ("spi_bus_free", "W5500 SPI rollback"),
+    ("if (uninstall_error == ESP_OK)", "W5500 uninstall ownership guard"),
+    ("if (eth_ == nullptr)", "W5500 lower-resource ownership guard"),
 ]:
     require_token(w5500, token, label)
 
@@ -140,6 +145,15 @@ if "ESP_RETURN_ON_ERROR" in ina:
 
 # 5: physical I2C ACK is mandatory before accepting a device handle.
 require_token(i2c, "i2c_master_probe", "I2C physical ACK probe")
+
+# ADS1115 and DS3231 must not equate a software I2C handle with a live device.
+for text, label in [
+    (ads, "ADS1115"),
+    (rtc, "DS3231"),
+]:
+    require_token(text, "initialized_ = true", f"{label} transactional initialization")
+    require_token(text, "remove_device(&device_)", f"{label} failed-init cleanup")
+    require_token(text, "initialized_ && device_ != nullptr", f"{label} strict ready state")
 
 # 6: MCP23017 initialization is transactional and safe outputs are part of successful init.
 require_token(mcp, "remove_device(&device_)", "MCP23017 failed-init cleanup")
@@ -153,10 +167,22 @@ require_token(bootstrap, "HardwareModuleState::Fault", "hardware fault classific
 require_token(sd, "spi_bus_free(SPI3_HOST)", "microSD failed-mount SPI cleanup")
 require_token(telemetry, "storage().status().mounted", "microSD runtime gating")
 
-# 9: telemetry respects bootstrap hardware state.
+# 9: telemetry respects bootstrap hardware state and does not hammer optional buses.
 require_token(telemetry, "hardware_status.ina226.state", "INA226 telemetry gating")
 require_token(telemetry, "hardware_status.ads1115_telemetry.state", "ADC telemetry gating")
 require_token(telemetry, "hardware_status.ds3231.state", "RTC telemetry gating")
+require_token(telemetry, "kOneWireRediscoveryCycles", "1-Wire rediscovery backoff")
+require_token(telemetry, "rediscovery_due", "1-Wire absent-device polling gate")
+
+# 10: a true factory reset is different from service commissioning invalidation.
+for token, label in [
+    ('/api/v1/service/factory-reset', "factory reset endpoint"),
+    ('confirmation != "ERASE_ALL"', "factory reset explicit confirmation"),
+    ("nvs_flash_erase()", "factory reset whole-NVS erase"),
+    ("esp_restart()", "factory reset reboot"),
+    ('"factoryReset\\\":true', "factory reset response marker"),
+]:
+    require_token(service, token, label)
 
 # 10 + 12: clean-state and fail-closed rules are persistent project contracts.
 field_contract = ROOT / "docs" / "FIELD_TEST_BUGS_2026-08-16.md"
