@@ -5,6 +5,8 @@ ESP-IDF httpd_req_recv() may return less than content_len. Every mutating or
 credential-bearing POST endpoint must therefore loop until the declared body is
 fully consumed or fail closed. Output-command scalar parsing is also required
 to accept normal JSON whitespace after ':' rather than a single compact form.
+Config import must also schedule its reboot before replying so a dropped socket
+cannot strand old runtime state after a committed transaction.
 """
 from pathlib import Path
 import sys
@@ -35,6 +37,9 @@ checks = {
     "output scalar parser finds colon independently": "find_json_value" in sources["output"] and "body.find(':', pos + marker.size())" in sources["output"],
     "output scalar parser skips JSON whitespace": "std::isspace(static_cast<unsigned char>(body[pos]))" in sources["output"],
     "output uint uses tolerant value locator": "if (!find_json_value(body, key, pos)) return false;" in sources["output"],
+    "config import schedules reboot before success response": sources["config"].find("xTaskCreate(") != -1 and sources["config"].find("xTaskCreate(") < sources["config"].find("config_imported"),
+    "config import does not gate reboot on response send": "if (send_error == ESP_OK)" not in sources["config"],
+    "config import reboot scheduling is fail-safe": "if (reboot_task != pdPASS)" in sources["config"] and "esp_restart();" in sources["config"],
 }
 
 # Catch the exact anti-pattern that caused the field-risk: allocate content_len,
@@ -55,3 +60,4 @@ print("HTTP POST body safety PASS")
 print(" - all credential-bearing/mutating POST handlers consume complete bodies")
 print(" - single-fragment recv+resize anti-pattern is forbidden")
 print(" - output scalar JSON accepts normal whitespace")
+print(" - config import reboot is independent of HTTP response delivery")
