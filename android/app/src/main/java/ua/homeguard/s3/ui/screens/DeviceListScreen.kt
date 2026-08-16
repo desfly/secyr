@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.network.ControllerIdentity
 import ua.homeguard.s3.storage.RegisteredDevice
 import ua.homeguard.s3.ui.components.BruceBrand
 
@@ -47,8 +48,6 @@ fun DeviceListScreen(
     var renameDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
     var renameText by remember { mutableStateOf("") }
     var deleteDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
-    val onlineIds = discovered.mapTo(hashSetOf()) { it.deviceId }
-    val onlineHosts = discovered.mapTo(hashSetOf()) { it.host.trim().trim('[', ']').lowercase() }
 
     renameDevice?.let { device ->
         AlertDialog(
@@ -122,10 +121,17 @@ fun DeviceListScreen(
             }
         } else {
             items(devices, key = { it.deviceId }) { device ->
-                val deviceHost = device.baseUrl.substringAfter("://", "").substringBefore('/').substringBefore(':').trim('[', ']').lowercase()
-                val online = device.deviceId in onlineIds || deviceHost in onlineHosts || (device.deviceId == activeDeviceId && snapshot.sequence > 0)
+                val discoveredOnline = discovered.any { candidate ->
+                    ControllerIdentity.sameController(
+                        device.deviceId,
+                        device.baseUrl,
+                        candidate.deviceId,
+                        candidate.baseUrl,
+                    )
+                }
+                val active = device.deviceId.trim().equals(activeDeviceId.trim(), ignoreCase = true)
+                val online = discoveredOnline || (active && snapshot.sequence > 0)
                 val expanded = expandedId == device.deviceId
-                val active = device.deviceId == activeDeviceId
                 val titleColor = if (device.authorized) Color.Unspecified else MaterialTheme.colorScheme.error
 
                 Card(
