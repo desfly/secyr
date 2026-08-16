@@ -126,8 +126,14 @@ void TelemetryRuntime::run()
         health_.set(hg::Component::Outputs, module_health(hardware_status.mcp23017.state), now_ms);
 
         bool rtc_valid = false;
-        const auto epoch = rtc_epoch(hardware_->rtc(), rtc_valid);
-        health_.set(hg::Component::Rtc, rtc_valid ? hg::HealthState::Ok : module_health(hardware_status.ds3231.state), now_ms);
+        std::uint64_t epoch = 0;
+        if (hardware_status.ds3231.state == homeguard::HardwareModuleState::Ready &&
+            hardware_->rtc().ready()) {
+            epoch = rtc_epoch(hardware_->rtc(), rtc_valid);
+        }
+        health_.set(hg::Component::Rtc,
+                    rtc_valid ? hg::HealthState::Ok : module_health(hardware_status.ds3231.state),
+                    now_ms);
 
         wifi_ap_record_t wifi_ap{};
         const bool wifi_connected = esp_wifi_sta_get_ap_info(&wifi_ap) == ESP_OK;
@@ -148,15 +154,13 @@ void TelemetryRuntime::run()
             }
         }
 
-        // The telemetry ADS1115 is sampled directly. Until a pressure-sensor
-        // transfer function is configured, values are intentionally carried as
-        // millivolts rather than being mislabeled as bar/kPa.
         std::array<hg::PressureState, 2> pressures{};
         std::array<float, 2> pressure_values{};
         std::array<bool, 2> pressure_valid{};
         auto& analog_adc = hardware_->telemetry_adc();
         for (std::size_t index = 0; index < pressures.size(); ++index) {
-            if (!analog_adc.ready()) {
+            if (hardware_status.ads1115_telemetry.state != homeguard::HardwareModuleState::Ready ||
+                !analog_adc.ready()) {
                 pressures[index] = hg::PressureState::Disabled;
                 continue;
             }
@@ -174,7 +178,9 @@ void TelemetryRuntime::run()
         std::array<bool, 8> temperature_valid{};
         std::uint8_t temperature_count = 0;
         auto& one_wire = hardware_->one_wire();
-        if (one_wire.ready()) {
+        if (hardware_status.one_wire.state != homeguard::HardwareModuleState::Missing &&
+            hardware_status.one_wire.state != homeguard::HardwareModuleState::Fault &&
+            one_wire.ready()) {
             if (one_wire.device_count() == 0U) (void)one_wire.discover();
             if (one_wire.device_count() > 0U && one_wire.convert_all() == ESP_OK) {
                 (void)one_wire.read_all();
@@ -189,7 +195,11 @@ void TelemetryRuntime::run()
         }
 
         Ina226Reading battery{};
-        const bool battery_valid = hardware_->battery_monitor().read(&battery) == ESP_OK;
+        bool battery_valid = false;
+        if (hardware_status.ina226.state == homeguard::HardwareModuleState::Ready &&
+            hardware_->battery_monitor().ready()) {
+            battery_valid = hardware_->battery_monitor().read(&battery) == ESP_OK;
+        }
 
         const auto frame = builder_.build(
             now_ms,
@@ -211,8 +221,8 @@ void TelemetryRuntime::run()
 
         websocket_->publish(frame);
 
-        if ((++cycles % 60U) == 0U) {
-            hardware_->storage().refresh_space();
+        if ((++cycles % 60U) == 0U && hardware_->storage().status().mounted) {
+            (void)hardware_->storage().refresh_space();
         }
 
         ESP_LOGD(kTag,
