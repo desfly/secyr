@@ -24,6 +24,8 @@ import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.navigation.AppNavigation
+import ua.homeguard.s3.navigation.AppScreen
 import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
 import ua.homeguard.s3.network.DiscoveryInputValidator
@@ -56,9 +58,7 @@ class MainActivity : ComponentActivity() {
     private val operatorId = MutableStateFlow("")
     private val operatorPin = MutableStateFlow("")
     private val accessSession = MutableStateFlow<AccessSession?>(null)
-    private val addDeviceOpen = MutableStateFlow(false)
-    private val provisioningOpen = MutableStateFlow(false)
-    private val deviceListOpen = MutableStateFlow(true)
+    private val navigation = AppNavigation()
     private var pendingExportText: String = ""
     private var pendingSettingsBackupText: String = ""
 
@@ -183,9 +183,7 @@ class MainActivity : ComponentActivity() {
             val currentOperator by operatorId.collectAsState()
             val currentPin by operatorPin.collectAsState()
             val currentAccessSession by accessSession.collectAsState()
-            val showAddDevice by addDeviceOpen.collectAsState()
-            val showProvisioning by provisioningOpen.collectAsState()
-            val showDeviceList by deviceListOpen.collectAsState()
+            val currentScreen by navigation.screen.collectAsState()
             val diagnostics = SystemDiagnosticsEvaluator.evaluate(
                 appSettings.deviceId,
                 endpoint.path.name,
@@ -213,47 +211,40 @@ class MainActivity : ComponentActivity() {
                 )
 
                 when {
-                    showProvisioning || provisioningActive -> ProvisioningScreen(
+                    provisioningActive || currentScreen == AppScreen.PROVISIONING -> ProvisioningScreen(
                         provisioningState,
                         {
-                            if (!provisioningActive) {
-                                provisioningOpen.value = false
-                                addDeviceOpen.value = true
-                            }
+                            if (!provisioningActive) navigation.onProvisioningFinished()
                         },
                         ::requestQrScan,
                         provisioning::provision,
                     )
 
-                    showAddDevice -> AddDeviceScreen(
+                    currentScreen == AppScreen.ADD_DEVICE -> AddDeviceScreen(
                         devices,
                         isScanning,
                         scanStatus,
-                        { addDeviceOpen.value = false },
+                        navigation::showDeviceList,
                         { lifecycleScope.launch { discovery.rescan() } },
                         { device, name ->
                             lifecycleScope.launch {
                                 registeredDevices.addOrUpdate(device, name)
                                 settings.remember(device)
-                                addDeviceOpen.value = false
-                                deviceListOpen.value = true
+                                navigation.onDeviceSaved()
                             }
                         },
                         { name, address -> addManualDevice(name, address) },
                         { name, deviceId -> addManualDeviceId(name, deviceId) },
-                        {
-                            addDeviceOpen.value = false
-                            provisioningOpen.value = true
-                        },
+                        navigation::showProvisioning,
                     )
 
-                    showDeviceList -> DeviceListScreen(
+                    currentScreen == AppScreen.DEVICE_LIST -> DeviceListScreen(
                         devices = registered,
                         discovered = devices,
                         activeDeviceId = appSettings.deviceId,
                         snapshot = snapshot,
                         onAddDevice = {
-                            addDeviceOpen.value = true
+                            navigation.showAddDevice()
                             lifecycleScope.launch { discovery.rescan() }
                         },
                         onRenameDevice = { device, newName ->
@@ -272,7 +263,7 @@ class MainActivity : ComponentActivity() {
                         onOpenDevice = { device ->
                             lifecycleScope.launch {
                                 settings.selectDevice(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() })
-                                deviceListOpen.value = false
+                                navigation.onDeviceSelected()
                             }
                         },
                     )
@@ -293,10 +284,9 @@ class MainActivity : ComponentActivity() {
                         criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled,
                         statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
                         zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
-                        onBackToDevices = { deviceListOpen.value = true },
+                        onBackToDevices = navigation::showDeviceList,
                         onAddDevice = {
-                            deviceListOpen.value = true
-                            addDeviceOpen.value = true
+                            navigation.showAddDevice()
                             lifecycleScope.launch { discovery.rescan() }
                         },
                         onOperatorIdChange = { value ->
@@ -366,8 +356,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             registeredDevices.addManual(deviceId, baseUrl, name)
             settings.selectDevice(deviceId, baseUrl)
-            addDeviceOpen.value = false
-            deviceListOpen.value = true
+            navigation.onDeviceSaved()
         }
     }
 
@@ -379,8 +368,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             registeredDevices.addManual(deviceId, "", name)
             settings.selectDevice(deviceId)
-            addDeviceOpen.value = false
-            deviceListOpen.value = true
+            navigation.onDeviceSaved()
             discovery.rescan()
         }
     }
