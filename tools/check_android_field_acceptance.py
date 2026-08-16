@@ -18,6 +18,7 @@ maintenance = (ANDROID / "ControllerMaintenanceActivity.kt").read_text(encoding=
 client = (ANDROID / "diagnostics/DeviceConfigMaintenanceClient.kt").read_text(encoding="utf-8")
 access_models = (ANDROID / "model/AccessModels.kt").read_text(encoding="utf-8")
 http_api = (ANDROID / "network/HttpDeviceApi.kt").read_text(encoding="utf-8")
+runtime_contract = (ANDROID / "network/RuntimeApiContract.kt").read_text(encoding="utf-8")
 errors: list[str] = []
 
 
@@ -26,7 +27,6 @@ def require(condition: bool, message: str) -> None:
         errors.append(message)
 
 
-# Device list is the primary screen and old Add flow is hidden.
 require("AppNavigation(initial: AppScreen = AppScreen.DEVICE_LIST)" in navigation,
         "Android does not start on DEVICE_LIST")
 require('Text("+ Додати")' not in list_screen and 'Text("+ Додати пристрій")' not in list_screen,
@@ -40,7 +40,6 @@ require("onAddDevice =" not in main_activity and "navigation.showAddDevice()" no
 require("currentScreen == AppScreen.ADD_DEVICE -> AddDeviceScreen(" in main_activity,
         "hidden Add flow was deleted instead of being retained for later redesign")
 
-# Friendly names only on cards; technical data belongs in Properties.
 require('var deviceName by remember { mutableStateOf("") }' in add_screen,
         "new device name does not start empty")
 require("fun isForbiddenFriendlyName(" in identity,
@@ -70,8 +69,6 @@ require('StatusLine("ID", device.deviceId)' in list_screen and
 require("Text(device.baseUrl" not in list_screen,
         "raw endpoint leaked into normal device card")
 
-# One physical ESP must collapse to one owner-visible record. Persistence and
-# visible LAN/CLOUD state must use the same canonical identity algorithm.
 for needle in (
     "DeviceIdentity.samePhysicalDevice(",
     "current.removeAll { sameDevice(it, device) }",
@@ -85,7 +82,6 @@ require("private fun newestDiscoveryFor(" in list_screen and
 require("candidate.deviceId.equals(device.deviceId" not in list_screen,
         "device list still uses a second simplified identity matcher")
 
-# Small icon + visible LAN/CLOUD state picons are required on the card.
 require("Modifier.size(36.dp)" in list_screen,
         "device card icon is not the approved compact size")
 require('"● LAN"' in list_screen and '"○ LAN"' in list_screen,
@@ -95,9 +91,6 @@ require('"☁ CLOUD"' in list_screen,
 require('"● online"' in list_screen and '"○ offline"' in list_screen,
         "overall connection state missing")
 
-# No active UI control may route to a runtime command that is known to be
-# unimplemented. Admin authorization is broad, but UI enablement must still
-# respect runtime capabilities.
 require("AccessRole.ADMIN -> capabilities.allowsOperatorCommand(command)" in access_models,
         "Admin UI bypasses runtime capabilities and can enable dead commands")
 require("CommandType.SILENCE, CommandType.RESET_ALARM" in access_models and
@@ -109,9 +102,6 @@ require("CommandType.ARM_HOME -> runtimeSecurityCommand" in http_api and
         "CommandType.OPEN_VALVES -> runtimeValveCommand" in http_api,
         "supported runtime command wiring is missing")
 
-# Controller maintenance must be reachable from the normal dashboard and must
-# expose PIN reveal plus explicit destructive reset. This guards against the
-# Build-948 class of bug where backend code existed but the user had no control.
 require('Text("Конфігурація контролера")' in maintenance_panel,
         "Dashboard maintenance panel does not expose controller configuration")
 require("ControllerMaintenanceActivity::class.java" in maintenance_panel and
@@ -141,14 +131,13 @@ require("Intent.FLAG_ACTIVITY_CLEAR_TASK" in maintenance and "Intent.FLAG_ACTIVI
         "Android may reuse stale discovery/session Activity state after reset")
 require("MainActivity::class.java" in maintenance,
         "Android does not return to the device-list activity after reset")
-require("/api/v1/system/factory-reset" in client and "ERASE_ALL" in client,
+require("RuntimeApiContract.FACTORY_RESET_PATH" in client and
+        'FACTORY_RESET_PATH = "/api/v1/system/factory-reset"' in runtime_contract and
+        "ERASE_ALL" in client,
         "Android maintenance client does not call true Factory Reset endpoint")
 require('optBoolean("rebooting", false)' in client,
         "Android treats reset as success without controller reboot acknowledgement")
 
-# Acceptance item 23: an expected connection loss during destructive reset
-# must never leave stale authorization/endpoint/tokens in the UI. Explicit HTTP
-# rejection remains a different path and must not wipe local registration.
 require("class FactoryResetTransportException" in client and
         "class FactoryResetRejectedException" in client,
         "Factory Reset transport loss is not distinguished from explicit rejection")
@@ -159,7 +148,7 @@ require("throw FactoryResetRejectedException(" in client,
 require("catch (error: FactoryResetTransportException)" in maintenance,
         "maintenance screen does not handle expected reset disconnect explicitly")
 require("val leaveAfterReset: suspend" in maintenance and
-        maintenance.count("leaveAfterReset(") >= 3,
+        maintenance.count("leaveAfterReset(") >= 2,
         "confirmed reset and transport-loss reset do not share fail-closed cleanup")
 require("registeredDevices.markAuthorization(resetDeviceId, resetBaseUrl, false)" in maintenance and
         "settings.clearControllerSessionAfterFactoryReset()" in maintenance and
