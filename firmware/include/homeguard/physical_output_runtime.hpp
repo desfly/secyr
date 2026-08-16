@@ -102,10 +102,16 @@ public:
     bool synchronize(const SystemModel& model, std::uint64_t now_ms);
     bool force_safe();
 
+    // Returns true when a bounded physical pulse was safely applied. For valve
+    // channels, target_evidence is set true only when the matching GPB end stop
+    // was inactive before the pulse and active afterwards. A safe partial move
+    // therefore returns true with target_evidence=false and may be repeated in
+    // another <=1 s pulse. Rejected/unsafe operations return false.
     bool bench_pulse(
         PhysicalOutputChannel channel,
         std::uint32_t duration_ms,
-        BenchDelayFn delay_fn);
+        BenchDelayFn delay_fn,
+        bool* target_evidence = nullptr);
 
     bool lockout_fail_closed();
 
