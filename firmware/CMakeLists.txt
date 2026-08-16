@@ -57,6 +57,7 @@ add_executable(homeguard_tests
     ../tests/test_controller.cpp
     ../tests/test_connectivity.cpp
     ../tests/test_provisioning.cpp
+    ../tests/test_reset_sequence.cpp
     ../tests/test_build0009.cpp
     ../tests/test_build0013.cpp
     ../tests/test_build0032.cpp
