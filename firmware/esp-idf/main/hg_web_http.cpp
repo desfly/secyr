@@ -48,6 +48,34 @@ esp_err_t send_text_with_suffix(httpd_req_t* request,
     return httpd_resp_send(request, body.data(), static_cast<ssize_t>(body.size()));
 }
 
+esp_err_t send_binary_chunked(httpd_req_t* request,
+                              const char* content_type,
+                              const uint8_t* start,
+                              const uint8_t* end)
+{
+    if (request == nullptr || start == nullptr || end == nullptr || end < start) return ESP_ERR_INVALID_ARG;
+
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    httpd_resp_set_hdr(request, "Pragma", "no-cache");
+    httpd_resp_set_hdr(request, "Expires", "0");
+    httpd_resp_set_type(request, content_type);
+
+    constexpr std::size_t kChunkSize = 4096U;
+    const auto total = static_cast<std::size_t>(end - start);
+    std::size_t offset = 0U;
+    while (offset < total) {
+        const auto remaining = total - offset;
+        const auto chunk = remaining < kChunkSize ? remaining : kChunkSize;
+        const auto error = httpd_resp_send_chunk(
+            request,
+            reinterpret_cast<const char*>(start + offset),
+            static_cast<ssize_t>(chunk));
+        if (error != ESP_OK) return error;
+        offset += chunk;
+    }
+    return httpd_resp_send_chunk(request, nullptr, 0U);
+}
+
 }  // namespace
 
 esp_err_t WebHttp::register_handlers(httpd_handle_t server)
@@ -502,7 +530,9 @@ esp_err_t WebHttp::access_session_js_get(httpd_req_t* request)
 
 esp_err_t WebHttp::bruce_get(httpd_req_t* request)
 {
-    return send_asset(request, "image/jpeg", bruce_jpg_start, bruce_jpg_end);
+    // web/bruce.jpg contains the approved source bytes, which are PNG. Keep the
+    // historic URL for compatibility but serve the real media type directly.
+    return send_binary_chunked(request, "image/png", bruce_jpg_start, bruce_jpg_end);
 }
 
 }  // namespace homeguard::idf
