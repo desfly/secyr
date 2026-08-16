@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -77,6 +78,7 @@ class ControllerMaintenanceActivity : ComponentActivity() {
         setContent {
             var actor by remember { mutableStateOf("") }
             var pin by remember { mutableStateOf("") }
+            var pinVisible by remember { mutableStateOf(false) }
             var session by remember { mutableStateOf<AccessSession?>(null) }
             var status by remember { mutableStateOf("Увійдіть як Admin") }
             var confirmReset by remember { mutableStateOf(false) }
@@ -113,29 +115,43 @@ class ControllerMaintenanceActivity : ComponentActivity() {
                 AlertDialog(
                     onDismissRequest = { confirmReset = false },
                     title = { Text("Повне заводське скидання?") },
-                    text = { Text("Будуть стерті користувачі, Wi-Fi, Cloud і всі користувацькі налаштування. Прошивка та hardware identity залишаться.") },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            confirmReset = false
-                            val authenticated = session ?: return@TextButton
-                            lifecycleScope.launch {
-                                status = "Виконується Factory Reset…"
-                                runCatching { maintenance.factoryReset(authenticated, pin) }
-                                    .onSuccess {
-                                        settings.selectDevice("")
-                                        session = null
-                                        pin = ""
-                                        status = "Factory Reset прийнято; контролер перезавантажується"
-                                        startActivity(Intent(this@ControllerMaintenanceActivity, MainActivity::class.java).apply {
-                                            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        })
-                                        finish()
-                                    }
-                                    .onFailure { error -> status = "Factory Reset: ${error.message ?: "network"}" }
-                            }
-                        }) { Text("СТЕРТИ ВСЕ") }
+                    text = {
+                        Text(
+                            "Будуть стерті користувачі, Wi-Fi, Cloud і всі користувацькі налаштування. " +
+                                "Прошивка та hardware identity залишаться. Після команди контролер відключиться і перезавантажиться.",
+                        )
                     },
-                    dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Скасувати") } },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                confirmReset = false
+                                val authenticated = session ?: return@TextButton
+                                lifecycleScope.launch {
+                                    status = "Виконується Factory Reset…"
+                                    runCatching { maintenance.factoryReset(authenticated, pin) }
+                                        .onSuccess {
+                                            settings.selectDevice("")
+                                            session = null
+                                            pin = ""
+                                            pinVisible = false
+                                            status = "Factory Reset прийнято; контролер перезавантажується"
+                                            startActivity(
+                                                Intent(this@ControllerMaintenanceActivity, MainActivity::class.java).apply {
+                                                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                },
+                                            )
+                                            finish()
+                                        }
+                                        .onFailure { error ->
+                                            status = "Factory Reset: ${error.message ?: "network"}"
+                                        }
+                                }
+                            },
+                        ) { Text("СТЕРТИ ВСЕ") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmReset = false }) { Text("Скасувати") }
+                    },
                 )
             }
 
@@ -145,21 +161,37 @@ class ControllerMaintenanceActivity : ComponentActivity() {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text("Конфігурація контролера", style = MaterialTheme.typography.headlineSmall)
-                    Text(endpoint.value.apiBaseUrl.ifBlank { "Локальний контролер не вибраний" }, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        endpoint.value.apiBaseUrl.ifBlank { "Локальний контролер не вибраний" },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                     OutlinedTextField(
                         value = actor,
-                        onValueChange = { actor = it.take(23); session = null },
+                        onValueChange = {
+                            actor = it.take(23)
+                            session = null
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Admin ID") },
                         singleLine = true,
                     )
                     OutlinedTextField(
                         value = pin,
-                        onValueChange = { value -> if (value.length <= 12 && value.all(Char::isDigit)) { pin = value; session = null } },
+                        onValueChange = { value ->
+                            if (value.length <= 12 && value.all(Char::isDigit)) {
+                                pin = value
+                                session = null
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("PIN") },
                         singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
+                        visualTransformation = if (pinVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            TextButton(onClick = { pinVisible = !pinVisible }) {
+                                Text(if (pinVisible) "Сховати" else "Показати")
+                            }
+                        },
                     )
                     Button(
                         enabled = actor.isNotBlank() && pin.length in 4..12,
@@ -179,7 +211,9 @@ class ControllerMaintenanceActivity : ComponentActivity() {
                                         exportLauncher.launch("homeguard-config-v1.json")
                                         status = "Backup готовий до збереження"
                                     }
-                                    .onFailure { error -> status = "Export: ${error.message ?: "network"}" }
+                                    .onFailure { error ->
+                                        status = "Export: ${error.message ?: "network"}"
+                                    }
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -213,9 +247,12 @@ class ControllerMaintenanceActivity : ComponentActivity() {
                                         importReady = false
                                         session = null
                                         pin = ""
+                                        pinVisible = false
                                         status = "Імпорт прийнято; контролер перезавантажується"
                                     }
-                                    .onFailure { error -> status = "Import: ${error.message ?: "network"}" }
+                                    .onFailure { error ->
+                                        status = "Import: ${error.message ?: "network"}"
+                                    }
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -228,7 +265,10 @@ class ControllerMaintenanceActivity : ComponentActivity() {
                     ) { Text("Повне заводське скидання") }
 
                     Text(status, style = MaterialTheme.typography.bodySmall)
-                    OutlinedButton(onClick = { finish() }, modifier = Modifier.fillMaxWidth()) { Text("Назад") }
+                    OutlinedButton(
+                        onClick = { finish() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Назад") }
                 }
             }
         }
