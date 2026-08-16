@@ -1,5 +1,9 @@
 package ua.homeguard.s3.navigation
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 enum class AppScreen {
     DEVICE_LIST,
     ADD_DEVICE,
@@ -8,38 +12,38 @@ enum class AppScreen {
 }
 
 class AppNavigation(initial: AppScreen = AppScreen.DEVICE_LIST) {
-    var current: AppScreen = initial
-        private set
+    private val _screen = MutableStateFlow(initial)
+    val screen: StateFlow<AppScreen> = _screen.asStateFlow()
 
     fun showDeviceList() {
-        current = AppScreen.DEVICE_LIST
+        _screen.value = AppScreen.DEVICE_LIST
     }
 
     fun showAddDevice() {
-        current = AppScreen.ADD_DEVICE
+        _screen.value = AppScreen.ADD_DEVICE
     }
 
     fun showProvisioning() {
-        current = AppScreen.PROVISIONING
+        _screen.value = AppScreen.PROVISIONING
     }
 
     fun showDashboard() {
-        current = AppScreen.DASHBOARD
+        _screen.value = AppScreen.DASHBOARD
     }
 
     fun onProvisioningFinished() {
-        current = AppScreen.ADD_DEVICE
+        _screen.value = AppScreen.ADD_DEVICE
     }
 
     fun onDeviceSelected() {
-        current = AppScreen.DASHBOARD
+        _screen.value = AppScreen.DASHBOARD
     }
 
     fun onDeviceSaved() {
-        current = AppScreen.DEVICE_LIST
+        _screen.value = AppScreen.DEVICE_LIST
     }
 
     fun onFactoryResetDisconnect() {
-        current = AppScreen.DEVICE_LIST
+        _screen.value = AppScreen.DEVICE_LIST
     }
 }
