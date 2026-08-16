@@ -78,5 +78,22 @@ add_executable(homeguard_tests
     ../tests/test_build0058.cpp
 )
 target_link_libraries(homeguard_tests PRIVATE homeguard_core)
+
+# Exercise the actual ESP-IDF FactoryResetManager against an in-memory NVS/Wi-Fi
+# mock. This is intentionally separate from the pure core test binary so the
+# release gate validates namespace erasure and immutable-state preservation,
+# not merely static source strings.
+add_executable(factory_reset_host_test
+    ../tests/test_factory_reset_host.cpp
+    esp-idf/main/hg_factory_reset.cpp
+    esp-idf/main/hg_commissioning_nvs.cpp
+)
+target_include_directories(factory_reset_host_test PRIVATE
+    esp-idf/main
+    ../tests/esp-idf-mock/include
+)
+target_link_libraries(factory_reset_host_test PRIVATE homeguard_core)
+
 enable_testing()
 add_test(NAME homeguard_tests COMMAND homeguard_tests)
+add_test(NAME factory_reset_host_test COMMAND factory_reset_host_test)
