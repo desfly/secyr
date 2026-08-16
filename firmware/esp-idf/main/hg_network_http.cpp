@@ -464,6 +464,7 @@ std::string NetworkHttp::scan_json() const
 
     std::uint16_t count = 0;
     if (esp_wifi_scan_get_ap_num(&count) != ESP_OK) {
+        if (sta_credentials_configured_) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_count_failed\",\"networks\":[]}";
     }
 
@@ -471,6 +472,7 @@ std::string NetworkHttp::scan_json() const
     std::array<wifi_ap_record_t, kMaxScanRecords> records{};
     std::uint16_t returned = count;
     if (returned != 0 && esp_wifi_scan_get_ap_records(&returned, records.data()) != ESP_OK) {
+        if (sta_credentials_configured_) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_records_failed\",\"networks\":[]}";
     }
 
@@ -482,6 +484,11 @@ std::string NetworkHttp::scan_json() const
                std::to_string(static_cast<int>(records[i].rssi)) + "}";
     }
     out += "]}";
+
+    wifi_ap_record_t current{};
+    if (sta_credentials_configured_ && esp_wifi_sta_get_ap_info(&current) != ESP_OK) {
+        (void)esp_wifi_connect();
+    }
     return out;
 }
 
