@@ -379,22 +379,27 @@ std::string NetworkHttp::status_json() const
 
 std::string NetworkHttp::scan_json() const
 {
-    wifi_ap_record_t current_ap{};
-    const bool sta_was_connected = esp_wifi_sta_get_ap_info(&current_ap) == ESP_OK;
-    if (sta_was_connected) {
-        (void)esp_wifi_disconnect();
-        vTaskDelay(pdMS_TO_TICKS(120));
-    }
+    // A connected ESP32-S3 can perform a background scan without tearing down
+    // the STA association. Build 877 explicitly disconnected here and relied on
+    // a later esp_wifi_connect(); field testing proved that recovery path can
+    // fail and leave the controller permanently off-LAN. Scanning is therefore
+    // forbidden from changing STA connection state.
+    wifi_scan_config_t scan_config{};
+    scan_config.ssid = nullptr;
+    scan_config.bssid = nullptr;
+    scan_config.channel = 0;
+    scan_config.show_hidden = true;
+    scan_config.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+    scan_config.scan_time.active.min = 20;
+    scan_config.scan_time.active.max = 60;
 
-    const auto start_error = esp_wifi_scan_start(nullptr, true);
+    const auto start_error = esp_wifi_scan_start(&scan_config, true);
     if (start_error != ESP_OK) {
-        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_start_failed\",\"networks\":[]}";
     }
 
     std::uint16_t count = 0;
     if (esp_wifi_scan_get_ap_num(&count) != ESP_OK) {
-        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_count_failed\",\"networks\":[]}";
     }
 
@@ -402,7 +407,6 @@ std::string NetworkHttp::scan_json() const
     std::array<wifi_ap_record_t, kMaxScanRecords> records{};
     std::uint16_t returned = count;
     if (returned != 0 && esp_wifi_scan_get_ap_records(&returned, records.data()) != ESP_OK) {
-        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_records_failed\",\"networks\":[]}";
     }
 
@@ -414,8 +418,6 @@ std::string NetworkHttp::scan_json() const
                std::to_string(static_cast<int>(records[i].rssi)) + "}";
     }
     out += "]}";
-
-    if (sta_was_connected) (void)esp_wifi_connect();
     return out;
 }
 
