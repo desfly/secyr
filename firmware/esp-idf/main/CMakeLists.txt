@@ -4,6 +4,8 @@
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/web")
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/index.html" "${CMAKE_CURRENT_LIST_DIR}/web/index.html" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.css" "${CMAKE_CURRENT_LIST_DIR}/web/app.css" COPYONLY)
+file(READ "${CMAKE_CURRENT_LIST_DIR}/../../../web/mobile-bruce-fix.css" HG_MOBILE_BRUCE_FIX_CSS)
+file(APPEND "${CMAKE_CURRENT_LIST_DIR}/web/app.css" "\n${HG_MOBILE_BRUCE_FIX_CSS}\n")
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.js" "${CMAKE_CURRENT_LIST_DIR}/web/app.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/access-session.js" "${CMAKE_CURRENT_LIST_DIR}/web/access-session.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/factory-reset.js" "${CMAKE_CURRENT_LIST_DIR}/web/factory-reset.js" COPYONLY)
