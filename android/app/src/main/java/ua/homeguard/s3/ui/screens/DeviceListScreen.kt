@@ -1,5 +1,6 @@
 package ua.homeguard.s3.ui.screens
 
+import android.content.Context
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -24,6 +26,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.model.DiscoveredDevice
@@ -44,6 +50,24 @@ fun DeviceListScreen(
     onDeleteDevice: (RegisteredDevice) -> Unit,
     onOpenDevice: (RegisteredDevice) -> Unit,
 ) {
+    val context = LocalContext.current
+    val profilePrefs = remember { context.getSharedPreferences("myfist_profile", Context.MODE_PRIVATE) }
+    var profileRegistered by remember { mutableStateOf(profilePrefs.getBoolean("registered", false)) }
+
+    if (!profileRegistered) {
+        FirstRunRegistrationScreen(
+            onRegister = { name, password ->
+                profilePrefs.edit()
+                    .putBoolean("registered", true)
+                    .putString("name", name)
+                    .putString("password", password)
+                    .apply()
+                profileRegistered = true
+            },
+        )
+        return
+    }
+
     var expandedId by remember { mutableStateOf<String?>(null) }
     var renameDevice by remember { mutableStateOf<RegisteredDevice?>(null) }
     var renameText by remember { mutableStateOf("") }
@@ -130,9 +154,10 @@ fun DeviceListScreen(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 BruceBrand(showTitle = true)
+                Text("Мої пристрої", style = MaterialTheme.typography.headlineSmall)
                 Text("Пристрої: ${devices.size}", style = MaterialTheme.typography.titleMedium)
                 Text("Стани оновлюються автоматично", style = MaterialTheme.typography.bodySmall)
-                Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати") }
+                Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати пристрій") }
             }
         }
 
@@ -141,7 +166,7 @@ fun DeviceListScreen(
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Пристроїв ще немає", style = MaterialTheme.typography.titleMedium)
-                        Text("Додайте HomeGuard через пошук у мережі або вручну.")
+                        Text("Додайте HomeGuard через автоматичний пошук або вручну.")
                         Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати пристрій") }
                     }
                 }
@@ -253,6 +278,54 @@ fun DeviceListScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FirstRunRegistrationScreen(
+    onRegister: (String, String) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    val cleanName = name.trim()
+
+    Column(
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        BruceBrand(showTitle = true)
+        Text("Реєстрація", style = MaterialTheme.typography.headlineSmall)
+        Text("Перший запуск. Створіть локальний профіль користувача.")
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it.take(40) },
+            label = { Text("Ім’я") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it.take(64) },
+            label = { Text("Пароль") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                TextButton(onClick = { passwordVisible = !passwordVisible }) {
+                    Text(if (passwordVisible) "🙈" else "👁")
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = { onRegister(cleanName, password) },
+            enabled = cleanName.isNotBlank() && password.length >= 4,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Зареєструватися")
+        }
+        Text("Після реєстрації відкриється екран «Мої пристрої».", style = MaterialTheme.typography.bodySmall)
     }
 }
 
