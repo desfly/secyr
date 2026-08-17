@@ -54,6 +54,28 @@ esp_err_t ServiceHttp::register_handlers(
     hg::HardwareVerificationRecord* hardware,
     hg::CommissioningPersistentState* commissioning,
     hg::BootReadinessReport* readiness,
+    hg::SystemEventBus* bus)
+{
+    static NvsConfigStore config_store;
+    static hg::ControllerConfig controller_config{};
+    (void)config_store.load(controller_config);
+    return register_handlers(
+        server,
+        store,
+        hardware,
+        commissioning,
+        readiness,
+        bus,
+        &config_store,
+        &controller_config);
+}
+
+esp_err_t ServiceHttp::register_handlers(
+    httpd_handle_t server,
+    CommissioningNvsStore* store,
+    hg::HardwareVerificationRecord* hardware,
+    hg::CommissioningPersistentState* commissioning,
+    hg::BootReadinessReport* readiness,
     hg::SystemEventBus* bus,
     NvsConfigStore* config_store,
     hg::ControllerConfig* controller_config)
