@@ -172,9 +172,7 @@ fun DeviceListScreen(
             }
 
             item {
-                Image(
-                    painter = painterResource(R.drawable.bruce_launcher),
-                    contentDescription = null,
+                SafeBruceImage(
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -249,7 +247,10 @@ private fun FirstRunRegistrationScreen(onRegister: (String, String) -> Unit) {
     var passwordVisible by remember { mutableStateOf(false) }
     val cleanName = name.trim()
     Box(modifier = Modifier.fillMaxSize()) {
-        Image(painter = painterResource(R.drawable.bruce_launcher), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().alpha(0.46f))
+        SafeBruceImage(
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize().alpha(0.46f),
+        )
         Surface(modifier = Modifier.padding(horizontal = 20.dp, vertical = 28.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f), shape = MaterialTheme.shapes.large, tonalElevation = 6.dp) {
             Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("Реєстрація", style = MaterialTheme.typography.headlineSmall)
@@ -261,6 +262,25 @@ private fun FirstRunRegistrationScreen(onRegister: (String, String) -> Unit) {
             }
         }
     }
+}
+
+@Composable
+private fun SafeBruceImage(
+    contentScale: ContentScale,
+    modifier: Modifier = Modifier,
+) {
+    val painter = try {
+        painterResource(R.drawable.bruce_launcher)
+    } catch (_: Exception) {
+        painterResource(R.drawable.ic_myfist)
+    }
+
+    Image(
+        painter = painter,
+        contentDescription = null,
+        contentScale = contentScale,
+        modifier = modifier,
+    )
 }
 
 @Composable
