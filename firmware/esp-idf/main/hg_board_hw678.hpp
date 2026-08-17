@@ -33,6 +33,9 @@ inline constexpr gpio_num_t kSdSck = GPIO_NUM_40;
 inline constexpr gpio_num_t kSdMosi = GPIO_NUM_41;
 inline constexpr gpio_num_t kSdMiso = GPIO_NUM_42;
 
+// On-board WS2812 RGB LED confirmed on the HW-678 board.
+inline constexpr gpio_num_t kRgbLed = GPIO_NUM_48;
+
 inline constexpr bool is_reserved_gpio(int gpio) noexcept
 {
     switch (gpio) {
