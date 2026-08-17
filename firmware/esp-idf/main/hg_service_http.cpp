@@ -66,7 +66,7 @@ esp_err_t ServiceHttp::register_handlers(
     const httpd_uri_t routes[] = {
         {.uri="/api/v1/service/readiness", .method=HTTP_GET, .handler=&ServiceHttp::readiness_get, .user_ctx=this},
         {.uri="/api/v1/service/invalidate", .method=HTTP_POST, .handler=&ServiceHttp::invalidate_post, .user_ctx=this},
-        {.uri="/api/v1/service/factory-reset", .method=HTTP_POST, .handler=&ServiceHttp::factory_reset_post, .user_ctx=this},
+        {.uri="/api/v1/system/factory-reset", .method=HTTP_POST, .handler=&ServiceHttp::factory_reset_post, .user_ctx=this},
     };
     for (const auto& route : routes) {
         const auto error = httpd_register_uri_handler(server, &route);
@@ -92,8 +92,6 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
     if (self == nullptr || self->store_ == nullptr || self->hardware_ == nullptr ||
         self->commissioning_ == nullptr || self->readiness_ == nullptr) return ESP_FAIL;
 
-    // Destructive service operations are fail-closed. They must never be
-    // reachable through a direct HTTP call that bypasses the Web UI.
     if (self->access_control_ == nullptr) {
         httpd_resp_set_status(request, "503 Service Unavailable");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"access_unavailable\"}");
@@ -155,12 +153,12 @@ esp_err_t ServiceHttp::factory_reset_post(httpd_req_t* request) {
     std::string confirmation;
     if (!parse_json_string(body, "actor", actor) ||
         !parse_json_string(body, "credential", credential) ||
-        !parse_json_string(body, "confirmation", confirmation)) {
+        !parse_json_string(body, "confirm", confirmation)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"confirmation_required\"}");
     }
 
-    if (confirmation != "FACTORY_RESET") {
+    if (confirmation != "ERASE_ALL") {
         httpd_resp_set_status(request, "409 Conflict");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"confirmation_mismatch\"}");
     }
