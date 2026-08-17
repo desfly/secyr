@@ -63,10 +63,25 @@ esp_err_t transmit_rgb(int gpio, const std::array<std::uint8_t, 3>& grb) {
     }
     return error;
 }
-}
+}  // namespace
 
 bool RgbDiagnostic::supported_gpio(int gpio) {
     return gpio == 38 || gpio == 48;
+}
+
+esp_err_t RgbDiagnostic::set_color(
+    int gpio,
+    std::uint8_t red,
+    std::uint8_t green,
+    std::uint8_t blue) {
+    if (!supported_gpio(gpio)) return ESP_ERR_INVALID_ARG;
+
+    // WS2812 consumes bytes in GRB order.
+    return transmit_rgb(gpio, std::array<std::uint8_t, 3>{{green, red, blue}});
+}
+
+esp_err_t RgbDiagnostic::off(int gpio) {
+    return set_color(gpio, 0x00U, 0x00U, 0x00U);
 }
 
 esp_err_t RgbDiagnostic::test_white(int gpio, unsigned duration_ms) {
@@ -74,16 +89,11 @@ esp_err_t RgbDiagnostic::test_white(int gpio, unsigned duration_ms) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    // GRB byte order for the onboard addressable RGB LED. White is 255/255/255,
-    // so channel ordering does not affect this identification test.
-    const std::array<std::uint8_t, 3> white{{0xffU, 0xffU, 0xffU}};
-    const std::array<std::uint8_t, 3> off{{0x00U, 0x00U, 0x00U}};
-
-    auto error = transmit_rgb(gpio, white);
+    auto error = set_color(gpio, 0xffU, 0xffU, 0xffU);
     if (error != ESP_OK) return error;
 
     vTaskDelay(pdMS_TO_TICKS(duration_ms));
-    return transmit_rgb(gpio, off);
+    return off(gpio);
 }
 
 }  // namespace homeguard::idf

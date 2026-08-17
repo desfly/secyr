@@ -13,6 +13,11 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
+# HomeGuard performs NVS restore, reset/RGB handling and ESP-NETIF/VFS startup
+# from app_main(). The ESP-IDF default main-task stack is too small for this
+# bootstrap path on the current firmware and was observed overflowing on HW-678.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0x8000
