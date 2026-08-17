@@ -21,6 +21,21 @@ esp_err_t erase_namespace(const char* name) {
     return error;
 }
 
+esp_err_t restore_wifi_defaults() {
+    // esp_wifi_restore() requires the Wi-Fi driver to be initialized. Triple-RST
+    // factory reset runs before the normal NetworkHttp runtime initializes Wi-Fi,
+    // so use a short-lived driver instance here to clear ESP-IDF's persisted
+    // esp_wifi_set_config()/mode/protocol state as part of the full reset.
+    wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
+    auto error = esp_wifi_init(&init);
+    if (error != ESP_OK) return error;
+
+    const auto restore_error = esp_wifi_restore();
+    const auto deinit_error = esp_wifi_deinit();
+    if (restore_error != ESP_OK) return restore_error;
+    return deinit_error;
+}
+
 }  // namespace
 
 FactoryResetReport FactoryResetManager::erase_mutable_state() const {
@@ -30,7 +45,7 @@ FactoryResetReport FactoryResetManager::erase_mutable_state() const {
 
     report.wifi = erase_namespace("hg_wifi");
     if (report.wifi == ESP_OK) {
-        report.wifi = esp_wifi_restore();
+        report.wifi = restore_wifi_defaults();
     }
 
     report.cloud = erase_namespace("hg_cloud");
