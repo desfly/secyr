@@ -29,6 +29,7 @@ public:
 private:
     static esp_err_t readiness_get(httpd_req_t* request);
     static esp_err_t invalidate_post(httpd_req_t* request);
+    static esp_err_t factory_reset_post(httpd_req_t* request);
     esp_err_t send_json(httpd_req_t* request, const std::string& body) const;
 
     CommissioningNvsStore* store_{};
