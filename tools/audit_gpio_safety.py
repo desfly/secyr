@@ -8,6 +8,11 @@ FIRMWARE = ROOT / "firmware"
 reserved = {0, 3, 19, 20, 35, 36, 37, 43, 44, 45, 46, 48}
 allowed_profile = FIRMWARE / "esp-idf" / "main" / "hg_board_hw678.hpp"
 
+# Reserved GPIOs remain forbidden for arbitrary external wiring. The HW-678
+# profile may name a verified on-board function explicitly after hardware
+# confirmation. GPIO48 is the on-board WS2812 data line, not a free external pin.
+allowed_reserved_profile_assignments = {("RgbLed", 48)}
+
 errors = []
 warnings = []
 
@@ -41,7 +46,7 @@ for name, gpio in assigned:
     seen[gpio] = name
 
 for name, gpio in assigned:
-    if gpio in reserved:
+    if gpio in reserved and (name, gpio) not in allowed_reserved_profile_assignments:
         errors.append(
             f"external function {name} uses reserved GPIO{gpio}"
         )
