@@ -22,6 +22,14 @@ public:
         hg::HardwareVerificationRecord* hardware,
         hg::CommissioningPersistentState* commissioning,
         hg::BootReadinessReport* readiness,
+        hg::SystemEventBus* bus);
+
+    esp_err_t register_handlers(
+        httpd_handle_t server,
+        CommissioningNvsStore* store,
+        hg::HardwareVerificationRecord* hardware,
+        hg::CommissioningPersistentState* commissioning,
+        hg::BootReadinessReport* readiness,
         hg::SystemEventBus* bus,
         NvsConfigStore* config_store,
         hg::ControllerConfig* controller_config);
