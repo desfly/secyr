@@ -1,16 +1,17 @@
 package ua.homeguard.s3.ui.screens
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
@@ -19,6 +20,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,7 +36,6 @@ import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.R
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.network.UdpDeviceDiscovery
-import ua.homeguard.s3.ui.components.BruceBrand
 
 @Composable
 fun AddDeviceScreen(
@@ -54,11 +55,48 @@ fun AddDeviceScreen(
     var manualName by remember { mutableStateOf("") }
     var manualAddressTouched by remember { mutableStateOf(false) }
     var selectedDiscoveredDevice by remember { mutableStateOf<DiscoveredDevice?>(null) }
+    var foundDeviceName by remember { mutableStateOf("") }
     val cleanName = manualName.trim()
     val progress = scanStatus.progress.coerceIn(0f, 1f)
 
     LaunchedEffect(devices) {
         if (!manualAddressTouched && devices.isNotEmpty()) manualAddress = devices.first().host
+    }
+
+    selectedDiscoveredDevice?.let { selected ->
+        AlertDialog(
+            onDismissRequest = {
+                selectedDiscoveredDevice = null
+                foundDeviceName = ""
+            },
+            title = { Text("Назва пристрою") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Задайте назву, під якою HomeGuard буде показаний у «Мої пристрої».")
+                    OutlinedTextField(
+                        value = foundDeviceName,
+                        onValueChange = { foundDeviceName = it.take(40) },
+                        label = { Text("Назва") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = foundDeviceName.trim().isNotBlank(),
+                    onClick = { onUseDevice(selected, foundDeviceName.trim()) },
+                ) { Text("Додати") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        selectedDiscoveredDevice = null
+                        foundDeviceName = ""
+                    },
+                ) { Text("Скасувати") }
+            },
+        )
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -85,7 +123,6 @@ fun AddDeviceScreen(
                     modifier = Modifier.fillMaxWidth().padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    BruceBrand(showTitle = true)
                     Text("Додати пристрій", style = MaterialTheme.typography.headlineSmall)
                     OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("← Назад до пристроїв") }
                 }
@@ -109,6 +146,8 @@ fun AddDeviceScreen(
                             when {
                                 isScanning -> "Пошук пристроїв…"
                                 scanStatus.phase == "error" -> "Пошук завершився з помилкою"
+                                devices.size == 1 -> "Знайдено: 1 пристрій"
+                                devices.isNotEmpty() -> "Знайдено: ${devices.size} пристрої"
                                 else -> "Пошук завершено"
                             },
                             style = MaterialTheme.typography.titleMedium,
@@ -136,24 +175,26 @@ fun AddDeviceScreen(
                     )
                 }
             } else {
-                Text("Знайдені пристрої", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (devices.size == 1) "Знайдено: 1 пристрій" else "Знайдено: ${devices.size} пристрої",
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 devices.forEach { device ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                foundDeviceName = ""
+                                selectedDiscoveredDevice = device
+                            },
+                    ) {
                         Column(
                             modifier = Modifier.fillMaxWidth().padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             Text(device.serviceName.ifBlank { "HomeGuard-S3" }, style = MaterialTheme.typography.titleMedium)
                             Text("Пристрій доступний у локальній мережі", style = MaterialTheme.typography.bodySmall)
-                            Button(
-                                onClick = {
-                                    selectedDiscoveredDevice = device
-                                    manualAddress = device.host
-                                    manualAddressTouched = false
-                                    manualExpanded = true
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Додати") }
+                            Text("Торкніться, щоб назвати і додати", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
@@ -197,14 +238,6 @@ fun AddDeviceScreen(
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
-
-                        selectedDiscoveredDevice?.let { selected ->
-                            Button(
-                                onClick = { onUseDevice(selected, cleanName) },
-                                enabled = cleanName.isNotBlank(),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Зберегти знайдений пристрій") }
-                        }
 
                         Text("За IP", style = MaterialTheme.typography.titleSmall)
                         OutlinedTextField(
