@@ -61,13 +61,13 @@ void reset_sequence_state() {
     g_external_reset_count = 0U;
 }
 
-bool is_physical_rst_boot(esp_reset_reason_t reason) {
-    // On ESP32-S3, toggling CHIP_PU/EN (the board RST button) is reported by
-    // esp_reset_reason() as ESP_RST_POWERON. Keep ESP_RST_EXT accepted as well
-    // for compatibility with targets/boards that expose a distinct external
-    // reset reason. RTC_NOINIT keeps the short sequence state across RST/EN,
-    // while a real loss of power invalidates the magic and starts from zero.
-    return reason == ESP_RST_POWERON || reason == ESP_RST_EXT;
+bool is_physical_rst_boot(esp_reset_reason_t reason, bool rtc_sequence_was_valid) {
+    // HW-678 reports an EN/RST-button reboot as ESP_RST_POWERON, but a genuine
+    // cold power-up has the same reset reason. RTC_NOINIT is the discriminator:
+    // an EN/RST reboot preserves our magic, while a cold start begins without a
+    // valid sequence marker. Never count that first cold POWERON as press 1/3.
+    if (reason == ESP_RST_EXT) return true;
+    return reason == ESP_RST_POWERON && rtc_sequence_was_valid;
 }
 
 void force_reset_rgb_off() {
@@ -160,20 +160,22 @@ bool handle_triple_rst_factory_reset() {
     // it first so an ordinary reboot never reproduces the old 5-second white state.
     force_reset_rgb_off();
 
-    if (g_reset_magic != kMagic) reset_sequence_state();
+    const bool rtc_sequence_was_valid = g_reset_magic == kMagic;
+    if (!rtc_sequence_was_valid) reset_sequence_state();
 
     const auto reset_reason = esp_reset_reason();
     const auto step = hg::advance_reset_sequence(
         g_external_reset_count,
-        is_physical_rst_boot(reset_reason),
+        is_physical_rst_boot(reset_reason, rtc_sequence_was_valid),
         kRequiredPresses);
     g_external_reset_count = step.count;
 
     ESP_LOGI(kTag,
-             "Boot reset reason=%d, RST sequence=%u/%u",
+             "Boot reset reason=%d, RST sequence=%u/%u, rtc_sequence=%s",
              static_cast<int>(reset_reason),
              static_cast<unsigned>(g_external_reset_count),
-             static_cast<unsigned>(kRequiredPresses));
+             static_cast<unsigned>(kRequiredPresses),
+             rtc_sequence_was_valid ? "valid" : "cold");
 
     if (!step.trigger_factory_reset) {
         if (g_external_reset_count == 0U) return false;
