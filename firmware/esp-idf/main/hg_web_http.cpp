@@ -14,6 +14,8 @@ extern const uint8_t app_js_start[] asm("_binary_app_js_start");
 extern const uint8_t app_js_end[] asm("_binary_app_js_end");
 extern const uint8_t access_session_js_start[] asm("_binary_access_session_js_start");
 extern const uint8_t access_session_js_end[] asm("_binary_access_session_js_end");
+extern const uint8_t factory_reset_js_start[] asm("_binary_factory_reset_js_start");
+extern const uint8_t factory_reset_js_end[] asm("_binary_factory_reset_js_end");
 extern const uint8_t bruce_jpg_start[] asm("_binary_bruce_jpg_start");
 extern const uint8_t bruce_jpg_end[] asm("_binary_bruce_jpg_end");
 
@@ -24,8 +26,6 @@ std::size_t text_asset_size(const uint8_t* start, const uint8_t* end)
 {
     if (start == nullptr || end == nullptr || end < start) return 0;
     std::size_t size = static_cast<std::size_t>(end - start);
-    // EMBED_TXTFILES may append a terminating NUL. Never place injected CSS/JS
-    // after that byte: browsers can treat the remainder as unreachable text.
     while (size > 0 && start[size - 1U] == 0U) --size;
     return size;
 }
@@ -62,6 +62,7 @@ esp_err_t WebHttp::register_handlers(httpd_handle_t server)
         {.uri="/app.css", .method=HTTP_GET, .handler=&WebHttp::css_get, .user_ctx=this},
         {.uri="/app.js", .method=HTTP_GET, .handler=&WebHttp::js_get, .user_ctx=this},
         {.uri="/access-session.js", .method=HTTP_GET, .handler=&WebHttp::access_session_js_get, .user_ctx=this},
+        {.uri="/factory-reset.js", .method=HTTP_GET, .handler=&WebHttp::factory_reset_js_get, .user_ctx=this},
         {.uri="/bruce.jpg", .method=HTTP_GET, .handler=&WebHttp::bruce_get, .user_ctx=this},
     };
 
@@ -79,8 +80,6 @@ esp_err_t WebHttp::send_asset(httpd_req_t* request,
 {
     if (request == nullptr || start == nullptr || end == nullptr || end < start) return ESP_ERR_INVALID_ARG;
 
-    // HomeGuard is repeatedly reflashed during commissioning. Stable asset
-    // URLs must never let an old browser cache mask a freshly flashed UI.
     httpd_resp_set_hdr(request, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     httpd_resp_set_hdr(request, "Pragma", "no-cache");
     httpd_resp_set_hdr(request, "Expires", "0");
@@ -98,9 +97,6 @@ esp_err_t WebHttp::index_get(httpd_req_t* request)
 
 esp_err_t WebHttp::css_get(httpd_req_t* request)
 {
-    // Keep the desktop source stylesheet untouched, but force a compact mobile
-    // layout in the firmware-served asset. This also guarantees the fix is in
-    // the flashed binary even when the browser previously cached /app.css.
     static constexpr char kFirmwareCssFix[] = R"CSS(
 
 [hidden]{display:none!important}
@@ -142,8 +138,6 @@ esp_err_t WebHttp::css_get(httpd_req_t* request)
 
 esp_err_t WebHttp::js_get(httpd_req_t* request)
 {
-    // Embedded-browser fixes live in one suffix so the flashed controller does
-    // not depend on user-agent quirks or stale UI assets during commissioning.
     static constexpr char kEmbeddedViewFix[] = R"JS(
 
 ;(() => {
@@ -223,11 +217,6 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
       } catch (error) {
         if (!isWifiConnect) throw error;
 
-        // AP+STA may briefly retune the radio while the controller starts the
-        // new STA association. That can tear down the HTTP socket even though
-        // the command was accepted. Treat only this endpoint as transitional;
-        // app.js will poll /network/status and still report a real timeout if
-        // the controller never connects.
         const result = document.getElementById("wifiResult");
         if (result) result.textContent = "Wi-Fi перемикається, перевіряємо підключення…";
         return new Response(
@@ -259,6 +248,11 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
 esp_err_t WebHttp::access_session_js_get(httpd_req_t* request)
 {
     return send_asset(request, "application/javascript; charset=utf-8", access_session_js_start, access_session_js_end);
+}
+
+esp_err_t WebHttp::factory_reset_js_get(httpd_req_t* request)
+{
+    return send_asset(request, "application/javascript; charset=utf-8", factory_reset_js_start, factory_reset_js_end);
 }
 
 esp_err_t WebHttp::bruce_get(httpd_req_t* request)
