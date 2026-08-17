@@ -45,6 +45,7 @@ add_library(homeguard_core
     src/command.cpp
     src/local_api.cpp
     src/controller.cpp
+    src/controller_config_backup.cpp
     src/boot_self_test.cpp
 )
 target_include_directories(homeguard_core PUBLIC include)
@@ -58,6 +59,7 @@ add_executable(homeguard_tests
     ../tests/test_connectivity.cpp
     ../tests/test_provisioning.cpp
     ../tests/test_reset_sequence.cpp
+    ../tests/test_controller_config_backup.cpp
     ../tests/test_build0009.cpp
     ../tests/test_build0013.cpp
     ../tests/test_build0032.cpp
