@@ -6,8 +6,7 @@
 
 #include "esp_log.h"
 #include "esp_system.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "esp_timer.h"
 #include "nvs.h"
 
 #include <cstdint>
@@ -19,8 +18,10 @@ constexpr const char* kTag = "hg_rst_sequence";
 constexpr const char* kResetNamespace = "hg_rst";
 constexpr const char* kResetCountKey = "count";
 constexpr std::uint8_t kRequiredPresses = 3U;
-constexpr TickType_t kSequenceWindowTicks = pdMS_TO_TICKS(4500);
+constexpr std::uint64_t kSequenceWindowUs = 4500000ULL;
 constexpr unsigned kFactoryResetWhiteMs = 5000U;
+
+esp_timer_handle_t g_reset_clear_timer = nullptr;
 
 esp_err_t load_reset_count(std::uint8_t& count) {
     count = 0U;
@@ -57,12 +58,29 @@ esp_err_t clear_reset_count() {
     return error;
 }
 
-void clear_sequence_after_window(void*) {
-    vTaskDelay(kSequenceWindowTicks);
+void reset_window_expired(void*) {
     const auto error = clear_reset_count();
     if (error != ESP_OK) ESP_LOGE(kTag, "Cannot clear reset sequence: %s", esp_err_to_name(error));
     else ESP_LOGI(kTag, "RST sequence window expired; counter cleared");
-    vTaskDelete(nullptr);
+}
+
+esp_err_t arm_reset_window() {
+    if (g_reset_clear_timer == nullptr) {
+        const esp_timer_create_args_t args{
+            .callback = &reset_window_expired,
+            .arg = nullptr,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "hg_rst_window",
+            .skip_unhandled_events = true,
+        };
+        const auto create_error = esp_timer_create(&args, &g_reset_clear_timer);
+        if (create_error != ESP_OK) return create_error;
+    }
+    if (esp_timer_is_active(g_reset_clear_timer)) {
+        const auto stop_error = esp_timer_stop(g_reset_clear_timer);
+        if (stop_error != ESP_OK) return stop_error;
+    }
+    return esp_timer_start_once(g_reset_clear_timer, kSequenceWindowUs);
 }
 
 void force_reset_rgb_off() {
@@ -70,10 +88,23 @@ void force_reset_rgb_off() {
     if (error != ESP_OK) ESP_LOGW(kTag, "Cannot force reset RGB off: %s", esp_err_to_name(error));
 }
 
+bool is_button_style_reset(esp_reset_reason_t reason) {
+    // HW-678 EN/RST is reported as POWERON. EXT is accepted for compatibility.
+    // Software, watchdog, panic and brownout resets must never advance the counter.
+    return reason == ESP_RST_POWERON || reason == ESP_RST_EXT;
+}
+
 }  // namespace
 
 bool handle_triple_rst_factory_reset() {
     force_reset_rgb_off();
+
+    const auto reason = esp_reset_reason();
+    if (!is_button_style_reset(reason)) {
+        (void)clear_reset_count();
+        ESP_LOGI(kTag, "Reset reason=%d ignored; RST sequence cleared", static_cast<int>(reason));
+        return false;
+    }
 
     std::uint8_t count = 0U;
     const auto load_error = load_reset_count(count);
@@ -92,15 +123,14 @@ bool handle_triple_rst_factory_reset() {
     ESP_LOGI(kTag, "RST sequence=%u/%u", static_cast<unsigned>(count), static_cast<unsigned>(kRequiredPresses));
 
     if (count < kRequiredPresses) {
-        if (xTaskCreate(&clear_sequence_after_window, "hg_rst_window", 1536, nullptr, 3, nullptr) != pdPASS) {
+        const auto timer_error = arm_reset_window();
+        if (timer_error != ESP_OK) {
             (void)clear_reset_count();
-            ESP_LOGE(kTag, "Cannot arm RST expiry window; sequence cancelled");
+            ESP_LOGE(kTag, "Cannot arm RST expiry timer; sequence cancelled: %s", esp_err_to_name(timer_error));
         }
         return false;
     }
 
-    // One operation, one indication: 3x RST -> steady white for 5 s -> erase all
-    // mutable/user state -> LED off -> clean reboot. No secondary color animation.
     (void)clear_reset_count();
     ESP_LOGW(kTag, "Triple RST detected: full Factory Reset accepted");
 
