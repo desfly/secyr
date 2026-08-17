@@ -37,6 +37,7 @@ private:
     static esp_err_t config_export_post(httpd_req_t* request);
     static esp_err_t config_import_post(httpd_req_t* request);
     esp_err_t send_json(httpd_req_t* request, const std::string& body) const;
+    bool authorize_admin(httpd_req_t* request, const std::string& body, const char* command) const;
 
     CommissioningNvsStore* store_{};
     hg::HardwareVerificationRecord* hardware_{};
