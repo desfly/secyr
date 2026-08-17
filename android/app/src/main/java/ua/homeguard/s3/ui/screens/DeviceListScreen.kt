@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -171,17 +170,6 @@ fun DeviceListScreen(
                 }
             }
 
-            item {
-                Image(
-                    painter = painterResource(R.drawable.bruce_launcher),
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f),
-                )
-            }
-
             items(devices, key = { it.deviceId }) { device ->
                 val discoveredOnline = discovered.any { candidate ->
                     ControllerIdentity.sameController(device.deviceId, device.baseUrl, candidate.deviceId, candidate.baseUrl)
@@ -266,10 +254,33 @@ private fun FirstRunRegistrationScreen(onRegister: (String, String) -> Unit) {
 @Composable
 private fun DeviceStatePicons(online: Boolean, authorized: Boolean, active: Boolean, snapshot: SystemSnapshot) {
     val systemOk = active && snapshot.sequence > 0 && !snapshot.health.name.contains("alarm", true) && !snapshot.health.name.contains("critical", true)
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(if (online) "📶 online" else "📵 offline", color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-        Text(if (authorized) "🛡 знято" else "🔒 доступ втрачено", color = if (authorized) Color.Unspecified else MaterialTheme.colorScheme.error)
-        if (active) Text(if (systemOk) "✓ норма" else "⚠ ${snapshot.health.name}", color = if (systemOk) Color.Unspecified else MaterialTheme.colorScheme.error)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                if (online) "📶 online" else "📵 offline",
+                color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                maxLines = 1,
+            )
+            Text(
+                if (authorized) "🛡 знято" else "🔒 доступ втрачено",
+                color = if (authorized) Color.Unspecified else MaterialTheme.colorScheme.error,
+                maxLines = 1,
+            )
+        }
+        if (active) {
+            val healthLabel = if (systemOk) {
+                "✓ норма"
+            } else if (snapshot.health.name.equals("UNKNOWN", ignoreCase = true)) {
+                "⚠ стан невідомий"
+            } else {
+                "⚠ ${snapshot.health.name.lowercase()}"
+            }
+            Text(
+                healthLabel,
+                color = if (systemOk) Color.Unspecified else MaterialTheme.colorScheme.error,
+                maxLines = 1,
+            )
+        }
     }
 }
 
