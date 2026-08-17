@@ -42,24 +42,6 @@ bool read_body(httpd_req_t* request, std::size_t limit, std::string& body) {
     return true;
 }
 
-bool authorize_admin(ServiceHttp* self, httpd_req_t* request, const std::string& body, const char* command) {
-    if (self == nullptr || request == nullptr || self->access_control_ == nullptr) return false;
-    std::string actor;
-    std::string credential;
-    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
-        httpd_resp_set_status(request, "401 Unauthorized");
-        self->send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
-        return false;
-    }
-    const auto decision = self->access_control_->authorize(actor, credential, command);
-    if (decision != homeguard::AuditDecision::Allowed) {
-        httpd_resp_set_status(request, "403 Forbidden");
-        self->send_json(request, std::string{"{\"ok\":false,\"reason\":\""} + homeguard::to_string(decision) + "\"}");
-        return false;
-    }
-    return true;
-}
-
 void delayed_restart(void*) {
     vTaskDelay(pdMS_TO_TICKS(350));
     esp_restart();
@@ -104,6 +86,24 @@ esp_err_t ServiceHttp::send_json(httpd_req_t* request, const std::string& body) 
     httpd_resp_set_type(request, "application/json");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, body.c_str(), static_cast<ssize_t>(body.size()));
+}
+
+bool ServiceHttp::authorize_admin(httpd_req_t* request, const std::string& body, const char* command) const {
+    if (request == nullptr || access_control_ == nullptr) return false;
+    std::string actor;
+    std::string credential;
+    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
+        httpd_resp_set_status(request, "401 Unauthorized");
+        send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
+        return false;
+    }
+    const auto decision = access_control_->authorize(actor, credential, command);
+    if (decision != homeguard::AuditDecision::Allowed) {
+        httpd_resp_set_status(request, "403 Forbidden");
+        send_json(request, std::string{"{\"ok\":false,\"reason\":\""} + homeguard::to_string(decision) + "\"}");
+        return false;
+    }
+    return true;
 }
 
 esp_err_t ServiceHttp::readiness_get(httpd_req_t* request) {
@@ -157,7 +157,7 @@ esp_err_t ServiceHttp::config_export_post(httpd_req_t* request) {
         httpd_resp_set_status(request, "401 Unauthorized");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
     }
-    if (!authorize_admin(self, request, body, "system.config.export")) return ESP_OK;
+    if (!self->authorize_admin(request, body, "system.config.export")) return ESP_OK;
     httpd_resp_set_hdr(request, "Content-Disposition", "attachment; filename=homeguard-s3-controller-settings.json");
     return self->send_json(request, hg::ControllerConfigBackup::encode(*self->controller_config_));
 }
@@ -170,7 +170,7 @@ esp_err_t ServiceHttp::config_import_post(httpd_req_t* request) {
         httpd_resp_set_status(request, "400 Bad Request");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"invalid_or_oversized_backup\"}");
     }
-    if (!authorize_admin(self, request, body, "system.config.import")) return ESP_OK;
+    if (!self->authorize_admin(request, body, "system.config.import")) return ESP_OK;
 
     hg::ControllerConfig candidate{};
     std::string error;
