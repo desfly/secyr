@@ -146,8 +146,6 @@ fun AddDeviceScreen(
                             when {
                                 isScanning -> "Пошук пристроїв…"
                                 scanStatus.phase == "error" -> "Пошук завершився з помилкою"
-                                devices.size == 1 -> "Знайдено: 1 пристрій"
-                                devices.isNotEmpty() -> "Знайдено: ${devices.size} пристрої"
                                 else -> "Пошук завершено"
                             },
                             style = MaterialTheme.typography.titleMedium,
