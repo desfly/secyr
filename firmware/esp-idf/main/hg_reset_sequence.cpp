@@ -61,6 +61,15 @@ void reset_sequence_state() {
     g_external_reset_count = 0U;
 }
 
+bool is_physical_rst_boot(esp_reset_reason_t reason) {
+    // On ESP32-S3, toggling CHIP_PU/EN (the board RST button) is reported by
+    // esp_reset_reason() as ESP_RST_POWERON. Keep ESP_RST_EXT accepted as well
+    // for compatibility with targets/boards that expose a distinct external
+    // reset reason. RTC_NOINIT keeps the short sequence state across RST/EN,
+    // while a real loss of power invalidates the magic and starts from zero.
+    return reason == ESP_RST_POWERON || reason == ESP_RST_EXT;
+}
+
 void force_reset_rgb_off() {
     const auto error = RgbDiagnostic::off(static_cast<int>(homeguard::board::kRgbLed));
     if (error != ESP_OK) {
@@ -153,16 +162,23 @@ bool handle_triple_rst_factory_reset() {
 
     if (g_reset_magic != kMagic) reset_sequence_state();
 
+    const auto reset_reason = esp_reset_reason();
     const auto step = hg::advance_reset_sequence(
         g_external_reset_count,
-        esp_reset_reason() == ESP_RST_EXT,
+        is_physical_rst_boot(reset_reason),
         kRequiredPresses);
     g_external_reset_count = step.count;
+
+    ESP_LOGI(kTag,
+             "Boot reset reason=%d, RST sequence=%u/%u",
+             static_cast<int>(reset_reason),
+             static_cast<unsigned>(g_external_reset_count),
+             static_cast<unsigned>(kRequiredPresses));
 
     if (!step.trigger_factory_reset) {
         if (g_external_reset_count == 0U) return false;
 
-        ESP_LOGW(kTag, "External RST sequence: %u/%u",
+        ESP_LOGW(kTag, "Physical RST sequence: %u/%u",
                  static_cast<unsigned>(g_external_reset_count),
                  static_cast<unsigned>(kRequiredPresses));
         if (xTaskCreate(
