@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -150,19 +151,13 @@ fun DeviceListScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Image(
-            painter = painterResource(R.drawable.bruce_launcher),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize().alpha(0.28f),
-        )
         LazyColumn(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
                 Surface(
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
                     shape = MaterialTheme.shapes.large,
                     tonalElevation = 4.dp,
                 ) {
@@ -174,6 +169,17 @@ fun DeviceListScreen(
                         Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати пристрій") }
                     }
                 }
+            }
+
+            item {
+                Image(
+                    painter = painterResource(R.drawable.bruce_launcher),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f),
+                )
             }
 
             items(devices, key = { it.deviceId }) { device ->
