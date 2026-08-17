@@ -3,13 +3,12 @@
 #include "hg_board_hw678.hpp"
 #include "hg_factory_reset.hpp"
 #include "hg_rgb_diagnostic.hpp"
-#include "homeguard/reset_sequence.hpp"
 
-#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs.h"
 
 #include <array>
 #include <cstddef>
@@ -19,12 +18,13 @@ namespace homeguard::idf {
 namespace {
 
 constexpr const char* kTag = "hg_rst_sequence";
-constexpr std::uint32_t kMagic = 0x48524733U;  // "HRG3"
+constexpr const char* kResetNamespace = "hg_rst";
+constexpr const char* kResetCountKey = "count";
 constexpr std::uint8_t kRequiredPresses = 3U;
 constexpr TickType_t kSequenceWindowTicks = pdMS_TO_TICKS(4500);
 constexpr unsigned kFactoryResetWhiteMs = 5000U;
 constexpr TickType_t kFactoryResetColorStepTicks = pdMS_TO_TICKS(200);
-constexpr std::size_t kFactoryResetMinColorSteps = 25U;  // 5 seconds.
+constexpr std::size_t kFactoryResetMinColorSteps = 25U;
 
 struct ResetColor {
     std::uint8_t red;
@@ -41,33 +41,58 @@ constexpr std::array<ResetColor, 6> kFactoryResetColors{{
     {0xffU, 0x00U, 0xffU},
 }};
 
-RTC_NOINIT_ATTR std::uint32_t g_reset_magic;
-RTC_NOINIT_ATTR std::uint8_t g_external_reset_count;
-
 struct FactoryResetTaskContext {
     TaskHandle_t waiter{nullptr};
     FactoryResetReport report{};
 };
 
+esp_err_t load_reset_count(std::uint8_t& count) {
+    count = 0U;
+    nvs_handle_t handle{};
+    auto error = nvs_open(kResetNamespace, NVS_READWRITE, &handle);
+    if (error != ESP_OK) return error;
+
+    error = nvs_get_u8(handle, kResetCountKey, &count);
+    if (error == ESP_ERR_NVS_NOT_FOUND) {
+        count = 0U;
+        error = ESP_OK;
+    }
+    nvs_close(handle);
+    return error;
+}
+
+esp_err_t save_reset_count(std::uint8_t count) {
+    nvs_handle_t handle{};
+    auto error = nvs_open(kResetNamespace, NVS_READWRITE, &handle);
+    if (error != ESP_OK) return error;
+
+    error = nvs_set_u8(handle, kResetCountKey, count);
+    if (error == ESP_OK) error = nvs_commit(handle);
+    nvs_close(handle);
+    return error;
+}
+
+esp_err_t clear_reset_count() {
+    nvs_handle_t handle{};
+    auto error = nvs_open(kResetNamespace, NVS_READWRITE, &handle);
+    if (error != ESP_OK) return error;
+
+    error = nvs_erase_key(handle, kResetCountKey);
+    if (error == ESP_ERR_NVS_NOT_FOUND) error = ESP_OK;
+    if (error == ESP_OK) error = nvs_commit(handle);
+    nvs_close(handle);
+    return error;
+}
+
 void clear_sequence_after_window(void*) {
     vTaskDelay(kSequenceWindowTicks);
-    g_reset_magic = kMagic;
-    g_external_reset_count = 0U;
+    const auto error = clear_reset_count();
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag, "Cannot clear reset sequence: %s", esp_err_to_name(error));
+    } else {
+        ESP_LOGI(kTag, "RST sequence window expired; counter cleared");
+    }
     vTaskDelete(nullptr);
-}
-
-void reset_sequence_state() {
-    g_reset_magic = kMagic;
-    g_external_reset_count = 0U;
-}
-
-bool is_physical_rst_boot(esp_reset_reason_t reason, bool rtc_sequence_was_valid) {
-    // HW-678 reports an EN/RST-button reboot as ESP_RST_POWERON, but a genuine
-    // cold power-up has the same reset reason. RTC_NOINIT is the discriminator:
-    // an EN/RST reboot preserves our magic, while a cold start begins without a
-    // valid sequence marker. Never count that first cold POWERON as press 1/3.
-    if (reason == ESP_RST_EXT) return true;
-    return reason == ESP_RST_POWERON && rtc_sequence_was_valid;
 }
 
 void force_reset_rgb_off() {
@@ -97,7 +122,7 @@ FactoryResetReport erase_with_color_animation() {
         nullptr) == pdPASS;
 
     if (!worker_started) {
-        ESP_LOGE(kTag, "Cannot start factory-reset erase worker; falling back to synchronous erase");
+        ESP_LOGE(kTag, "Cannot start factory-reset erase worker; using synchronous erase");
         context.report = FactoryResetManager{}.erase_mutable_state();
     }
 
@@ -111,7 +136,7 @@ FactoryResetReport erase_with_color_animation() {
             color.green,
             color.blue);
         if (rgb_error != ESP_OK) {
-            ESP_LOGW(kTag, "Factory-reset RGB color step failed: %s", esp_err_to_name(rgb_error));
+            ESP_LOGW(kTag, "Factory-reset RGB step failed: %s", esp_err_to_name(rgb_error));
         }
 
         if (worker_started && !erase_done) {
@@ -144,7 +169,6 @@ void start_factory_reset_error_indicator() {
             nullptr,
             2,
             nullptr) != pdPASS) {
-        ESP_LOGE(kTag, "Cannot start factory-reset error RGB task; latching red instead");
         (void)RgbDiagnostic::set_color(
             static_cast<int>(homeguard::board::kRgbLed),
             0xffU,
@@ -156,33 +180,28 @@ void start_factory_reset_error_indicator() {
 }  // namespace
 
 bool handle_triple_rst_factory_reset() {
-    // WS2812 keeps its last latched color across an MCU-only reset. Always clear
-    // it first so an ordinary reboot never reproduces the old 5-second white state.
+    // HW-678 RST is wired to EN/CHIP_PU and is reported as POWERON, exactly like
+    // a power cycle. Do not guess the reset source. Instead use a tiny persistent
+    // counter with a short expiry window: three quick resets trigger Factory Reset.
     force_reset_rgb_off();
 
-    const bool rtc_sequence_was_valid = g_reset_magic == kMagic;
-    if (!rtc_sequence_was_valid) reset_sequence_state();
+    std::uint8_t count = 0U;
+    const auto load_error = load_reset_count(count);
+    if (load_error != ESP_OK) {
+        ESP_LOGE(kTag, "Cannot load reset counter: %s", esp_err_to_name(load_error));
+        return false;
+    }
 
-    const auto reset_reason = esp_reset_reason();
-    const auto step = hg::advance_reset_sequence(
-        g_external_reset_count,
-        is_physical_rst_boot(reset_reason, rtc_sequence_was_valid),
-        kRequiredPresses);
-    g_external_reset_count = step.count;
+    if (count < kRequiredPresses) ++count;
+    const auto save_error = save_reset_count(count);
+    if (save_error != ESP_OK) {
+        ESP_LOGE(kTag, "Cannot save reset counter: %s", esp_err_to_name(save_error));
+        return false;
+    }
 
-    ESP_LOGI(kTag,
-             "Boot reset reason=%d, RST sequence=%u/%u, rtc_sequence=%s",
-             static_cast<int>(reset_reason),
-             static_cast<unsigned>(g_external_reset_count),
-             static_cast<unsigned>(kRequiredPresses),
-             rtc_sequence_was_valid ? "valid" : "cold");
+    ESP_LOGI(kTag, "RST sequence=%u/%u", static_cast<unsigned>(count), static_cast<unsigned>(kRequiredPresses));
 
-    if (!step.trigger_factory_reset) {
-        if (g_external_reset_count == 0U) return false;
-
-        ESP_LOGW(kTag, "Physical RST sequence: %u/%u",
-                 static_cast<unsigned>(g_external_reset_count),
-                 static_cast<unsigned>(kRequiredPresses));
+    if (count < kRequiredPresses) {
         if (xTaskCreate(
                 &clear_sequence_after_window,
                 "hg_rst_window",
@@ -190,14 +209,13 @@ bool handle_triple_rst_factory_reset() {
                 nullptr,
                 3,
                 nullptr) != pdPASS) {
-            reset_sequence_state();
-            ESP_LOGE(kTag, "Cannot arm triple-RST expiry window; sequence cancelled");
+            (void)clear_reset_count();
+            ESP_LOGE(kTag, "Cannot arm RST expiry window; sequence cancelled");
         }
         return false;
     }
 
-    // Consume before erasing so a reset during flash operations cannot loop.
-    reset_sequence_state();
+    (void)clear_reset_count();
     ESP_LOGW(kTag, "Triple RST detected: Factory Reset accepted");
 
     const auto white_error = RgbDiagnostic::test_white(
