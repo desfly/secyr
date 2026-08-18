@@ -112,7 +112,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        discovery.start(); session.start()
+        session.start()
 
         setContent {
             val appSettings by settings.settings.collectAsState(); val devices by discovery.devices.collectAsState(); val registered by registeredDevices.devices.collectAsState()
@@ -142,6 +142,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        discovery.start()
+    }
+
+    override fun onStop() {
+        discovery.stop()
+        super.onStop()
     }
 
     private fun addManualDevice(name: String, rawAddress: String) {
