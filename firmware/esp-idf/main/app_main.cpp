@@ -5,6 +5,7 @@
 #include "hg_cloud_link.hpp"
 #include "hg_cloud_http.hpp"
 #include "hg_cloud_nvs.hpp"
+#include "hg_config_http.hpp"
 #include "hg_build_http.hpp"
 #include "hg_build_info.hpp"
 #include "hg_infrastructure_http.hpp"
@@ -53,6 +54,7 @@ homeguard::idf::LanHttp g_lan_http;
 homeguard::idf::CloudLink g_cloud_link;
 homeguard::idf::CloudHttp g_cloud_http;
 homeguard::idf::CloudNvsStore g_cloud_store;
+homeguard::idf::ConfigHttp g_config_http;
 homeguard::idf::InfrastructureHttp g_http_api;
 homeguard::idf::BuildHttp g_build_http;
 homeguard::idf::SystemHttp g_system_http;
@@ -174,6 +176,7 @@ esp_err_t start_http_server()
     ESP_RETURN_ON_ERROR(g_network_http.register_handlers(g_http_server), kTag, "network routes");
     ESP_RETURN_ON_ERROR(g_lan_http.register_handlers(g_http_server), kTag, "LAN discovery routes");
     ESP_RETURN_ON_ERROR(g_cloud_http.register_handlers(g_http_server, &g_cloud_link, &g_cloud_store, &g_access_control), kTag, "cloud routes");
+    ESP_RETURN_ON_ERROR(g_config_http.register_handlers(g_http_server, &g_access_control, &g_network_http, &g_cloud_store), kTag, "config routes");
     ESP_RETURN_ON_ERROR(g_http_api.register_handlers(g_http_server, &g_hardware), kTag, "hardware routes");
     ESP_RETURN_ON_ERROR(g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus, &g_access_control), kTag, "system routes");
     g_output_http.set_access_control(&g_access_control);
