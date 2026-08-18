@@ -51,6 +51,20 @@ for source in sorted(MAIN.glob("*.cpp")) + sorted(MAIN.glob("*.hpp")):
     if re.search(r"\bGPIO_NUM_(?:19|20|35|36|37|43|44|45|46|48)\b", text):
         warnings.append(f"{source.name}: reserved GPIO referenced")
 
+# AccessControl carries users plus a 64-entry audit trail and is too large to
+# copy as an automatic local in ESP-IDF's httpd task. Build-1090 demonstrated
+# that such a rollback snapshot can overflow the 8 KiB HTTP stack before the
+# handler reaches even its early validation returns. Rollback snapshots must
+# therefore live outside the task stack (for example behind a smart pointer).
+access_http = (MAIN / "hg_access_http.cpp").read_text(encoding="utf-8")
+large_access_stack_copy = re.compile(
+    r"\b(?:const\s+)?(?:auto|(?:homeguard::)?AccessControl)\s+\w+\s*=\s*\*access_\s*;"
+)
+if large_access_stack_copy.search(access_http):
+    errors.append(
+        "hg_access_http.cpp: AccessControl rollback snapshot must not be copied into the httpd task stack"
+    )
+
 for warning in warnings:
     print(f"WARNING: {warning}")
 
