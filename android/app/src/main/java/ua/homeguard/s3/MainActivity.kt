@@ -91,7 +91,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = SettingsStore(this); registeredDevices = RegisteredDeviceStore(this); eventHistory = EventHistoryStore(this)
-        discovery = LocalDiscoveryCoordinator(this, lifecycleScope); resolver = DeviceEndpointResolver(settings, discovery, lifecycleScope)
+        discovery = LocalDiscoveryCoordinator(this, lifecycleScope); resolver = DeviceEndpointResolver(settings, discovery, registeredDevices, lifecycleScope)
         provisioning = ProvisioningCoordinator(this, settings, discovery, registeredDevices, lifecycleScope)
         telemetry = TelemetrySocket().apply { seedEvents(eventHistory.load()) }
         session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry, registeredDevices)
@@ -133,7 +133,7 @@ class MainActivity : ComponentActivity() {
                         onScanQr = ::requestQrScan,
                         onDiscover = { lifecycleScope.launch { discovery.rescan() } },
                         onUseDevice = { device, name -> lifecycleScope.launch { registeredDevices.addOrUpdate(device, name); settings.remember(device); provisioningOpen.value = false; deviceListOpen.value = true } },
-                        onUseManualIp = { address, name -> provisioningOpen.value = false; addManualDevice(name, address) },
+                        onUseManualIp = { address, name -> addManualDevice(name, address); provisioningOpen.value = false },
                         onProvision = provisioning::provision,
                     )
                     showAddDevice -> AddDeviceScreen(devices, isScanning, scanStatus, { addDeviceOpen.value = false; deviceListOpen.value = true }, { lifecycleScope.launch { discovery.rescan() } }, { device, name -> lifecycleScope.launch { registeredDevices.addOrUpdate(device, name); settings.remember(device); addDeviceOpen.value = false; deviceListOpen.value = true } }, { name, address -> addManualDevice(name, address) }, { name, deviceId -> addManualDeviceId(name, deviceId) }, { addDeviceOpen.value = false; provisioningOpen.value = true })
@@ -164,17 +164,33 @@ class MainActivity : ComponentActivity() {
         val authenticated = accessSession.value
         val actor = operatorId.value.trim()
         val credential = operatorPin.value
-        if (authenticated == null || authenticated.actor != actor || authenticated.role.name != "ADMIN") { commandStatus.value = "Factory Reset доступний тільки після входу Admin"; return }
-        if (credential.length !in 4..12 || !credential.all(Char::isDigit)) { accessSession.value = null; commandStatus.value = "PIN сеансу відсутній — увійдіть знову"; return }
+        if (authenticated == null || authenticated.actor != actor || authenticated.role.name != "ADMIN") {
+            commandStatus.value = "Factory Reset доступний тільки після входу Admin"
+            return
+        }
+        if (credential.length !in 4..12 || !credential.all(Char::isDigit)) {
+            accessSession.value = null
+            commandStatus.value = "PIN сеансу відсутній — увійдіть знову"
+            return
+        }
         val target = resolver.endpoint.value
-        if (target.apiBaseUrl.isBlank() || target.path.name == "OFFLINE" || target.path.name == "CLOUD") { commandStatus.value = "Factory Reset потребує локального підключення до контролера"; return }
+        if (target.apiBaseUrl.isBlank() || target.path.name == "OFFLINE" || target.path.name == "CLOUD") {
+            commandStatus.value = "Factory Reset потребує локального підключення до контролера"
+            return
+        }
         val selectedId = settings.settings.value.deviceId
         lifecycleScope.launch {
             commandStatus.value = "Factory Reset…"
-            val outcome = runCatching { FactoryResetClient(target.apiBaseUrl, target.certificateSha256).reset(actor, credential) }.getOrElse { error -> commandStatus.value = "Factory Reset: ${error.message ?: "помилка"}"; return@launch }
+            val outcome = runCatching {
+                FactoryResetClient(target.apiBaseUrl, target.certificateSha256).reset(actor, credential)
+            }.getOrElse { error ->
+                commandStatus.value = "Factory Reset: ${error.message ?: "помилка"}"
+                return@launch
+            }
             when (outcome) {
                 FactoryResetResult.REJECTED -> commandStatus.value = "Factory Reset відхилено контролером"
-                FactoryResetResult.ACCEPTED, FactoryResetResult.CONNECTION_LOST -> {
+                FactoryResetResult.ACCEPTED,
+                FactoryResetResult.CONNECTION_LOST -> {
                     if (selectedId.isNotBlank()) registeredDevices.markAuthorization(selectedId, false)
                     settings.selectDevice("")
                     accessSession.value = null
@@ -182,7 +198,11 @@ class MainActivity : ComponentActivity() {
                     addDeviceOpen.value = false
                     provisioningOpen.value = false
                     deviceListOpen.value = true
-                    commandStatus.value = if (outcome == FactoryResetResult.ACCEPTED) "Factory Reset прийнято; контролер перезавантажується" else "Зв’язок обірвався під час Factory Reset; локальну сесію закрито"
+                    commandStatus.value = if (outcome == FactoryResetResult.ACCEPTED) {
+                        "Factory Reset прийнято; контролер перезавантажується"
+                    } else {
+                        "Зв’язок обірвався під час Factory Reset; локальну сесію закрито"
+                    }
                 }
             }
         }
