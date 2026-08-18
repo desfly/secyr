@@ -14,7 +14,7 @@ object DeviceSelectionPolicy {
         nextDeviceId: String,
         confirmedLocalUrl: String? = null,
     ): DeviceSelectionState {
-        val switchingDevice = currentDeviceId != nextDeviceId
+        val switchingDevice = !currentDeviceId.equals(nextDeviceId, ignoreCase = true)
         val confirmed = confirmedLocalUrl
             ?.trim()
             ?.trimEnd('/')
