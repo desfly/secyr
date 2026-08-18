@@ -85,13 +85,22 @@ File:
 
 The provisioning callback previously set `provisioningOpen=false` unconditionally after calling `addManualDevice()`. If address validation rejected the IP, the device was not added but the provisioning screen still closed. The close transition now lives only in the successful canonical `addManualDevice()` path, after validation and registry/settings update. Build #1153 passed on head `8d67803d93c49af71fc42ed856daae91f94dcc00`.
 
-#### A-029 — NSD start/restart races could poison discovery lifecycle — FIXED ON AUDIT BRANCH
+#### A-029 — NSD start/restart races could poison discovery lifecycle — FIXED + CI VALIDATED
 File:
 - `android/app/src/main/java/ua/homeguard/s3/network/NsdDeviceDiscovery.kt`
 
 Two lifecycle holes were present. First, `start()` set `started=true` before `NsdManager.discoverServices()`, so a synchronous platform exception could permanently suppress later retries. Second, checking only `started` on resolve callbacks was insufficient across a rapid stop→start cycle: an in-flight resolve from the previous run could arrive after the new start, see `started=true`, and republish a stale endpoint into the new discovery session.
 
-Fix: synchronous start failure rolls the flag back, callback-visible state is volatile, and every discovery run now gets a monotonically increasing generation. Resolve callbacks capture their generation and are ignored unless it still matches the active run. Stop and failed start invalidate all outstanding generations. This prevents a previous run from contaminating the next one without adding another coordinator/runtime.
+Fix: synchronous start failure rolls the flag back, callback-visible state is volatile, and every discovery run now gets a monotonically increasing generation. Resolve callbacks capture their generation and are ignored unless it still matches the active run. Stop and failed start invalidate all outstanding generations. Build #1155 passed on exact head `61d6b3094d723af6f6e7b768dac41b42602c2df4`.
+
+#### A-030 — Discovery refresh caused repeated persistent registry writes — FIXED ON AUDIT BRANCH
+Files:
+- `android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt`
+- `android/app/src/test/java/ua/homeguard/s3/storage/RegisteredDeviceRefreshPolicyTest.kt`
+
+UDP discovery runs every 5 seconds. The MainActivity discovery collector refreshes registered devices when fresh reports arrive, and `refreshDiscovered()` previously persisted the complete SharedPreferences registry whenever `lastSeenAtMs` changed. With one continuously visible controller this could produce up to 12 timestamp-only registry writes per minute (about 720/hour), plus matching `_devices` emissions and UI recomposition pressure.
+
+Fix: stable identity/endpoint refreshes persist `lastSeenAtMs` at a 60-second granularity; real device-ID or base-URL changes still persist immediately. Live online/offline state remains driven by `discovered`, so discovery frequency and availability behavior are unchanged. The timestamp-only persistent-write upper bound is reduced approximately 12× (12/minute → 1/minute per continuously discovered controller). Three unit tests cover the throttle boundary, immediate endpoint changes and case-insensitive stable IDs. CI is pending for this newest head.
 
 ### MEDIUM
 
@@ -135,24 +144,37 @@ Removed `activeStore` and static registry mutation helpers. `ProvisioningCoordin
 - Build #1143 passed after the 11-file dead-architecture removal.
 - Build #1146 passed after A-027 telemetry setup-failure containment and tests.
 - Build #1153 passed after active stale-discovery expiry, manual-IP provisioning correction, host-contract update and initial NSD lifecycle hardening.
+- Build #1155 passed after the strengthened NSD generation guard.
+
+## Quantitative audit metrics
+Measured from the PR/base and exact CI artifacts; phone-only runtime metrics are deliberately not invented.
+
+- PR delta after A-030 tests, before this register-only commit: 42 changed files, 1,285 additions, 670 deletions; this includes production code, tests and this audit document.
+- Proven-dead architecture removed: 11 files.
+- Current exact-CI Android artifact from Build #1155: `MyFist-Android` ZIP = 9,611,209 bytes; extracted `MyFist.apk` = 10,018,339 bytes.
+- Periodic UDP discovery cadence: one pass every 5 seconds.
+- A-030 timestamp-only registry persistence: theoretical maximum reduced from 12 writes/minute to 1 write/minute per continuously discovered controller while preserving immediate ID/base-URL updates.
+- Telemetry reconnect schedule: 2 / 5 / 10 / 20 / 30-second capped backoff.
+- Phone measurements still required after code freeze: cold/warm startup, PSS/RSS, Java/native heap, CPU in idle/discovery/telemetry, discovery latency and real reconnect time.
 
 ## Current execution status
-Latest code head before this register update: `f287336fe0d557ef9831b4b8a1c21a8ed3e8b04f`.
+Latest code/test head before this register update: `6cb00edd27df1b4a82616f90e3a529109c940e58`.
 
 Latest pass:
-- confirmed Build #1153 success on previous exact head `8d67803d93c49af71fc42ed856daae91f94dcc00`;
-- strengthened A-029 after finding the remaining stop→start race that a boolean `started` flag cannot distinguish;
-- added a discovery generation token so old NSD resolve callbacks cannot repopulate a newer run;
-- changed only `NsdDeviceDiscovery.kt` for the new behavioral fix; no new runtime/store/coordinator was introduced.
+- confirmed Build #1155 success on exact previous head `61d6b3094d723af6f6e7b768dac41b42602c2df4`, therefore A-029 is now CI validated;
+- found A-030 persistent-write/recomposition churn in the registry refresh path;
+- throttled timestamp-only persistence to 60 seconds while keeping real endpoint/identity changes immediate;
+- added three focused JVM unit tests for the refresh policy;
+- captured the current Build #1155 artifact and measured the actual extracted APK at 10,018,339 bytes.
 
-CI for the newest generation-token head is pending. Do not mark the strengthened A-029 fully CI-validated until an exact-head run succeeds.
+CI for the A-030 code/test head is pending and must pass before A-030 is marked CI validated.
 
 ## Next immediate blocks
-1. Check latest CI and fix the exact failing job first if red.
-2. Continue lifecycle review around network callbacks and repeated start/stop/reconnect paths.
-3. Audit `MainActivity` for removable orchestration chains without adding abstraction layers.
-4. Audit manifest/build/security surface, especially global cleartext and permission timing.
-5. Strengthen acceptance tests around restart, device switching, network loss/recovery, invalid inputs and repeated user actions.
+1. Check A-030 exact-head CI and fix the precise failure first if red.
+2. Continue the last MainActivity/network lifecycle pass for repeated writes/collectors/state transitions.
+3. Audit manifest/build/security surface, especially global cleartext and permission timing without breaking local/setup HTTP.
+4. Freeze code after the final green exact-head CI and produce the benchmark/acceptance procedure for phone measurements.
+5. After code freeze only: compare cold/warm startup, PSS/RSS, heaps, CPU, discovery latency and reconnect on the same phone/build conditions.
 
 ## Audit rule
 Do not merge to `main` during discovery. Keep changes isolated on the audit branch and merge only verified minimal changes after CI and later phone validation.
