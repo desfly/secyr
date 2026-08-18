@@ -40,6 +40,13 @@ template <std::size_t N>
 void get_u8(std::span<const std::byte> in, std::size_t& cursor, std::array<std::uint8_t, N>& out) {
     for (auto& value : out) value = std::to_integer<std::uint8_t>(in[cursor++]);
 }
+
+bool valid_record_for_import(const AccessUser& user) {
+    const bool id_terminated = std::find(user.id.begin(), user.id.end(), '\0') != user.id.end();
+    const bool name_terminated = std::find(user.name.begin(), user.name.end(), '\0') != user.name.end();
+    return id_terminated && name_terminated && user.id[0] != '\0' &&
+           static_cast<std::uint8_t>(user.role) <= static_cast<std::uint8_t>(AccessRole::Admin);
+}
 }
 
 AccessStoreCodec::Image AccessStoreCodec::encode(const AccessControl& access) {
@@ -80,7 +87,11 @@ bool AccessStoreCodec::decode(std::span<const std::byte> image, AccessControl& a
     const auto actual = hg::crc32(image.first(image.size() - crc_size));
     if (expected != actual) return false;
 
-    AccessControl restored;
+    // Keep the decode scratch proportional to persisted user data only.
+    // AccessControl also owns a 64-entry audit ring, so constructing a full
+    // temporary AccessControl here consumes several KiB of task stack and can
+    // overflow ESP-IDF's main task while restoring NVS at boot.
+    std::array<AccessUser, AccessControl::user_capacity> restored_users{};
     std::size_t cursor = header_size;
     for (std::size_t i = 0; i < AccessControl::user_capacity; ++i) {
         AccessUser record{};
@@ -90,13 +101,20 @@ bool AccessStoreCodec::decode(std::span<const std::byte> image, AccessControl& a
         record.enabled = std::to_integer<std::uint8_t>(image[cursor++]) != 0U;
         get_u8(image, cursor, record.salt);
         get_u8(image, cursor, record.pin_digest);
-        if (i < count && !restored.import_user(record)) return false;
+        if (i < count) {
+            if (!valid_record_for_import(record)) return false;
+            restored_users[i] = record;
+        }
     }
 
+    // All records are validated before mutating the destination. With count
+    // capped at user_capacity, import_user cannot run out of capacity here.
     access.clear_users();
-    for (std::size_t i = 0; i < restored.user_count(); ++i) {
-        const auto* record = restored.user_at(i);
-        if (record == nullptr || !access.import_user(*record)) return false;
+    for (std::size_t i = 0; i < count; ++i) {
+        if (!access.import_user(restored_users[i])) {
+            access.clear_users();
+            return false;
+        }
     }
     return true;
 }
