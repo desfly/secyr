@@ -90,8 +90,9 @@ class HttpSubnetDiscovery(context: Context) {
         val total = hosts.size + if (probeSetupController) 1 else 0
         val completed = AtomicInteger(0)
         val foundCount = AtomicInteger(0)
+        val progressLock = Any()
 
-        fun record(result: DiscoveredDevice?): DiscoveredDevice? {
+        fun record(result: DiscoveredDevice?): DiscoveredDevice? = synchronized(progressLock) {
             val done = completed.incrementAndGet()
             val foundNow = if (result != null) foundCount.incrementAndGet() else foundCount.get()
             _status.value = ScanStatus(
@@ -101,7 +102,7 @@ class HttpSubnetDiscovery(context: Context) {
                 completed = done,
                 found = foundNow,
             )
-            return result
+            result
         }
 
         _status.value = ScanStatus(phase = "probing", progress = 0f, total = total)
