@@ -75,10 +75,14 @@ Cancellation cancels the call; public cancellable-continuation `resume(response)
 #### A-022 — Stale mDNS reports could keep a disappeared controller online indefinitely — FIXED
 All discovery sources are filtered by a common 30-second freshness window before deduplication. A boundary test covers fresh vs stale reports.
 
-#### A-023 — Provisioning “already on Wi-Fi” / manual-IP shortcuts bypass registry naming — OPEN
-Those shortcuts still write through the screen-owned `SettingsStore` instead of the application-level owner-named registry path.
+#### A-023 — Provisioning “already on Wi-Fi” / manual-IP shortcuts bypass registry naming — FIXED ON AUDIT BRANCH
+Files:
+- `android/app/src/main/java/ua/homeguard/s3/ui/screens/ProvisioningScreen.kt`
+- `android/app/src/test/java/ua/homeguard/s3/ui/screens/ProvisioningShortcutPolicyTest.kt`
 
-Action: close together with A-018 and require the same friendly-name/registry contract used by Add Device.
+The shortcut paths now require a nonblank owner-friendly name before they are enabled. Before selection, discovered devices and manual-IP entries are registered through the active owner-named registry path; only then is `SettingsStore` selection applied. A focused policy test locks the friendly-name, busy-state and manual-address gates.
+
+Remaining architectural debt: this narrow fix still uses the existing process-global `RegisteredDeviceStore.activeStore` bridge and screen-owned `SettingsStore`; A-018/A-021 must remove that bridge/recreate pattern rather than expanding it further.
 
 #### A-024 — Setup AP cancellation could leave the whole process bound to temporary Wi-Fi — FIXED
 Terminal callbacks are guarded; cancelled/unclaimed `BoundSetupNetwork` values close/unbind themselves; cancellation unregisters the network callback; bind failures clean up before propagating.
@@ -118,14 +122,14 @@ PR #51 removed exactly 8 source files / 203 lines from the first three families,
 Action: identify the full obsolete island (including tests), then remove it atomically in one isolated minimal commit and require Android CI green.
 
 #### A-021 — RegisteredDeviceStore global `activeStore` bridge is architectural debt — OPEN
-The process-global bridge is tolerated on the audit branch for narrow fixes but should be replaced by explicit registry injection when A-018/A-004 are addressed.
+The process-global bridge is tolerated on the audit branch for narrow fixes and is now also used to close the provisioning shortcut naming bypass. Do not expand it further. Replace it with explicit registry injection when A-018/A-004 are addressed.
 
 ## Confirmed positives
 - API and telemetry tokens use `SecureTokenStore` / Android Keystore AES-GCM.
 - First save in `RegisteredDeviceStore.addOrUpdate()` requires an owner-provided friendly name.
 - Device List supports rename/delete/properties, red unauthorized state, single-tap quick state and double-tap full monitoring.
 - Factory Reset client requires explicit `ERASE_ALL`.
-- Build #1109 passed after prior audit-branch compile regressions were corrected.
+- Build #1115 passed on audit head `74665b6933daa44f412669a4445afffa191b8ddb` before the latest provisioning-shortcut code changes.
 
 ## Current execution status
 Verified/fixed on the audit branch so far:
@@ -137,16 +141,17 @@ Verified/fixed on the audit branch so far:
 - device-bound secret policy;
 - selected/provisioned ID normalization;
 - QR owner-friendly-name registry path;
+- already-connected/manual provisioning shortcut friendly-name registry gate + policy test;
 - legacy unnamed-device recovery;
 - secondary Add entry;
 - cancellation-safe OkHttp bridge;
 - cancellation-safe Setup AP handoff.
 
-Current audit head before this register-only commit was `b291243dbc195b2ef448136b24fa292c3c1e8fa5`; Build #1114 was still in progress when the dead-architecture review was performed.
+Latest code/test head before this register commit: `0190c7bdea0feea2571171dca9cd1c07cd4651ab`. Build #1118 was queued/pending when this register was updated; do not treat the latest shortcut changes as CI-validated until that run succeeds.
 
 ## Next immediate blocks
-1. Re-check CI for the latest audit head and fix any exact failure first.
-2. Remove the duplicate `ProvisioningScreen` discovery/settings runtime and close the already-connected/manual registry bypass.
+1. Re-check Build #1118 and fix any exact failure before more code changes.
+2. Remove the duplicate `ProvisioningScreen` discovery/settings runtime and `Activity.recreate()` dependency (A-018) using existing MainActivity-owned state/actions.
 3. Continue lifecycle/coroutine review around NSD, network requests, telemetry and Activity transitions.
 4. Complete the obsolete `ui/main` + API/data/alarm call graph and remove only when the full island is proven dead.
 5. Plan MainActivity decomposition after contracts are covered.
