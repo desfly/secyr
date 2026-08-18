@@ -18,7 +18,7 @@ class DeviceEndpointResolver(
 ) {
     val endpoint: StateFlow<DeviceEndpoint> = combine(settings.settings, discovery.devices) { config, devices ->
         val eligible = devices.filter { it.apiVersion == 1 }
-        val directLocal = eligible.firstOrNull { it.deviceId == config.deviceId }
+        val directLocal = eligible.firstOrNull { it.deviceId.equals(config.deviceId, ignoreCase = true) }
         val manualLocal = if (config.deviceId.startsWith("manual-") && config.lastKnownLocalUrl.isNotBlank()) {
             val expected = EndpointUrlBuilder.normalizeBaseUrl(config.lastKnownLocalUrl)
             eligible.firstOrNull { EndpointUrlBuilder.normalizeBaseUrl(it.baseUrl) == expected }
