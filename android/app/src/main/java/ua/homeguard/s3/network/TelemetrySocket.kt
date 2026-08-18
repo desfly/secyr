@@ -12,6 +12,7 @@ import okhttp3.WebSocketListener
 import org.json.JSONObject
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.model.sameEventIdentity
 import java.util.concurrent.TimeUnit
 
 enum class TelemetryConnectionState { IDLE, CONNECTING, CONNECTED, UNAUTHORIZED, OFFLINE }
@@ -21,7 +22,7 @@ internal fun mergeTelemetryEvent(
     event: SystemEventRecord,
     maxEvents: Int = 256,
 ): Pair<List<SystemEventRecord>, Boolean> {
-    if (history.any { it.sequence == event.sequence }) return history to false
+    if (history.any { it.sameEventIdentity(event) }) return history to false
     return (listOf(event) + history).take(maxEvents.coerceAtLeast(0)) to true
 }
 
@@ -43,12 +44,18 @@ class TelemetrySocket {
     fun connection(): StateFlow<TelemetryConnectionState> = connectionState.asStateFlow()
 
     fun seedEvents(events: List<SystemEventRecord>) {
-        eventState.value = events.distinctBy { it.sequence }.sortedByDescending { it.sequence }.take(MAX_EVENT_HISTORY)
+        val unique = mutableListOf<SystemEventRecord>()
+        events
+            .sortedWith(compareByDescending<SystemEventRecord> { it.timestampMs }.thenByDescending { it.sequence })
+            .forEach { event ->
+                if (unique.none { it.sameEventIdentity(event) }) unique += event
+            }
+        eventState.value = unique.take(MAX_EVENT_HISTORY)
     }
 
     fun clearEvents() { eventState.value = emptyList() }
 
-    fun connect(url: String, token: String, certificateSha256: String = "") {
+    fun connect(url: String, token: String, certificateSha256: String = "", controllerId: String = "") {
         disconnect()
         if (url.isBlank()) return
         connectionState.value = TelemetryConnectionState.CONNECTING
@@ -61,7 +68,7 @@ class TelemetrySocket {
             val request = Request.Builder().url(url).apply {
                 if (token.isNotBlank()) header("Authorization", "Bearer $token")
             }.build()
-            client.newWebSocket(request, listener())
+            client.newWebSocket(request, listener(controllerId.trim()))
         }.getOrElse {
             state.value = SystemSnapshot()
             connectionState.value = TelemetryConnectionState.OFFLINE
@@ -78,7 +85,7 @@ class TelemetrySocket {
         connectionState.value = TelemetryConnectionState.IDLE
     }
 
-    private fun listener() = object : WebSocketListener() {
+    private fun listener(controllerId: String) = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             if (socket === webSocket) connectionState.value = TelemetryConnectionState.CONNECTED
         }
@@ -93,8 +100,12 @@ class TelemetrySocket {
                 val json = JSONObject(text)
                 if (json.has("event")) {
                     val item = SystemEventRecord(
-                        sequence = json.optLong("sequence", 0), timestampMs = json.optLong("timestampMs", 0),
-                        event = json.optString("event", "unknown"), sourceId = json.optInt("sourceId", 0), value = json.optInt("value", 0),
+                        sequence = json.optLong("sequence", 0),
+                        timestampMs = json.optLong("timestampMs", 0),
+                        event = json.optString("event", "unknown"),
+                        sourceId = json.optInt("sourceId", 0),
+                        value = json.optInt("value", 0),
+                        controllerId = controllerId,
                     )
                     val (updatedEvents, added) = mergeTelemetryEvent(eventState.value, item, MAX_EVENT_HISTORY)
                     if (added) {
