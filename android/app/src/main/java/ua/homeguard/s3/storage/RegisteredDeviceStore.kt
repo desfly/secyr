@@ -18,40 +18,9 @@ data class RegisteredDevice(
 )
 
 class RegisteredDeviceStore(context: Context) {
-    companion object {
-        @Volatile private var activeStore: RegisteredDeviceStore? = null
-
-        suspend fun markActiveAuthorization(deviceId: String, authorized: Boolean) {
-            if (deviceId.isBlank()) return
-            activeStore?.markAuthorization(deviceId, authorized)
-        }
-
-        suspend fun reconcileActiveManual(manualDeviceId: String, discovered: DiscoveredDevice): Boolean {
-            return activeStore?.reconcileManual(manualDeviceId, discovered) ?: false
-        }
-
-        suspend fun refreshActiveDiscovered(discovered: DiscoveredDevice): Boolean {
-            return activeStore?.refreshDiscovered(discovered) ?: false
-        }
-
-        suspend fun registerActive(deviceId: String, baseUrl: String, name: String): Boolean {
-            val store = activeStore ?: return false
-            if (deviceId.isBlank() || name.trim().isBlank()) return false
-            store.addManual(deviceId, baseUrl, name)
-            return true
-        }
-
-        suspend fun removeActive(deviceId: String): Boolean {
-            if (deviceId.isBlank()) return false
-            return activeStore?.remove(deviceId) ?: false
-        }
-    }
-
     private val preferences = context.applicationContext.getSharedPreferences("homeguard_devices", Context.MODE_PRIVATE)
     private val _devices = MutableStateFlow(load())
     val devices: StateFlow<List<RegisteredDevice>> = _devices.asStateFlow()
-
-    init { activeStore = this }
 
     suspend fun addOrUpdate(device: DiscoveredDevice, requestedName: String? = null) {
         val current = _devices.value.toMutableList()
@@ -60,9 +29,6 @@ class RegisteredDeviceStore(context: Context) {
         }
         val previous = current.getOrNull(previousIndex)
         val requested = requestedName?.trim()?.take(40).orEmpty()
-
-        // A new controller may never acquire a generated/service/technical name.
-        // The owner must explicitly provide the friendly name before first save.
         if (previous == null && requested.isBlank()) return
 
         val registered = RegisteredDevice(
@@ -207,8 +173,6 @@ class RegisteredDeviceStore(context: Context) {
                 add(
                     RegisteredDevice(
                         deviceId = id.trim(),
-                        // Missing legacy names stay blank so the UI can force an owner rename;
-                        // never synthesize HomeGuard/ID/IP as a visible friendly name.
                         name = item.optString("name").trim().take(40),
                         baseUrl = item.optString("base_url"),
                         lastSeenAtMs = item.optLong("last_seen_at_ms"),
