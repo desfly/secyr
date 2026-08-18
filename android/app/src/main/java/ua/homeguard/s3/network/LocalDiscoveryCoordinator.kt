@@ -2,6 +2,7 @@ package ua.homeguard.s3.network
 
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -10,14 +11,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.DiscoveredDevice
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal const val DISCOVERY_FRESHNESS_MS = 30_000L
 private const val DISCOVERY_FRESHNESS_TICK_MS = 1_000L
+private const val DISCOVERY_RESUME_GRACE_MS = 3_000L
 
 internal fun freshDiscoveryReports(
     reports: List<DiscoveredDevice>,
@@ -70,12 +73,8 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
     private val http = HttpSubnetDiscovery(appContext)
     private val manualRescanActive = MutableStateFlow(false)
     private val manualRescanRunning = AtomicBoolean(false)
-    private val freshnessClock = flow {
-        while (true) {
-            emit(System.currentTimeMillis())
-            delay(DISCOVERY_FRESHNESS_TICK_MS)
-        }
-    }
+    private val freshnessClock = MutableStateFlow(System.currentTimeMillis())
+    private var freshnessJob: Job? = null
 
     val scanStatus: StateFlow<UdpDeviceDiscovery.ScanStatus> = combine(
         udp.status,
@@ -104,11 +103,24 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
     fun start() {
         nsd.start()
         udp.start()
+        if (freshnessJob?.isActive == true) return
+        freshnessJob = scope.launch {
+            // A resumed activity may still have a healthy WebSocket and cached discovery
+            // state. Give the first immediate UDP pass time to refresh it before expiring
+            // old reports, avoiding a synthetic LOCAL -> LAST_KNOWN_LOCAL reconnect.
+            delay(DISCOVERY_RESUME_GRACE_MS)
+            while (isActive) {
+                freshnessClock.value = System.currentTimeMillis()
+                delay(DISCOVERY_FRESHNESS_TICK_MS)
+            }
+        }
     }
 
     fun stop() {
         nsd.stop()
         udp.stop()
+        freshnessJob?.cancel()
+        freshnessJob = null
     }
 
     suspend fun rescan() {
