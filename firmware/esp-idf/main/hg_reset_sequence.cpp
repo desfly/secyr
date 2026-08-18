@@ -20,6 +20,7 @@ constexpr const char* kNvsNamespace = "hg_rstseq";
 constexpr const char* kNvsCountKey = "count";
 constexpr std::uint8_t kRequiredPresses = 3U;
 constexpr TickType_t kSequenceWindowTicks = pdMS_TO_TICKS(4500);
+constexpr std::uint32_t kSequenceWindowTaskStackBytes = 4096U;
 constexpr int kResetRgbGpio = 48;
 constexpr unsigned kResetWhiteMs = 5000U;
 
@@ -68,10 +69,13 @@ void clear_sequence_after_window(void*) {
 }
 
 bool arm_sequence_expiry_task() {
+    // NVS commit + ESP logging needs materially more stack than the original
+    // 1536-byte worker. The smaller stack overflowed on the real ESP32-S3
+    // before it could clear the 4.5-second reset window.
     if (xTaskCreate(
             &clear_sequence_after_window,
             "hg_rst_window",
-            1536,
+            kSequenceWindowTaskStackBytes,
             nullptr,
             3,
             nullptr) == pdPASS) {
