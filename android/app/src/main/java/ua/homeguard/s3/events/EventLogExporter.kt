@@ -4,8 +4,9 @@ import ua.homeguard.s3.model.SystemEventRecord
 
 object EventLogExporter {
     fun toCsv(events: List<SystemEventRecord>): String = buildString {
-        appendLine("sequence,timestamp_ms,event,source_id,value,category")
+        appendLine("controller_id,sequence,timestamp_ms,event,source_id,value,category")
         events.forEach { item ->
+            append(csv(item.controllerId)).append(',')
             append(item.sequence).append(',')
             append(item.timestampMs).append(',')
             append(csv(item.event)).append(',')
