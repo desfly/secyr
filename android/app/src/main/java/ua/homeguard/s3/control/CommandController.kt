@@ -37,7 +37,7 @@ class CommandController(
             settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
         }
         requireStillSelected(target)
-        return session
+        return session.copy(controllerId = target.deviceId)
     }
 
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
