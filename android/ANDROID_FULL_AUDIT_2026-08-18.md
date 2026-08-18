@@ -5,19 +5,19 @@ Base: `main`
 Draft PR: `#53`
 
 ## Goal
-Keep one canonical path for discovery, registry, selection, auth/session, provisioning, Factory Reset and backup/restore. Prefer deletion and explicit dependency flow over duplicate runtimes, process-global bridges and screen-owned storage/network state.
+Keep one canonical path for discovery, registry, selection, auth/session, provisioning, telemetry/reconnect, Factory Reset and backup/restore. Functional correctness and stable lifecycle behavior come first; code reduction follows only when behavior is preserved.
 
 ## Findings register
 
 ### CRITICAL
 
 #### A-001 — Plaintext first-run password — FIXED
-First-run password moved from SharedPreferences to `SecureTokenStore` (Android Keystore + AES/GCM), including legacy plaintext migration/removal.
+First-run password moved from SharedPreferences to Android Keystore-backed `SecureTokenStore`, including legacy plaintext migration/removal.
 
 ### HIGH
 
 #### A-002 — Discovery dedup was host-based — FIXED
-Discovery now reconciles transitive physical-controller identity through `ControllerIdentity.sameController()` with tests.
+Discovery now reconciles transitive physical-controller identity through `ControllerIdentity.sameController()`.
 
 #### A-003 — Oversized/duplicated Bruce — FIXED
 Normal Device List uses only the compact Bruce mark.
@@ -29,7 +29,7 @@ Normal Device List uses only the compact Bruce mark.
 Transport loss counts as expected destructive-reset disconnect only after the request body was submitted.
 
 #### A-009 — Device secret reuse/restore leakage — FIXED
-API/telemetry secrets are device-bound; normal controller changes clear carried-over secrets.
+API/telemetry secrets are device-bound; controller changes clear carried-over secrets.
 
 #### A-010 — Add Device was a prominent primary action — FIXED
 Device List exposes Add as a secondary action.
@@ -41,57 +41,51 @@ Coordinator progress combines UDP + HTTP until both finish.
 Missing Wi-Fi/IPv4 clears stale HTTP results.
 
 #### A-015 — Duplicate discovery result counters — FIXED
-Search status and result count are rendered once each.
+Search state/result count are rendered once.
 
 #### A-016 — Provisioning stable-ID comparison was case-sensitive — FIXED
-ID and HTTPS normalization are case-insensitive; handoff test covers lowercase identity.
+Stable IDs and HTTPS handling are normalized case-insensitively.
 
-#### A-017 — QR provisioning bypassed owner-friendly-name registry contract — FIXED
-QR provisioning requires a nonblank owner name, registers the stable controller ID, then refreshes its LAN endpoint.
+#### A-017 — QR provisioning bypassed owner-friendly-name contract — FIXED
+QR provisioning requires an owner name and registers the stable controller ID before endpoint refresh.
 
-#### A-018 — ProvisioningScreen owned a second discovery/settings runtime — FIXED ON AUDIT BRANCH
-Files:
-- `android/app/src/main/java/ua/homeguard/s3/ui/screens/ProvisioningScreen.kt`
-- `android/app/src/main/java/ua/homeguard/s3/MainActivity.kt`
-
-Removed the screen-owned `LocalDiscoveryCoordinator`, screen-owned `SettingsStore`, `DisposableEffect` runtime start/stop and `Activity.recreate()` synchronization workaround. `ProvisioningScreen` is now presentation/local-form state only and receives the existing MainActivity-owned discovery state/actions. Already-connected and manual-IP selection now execute through the same application-owned `RegisteredDeviceStore` + `SettingsStore` instances used by the rest of the app.
+#### A-018 — ProvisioningScreen owned a second discovery/settings runtime — FIXED
+Removed the screen-owned `LocalDiscoveryCoordinator`, screen-owned `SettingsStore`, `DisposableEffect` start/stop and `Activity.recreate()` workaround. The screen now consumes MainActivity-owned discovery state/actions.
 
 #### A-019 — HttpDeviceApi cancellation could leak Response — FIXED
-Cancellation cancels the OkHttp call; an undeliverable response is closed through the cancellable-continuation resume callback.
+Cancellation cancels the OkHttp call and closes an undeliverable response.
 
 #### A-022 — Stale mDNS report could stay online indefinitely — FIXED
-All discovery sources use a common 30-second freshness window before deduplication.
+All discovery sources use one 30-second freshness window before deduplication.
 
 #### A-023 — Provisioning shortcuts bypassed registry naming — FIXED
-Already-connected/manual-IP paths require owner-friendly name and register before selection. After A-018 they also no longer use a second settings/runtime path.
+Already-connected/manual-IP paths require owner-friendly name and use the canonical app-owned registry/settings path.
 
 #### A-024 — Setup AP cancellation could leave process bound to temporary Wi-Fi — FIXED
-Cancellation/terminal callback cleanup now unbinds and unregisters safely.
+Cancellation and terminal callback cleanup now unbind/unregister safely.
 
-#### A-025 — Rapid repeated manual scan could launch overlapping full discovery passes — FIXED ON AUDIT BRANCH
-File:
-- `android/app/src/main/java/ua/homeguard/s3/network/LocalDiscoveryCoordinator.kt`
+#### A-025 — Rapid repeated manual scan could launch overlapping full scans — FIXED
+`LocalDiscoveryCoordinator.rescan()` is single-flight; overlapping taps no longer start parallel UDP+HTTP sweeps or clear scan state early.
 
-A fast double tap can invoke `rescan()` twice before Compose has time to render the disabled scanning button. Each call previously set the same `manualRescanActive` flag independently while running its own UDP+HTTP pass. One scan could finish first and clear the flag while another scan was still running, making the UI report a completed/idle scan while network work continued and allowing yet another scan to start.
+#### A-026 — Telemetry stayed offline forever after transient WebSocket failure — FIXED
+`DeviceSession` owns one reconnect job with 2/5/10/20/30-second capped backoff. CONNECTED, UNAUTHORIZED, target change and stop cancel retries; stale targets cannot reconnect.
 
-Fix: an atomic single-flight guard now accepts only one manual full scan at a time. Extra overlapping calls return immediately instead of queuing another full UDP+HTTP sweep. The active flag is cleared only by the owning scan in `finally`.
-
-#### A-026 — Telemetry stayed offline forever after a transient WebSocket failure — FIXED ON AUDIT BRANCH
+#### A-027 — Synchronous telemetry connect setup failure could kill DeviceSession collector — FIXED ON AUDIT BRANCH
 Files:
-- `android/app/src/main/java/ua/homeguard/s3/network/DeviceSession.kt`
-- `android/app/src/test/java/ua/homeguard/s3/network/DeviceSessionReconnectPolicyTest.kt`
+- `android/app/src/main/java/ua/homeguard/s3/network/TelemetrySocket.kt`
+- `android/app/src/test/java/ua/homeguard/s3/network/TelemetrySocketConnectFailureTest.kt`
 
-`DeviceSession` connected only when endpoint/token state changed. If an otherwise valid WebSocket failed because Wi-Fi briefly dropped, the socket moved to `OFFLINE`, but the unchanged endpoint produced no new target emission, so telemetry could remain offline until an app restart or device/route change.
+Before a WebSocket exists, URL parsing, certificate-pin validation or client construction can throw synchronously. Previously that exception escaped `TelemetrySocket.connect()` into the `DeviceSession` Flow collector, killing the target coroutine. A later settings/device change would then have no collector left to reconnect.
 
-Fix: `DeviceSession` now owns one controlled reconnect job. `OFFLINE` schedules a reconnect with 2/5/10/20/30-second capped backoff; `CONNECTED`, `UNAUTHORIZED`, target changes and `stop()` cancel pending reconnect work. The retry re-checks that the target is still current and the socket is still offline before reconnecting, so device switching cannot resurrect an old controller connection. Unit tests lock the backoff/cap policy.
+Fix: connect setup is contained inside `TelemetrySocket`; synchronous setup failures now move the socket to `OFFLINE` instead of escaping. Tests cover malformed URL and invalid certificate pin. This keeps the session runtime alive so later valid target/settings changes remain recoverable.
 
 ### MEDIUM
 
 #### A-004 — MainActivity is an orchestration god-object — OPEN
-It still owns many runtime services and navigation/auth/maintenance state. Decompose only after canonical runtime paths and acceptance contracts are stable; do not add parallel coordinators.
+Decompose only after canonical paths and lifecycle contracts are stable; do not add parallel coordinators.
 
 #### A-005 — Global cleartext HTTP enabled — OPEN
-`android:usesCleartextTraffic="true"` is wider than the local/setup paths that need HTTP. Constrain after endpoint audit without breaking ESP setup/bench use.
+`android:usesCleartextTraffic="true"` is wider than the local/setup paths that need HTTP. Constrain only after endpoint audit without breaking ESP setup/bench access.
 
 #### A-012 — Selected controller comparison case-sensitive — FIXED
 Selected ID matching is case-insensitive.
@@ -99,60 +93,50 @@ Selected ID matching is case-insensitive.
 #### A-013 — Legacy unnamed devices synthesized `HomeGuard` — FIXED
 Unnamed entries remain unnamed until owner rename; UI shows `Потрібна назва`.
 
-#### A-020 — Device-state picons mixed authorization/armed state and UNKNOWN/fault — FIXED
-Authorization, unknown telemetry and actual fault/alarm are rendered distinctly.
+#### A-020 — Device-state picons mixed authorization/armed/UNKNOWN — FIXED
+Authorization, unknown telemetry and real alarm/fault states are rendered distinctly.
 
 ### CLEANUP
 
-#### A-006 — Parallel/dead Android architecture — OPEN, SCOPE CONFIRMED
-Obsolete island includes at least:
-- `ua.homeguard.app.alarm...`
-- `ua.homeguard.s3.api...`
-- `ua.homeguard.s3.data...`
-- `ua.homeguard.s3.ui.main.MainUiState/MainViewModel`
+#### A-006 — Parallel/dead Android architecture — FIXED
+The complete proven-dead island was removed atomically after source/test call-graph verification:
+- five `ua.homeguard.app.alarm...` source files;
+- `ua.homeguard.s3.api.HomeGuardApi`;
+- `ua.homeguard.s3.api.model.DeviceDtos`;
+- `ua.homeguard.s3.data.HomeGuardRepository`;
+- `ua.homeguard.s3.ui.main.MainUiState`;
+- `ua.homeguard.s3.ui.main.MainViewModel`;
+- old `AlarmAcknowledgementMappingTest`.
 
-PR #51 removed only part of this island and failed compile because `ui/main` still referenced deleted DTO/repository classes. Do not cherry-pick it. Remove the complete proven-dead island atomically after source/test call-graph verification.
+Total: **11 files removed**. Build #1143 passed on exact cleanup head `d54e01083bcf88e1f8684e1af7dbe6c7c92cfdd3`, proving the island was not required by the active Android build/test graph.
 
-#### A-021 — RegisteredDeviceStore process-global `activeStore` bridge — FIXED ON AUDIT BRANCH
-Files:
-- `android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt`
-- `android/app/src/main/java/ua/homeguard/s3/repository/ProvisioningCoordinator.kt`
-- `android/app/src/main/java/ua/homeguard/s3/network/DeviceSession.kt`
-- `android/app/src/main/java/ua/homeguard/s3/MainActivity.kt`
-
-Removed `activeStore` and all static `markActive* / reconcileActive* / refreshActive* / registerActive / removeActive` methods. `RegisteredDeviceStore` is now explicitly injected into `ProvisioningCoordinator` and `DeviceSession`; both call the same app-owned store instance directly. This removes process-global hidden state and makes registry mutation paths explicit.
+#### A-021 — RegisteredDeviceStore process-global `activeStore` bridge — FIXED
+Removed `activeStore` and static registry mutation helpers. `ProvisioningCoordinator`, `DeviceSession` and `DeviceEndpointResolver` receive the same app-owned `RegisteredDeviceStore` explicitly.
 
 ## Confirmed positives
 - API/telemetry tokens use Android Keystore-backed secure storage.
-- New registry entries require an owner-friendly name.
-- Device List has rename/delete/properties, unauthorized state and one-card-per-controller reconciliation.
-- Factory Reset client requires explicit destructive confirmation.
-- Build #1119 passed on head `d9dd97029301413d406a5f72ccea87e9fadbe816` before the runtime/bridge cleanup.
+- New registry entries require owner-friendly names.
+- Device List has rename/delete/properties, unauthorized state and one-controller-one-card reconciliation.
+- Factory Reset requires explicit destructive confirmation.
+- Build #1143 passed after the 11-file dead-architecture removal.
 
 ## Current execution status
-Latest code/test head before this register update: `81fe815c1cc1fb65e42bf9df32f89933ad2c0581`.
+Latest code/test head before this register update: `0f5989901526eee71080f790dc7dce97d41095cb`.
 
-Runtime/bridge/loop cleanup performed in the latest passes:
-- `DeviceSession` receives `RegisteredDeviceStore` explicitly;
-- `ProvisioningCoordinator` receives `RegisteredDeviceStore` explicitly;
-- `DeviceEndpointResolver` receives the same registry explicitly;
-- global `RegisteredDeviceStore.activeStore` bridge removed;
-- duplicate `ProvisioningScreen` discovery/settings runtime removed;
-- `Activity.recreate()` removed from provisioning selection;
-- provisioning screen consumes MainActivity-owned discovery state/actions;
-- manual/already-connected shortcut selection uses the canonical app-owned registry/settings path;
-- overlapping manual full rescans are suppressed with a single-flight guard;
-- telemetry now reconnects after transient offline failures with capped backoff and stale-target protection.
+Latest pass:
+- confirmed Build #1143 success on the full dead-code cleanup head;
+- closed A-006 after 11-file atomic removal;
+- found and fixed A-027 so malformed telemetry URL/pin cannot kill the long-lived `DeviceSession` collector;
+- added focused tests for malformed URL and invalid certificate pin.
 
-A fresh CI run is expected for the latest reconnect/test head. Do not treat A-025/A-026 as CI-validated until that run succeeds.
+The CI run for the newest A-027 test head had not appeared yet when this register was updated; do not treat A-027 as CI-validated until that run succeeds.
 
 ## Next immediate blocks
-1. Check CI for the latest head and fix the exact failing job first if red.
-2. Finish call-graph proof for the obsolete `ui/main + api/data/alarm` island, including tests, then delete atomically if proven dead.
-3. Continue lifecycle/coroutine review around NSD, network callbacks and telemetry, especially repeated start/stop/reconnect paths.
-4. Audit MainActivity for further removable orchestration chains before introducing any new abstraction.
-5. Audit manifest/build/security surface, especially global cleartext and permission timing.
-6. Strengthen acceptance tests around provisioning selection, repeated scan taps and one-controller-one-card behavior.
+1. Check CI for A-027 and fix any exact compile/test failure first if red.
+2. Continue lifecycle review around NSD/network callbacks and repeated start/stop/reconnect paths.
+3. Audit `MainActivity` for removable orchestration chains without adding abstraction layers.
+4. Audit manifest/build/security surface, especially global cleartext and permission timing.
+5. Strengthen acceptance tests around restart, device switching, network loss/recovery and repeated user actions.
 
 ## Audit rule
-Do not merge to `main` during discovery. Keep changes isolated on the audit branch and merge only verified minimal changes after CI and phone validation.
+Do not merge to `main` during discovery. Keep changes isolated on the audit branch and merge only verified minimal changes after CI and later phone validation.
