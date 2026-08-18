@@ -29,7 +29,8 @@ class ProvisioningCoordinator(
     context: Context,
     private val settings: SettingsStore,
     private val discovery: LocalDiscoveryCoordinator,
-    private val scope: CoroutineScope
+    private val registeredDevices: RegisteredDeviceStore,
+    private val scope: CoroutineScope,
 ) {
     private val connector = SetupNetworkConnector(context)
     private val mutableState = MutableStateFlow(ProvisioningUiState())
@@ -81,7 +82,7 @@ class ProvisioningCoordinator(
                         message = "Передавання налаштувань через HTTPS"
                     )
                     api.apply(form, localApiToken)
-                    RegisteredDeviceStore.registerActive(qr.deviceId, "", ownerLabel)
+                    registeredDevices.addManual(qr.deviceId, "", ownerLabel)
                     settings.update(
                         AppSettings(
                             deviceId = qr.deviceId,
@@ -117,7 +118,7 @@ class ProvisioningCoordinator(
                         System.currentTimeMillis()
                     )
                     require(accepted.accepted) { "Знайдений пристрій не пройшов перевірку handoff" }
-                    RegisteredDeviceStore.refreshActiveDiscovered(device)
+                    registeredDevices.refreshDiscovered(device)
                     settings.remember(device)
                     mutableState.value = mutableState.value.copy(
                         phase = ProvisioningPhase.COMPLETE,
