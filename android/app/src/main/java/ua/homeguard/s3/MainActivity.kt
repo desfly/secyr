@@ -91,7 +91,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = SettingsStore(this); registeredDevices = RegisteredDeviceStore(this); eventHistory = EventHistoryStore(this)
-        discovery = LocalDiscoveryCoordinator(this, lifecycleScope); resolver = DeviceEndpointResolver(settings, discovery, registeredDevices, lifecycleScope)
+        discovery = LocalDiscoveryCoordinator(this, lifecycleScope); resolver = DeviceEndpointResolver(settings, discovery, lifecycleScope)
         provisioning = ProvisioningCoordinator(this, settings, discovery, registeredDevices, lifecycleScope)
         telemetry = TelemetrySocket().apply { seedEvents(eventHistory.load()) }
         session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry, registeredDevices)
