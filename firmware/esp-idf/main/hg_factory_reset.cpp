@@ -29,14 +29,13 @@ FactoryResetReport FactoryResetManager::erase_mutable_state() const {
     report.access = erase_namespace("hg_access");
 
     // Triple-RST factory reset runs before the Wi-Fi driver is initialized.
-    // Erasing HomeGuard's persisted credentials is therefore the authoritative
-    // reset step here. esp_wifi_restore() may legitimately report
-    // ESP_ERR_WIFI_NOT_INIT at this stage; that must not abort the reset or
-    // prevent the clean reboot into setup AP mode.
+    // HomeGuard owns its credentials in hg_wifi, so erasing that namespace is
+    // the authoritative reset step. esp_wifi_restore() is best-effort here:
+    // before esp_wifi_init() it legitimately fails, and that must never abort
+    // the factory reset or prevent the clean reboot into setup AP mode.
     report.wifi = erase_namespace("hg_wifi");
     if (report.wifi == ESP_OK) {
-        const auto restore_error = esp_wifi_restore();
-        report.wifi = restore_error == ESP_ERR_WIFI_NOT_INIT ? ESP_OK : restore_error;
+        (void)esp_wifi_restore();
     }
 
     report.cloud = erase_namespace("hg_cloud");
