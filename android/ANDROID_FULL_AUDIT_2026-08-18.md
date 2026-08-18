@@ -2,6 +2,7 @@
 
 Branch: `audit/android-full-20260818`
 Base: `main`
+Draft PR: `#53`
 
 ## Goal
 Perform a complete Android audit before broad refactoring. Classify findings as `CRITICAL`, `HIGH`, `MEDIUM`, or `CLEANUP`; preserve the cemented device-list/discovery/auth/factory-reset contract; avoid blind merges from older PRs.
@@ -36,61 +37,64 @@ Fix: password now goes through `SecureTokenStore` (Android Keystore + AES/GCM). 
 
 ### HIGH
 
-#### A-002 — Discovery deduplication was host-grouped, not transitive identity reconciliation — FIXED ON AUDIT BRANCH
+#### A-002 — Discovery deduplication was host-grouped, not transitive identity reconciliation — FIXED
 Files:
 - `android/app/src/main/java/ua/homeguard/s3/network/DiscoveryDeduplicator.kt`
 - `android/app/src/main/java/ua/homeguard/s3/network/LocalDiscoveryCoordinator.kt`
 - `android/app/src/test/java/ua/homeguard/s3/network/DiscoveryDeduplicatorTest.kt`
 
-Previous `groupBy(host)` could leave duplicates when mDNS/UDP/HTTP observed one ESP through different hosts/IDs.
-
 Fix: union-find transitive reconciliation using `ControllerIdentity.sameController()`. Stable `HG-*` identity is preserved while endpoint details can come from the freshest discovery report. Tests cover same ID/different host, setup fallback/stable ID, transitive merge, unrelated controllers, and source priority.
 
-#### A-003 — Oversized Bruce artwork in Device List — FIXED ON AUDIT BRANCH
-File: `android/app/src/main/java/ua/homeguard/s3/ui/screens/DeviceListScreen.kt`
+#### A-003 — Oversized/duplicated Bruce in Device List — FIXED
+Files:
+- `android/app/src/main/java/ua/homeguard/s3/ui/screens/DeviceListScreen.kt`
+- `android/app/src/main/java/ua/homeguard/s3/ui/components/BruceBrand.kt`
 
-The separate full-width square Bruce image was removed from the normal device-list flow. Compact `BruceBrand` remains in the header.
+Fix: removed the separate full-width square Bruce image from the normal Device List and restored a compact 44dp Bruce header mark.
 
-#### A-007 — Stale WebSocket frames could overwrite the newly selected device — FIXED ON AUDIT BRANCH
+#### A-007 — Stale WebSocket frames could overwrite the newly selected device — FIXED
 File: `android/app/src/main/java/ua/homeguard/s3/network/TelemetrySocket.kt`
-
-`onMessage()` checked whether the callback belonged to the active socket only before setting connection state, but still parsed and published the message when the socket was stale. During asynchronous close/reconnect, telemetry from the previous controller could therefore overwrite the current snapshot/event list.
 
 Fix: stale socket callbacks now return before parsing or publishing any telemetry.
 
-#### A-008 — Any Factory Reset IOException was treated as expected reboot/disconnect — FIXED ON AUDIT BRANCH
+#### A-008 — Any Factory Reset IOException was treated as expected reboot/disconnect — FIXED
 Files:
 - `android/app/src/main/java/ua/homeguard/s3/network/FactoryResetClient.kt`
 - `android/app/src/test/java/ua/homeguard/s3/network/FactoryResetTransportPolicyTest.kt`
 
-DNS/connect/TLS failures before the destructive request was submitted were previously returned as `CONNECTION_LOST`, causing Android to clear its local selected-device/session state as if reset had likely been accepted.
+Fix: OkHttp `requestBodyEnd` tracks whether the destructive request body was actually sent. DNS/connect/TLS failures before submission are no longer treated as likely successful reset disconnects.
 
-Fix: OkHttp `EventListener.requestBodyEnd` tracks whether the request body was actually sent. Only a later transport loss becomes `CONNECTION_LOST`; failures before submission are `REJECTED`. Policy is unit-tested.
-
-#### A-009 — Settings restore can erase the dedicated telemetry token — OPEN
+#### A-009 — Settings restore could erase telemetry token / device switches could reuse another controller's secret — FIXED
 Files:
-- `android/app/src/main/java/ua/homeguard/s3/storage/SettingsBackupCodec.kt`
-- `android/app/src/main/java/ua/homeguard/s3/MainActivity.kt`
+- `android/app/src/main/java/ua/homeguard/s3/storage/SettingsStore.kt`
+- `android/app/src/test/java/ua/homeguard/s3/storage/SettingsSecretPolicyTest.kt`
 
-`SettingsBackupCodec.decode(text, currentToken)` preserves `apiToken` only. `telemetryToken` falls back to the `AppSettings` default (`""`) and `SettingsStore.update()` then removes the stored secure telemetry token. This can break the authenticated telemetry socket after restore.
-
-Action: preserve both local secrets across import while continuing to exclude them from exported JSON. Add regression test before changing behavior.
+Fix: secrets are now device-bound. Same-device restore preserves omitted local secrets; normal device selection clears carried-over API/telemetry tokens; provisioning may still install a genuinely new token while changing devices. This also clears stale device-bound secrets when the selected controller is cleared after Factory Reset.
 
 #### A-010 — Prominent Add Device action conflicts with the cemented hidden/secondary Add flow — OPEN
 File: `android/app/src/main/java/ua/homeguard/s3/ui/screens/DeviceListScreen.kt`
 
-The normal device list still exposes a full-width `+ Додати пристрій` button. The cemented product rule says the current Add flow remains hidden/secondary until its structure is redesigned separately.
+The normal device list still exposes a full-width `+ Додати пристрій` button. The product rule says the current Add flow remains hidden/secondary until its structure is redesigned separately.
 
 Action: define the smallest secondary entry point without redesigning the Add screen, then lock it with UI contract tests.
 
-#### A-011 — Manual rescan completion/progress currently reflects UDP, not the whole UDP+HTTP scan — OPEN
+#### A-011 — Manual rescan progress reflected UDP only, not UDP+HTTP — FIXED
 Files:
-- `android/app/src/main/java/ua/homeguard/s3/network/LocalDiscoveryCoordinator.kt`
 - `android/app/src/main/java/ua/homeguard/s3/network/HttpSubnetDiscovery.kt`
+- `android/app/src/main/java/ua/homeguard/s3/network/LocalDiscoveryCoordinator.kt`
+- `android/app/src/test/java/ua/homeguard/s3/network/DiscoveryScanStatusTest.kt`
 
-`rescan()` awaits UDP and HTTP scans, but `isScanning` and `scanStatus` are derived only from UDP status. The UI can therefore report completion while HTTP subnet probing is still running.
+Fix: HTTP subnet scanning now exposes actual probe progress; coordinator-level status combines UDP+HTTP and keeps manual search active until both branches finish. Tests cover partial HTTP progress, final 100%, errors, and background UDP scans.
 
-Action: expose real coordinator-level scan state/progress covering both discovery branches.
+#### A-014 — HTTP discovery could leave stale devices visible after Wi-Fi disappeared — FIXED
+File: `android/app/src/main/java/ua/homeguard/s3/network/HttpSubnetDiscovery.kt`
+
+Fix: missing Wi-Fi network/IPv4 now clears stale HTTP discovery results and reports a concrete scan error.
+
+#### A-015 — Discovery UI displayed duplicate “Знайдено” counters — FIXED
+File: `android/app/src/main/java/ua/homeguard/s3/ui/screens/AddDeviceScreen.kt`
+
+Fix: the scan-status panel now reports only search state/completion; the actual result count is rendered once with the result list.
 
 ### MEDIUM
 
@@ -98,8 +102,6 @@ Action: expose real coordinator-level scan state/progress covering both discover
 File: `android/app/src/main/java/ua/homeguard/s3/MainActivity.kt`
 
 `MainActivity` owns discovery, settings, registry, event history, endpoint resolution, provisioning, telemetry, session, commands, notifications, navigation state, operator state, backup/restore launchers, QR flow, factory reset, and top-level Compose routing.
-
-Impact: difficult lifecycle reasoning, high regression risk, poor test isolation.
 
 Action: after behavior contracts are covered, split app/navigation state from networking/storage/runtime services.
 
@@ -110,10 +112,10 @@ File: `android/app/src/main/AndroidManifest.xml`
 
 Action: audit endpoints and constrain cleartext policy without breaking local controller discovery/setup.
 
-#### A-012 — Selected controller ID comparison was case-sensitive — FIXED ON AUDIT BRANCH
+#### A-012 — Selected controller ID comparison was case-sensitive — FIXED
 File: `android/app/src/main/java/ua/homeguard/s3/network/DeviceEndpointResolver.kt`
 
-Direct local selection now compares stable device IDs case-insensitively, matching the identity semantics already used by the registry.
+Direct local selection now compares stable device IDs case-insensitively.
 
 #### A-013 — Legacy registry entries can synthesize the visible name `HomeGuard` — OPEN
 File: `android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt`
@@ -124,37 +126,42 @@ Action: migrate or quarantine unnamed legacy entries rather than generating a pr
 
 ### CLEANUP
 
-#### A-006 — Two parallel package families exist in the Android source tree — OPEN
-Paths: `ua.homeguard.app...` and `ua.homeguard.s3...`
+#### A-006 — Two parallel/dead Android architecture families exist — OPEN
+Paths include:
+- `ua.homeguard.app.alarm...`
+- `ua.homeguard.s3.api...`
+- `ua.homeguard.s3.data...`
 
-The tree contains both the current `ua.homeguard.s3` runtime and an older/parallel `ua.homeguard.app` layer. PR #51 already targets part of this cleanup.
-
-Action: establish call/reference graph and remove only proven-unused code after tests cover the active path.
+PR #51 proves a first candidate set for removal, but its old standalone alarm mapping test also references the obsolete layer. Cleanup must include tests/call graph, not blind file deletion.
 
 ## Confirmed positives
-- `SettingsStore` stores API and telemetry tokens through `SecureTokenStore` rather than plaintext preferences.
+- API and telemetry tokens are protected through `SecureTokenStore`.
 - `SecureTokenStore` uses Android Keystore with AES/GCM.
 - `RegisteredDeviceStore.addOrUpdate()` refuses first save without a nonblank owner-provided friendly name.
 - `DeviceListScreen` supports rename, delete, properties, red unauthorized state, single-tap expansion and double-tap opening.
 - Factory Reset request already requires explicit `ERASE_ALL` at the API client layer.
 
 ## Current execution status
-Completed in the first audit pass:
+Completed in the active audit branch:
 - repository/navigation/security baseline;
-- first-run credential storage fix;
+- first-run credential storage hardening + legacy migration;
 - discovery deduplication redesign + tests;
-- oversized Device List Bruce regression removal;
-- stale telemetry isolation fix;
-- Factory Reset transport classification fix + tests;
-- selected-ID case normalization.
+- real UDP+HTTP search progress + stale HTTP result clearing + tests;
+- duplicate result counter removal;
+- compact Bruce header / oversized Bruce removal;
+- stale telemetry isolation;
+- Factory Reset transport classification + tests;
+- selected-ID normalization;
+- device-bound API/telemetry secret policy + tests.
 
 Next immediate blocks:
-1. backup/restore secret preservation;
-2. real full-scan progress semantics;
-3. registry legacy-name migration;
-4. Add Device visibility contract;
-5. lifecycle/coroutine review;
-6. dead/duplicate architecture and PR #51 comparison.
+1. registry legacy-name migration;
+2. Add Device hidden/secondary entry contract;
+3. Device List picon/health layout regression;
+4. lifecycle/coroutine review;
+5. MainActivity decomposition plan;
+6. dead/duplicate architecture and PR #51 comparison;
+7. manifest/build/security-surface review.
 
 ## Audit rule
 Do not merge to `main` during discovery. Keep changes isolated on the audit branch, run CI continuously, and only later split/merge verified minimal changes.
