@@ -21,6 +21,7 @@ import ua.homeguard.s3.provisioning.ProvisioningHandoff
 import ua.homeguard.s3.provisioning.ProvisioningQrParser
 import ua.homeguard.s3.provisioning.SetupNetworkConnector
 import ua.homeguard.s3.storage.AppSettings
+import ua.homeguard.s3.storage.RegisteredDeviceStore
 import ua.homeguard.s3.storage.SettingsStore
 import java.security.SecureRandom
 
@@ -56,6 +57,8 @@ class ProvisioningCoordinator(
         val qr = mutableState.value.qr ?: return
         scope.launch {
             runCatching {
+                val ownerLabel = form.ownerLabel.trim().take(40)
+                require(ownerLabel.isNotBlank()) { "Вкажіть назву пристрою перед збереженням" }
                 require(form.wifiSsid.isNotBlank()) { "Вкажіть домашню Wi-Fi мережу" }
                 require(form.wifiPassword.length in 8..64) { "Перевірте пароль домашньої Wi-Fi мережі" }
                 val localApiToken = randomToken()
@@ -78,6 +81,7 @@ class ProvisioningCoordinator(
                         message = "Передавання налаштувань через HTTPS"
                     )
                     api.apply(form, localApiToken)
+                    RegisteredDeviceStore.registerActive(qr.deviceId, "", ownerLabel)
                     settings.update(
                         AppSettings(
                             deviceId = qr.deviceId,
@@ -113,6 +117,7 @@ class ProvisioningCoordinator(
                         System.currentTimeMillis()
                     )
                     require(accepted.accepted) { "Знайдений пристрій не пройшов перевірку handoff" }
+                    RegisteredDeviceStore.refreshActiveDiscovered(device)
                     settings.remember(device)
                     mutableState.value = mutableState.value.copy(
                         phase = ProvisioningPhase.COMPLETE,
@@ -144,7 +149,8 @@ class ProvisioningCoordinator(
             discovery.devices
                 .map { devices ->
                     devices.firstOrNull {
-                        it.deviceId == deviceId && it.secure && !it.pairingRequired
+                        it.deviceId.trim().equals(deviceId.trim(), ignoreCase = true) &&
+                            it.secure && !it.pairingRequired
                     }
                 }
                 .filterNotNull()
