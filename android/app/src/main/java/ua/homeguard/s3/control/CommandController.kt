@@ -11,6 +11,9 @@ import ua.homeguard.s3.network.HttpDeviceApi
 import ua.homeguard.s3.storage.SettingsStore
 import java.util.concurrent.atomic.AtomicLong
 
+internal fun sameSelectedController(expectedDeviceId: String, selectedDeviceId: String): Boolean =
+    expectedDeviceId.isNotBlank() && expectedDeviceId.trim().equals(selectedDeviceId.trim(), ignoreCase = true)
+
 class CommandController(
     private val endpoint: StateFlow<DeviceEndpoint>,
     private val settings: SettingsStore,
@@ -24,10 +27,16 @@ class CommandController(
         }
         val api = createApi(target)
         val session = api.login(actor, credential)
+        requireStillSelected(target)
+
         if (target.path != ControlPath.CLOUD) {
             val telemetryToken = api.telemetrySession(actor, credential)
+            // A device switch while either auth request is in flight must never attach
+            // the previous controller's telemetry token to the newly selected device.
+            requireStillSelected(target)
             settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
         }
+        requireStillSelected(target)
         return session
     }
 
@@ -60,6 +69,12 @@ class CommandController(
             credential = credential,
         )
         return api.command(command)
+    }
+
+    private fun requireStillSelected(target: DeviceEndpoint) {
+        check(sameSelectedController(target.deviceId, settings.settings.value.deviceId)) {
+            "controller changed during login"
+        }
     }
 
     private fun createApi(target: DeviceEndpoint): HttpDeviceApi {
