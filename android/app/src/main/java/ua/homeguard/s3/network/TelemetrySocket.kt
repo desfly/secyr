@@ -56,7 +56,11 @@ class TelemetrySocket {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                if (socket === webSocket) connectionState.value = TelemetryConnectionState.CONNECTED
+                // A close/reconnect is asynchronous. A frame from the previous
+                // controller can still arrive after socket has already been replaced.
+                // Never let stale telemetry overwrite the newly selected device state.
+                if (socket !== webSocket) return
+                connectionState.value = TelemetryConnectionState.CONNECTED
                 runCatching {
                     val json = JSONObject(text)
                     if (json.has("event")) {
