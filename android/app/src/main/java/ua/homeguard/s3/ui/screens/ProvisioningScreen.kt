@@ -129,6 +129,7 @@ fun ProvisioningScreen(
         ProvisioningPhase.DISCOVERING_LOCAL,
     )
     val manualAddressValid = normalizeLocalAddress(manualAddress) != null
+    val ownerNameValid = form.ownerLabel.trim().isNotBlank()
 
     LaunchedEffect(devices) {
         if (!manualAddressTouched && devices.isNotEmpty()) {
@@ -232,13 +233,14 @@ fun ProvisioningScreen(
         )
         OutlinedTextField(
             form.ownerLabel,
-            { form = form.copy(ownerLabel = it) },
+            { form = form.copy(ownerLabel = it.take(40)) },
             label = { Text("Назва пристрою/об’єкта") },
+            supportingText = { if (!ownerNameValid) Text("Вкажіть власну назву перед збереженням пристрою") },
             modifier = Modifier.fillMaxWidth(),
         )
         Button(
             onClick = { onProvision(form) },
-            enabled = state.qr != null && form.wifiSsid.isNotBlank() && form.wifiPassword.length in 8..64 && !busy,
+            enabled = state.qr != null && ownerNameValid && form.wifiSsid.isNotBlank() && form.wifiPassword.length in 8..64 && !busy,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Підключити HomeGuard до Wi-Fi")
