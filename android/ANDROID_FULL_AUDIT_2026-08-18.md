@@ -58,9 +58,9 @@ Measured only where the repository/CI provides real numbers. Phone-only metrics 
 
 ### Code / structure
 - Base: `e522dc7ffc1a716f370ac7050b58c6f1a23e618a`.
-- Latest code/test head before this register update: `d66b4302be0fec0eb186ce0f1c81692f8624631e`.
-- Commits ahead of base: **91**.
-- PR footprint at that head: **46 changed files, 1,466 additions, 707 deletions** (production + tests + audit docs; not a pure LOC reduction metric).
+- Latest code/test head before this register update: `19590ba75592e7db82c94b08c273d7bf339679f0`.
+- Commits ahead of base: **93**.
+- PR footprint at that head: **46 changed files, 1,390 additions, 707 deletions** (production + tests + audit docs; not a pure LOC reduction metric).
 - Proven-dead island: **11 files / 334 lines removed**, including **293 production lines**.
 - `DeviceEndpointResolver`: current PR diff versus base is **1 addition / 25 deletions** after making it read-only.
 
@@ -90,12 +90,13 @@ Use the same phone, same Android version, same Wi-Fi/AP, same ESP firmware/confi
 7. **Lifecycle soak:** 50 foreground/background cycles, 20 device switches, 20 repeated scan taps, Wi-Fi loss/recovery loops; verify one card/controller, no duplicate notifications, no leaked discovery jobs and no stale telemetry.
 
 ## Current execution status
-- Build #1165 on previous head `2377fe66...`: Android job and host validation passed before later Android-only commits; firmware job was unrelated to these Android changes.
-- Current exact-head Build #1169 for `d66b4302...` is in progress. It must pass Android unit/build + host contracts before A-030..A-036 are marked CI validated.
+- Build #1169 on code/test head `d66b4302...`: **Host validation passed; production Android Kotlin compiled; Android job failed only in `compileDebugUnitTestKotlin` because the newly added `EventHistoryMergeTest` imported unavailable `kotlin.test` symbols.**
+- Test-only fix commit `19590ba75592e7db82c94b08c273d7bf339679f0` switches that test to the project-standard JUnit4 imports; no production behavior changed.
+- Exact-head Build #1171 for `19590ba7...` is queued and must pass before A-030..A-036 are marked CI validated.
 - `main` remains untouched; PR #53 remains draft and unmerged.
 
 ## Next immediate blocks
-1. Finish exact-head #1169; if red, fix the exact Android/host failure first.
+1. Finish exact-head #1171; if red, fix the exact Android/host failure first.
 2. One final MainActivity/lifecycle pass for permission/start-stop state and any remaining duplicate collector/write path.
 3. Freeze Android code only after green exact-head CI.
 4. Produce final CI-measured before/after report; then perform the phone benchmark plan once, not as intermediate testing.
