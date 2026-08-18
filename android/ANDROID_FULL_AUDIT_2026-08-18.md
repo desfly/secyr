@@ -55,8 +55,8 @@ Removed the screen-owned `LocalDiscoveryCoordinator`, screen-owned `SettingsStor
 #### A-019 — HttpDeviceApi cancellation could leak Response — FIXED
 Cancellation cancels the OkHttp call and closes an undeliverable response.
 
-#### A-022 — Stale discovery could remain visible without a new source emission — FIXED ON AUDIT BRANCH
-All discovery sources use one 30-second freshness window before deduplication, and `LocalDiscoveryCoordinator` now drives expiry with a 1-second clock tick. Previously the freshness predicate only re-ran when mDNS/UDP/HTTP emitted; if Android omitted `onServiceLost` and no other source changed, a stale device could remain visible indefinitely despite the nominal 30-second window.
+#### A-022 — Stale discovery could remain visible without a new source emission — FIXED + CI VALIDATED
+All discovery sources use one 30-second freshness window before deduplication, and `LocalDiscoveryCoordinator` drives expiry with a 1-second clock tick. Previously the freshness predicate only re-ran when mDNS/UDP/HTTP emitted; if Android omitted `onServiceLost` and no other source changed, a stale device could remain visible indefinitely despite the nominal 30-second window. Build #1153 passed on head `8d67803d93c49af71fc42ed856daae91f94dcc00`.
 
 #### A-023 — Provisioning shortcuts bypassed registry naming — FIXED
 Already-connected/manual-IP paths require owner-friendly name and use the canonical app-owned registry/settings path.
@@ -79,17 +79,19 @@ Before a WebSocket exists, URL parsing, certificate-pin validation or client con
 
 Fix: connect setup is contained inside `TelemetrySocket`; synchronous setup failures now move the socket to `OFFLINE` instead of escaping. Tests cover malformed URL and invalid certificate pin. Build #1146 passed on head `b9f31a0a4e7052daf709a052471f26d3e62f0523`.
 
-#### A-028 — Invalid manual IP closed provisioning despite failed validation — FIXED ON AUDIT BRANCH
+#### A-028 — Invalid manual IP closed provisioning despite failed validation — FIXED + CI VALIDATED
 File:
 - `android/app/src/main/java/ua/homeguard/s3/MainActivity.kt`
 
-The provisioning callback previously set `provisioningOpen=false` unconditionally after calling `addManualDevice()`. If address validation rejected the IP, the device was not added but the provisioning screen still closed. The close transition now lives only in the successful canonical `addManualDevice()` path, after validation and registry/settings update.
+The provisioning callback previously set `provisioningOpen=false` unconditionally after calling `addManualDevice()`. If address validation rejected the IP, the device was not added but the provisioning screen still closed. The close transition now lives only in the successful canonical `addManualDevice()` path, after validation and registry/settings update. Build #1153 passed on head `8d67803d93c49af71fc42ed856daae91f94dcc00`.
 
-#### A-029 — NSD start failure/stale resolve could poison discovery lifecycle — FIXED ON AUDIT BRANCH
+#### A-029 — NSD start/restart races could poison discovery lifecycle — FIXED ON AUDIT BRANCH
 File:
 - `android/app/src/main/java/ua/homeguard/s3/network/NsdDeviceDiscovery.kt`
 
-`start()` previously set `started=true` before `NsdManager.discoverServices()`. A synchronous platform exception could therefore leave discovery permanently marked started and suppress all future retries. Also an in-flight resolve callback could arrive after `stop()` and republish a device into the stopped runtime. Start now rolls the flag back on synchronous failure, `started` is visible across callback threads, and late found/resolve callbacks are ignored after stop.
+Two lifecycle holes were present. First, `start()` set `started=true` before `NsdManager.discoverServices()`, so a synchronous platform exception could permanently suppress later retries. Second, checking only `started` on resolve callbacks was insufficient across a rapid stop→start cycle: an in-flight resolve from the previous run could arrive after the new start, see `started=true`, and republish a stale endpoint into the new discovery session.
+
+Fix: synchronous start failure rolls the flag back, callback-visible state is volatile, and every discovery run now gets a monotonically increasing generation. Resolve callbacks capture their generation and are ignored unless it still matches the active run. Stop and failed start invalidate all outstanding generations. This prevents a previous run from contaminating the next one without adding another coordinator/runtime.
 
 ### MEDIUM
 
@@ -132,18 +134,18 @@ Removed `activeStore` and static registry mutation helpers. `ProvisioningCoordin
 - Factory Reset requires explicit destructive confirmation.
 - Build #1143 passed after the 11-file dead-architecture removal.
 - Build #1146 passed after A-027 telemetry setup-failure containment and tests.
+- Build #1153 passed after active stale-discovery expiry, manual-IP provisioning correction, host-contract update and initial NSD lifecycle hardening.
 
 ## Current execution status
-Latest code head before this register update: `ca2c0e9ac44c0268e827dcbf93fbee1245162e65`.
+Latest code head before this register update: `f287336fe0d557ef9831b4b8a1c21a8ed3e8b04f`.
 
 Latest pass:
-- Build #1148 showed Android APK/tests green but failed the host discovery contract because that script matched the old literal three-input `combine(...)` form; the product code now correctly has a fourth freshness-clock input;
-- updated `tools/check_android_discovery_contract.py` to inspect the actual `devices` combine inputs instead of matching one formatting string;
-- fixed A-028 so invalid manual-IP input no longer closes provisioning;
-- fixed A-029 so synchronous NSD start failure cannot permanently suppress retries and stale resolve callbacks do not republish after stop;
-- no new runtime/store/coordinator was introduced.
+- confirmed Build #1153 success on previous exact head `8d67803d93c49af71fc42ed856daae91f94dcc00`;
+- strengthened A-029 after finding the remaining stop→start race that a boolean `started` flag cannot distinguish;
+- added a discovery generation token so old NSD resolve callbacks cannot repopulate a newer run;
+- changed only `NsdDeviceDiscovery.kt` for the new behavioral fix; no new runtime/store/coordinator was introduced.
 
-CI for the latest head is pending. Do not mark A-022/A-028/A-029 fully CI-validated until an exact-head run succeeds.
+CI for the newest generation-token head is pending. Do not mark the strengthened A-029 fully CI-validated until an exact-head run succeeds.
 
 ## Next immediate blocks
 1. Check latest CI and fix the exact failing job first if red.
