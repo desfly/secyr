@@ -9,6 +9,8 @@ import org.json.JSONObject
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.network.ControllerIdentity
 
+internal const val REGISTERED_DEVICE_LAST_SEEN_PERSIST_MS = 60_000L
+
 data class RegisteredDevice(
     val deviceId: String,
     val name: String,
@@ -16,6 +18,17 @@ data class RegisteredDevice(
     val lastSeenAtMs: Long,
     val authorized: Boolean = true,
 )
+
+internal fun shouldPersistDiscoveredRefresh(
+    previous: RegisteredDevice,
+    discovered: DiscoveredDevice,
+    minLastSeenIntervalMs: Long = REGISTERED_DEVICE_LAST_SEEN_PERSIST_MS,
+): Boolean {
+    val discoveredId = discovered.deviceId.trim()
+    if (!previous.deviceId.equals(discoveredId, ignoreCase = true)) return true
+    if (previous.baseUrl != discovered.baseUrl) return true
+    return discovered.seenAtMs - previous.lastSeenAtMs >= minLastSeenIntervalMs.coerceAtLeast(0L)
+}
 
 class RegisteredDeviceStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences("homeguard_devices", Context.MODE_PRIVATE)
@@ -111,15 +124,15 @@ class RegisteredDeviceStore(context: Context) {
         if (index < 0) return false
 
         val previous = current[index]
-        val updated = previous.copy(
+        if (!shouldPersistDiscoveredRefresh(previous, discovered)) return false
+
+        current[index] = previous.copy(
             deviceId = discovered.deviceId.trim(),
             baseUrl = discovered.baseUrl,
             lastSeenAtMs = discovered.seenAtMs,
         )
-        current[index] = updated
-        val beforeCount = current.size
         persist(current)
-        return previous != updated || beforeCount != _devices.value.size
+        return true
     }
 
     suspend fun rename(deviceId: String, name: String) {
