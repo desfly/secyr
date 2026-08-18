@@ -87,7 +87,9 @@ for route in nav_routes:
             f"navigation route {route} has no DOM target id={target}")
 require(re.search(r'<div\s+class=["\']nav-group-label["\'][^>]*>.*?<span>Налаштування</span>.*?</div>', nav_html, re.S) is not None,
         "Налаштування must remain a non-clickable navigation group label")
-require(re.search(r'<a\b[^>]*>.*?<span>Налаштування</span>.*?</a>', nav_html, re.S) is None,
+nav_anchor_bodies = re.findall(r'<a\b[^>]*>(.*?)</a>', nav_html, re.S)
+nav_anchor_labels = [re.sub(r'<[^>]+>', '', body).strip() for body in nav_anchor_bodies]
+require(all("Налаштування" not in label for label in nav_anchor_labels),
         "Налаштування regressed into an active-capable navigation link")
 require(len(re.findall(r'class=["\'][^"\']*\bactive\b[^"\']*["\']', nav_html)) == 1,
         "HTML must boot with exactly one active navigation item")
