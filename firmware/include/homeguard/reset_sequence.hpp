@@ -9,23 +9,21 @@ struct ResetSequenceStep {
     bool trigger_factory_reset{false};
 };
 
-// Some ESP32-S3 boards wire the physical RST/EN button such that ESP-IDF
-// reports the reset as POWERON rather than EXT. RTC_NOINIT state survives the
-// button reset on this hardware, while a true cold boot starts without our
-// valid RTC marker. Treat POWERON as a button press only when the marker was
-// already valid before this boot.
-constexpr bool reset_press_detected(
-    bool rtc_state_was_valid,
+// The HomeGuard-S3 board reports the physical RST/EN button as POWERON.
+// Both EXT and POWERON therefore count as physical-reset candidates. The
+// runtime persistence layer decides whether consecutive candidates belong to
+// one short reset sequence; software/watchdog/panic resets must not count.
+constexpr bool physical_reset_candidate(
     bool external_rst,
     bool poweron_rst) noexcept {
-    return external_rst || (poweron_rst && rtc_state_was_valid);
+    return external_rst || poweron_rst;
 }
 
 constexpr ResetSequenceStep advance_reset_sequence(
     std::uint8_t previous_count,
-    bool external_rst,
+    bool physical_rst,
     std::uint8_t required_presses = 3U) noexcept {
-    if (!external_rst || required_presses == 0U) return {};
+    if (!physical_rst || required_presses == 0U) return {};
     const auto next = static_cast<std::uint8_t>(previous_count == 0xffU ? 0xffU : previous_count + 1U);
     if (next >= required_presses) return {0U, true};
     return {next, false};
