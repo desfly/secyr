@@ -76,6 +76,15 @@ A fast double tap can invoke `rescan()` twice before Compose has time to render 
 
 Fix: an atomic single-flight guard now accepts only one manual full scan at a time. Extra overlapping calls return immediately instead of queuing another full UDP+HTTP sweep. The active flag is cleared only by the owning scan in `finally`.
 
+#### A-026 — Telemetry stayed offline forever after a transient WebSocket failure — FIXED ON AUDIT BRANCH
+Files:
+- `android/app/src/main/java/ua/homeguard/s3/network/DeviceSession.kt`
+- `android/app/src/test/java/ua/homeguard/s3/network/DeviceSessionReconnectPolicyTest.kt`
+
+`DeviceSession` connected only when endpoint/token state changed. If an otherwise valid WebSocket failed because Wi-Fi briefly dropped, the socket moved to `OFFLINE`, but the unchanged endpoint produced no new target emission, so telemetry could remain offline until an app restart or device/route change.
+
+Fix: `DeviceSession` now owns one controlled reconnect job. `OFFLINE` schedules a reconnect with 2/5/10/20/30-second capped backoff; `CONNECTED`, `UNAUTHORIZED`, target changes and `stop()` cancel pending reconnect work. The retry re-checks that the target is still current and the socket is still offline before reconnecting, so device switching cannot resurrect an old controller connection. Unit tests lock the backoff/cap policy.
+
 ### MEDIUM
 
 #### A-004 — MainActivity is an orchestration god-object — OPEN
@@ -121,7 +130,7 @@ Removed `activeStore` and all static `markActive* / reconcileActive* / refreshAc
 - Build #1119 passed on head `d9dd97029301413d406a5f72ccea87e9fadbe816` before the runtime/bridge cleanup.
 
 ## Current execution status
-Current code head before this register update: `d04db9b2ca9eb9bf76e8d51288830241038fe50e`.
+Latest code/test head before this register update: `81fe815c1cc1fb65e42bf9df32f89933ad2c0581`.
 
 Runtime/bridge/loop cleanup performed in the latest passes:
 - `DeviceSession` receives `RegisteredDeviceStore` explicitly;
@@ -132,9 +141,10 @@ Runtime/bridge/loop cleanup performed in the latest passes:
 - `Activity.recreate()` removed from provisioning selection;
 - provisioning screen consumes MainActivity-owned discovery state/actions;
 - manual/already-connected shortcut selection uses the canonical app-owned registry/settings path;
-- overlapping manual full rescans are suppressed with a single-flight guard.
+- overlapping manual full rescans are suppressed with a single-flight guard;
+- telemetry now reconnects after transient offline failures with capped backoff and stale-target protection.
 
-Build #1128 is running for head `d04db9b2ca9eb9bf76e8d51288830241038fe50e`. Do not treat A-025 as CI-validated until this run succeeds.
+A fresh CI run is expected for the latest reconnect/test head. Do not treat A-025/A-026 as CI-validated until that run succeeds.
 
 ## Next immediate blocks
 1. Check CI for the latest head and fix the exact failing job first if red.
