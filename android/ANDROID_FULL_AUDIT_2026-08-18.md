@@ -79,6 +79,12 @@ Before a WebSocket exists, URL parsing, certificate-pin validation or client con
 
 Fix: connect setup is contained inside `TelemetrySocket`; synchronous setup failures now move the socket to `OFFLINE` instead of escaping. Tests cover malformed URL and invalid certificate pin. Build #1146 passed on head `b9f31a0a4e7052daf709a052471f26d3e62f0523`.
 
+#### A-028 — Invalid manual IP closed provisioning despite failed validation — FIXED ON AUDIT BRANCH
+File:
+- `android/app/src/main/java/ua/homeguard/s3/MainActivity.kt`
+
+The provisioning callback previously set `provisioningOpen=false` unconditionally after calling `addManualDevice()`. If address validation rejected the IP, the device was not added but the provisioning screen still closed. The close transition now lives only in the successful canonical `addManualDevice()` path, after validation and registry/settings update.
+
 ### MEDIUM
 
 #### A-004 — MainActivity is an orchestration god-object — OPEN
@@ -122,21 +128,22 @@ Removed `activeStore` and static registry mutation helpers. `ProvisioningCoordin
 - Build #1146 passed after A-027 telemetry setup-failure containment and tests.
 
 ## Current execution status
-Latest code head before this register update: `774726a80d8947a031b2b73d6766e2bd6c13d0a6`.
+Latest code head before this register update: `4c1af111e6324da8eb6936993eed4e6a5360364e`.
 
 Latest pass:
-- confirmed Build #1146 success on previous audit head `b9f31a0a4e7052daf709a052471f26d3e62f0523`;
-- closed the remaining hole in A-022: stale discovery expiry is now time-driven, not dependent on a future source emission;
-- changed only `LocalDiscoveryCoordinator.kt` for this behavioral fix; no new runtime/coordinator/store was introduced.
+- Build #1148 showed Android APK/tests green but failed the host discovery contract because that script matched the old literal three-input `combine(...)` form; the product code now correctly has a fourth freshness-clock input;
+- updated `tools/check_android_discovery_contract.py` to verify that the actual `devices` combine contains mDNS + UDP + HTTP regardless of additional inputs, rather than matching one formatting string;
+- found and fixed A-028 so invalid manual-IP input no longer closes provisioning;
+- no new runtime/store/coordinator was introduced.
 
-CI for the newest A-022 clock-tick head is pending and must pass before this specific change is considered fully validated.
+Build #1150 is pending on the latest code head. Do not mark the newest A-022/A-028 changes CI-validated until it succeeds.
 
 ## Next immediate blocks
-1. Check CI for the active-expiry change and fix any exact compile/test failure first if red.
+1. Check Build #1150 and fix the exact failing job first if red.
 2. Continue lifecycle review around NSD/network callbacks and repeated start/stop/reconnect paths.
 3. Audit `MainActivity` for removable orchestration chains without adding abstraction layers.
 4. Audit manifest/build/security surface, especially global cleartext and permission timing.
-5. Strengthen acceptance tests around restart, device switching, network loss/recovery and repeated user actions.
+5. Strengthen acceptance tests around restart, device switching, network loss/recovery, invalid inputs and repeated user actions.
 
 ## Audit rule
 Do not merge to `main` during discovery. Keep changes isolated on the audit branch and merge only verified minimal changes after CI and later phone validation.
