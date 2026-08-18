@@ -12,6 +12,9 @@ import ua.homeguard.s3.model.DiscoverySource
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
 
+internal fun isDiscoveryGenerationActive(started: Boolean, activeGeneration: Long, callbackGeneration: Long): Boolean =
+    started && activeGeneration == callbackGeneration
+
 class NsdDeviceDiscovery(context: Context) {
     companion object {
         const val SERVICE_TYPE = "_homeguard._tcp."
@@ -24,20 +27,20 @@ class NsdDeviceDiscovery(context: Context) {
     val devices: StateFlow<List<DiscoveredDevice>> = _devices.asStateFlow()
     @Volatile private var started = false
     @Volatile private var generation = 0L
+    @Volatile private var activeDiscoveryListener: NsdManager.DiscoveryListener? = null
 
-    private fun resolve(serviceInfo: NsdServiceInfo) {
-        // Resolve callbacks may arrive after stop(), or even after a later start(). Capture
-        // the current discovery generation so a callback from a previous run can never
-        // repopulate the new run with a stale endpoint.
-        val resolveGeneration = generation
+    private fun isActive(callbackGeneration: Long): Boolean =
+        isDiscoveryGenerationActive(started, generation, callbackGeneration)
+
+    private fun resolve(serviceInfo: NsdServiceInfo, resolveGeneration: Long) {
         val listener = object : NsdManager.ResolveListener {
             override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {
-                if (!started || generation != resolveGeneration) return
+                if (!isActive(resolveGeneration)) return
                 Log.w(TAG, "mDNS resolve failed: service=${info.serviceName} code=$errorCode")
             }
 
             override fun onServiceResolved(info: NsdServiceInfo) {
-                if (!started || generation != resolveGeneration) return
+                if (!isActive(resolveGeneration)) return
 
                 val attributes = info.attributes
                 fun attribute(name: String): String? = attributes[name]?.toString(StandardCharsets.UTF_8)
@@ -62,7 +65,7 @@ class NsdDeviceDiscovery(context: Context) {
                     port = info.port,
                     secure = secure,
                     apiVersion = apiVersion,
-                    source = DiscoverySource.MDNS
+                    source = DiscoverySource.MDNS,
                 )
                 Log.i(TAG, "HomeGuard mDNS found: id=$deviceId host=$host port=${info.port}")
                 publish()
@@ -73,52 +76,76 @@ class NsdDeviceDiscovery(context: Context) {
         nsd.resolveService(serviceInfo, listener)
     }
 
-    private val discoveryListener = object : NsdManager.DiscoveryListener {
-        override fun onDiscoveryStarted(serviceType: String) {
-            Log.d(TAG, "mDNS discovery started: $serviceType")
-        }
+    private fun discoveryListener(runGeneration: Long): NsdManager.DiscoveryListener =
+        object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(serviceType: String) {
+                if (!isActive(runGeneration)) return
+                Log.d(TAG, "mDNS discovery started: $serviceType")
+            }
 
-        override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-            Log.w(TAG, "mDNS discovery start failed: type=$serviceType code=$errorCode")
-            stop()
-        }
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+                if (!isActive(runGeneration)) return
+                Log.w(TAG, "mDNS discovery start failed: type=$serviceType code=$errorCode")
+                failRun(runGeneration, this)
+            }
 
-        override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
-            Log.w(TAG, "mDNS discovery stop failed: type=$serviceType code=$errorCode")
-        }
+            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
+                Log.w(TAG, "mDNS discovery stop failed: type=$serviceType code=$errorCode")
+            }
 
-        override fun onDiscoveryStopped(serviceType: String) {
-            Log.d(TAG, "mDNS discovery stopped: $serviceType")
-        }
+            override fun onDiscoveryStopped(serviceType: String) {
+                Log.d(TAG, "mDNS discovery stopped: $serviceType")
+            }
 
-        override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-            if (!started) return
-            if (serviceInfo.serviceType.startsWith("_homeguard._tcp")) {
-                Log.d(TAG, "mDNS service announced: ${serviceInfo.serviceName}")
-                resolve(serviceInfo)
+            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                if (!isActive(runGeneration)) return
+                if (serviceInfo.serviceType.startsWith("_homeguard._tcp")) {
+                    Log.d(TAG, "mDNS service announced: ${serviceInfo.serviceName}")
+                    resolve(serviceInfo, runGeneration)
+                }
+            }
+
+            override fun onServiceLost(serviceInfo: NsdServiceInfo) {
+                // The platform can deliver a callback from the previous discovery run
+                // after stop()->start(). Bind lost/found callbacks to their own run so an
+                // old lost event cannot delete a freshly resolved endpoint.
+                if (!isActive(runGeneration)) return
+                val keys = found.filterValues { it.serviceName == serviceInfo.serviceName }.keys
+                keys.forEach(found::remove)
+                if (keys.isNotEmpty()) {
+                    Log.d(TAG, "mDNS service lost: ${serviceInfo.serviceName}")
+                }
+                publish()
             }
         }
 
-        override fun onServiceLost(serviceInfo: NsdServiceInfo) {
-            val keys = found.filterValues { it.serviceName == serviceInfo.serviceName }.keys
-            keys.forEach(found::remove)
-            if (keys.isNotEmpty()) {
-                Log.d(TAG, "mDNS service lost: ${serviceInfo.serviceName}")
-            }
-            publish()
-        }
+    @Synchronized
+    private fun failRun(runGeneration: Long, listener: NsdManager.DiscoveryListener) {
+        if (!isDiscoveryGenerationActive(started, generation, runGeneration)) return
+        if (activeDiscoveryListener !== listener) return
+        started = false
+        generation += 1
+        activeDiscoveryListener = null
+        runCatching { nsd.stopServiceDiscovery(listener) }
+            .onFailure { Log.w(TAG, "Unable to clean up failed mDNS discovery", it) }
     }
 
     @Synchronized
     fun start() {
         if (started) return
         generation += 1
+        val runGeneration = generation
+        val listener = discoveryListener(runGeneration)
+        activeDiscoveryListener = listener
         started = true
         runCatching {
-            nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+            nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
         }.onFailure { error ->
-            started = false
-            generation += 1
+            if (generation == runGeneration && activeDiscoveryListener === listener) {
+                started = false
+                generation += 1
+                activeDiscoveryListener = null
+            }
             Log.w(TAG, "Unable to start mDNS discovery", error)
         }
     }
@@ -126,10 +153,14 @@ class NsdDeviceDiscovery(context: Context) {
     @Synchronized
     fun stop() {
         if (!started) return
+        val listener = activeDiscoveryListener
         started = false
         generation += 1
-        runCatching { nsd.stopServiceDiscovery(discoveryListener) }
-            .onFailure { Log.w(TAG, "Unable to stop mDNS discovery", it) }
+        activeDiscoveryListener = null
+        if (listener != null) {
+            runCatching { nsd.stopServiceDiscovery(listener) }
+                .onFailure { Log.w(TAG, "Unable to stop mDNS discovery", it) }
+        }
     }
 
     private fun publish() {
