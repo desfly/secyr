@@ -15,6 +15,7 @@ import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.model.sameEventIdentity
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 enum class TelemetryConnectionState { IDLE, CONNECTING, CONNECTED, UNAUTHORIZED, OFFLINE }
 
@@ -26,6 +27,9 @@ internal fun mergeTelemetryEvent(
     if (history.any { it.sameEventIdentity(event) }) return history to false
     return (listOf(event) + history).take(maxEvents.coerceAtLeast(0)) to true
 }
+
+internal fun isCurrentTelemetryGeneration(callbackGeneration: Long, activeGeneration: Long): Boolean =
+    callbackGeneration == activeGeneration
 
 class TelemetrySocket {
     companion object {
@@ -41,7 +45,8 @@ class TelemetrySocket {
     // processes it; duplicate identities are filtered before enqueueing.
     private val liveEventQueue = Channel<SystemEventRecord>(Channel.UNLIMITED)
     private val connectionState = MutableStateFlow(TelemetryConnectionState.IDLE)
-    private var socket: WebSocket? = null
+    private val generation = AtomicLong(0L)
+    @Volatile private var socket: WebSocket? = null
 
     fun snapshots(): Flow<SystemSnapshot> = state
     fun events(): Flow<List<SystemEventRecord>> = eventState
@@ -63,6 +68,8 @@ class TelemetrySocket {
     fun connect(url: String, token: String, certificateSha256: String = "", controllerId: String = "") {
         disconnect()
         if (url.isBlank()) return
+
+        val connectGeneration = generation.incrementAndGet()
         connectionState.value = TelemetryConnectionState.CONNECTING
 
         val newSocket = runCatching {
@@ -73,33 +80,44 @@ class TelemetrySocket {
             val request = Request.Builder().url(url).apply {
                 if (token.isNotBlank()) header("Authorization", "Bearer $token")
             }.build()
-            client.newWebSocket(request, listener(controllerId.trim()))
+            client.newWebSocket(request, listener(controllerId.trim(), connectGeneration))
         }.getOrElse {
-            state.value = SystemSnapshot()
-            connectionState.value = TelemetryConnectionState.OFFLINE
+            if (isCurrentTelemetryGeneration(connectGeneration, generation.get())) {
+                state.value = SystemSnapshot()
+                connectionState.value = TelemetryConnectionState.OFFLINE
+            }
             return
         }
 
-        socket = newSocket
+        if (isCurrentTelemetryGeneration(connectGeneration, generation.get()) &&
+            connectionState.value != TelemetryConnectionState.OFFLINE &&
+            connectionState.value != TelemetryConnectionState.UNAUTHORIZED
+        ) {
+            socket = newSocket
+        } else {
+            newSocket.cancel()
+        }
     }
 
     fun disconnect() {
-        socket?.close(1000, "client disconnect")
+        generation.incrementAndGet()
+        val oldSocket = socket
         socket = null
+        oldSocket?.close(1000, "client disconnect")
         state.value = SystemSnapshot()
         connectionState.value = TelemetryConnectionState.IDLE
     }
 
-    private fun listener(controllerId: String) = object : WebSocketListener() {
+    private fun listener(controllerId: String, callbackGeneration: Long) = object : WebSocketListener() {
+        private fun active(): Boolean =
+            isCurrentTelemetryGeneration(callbackGeneration, generation.get())
+
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            if (socket === webSocket) connectionState.value = TelemetryConnectionState.CONNECTED
+            if (active()) connectionState.value = TelemetryConnectionState.CONNECTED
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            // A close/reconnect is asynchronous. A frame from the previous
-            // controller can still arrive after socket has already been replaced.
-            // Never let stale telemetry overwrite the newly selected device state.
-            if (socket !== webSocket) return
+            if (!active()) return
             connectionState.value = TelemetryConnectionState.CONNECTED
             runCatching {
                 val json = JSONObject(text)
@@ -124,26 +142,24 @@ class TelemetrySocket {
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            if (socket === webSocket) {
-                socket = null
-                state.value = SystemSnapshot()
-                connectionState.value = if (response?.code == 401 || response?.code == 403) {
-                    TelemetryConnectionState.UNAUTHORIZED
-                } else {
-                    TelemetryConnectionState.OFFLINE
-                }
+            if (!active()) return
+            socket = null
+            state.value = SystemSnapshot()
+            connectionState.value = if (response?.code == 401 || response?.code == 403) {
+                TelemetryConnectionState.UNAUTHORIZED
+            } else {
+                TelemetryConnectionState.OFFLINE
             }
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            if (socket === webSocket) {
-                socket = null
-                state.value = SystemSnapshot()
-                connectionState.value = if (code == 1008 || reason.contains("unauthor", true) || reason.contains("forbidden", true)) {
-                    TelemetryConnectionState.UNAUTHORIZED
-                } else {
-                    TelemetryConnectionState.OFFLINE
-                }
+            if (!active()) return
+            socket = null
+            state.value = SystemSnapshot()
+            connectionState.value = if (code == 1008 || reason.contains("unauthor", true) || reason.contains("forbidden", true)) {
+                TelemetryConnectionState.UNAUTHORIZED
+            } else {
+                TelemetryConnectionState.OFFLINE
             }
         }
     }
