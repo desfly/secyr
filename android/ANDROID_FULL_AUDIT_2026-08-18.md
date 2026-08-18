@@ -68,6 +68,14 @@ Already-connected/manual-IP paths require owner-friendly name and register befor
 #### A-024 — Setup AP cancellation could leave process bound to temporary Wi-Fi — FIXED
 Cancellation/terminal callback cleanup now unbinds and unregisters safely.
 
+#### A-025 — Rapid repeated manual scan could launch overlapping full discovery passes — FIXED ON AUDIT BRANCH
+File:
+- `android/app/src/main/java/ua/homeguard/s3/network/LocalDiscoveryCoordinator.kt`
+
+A fast double tap can invoke `rescan()` twice before Compose has time to render the disabled scanning button. Each call previously set the same `manualRescanActive` flag independently while running its own UDP+HTTP pass. One scan could finish first and clear the flag while another scan was still running, making the UI report a completed/idle scan while network work continued and allowing yet another scan to start.
+
+Fix: an atomic single-flight guard now accepts only one manual full scan at a time. Extra overlapping calls return immediately instead of queuing another full UDP+HTTP sweep. The active flag is cleared only by the owning scan in `finally`.
+
 ### MEDIUM
 
 #### A-004 — MainActivity is an orchestration god-object — OPEN
@@ -113,26 +121,28 @@ Removed `activeStore` and all static `markActive* / reconcileActive* / refreshAc
 - Build #1119 passed on head `d9dd97029301413d406a5f72ccea87e9fadbe816` before the runtime/bridge cleanup.
 
 ## Current execution status
-Latest code head before this register update: `471997e4cf86af77816d5857a2b457cf4c91abe2`.
+Current code head before this register update: `d04db9b2ca9eb9bf76e8d51288830241038fe50e`.
 
-Runtime/bridge cleanup performed in this pass:
-- `DeviceSession` now receives `RegisteredDeviceStore` explicitly;
-- `ProvisioningCoordinator` now receives `RegisteredDeviceStore` explicitly;
+Runtime/bridge/loop cleanup performed in the latest passes:
+- `DeviceSession` receives `RegisteredDeviceStore` explicitly;
+- `ProvisioningCoordinator` receives `RegisteredDeviceStore` explicitly;
+- `DeviceEndpointResolver` receives the same registry explicitly;
 - global `RegisteredDeviceStore.activeStore` bridge removed;
 - duplicate `ProvisioningScreen` discovery/settings runtime removed;
 - `Activity.recreate()` removed from provisioning selection;
-- provisioning screen now consumes MainActivity-owned discovery state/actions;
-- manual/already-connected shortcut selection uses the canonical app-owned registry/settings path.
+- provisioning screen consumes MainActivity-owned discovery state/actions;
+- manual/already-connected shortcut selection uses the canonical app-owned registry/settings path;
+- overlapping manual full rescans are suppressed with a single-flight guard.
 
-Build #1124 started for code head `471997e4cf86af77816d5857a2b457cf4c91abe2`; it was pending when this register was written. Do not treat the cleanup as CI-validated until the latest run succeeds.
+Build #1128 is running for head `d04db9b2ca9eb9bf76e8d51288830241038fe50e`. Do not treat A-025 as CI-validated until this run succeeds.
 
 ## Next immediate blocks
 1. Check CI for the latest head and fix the exact failing job first if red.
 2. Finish call-graph proof for the obsolete `ui/main + api/data/alarm` island, including tests, then delete atomically if proven dead.
-3. Continue lifecycle/coroutine review around NSD, network callbacks and telemetry.
+3. Continue lifecycle/coroutine review around NSD, network callbacks and telemetry, especially repeated start/stop/reconnect paths.
 4. Audit MainActivity for further removable orchestration chains before introducing any new abstraction.
 5. Audit manifest/build/security surface, especially global cleartext and permission timing.
-6. Strengthen acceptance tests around provisioning selection and one-controller-one-card behavior.
+6. Strengthen acceptance tests around provisioning selection, repeated scan taps and one-controller-one-card behavior.
 
 ## Audit rule
 Do not merge to `main` during discovery. Keep changes isolated on the audit branch and merge only verified minimal changes after CI and phone validation.
