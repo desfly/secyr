@@ -1,0 +1,3 @@
+HomeGuard-S3 CI artifact audit trigger.
+No runtime behavior changes.
+Created to obtain a traceable pull_request workflow run for artifact verification.
