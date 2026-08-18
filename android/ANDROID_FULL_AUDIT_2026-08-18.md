@@ -102,26 +102,50 @@ Files:
 
 Fix: QR/handoff and post-reboot discovery now trim and compare stable controller IDs case-insensitively. HTTPS scheme validation is also case-insensitive. The pure handoff test now proves a lower-case discovered ID still matches the QR identity.
 
-#### A-017 — Provisioning could bypass the owner-friendly-name registry contract — FIXED AT COORDINATOR LEVEL
+#### A-017 — Provisioning could bypass the owner-friendly-name registry contract — FIXED FOR QR PROVISIONING
 Files:
 - `android/app/src/main/java/ua/homeguard/s3/repository/ProvisioningCoordinator.kt`
 - `android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt`
+- `android/app/src/main/java/ua/homeguard/s3/ui/screens/ProvisioningScreen.kt`
 
-Previous flow accepted `ownerLabel` in the UI but did not require it and did not register the QR-provisioned controller in `RegisteredDeviceStore`. A successfully provisioned controller could therefore be selected in settings without a proper owner-named device card.
+Previous flow accepted `ownerLabel` in the UI but did not require it and did not register the QR-provisioned controller in `RegisteredDeviceStore`.
 
-Fix: provisioning now rejects a blank owner label, registers the stable QR device ID with the owner-provided name after the controller accepts configuration, and refreshes that registry entry with the discovered LAN endpoint after reboot. UI-side button gating remains a small follow-up.
+Fix: QR provisioning rejects a blank owner label, caps the UI value at 40 characters, disables the provision button until the owner enters a name, registers the stable QR device ID with that owner-provided name, and refreshes the registry entry with the discovered LAN endpoint after reboot.
 
 #### A-018 — ProvisioningScreen creates a second discovery/settings runtime inside Compose — OPEN
 File: `android/app/src/main/java/ua/homeguard/s3/ui/screens/ProvisioningScreen.kt`
 
-The top-level `ProvisioningScreen` constructs another `LocalDiscoveryCoordinator` and another `SettingsStore` even though `MainActivity` already owns the application discovery/settings runtime. This duplicates network work and can produce competing state/lifecycle behavior.
+The top-level `ProvisioningScreen` constructs another `LocalDiscoveryCoordinator` and another `SettingsStore` even though `MainActivity` already owns the application discovery/settings runtime. This duplicates network work and forces a full `Activity.recreate()` after local/manual selection just to make the primary `SettingsStore` observe the secondary store's write.
 
-Action: after behavior contracts are locked, pass the existing runtime state/actions into the screen and remove the screen-owned discovery/settings instances.
+Action: pass the existing runtime state/actions into the screen and remove the screen-owned discovery/settings instances.
 
 #### A-019 — HttpDeviceApi cancellation could race with OkHttp response delivery and leak Response — FIXED ON AUDIT BRANCH
 File: `android/app/src/main/java/ua/homeguard/s3/network/HttpDeviceApi.kt`
 
-Fix: `Call.await()` now uses atomic `tryResumeWithException` / `tryResume` + `completeResume`. If cancellation wins before response delivery, an unclaimed OkHttp `Response` is explicitly closed instead of relying on the caller's `.use` block.
+Fix: coroutine cancellation cancels the OkHttp call and public cancellable-continuation `resume(response) { ... }` closes a response that cannot be delivered to the caller. This avoids internal kotlinx.coroutines APIs and keeps the caller's `.use` ownership for successfully delivered responses.
+
+#### A-022 — Stale mDNS reports could keep a disappeared controller online indefinitely — FIXED ON AUDIT BRANCH
+Files:
+- `android/app/src/main/java/ua/homeguard/s3/network/LocalDiscoveryCoordinator.kt`
+- `android/app/src/test/java/ua/homeguard/s3/network/DiscoveryScanStatusTest.kt`
+
+`NsdDeviceDiscovery` only pruned its cache when another mDNS publish event occurred. If Android omitted `onServiceLost`, an old mDNS entry could remain in the combined device list indefinitely even though its `seenAtMs` was older than the intended 30-second lifetime.
+
+Fix: the coordinator filters all source reports by the common 30-second freshness window before transitive deduplication. The periodic UDP flow re-evaluates the combined list, so stale mDNS entries are removed even without another NSD callback. A boundary test covers fresh-vs-stale reports.
+
+#### A-023 — Provisioning “already on Wi-Fi” and manual-IP shortcuts still bypass the registry name contract — OPEN
+File: `android/app/src/main/java/ua/homeguard/s3/ui/screens/ProvisioningScreen.kt`
+
+The secondary provisioning screen still calls a screen-owned `SettingsStore.remember()` / `selectDevice()` for already-connected or manual-IP devices without first writing an owner-named `RegisteredDevice`. This can create a selected controller that has no normal device-list card/name.
+
+Action: eliminate the duplicate screen runtime (A-018) and route these shortcuts through the same application-level registry methods used by Add Device, requiring the owner name before selection.
+
+#### A-024 — Setup AP cancellation could leave the whole process bound to the temporary Wi-Fi network — FIXED ON AUDIT BRANCH
+File: `android/app/src/main/java/ua/homeguard/s3/provisioning/SetupNetworkConnector.kt`
+
+Previous `onAvailable()` bound the process to the Setup AP and then resumed the coroutine after an `isActive` check. Cancellation could win between the check and resume, leaving the result unclaimed while the process remained bound to the temporary network. Repeated terminal callbacks could also race.
+
+Fix: terminal callback delivery is guarded by `AtomicBoolean`; cancelled/unclaimed `BoundSetupNetwork` values close themselves through the cancellable `resume` callback; cancellation before delivery unregisters the network callback; bind failures close/unregister before propagating the exception.
 
 ### MEDIUM
 
@@ -177,6 +201,7 @@ The existing static `activeStore` bridge is now also used by the minimal provisi
 - `RegisteredDeviceStore.addOrUpdate()` refuses first save without a nonblank owner-provided friendly name.
 - `DeviceListScreen` supports rename, delete, properties, red unauthorized state, single-tap expansion and double-tap opening.
 - Factory Reset request already requires explicit `ERASE_ALL` at the API client layer.
+- Build #1109 passed after correcting the prior audit-branch compile regressions; later audit commits must still pass their own CI before they are considered validated.
 
 ## Current execution status
 Completed in the active audit branch:
@@ -184,6 +209,7 @@ Completed in the active audit branch:
 - first-run credential storage hardening + legacy migration;
 - discovery deduplication redesign + tests;
 - real UDP+HTTP search progress + stale HTTP result clearing + tests;
+- aggregate 30-second stale discovery expiry + test;
 - duplicate result counter removal;
 - compact Bruce header / oversized Bruce removal;
 - stale telemetry isolation;
@@ -191,20 +217,21 @@ Completed in the active audit branch:
 - selected-ID normalization;
 - device-bound API/telemetry secret policy + tests;
 - provisioning ID normalization + test;
-- provisioning owner-friendly-name registration path;
+- QR provisioning owner-friendly-name registration + UI gating;
 - legacy unnamed-device recovery prompt;
 - Add Device demoted from a primary full-width action to a secondary entry;
 - Device List picon/UNKNOWN/narrow-layout correction;
-- cancellation-safe OkHttp coroutine bridge.
+- cancellation-safe OkHttp coroutine bridge;
+- cancellation-safe Setup AP network binding handoff.
 
 Next immediate blocks:
-1. finish CI for the latest device-list/OkHttp changes and fix any exact failure first;
-2. UI-side ownerLabel gating in provisioning;
-3. lifecycle/coroutine review, including duplicate ProvisioningScreen runtime;
+1. validate the latest owner-name/discovery/setup-network changes in CI and fix any exact failure first;
+2. remove the duplicate `ProvisioningScreen` discovery/settings runtime and close the already-connected/manual registry bypass;
+3. continue lifecycle/coroutine review for NSD, network requests, telemetry and Activity transitions;
 4. MainActivity decomposition plan;
 5. dead/duplicate architecture and PR #51 comparison;
-6. manifest/build/security-surface review;
-7. add/strengthen acceptance gates for the newly fixed Device List rules.
+6. manifest/build/security-surface review, especially global cleartext and permission timing;
+7. add/strengthen acceptance gates for the newly fixed Device List and provisioning rules.
 
 ## Audit rule
 Do not merge to `main` during discovery. Keep changes isolated on the audit branch, run CI continuously, and only later split/merge verified minimal changes.
