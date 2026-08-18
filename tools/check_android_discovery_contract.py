@@ -16,6 +16,11 @@ devices_combine = re.search(
 )
 devices_combine_inputs = devices_combine.group(1) if devices_combine else ""
 
+independent_resolve_function = re.search(
+    r"private\s+fun\s+resolve\(\s*serviceInfo\s*:\s*NsdServiceInfo(?:\s*,\s*\w+\s*:\s*Long)?\s*\)",
+    nsd,
+) is not None
+
 checks = {
     "UDP discovery port": "const val PORT = 45678" in udp,
     "UDP request token": 'const val REQUEST = "HG_DISCOVER_V1"' in udp,
@@ -26,7 +31,7 @@ checks = {
     "UDP diagnostics counters": all(token in udp for token in ("sent: Int", "received: Int", "accepted: Int", "lastResponder: String", "network: String", "error: String")),
     "mDNS service type": 'SERVICE_TYPE = "_homeguard._tcp."' in nsd,
     "mDNS concrete IP preference": "info.host?.hostAddress" in nsd,
-    "mDNS independent resolver": "private fun resolve(serviceInfo: NsdServiceInfo)" in nsd and "val listener = object : NsdManager.ResolveListener" in nsd,
+    "mDNS independent resolver": independent_resolve_function and "val listener = object : NsdManager.ResolveListener" in nsd,
     "mDNS shared resolver removed": "private val resolveListener" not in nsd,
     "HTTP subnet discovery source": "class HttpSubnetDiscovery" in http,
     "HTTP HomeGuard identity endpoint": "/api/v1/cloud/status" in http,
