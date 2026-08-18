@@ -1,0 +1,2 @@
+HomeGuard-S3 CI artifact audit marker.
+Runtime source is identical to current main plus this non-runtime marker.
