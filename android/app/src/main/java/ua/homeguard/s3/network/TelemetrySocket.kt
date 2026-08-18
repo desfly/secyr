@@ -16,6 +16,15 @@ import java.util.concurrent.TimeUnit
 
 enum class TelemetryConnectionState { IDLE, CONNECTING, CONNECTED, UNAUTHORIZED, OFFLINE }
 
+internal fun mergeTelemetryEvent(
+    history: List<SystemEventRecord>,
+    event: SystemEventRecord,
+    maxEvents: Int = 256,
+): Pair<List<SystemEventRecord>, Boolean> {
+    if (history.any { it.sequence == event.sequence }) return history to false
+    return (listOf(event) + history).take(maxEvents.coerceAtLeast(0)) to true
+}
+
 class TelemetrySocket {
     companion object {
         private const val MAX_EVENT_HISTORY = 256
@@ -87,8 +96,11 @@ class TelemetrySocket {
                         sequence = json.optLong("sequence", 0), timestampMs = json.optLong("timestampMs", 0),
                         event = json.optString("event", "unknown"), sourceId = json.optInt("sourceId", 0), value = json.optInt("value", 0),
                     )
-                    eventState.value = (listOf(item) + eventState.value).distinctBy { it.sequence }.take(MAX_EVENT_HISTORY)
-                    liveEventState.tryEmit(item)
+                    val (updatedEvents, added) = mergeTelemetryEvent(eventState.value, item, MAX_EVENT_HISTORY)
+                    if (added) {
+                        eventState.value = updatedEvents
+                        liveEventState.tryEmit(item)
+                    }
                 } else {
                     state.value = JsonParsers.snapshot(json)
                 }
