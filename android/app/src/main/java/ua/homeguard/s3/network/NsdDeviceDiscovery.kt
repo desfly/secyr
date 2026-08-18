@@ -23,19 +23,21 @@ class NsdDeviceDiscovery(context: Context) {
     private val _devices = MutableStateFlow<List<DiscoveredDevice>>(emptyList())
     val devices: StateFlow<List<DiscoveredDevice>> = _devices.asStateFlow()
     @Volatile private var started = false
+    @Volatile private var generation = 0L
 
     private fun resolve(serviceInfo: NsdServiceInfo) {
-        // A ResolveListener represents one in-flight NSD resolve operation. Reusing the
-        // same listener for multiple services can trigger FAILURE_ALREADY_ACTIVE on
-        // Android implementations when announcements arrive close together.
+        // Resolve callbacks may arrive after stop(), or even after a later start(). Capture
+        // the current discovery generation so a callback from a previous run can never
+        // repopulate the new run with a stale endpoint.
+        val resolveGeneration = generation
         val listener = object : NsdManager.ResolveListener {
             override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {
-                if (!started) return
+                if (!started || generation != resolveGeneration) return
                 Log.w(TAG, "mDNS resolve failed: service=${info.serviceName} code=$errorCode")
             }
 
             override fun onServiceResolved(info: NsdServiceInfo) {
-                if (!started) return
+                if (!started || generation != resolveGeneration) return
 
                 val attributes = info.attributes
                 fun attribute(name: String): String? = attributes[name]?.toString(StandardCharsets.UTF_8)
@@ -110,11 +112,13 @@ class NsdDeviceDiscovery(context: Context) {
     @Synchronized
     fun start() {
         if (started) return
+        generation += 1
         started = true
         runCatching {
             nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
         }.onFailure { error ->
             started = false
+            generation += 1
             Log.w(TAG, "Unable to start mDNS discovery", error)
         }
     }
@@ -123,6 +127,7 @@ class NsdDeviceDiscovery(context: Context) {
     fun stop() {
         if (!started) return
         started = false
+        generation += 1
         runCatching { nsd.stopServiceDiscovery(discoveryListener) }
             .onFailure { Log.w(TAG, "Unable to stop mDNS discovery", it) }
     }
