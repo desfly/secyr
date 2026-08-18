@@ -4,11 +4,11 @@
 #include "hg_rgb_diagnostic.hpp"
 #include "homeguard/reset_sequence.hpp"
 
-#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs.h"
 
 #include <cstdint>
 
@@ -16,77 +16,148 @@ namespace homeguard::idf {
 namespace {
 
 constexpr const char* kTag = "hg_rst_sequence";
-constexpr std::uint32_t kMagic = 0x48524733U;  // "HRG3"
+constexpr const char* kNvsNamespace = "hg_rstseq";
+constexpr const char* kNvsCountKey = "count";
 constexpr std::uint8_t kRequiredPresses = 3U;
 constexpr TickType_t kSequenceWindowTicks = pdMS_TO_TICKS(4500);
 constexpr int kResetRgbGpio = 48;
 constexpr unsigned kResetWhiteMs = 5000U;
 
-RTC_NOINIT_ATTR std::uint32_t g_reset_magic;
-RTC_NOINIT_ATTR std::uint8_t g_external_reset_count;
+esp_err_t load_sequence_count(std::uint8_t& count) {
+    count = 0U;
+    nvs_handle_t handle{};
+    const auto open_error = nvs_open(kNvsNamespace, NVS_READONLY, &handle);
+    if (open_error == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (open_error != ESP_OK) return open_error;
+
+    auto error = nvs_get_u8(handle, kNvsCountKey, &count);
+    nvs_close(handle);
+    if (error == ESP_ERR_NVS_NOT_FOUND) {
+        count = 0U;
+        return ESP_OK;
+    }
+    return error;
+}
+
+esp_err_t store_sequence_count(std::uint8_t count) {
+    nvs_handle_t handle{};
+    auto error = nvs_open(kNvsNamespace, NVS_READWRITE, &handle);
+    if (error != ESP_OK) return error;
+
+    if (count == 0U) {
+        error = nvs_erase_key(handle, kNvsCountKey);
+        if (error == ESP_ERR_NVS_NOT_FOUND) error = ESP_OK;
+    } else {
+        error = nvs_set_u8(handle, kNvsCountKey, count);
+    }
+
+    if (error == ESP_OK) error = nvs_commit(handle);
+    nvs_close(handle);
+    return error;
+}
 
 void clear_sequence_after_window(void*) {
     vTaskDelay(kSequenceWindowTicks);
-    g_reset_magic = kMagic;
-    g_external_reset_count = 0U;
+    const auto error = store_sequence_count(0U);
+    if (error == ESP_OK) {
+        ESP_LOGI(kTag, "RST sequence window expired; NVS counter cleared");
+    } else {
+        ESP_LOGE(kTag, "Cannot clear RST sequence counter: %s", esp_err_to_name(error));
+    }
     vTaskDelete(nullptr);
 }
 
-void reset_sequence_state() {
-    g_reset_magic = kMagic;
-    g_external_reset_count = 0U;
+bool arm_sequence_expiry_task() {
+    if (xTaskCreate(
+            &clear_sequence_after_window,
+            "hg_rst_window",
+            1536,
+            nullptr,
+            3,
+            nullptr) == pdPASS) {
+        return true;
+    }
+
+    const auto clear_error = store_sequence_count(0U);
+    ESP_LOGE(kTag,
+             "Cannot arm triple-RST expiry window; sequence cancelled%s%s",
+             clear_error == ESP_OK ? "" : ": ",
+             clear_error == ESP_OK ? "" : esp_err_to_name(clear_error));
+    return false;
 }
 
 }  // namespace
 
 bool handle_triple_rst_factory_reset() {
-    const bool rtc_state_was_valid = g_reset_magic == kMagic;
-    if (!rtc_state_was_valid) reset_sequence_state();
-
     const auto reason = esp_reset_reason();
-    const bool reset_press = hg::reset_press_detected(
-        rtc_state_was_valid,
+    const bool physical_reset = hg::physical_reset_candidate(
         reason == ESP_RST_EXT,
         reason == ESP_RST_POWERON);
 
-    const auto step = hg::advance_reset_sequence(
-        g_external_reset_count,
-        reset_press,
-        kRequiredPresses);
-    g_external_reset_count = step.count;
-
-    if (!step.trigger_factory_reset) {
-        if (g_external_reset_count == 0U) {
-            ESP_LOGI(kTag,
-                     "Reset reason=%d ignored; RST sequence cleared",
-                     static_cast<int>(reason));
-            return false;
-        }
-
-        ESP_LOGW(kTag, "Physical RST sequence: %u/%u (reason=%d)",
-                 static_cast<unsigned>(g_external_reset_count),
-                 static_cast<unsigned>(kRequiredPresses),
-                 static_cast<int>(reason));
-        if (xTaskCreate(
-                &clear_sequence_after_window,
-                "hg_rst_window",
-                1536,
-                nullptr,
-                3,
-                nullptr) != pdPASS) {
-            reset_sequence_state();
-            ESP_LOGE(kTag, "Cannot arm triple-RST expiry window; sequence cancelled");
-        }
+    std::uint8_t previous_count = 0U;
+    const auto load_error = load_sequence_count(previous_count);
+    if (load_error != ESP_OK) {
+        ESP_LOGE(kTag,
+                 "Cannot load RST sequence counter; ignoring reset sequence: %s",
+                 esp_err_to_name(load_error));
         return false;
     }
 
-    // Consume before feedback/erasing so a reset during flash operations cannot loop.
-    reset_sequence_state();
-    ESP_LOGW(kTag, "Triple RST detected: erasing mutable HomeGuard state");
+    if (!physical_reset) {
+        if (previous_count != 0U) {
+            const auto clear_error = store_sequence_count(0U);
+            if (clear_error != ESP_OK) {
+                ESP_LOGE(kTag,
+                         "Cannot clear stale RST sequence after reset reason=%d: %s",
+                         static_cast<int>(reason),
+                         esp_err_to_name(clear_error));
+            }
+        }
+        ESP_LOGI(kTag,
+                 "Reset reason=%d is not a physical RST candidate; sequence cleared",
+                 static_cast<int>(reason));
+        return false;
+    }
 
-    // Confirm the destructive reset locally. GPIO48 is the confirmed onboard
-    // WS2812 on this HomeGuard-S3 board. Failure to light must never block the
-    // actual factory reset.
+    const auto step = hg::advance_reset_sequence(
+        previous_count,
+        true,
+        kRequiredPresses);
+
+    if (!step.trigger_factory_reset) {
+        const auto save_error = store_sequence_count(step.count);
+        if (save_error != ESP_OK) {
+            ESP_LOGE(kTag,
+                     "Cannot persist physical RST sequence %u/%u: %s",
+                     static_cast<unsigned>(step.count),
+                     static_cast<unsigned>(kRequiredPresses),
+                     esp_err_to_name(save_error));
+            return false;
+        }
+
+        ESP_LOGW(kTag,
+                 "Physical RST sequence: %u/%u (reason=%d, persisted in NVS)",
+                 static_cast<unsigned>(step.count),
+                 static_cast<unsigned>(kRequiredPresses),
+                 static_cast<int>(reason));
+        arm_sequence_expiry_task();
+        return false;
+    }
+
+    // Consume the sequence before any destructive work so an interruption
+    // during LED feedback or flash erasure cannot re-trigger on the next boot.
+    const auto clear_error = store_sequence_count(0U);
+    if (clear_error != ESP_OK) {
+        ESP_LOGE(kTag,
+                 "Triple RST detected but sequence counter cannot be cleared; Factory Reset cancelled: %s",
+                 esp_err_to_name(clear_error));
+        return false;
+    }
+
+    ESP_LOGW(kTag, "Triple RST detected: WHITE RGB for 5 seconds before Factory Reset");
+
+    // GPIO48 is the confirmed onboard WS2812 on this HomeGuard-S3 board.
+    // LED failure is logged but must not block the requested Factory Reset.
     const auto rgb_error = RgbDiagnostic::test_white(kResetRgbGpio, kResetWhiteMs);
     if (rgb_error != ESP_OK) {
         ESP_LOGE(kTag, "Factory-reset white RGB feedback failed: %s", esp_err_to_name(rgb_error));
