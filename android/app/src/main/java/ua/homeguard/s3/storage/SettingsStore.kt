@@ -5,6 +5,30 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.provisioning.SecureTokenStore
 
+internal data class DeviceBoundSecrets(
+    val apiToken: String,
+    val telemetryToken: String,
+)
+
+internal fun normalizeDeviceBoundSecrets(current: AppSettings, incoming: AppSettings): DeviceBoundSecrets {
+    val deviceChanged = !current.deviceId.equals(incoming.deviceId, ignoreCase = true)
+    if (!deviceChanged) {
+        return DeviceBoundSecrets(
+            apiToken = incoming.apiToken.ifBlank { current.apiToken },
+            telemetryToken = incoming.telemetryToken.ifBlank { current.telemetryToken },
+        )
+    }
+
+    // API/telemetry tokens are controller-bound. A normal selection change is built
+    // from current.copy(...), so carrying the same secret value into another device
+    // is stale credential reuse and must be cleared. Provisioning is allowed to set a
+    // genuinely new non-empty token while changing the selected device.
+    return DeviceBoundSecrets(
+        apiToken = incoming.apiToken.takeIf { it.isNotBlank() && it != current.apiToken }.orEmpty(),
+        telemetryToken = incoming.telemetryToken.takeIf { it.isNotBlank() && it != current.telemetryToken }.orEmpty(),
+    )
+}
+
 class SettingsStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences("homeguard_settings", Context.MODE_PRIVATE)
     private val secure = SecureTokenStore(context)
@@ -12,7 +36,8 @@ class SettingsStore(context: Context) {
 
     suspend fun update(value: AppSettings) {
         val current = settings.value
-        val normalized = if (current.deviceId != value.deviceId) {
+        val secrets = normalizeDeviceBoundSecrets(current, value)
+        val normalized = if (!current.deviceId.equals(value.deviceId, ignoreCase = true)) {
             val selection = DeviceSelectionPolicy.select(
                 currentDeviceId = current.deviceId,
                 currentLocalUrl = current.lastKnownLocalUrl,
@@ -24,9 +49,14 @@ class SettingsStore(context: Context) {
                 deviceId = selection.deviceId,
                 lastKnownLocalUrl = selection.lastKnownLocalUrl,
                 localCertificateSha256 = selection.localCertificateSha256,
+                apiToken = secrets.apiToken,
+                telemetryToken = secrets.telemetryToken,
             )
         } else {
-            value
+            value.copy(
+                apiToken = secrets.apiToken,
+                telemetryToken = secrets.telemetryToken,
+            )
         }
 
         preferences.edit()
