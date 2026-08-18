@@ -1,8 +1,8 @@
 package ua.homeguard.s3.storage
 
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertSame
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
+import org.junit.Test
 import ua.homeguard.s3.model.SystemEventRecord
 
 class EventHistoryMergeTest {
