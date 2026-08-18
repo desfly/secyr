@@ -3,12 +3,14 @@ package ua.homeguard.s3.repository
 import android.content.Context
 import android.util.Base64
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import ua.homeguard.s3.model.DiscoveredDevice
@@ -142,22 +144,30 @@ class ProvisioningCoordinator(
         }
     }
 
-    private suspend fun awaitLocalDevice(deviceId: String, timeoutMs: Long): DiscoveredDevice {
-        discovery.stop()
-        discovery.start()
-        discovery.rescan()
-        return withTimeout(timeoutMs) {
-            discovery.devices
-                .map { devices ->
-                    devices.firstOrNull {
-                        it.deviceId.trim().equals(deviceId.trim(), ignoreCase = true) &&
-                            it.secure && !it.pairingRequired
+    private suspend fun awaitLocalDevice(deviceId: String, timeoutMs: Long): DiscoveredDevice =
+        withTimeout(timeoutMs) {
+            coroutineScope {
+                val scanJob = launch {
+                    while (isActive) {
+                        discovery.rescan()
+                        delay(5_000L)
                     }
                 }
-                .filterNotNull()
-                .first()
+                try {
+                    discovery.devices
+                        .map { devices ->
+                            devices.firstOrNull {
+                                it.deviceId.trim().equals(deviceId.trim(), ignoreCase = true) &&
+                                    it.secure && !it.pairingRequired
+                            }
+                        }
+                        .filterNotNull()
+                        .first()
+                } finally {
+                    scanJob.cancel()
+                }
+            }
         }
-    }
 
     private fun randomToken(): String {
         val bytes = ByteArray(48).also(SecureRandom()::nextBytes)
