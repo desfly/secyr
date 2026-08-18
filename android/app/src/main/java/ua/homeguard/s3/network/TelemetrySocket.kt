@@ -1,10 +1,11 @@
 package ua.homeguard.s3.network
 
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -34,13 +35,17 @@ class TelemetrySocket {
 
     private val state = MutableStateFlow(SystemSnapshot())
     private val eventState = MutableStateFlow<List<SystemEventRecord>>(emptyList())
-    private val liveEventState = MutableSharedFlow<SystemEventRecord>(extraBufferCapacity = 16)
+    // Exactly one app-owned consumer persists events and emits notifications. The old
+    // SharedFlow buffer could silently lose bursts beyond 16 events because tryEmit()
+    // was unchecked. This queue preserves every accepted event until that consumer
+    // processes it; duplicate identities are filtered before enqueueing.
+    private val liveEventQueue = Channel<SystemEventRecord>(Channel.UNLIMITED)
     private val connectionState = MutableStateFlow(TelemetryConnectionState.IDLE)
     private var socket: WebSocket? = null
 
     fun snapshots(): Flow<SystemSnapshot> = state
     fun events(): Flow<List<SystemEventRecord>> = eventState
-    fun liveEvents(): Flow<SystemEventRecord> = liveEventState
+    fun liveEvents(): Flow<SystemEventRecord> = liveEventQueue.receiveAsFlow()
     fun connection(): StateFlow<TelemetryConnectionState> = connectionState.asStateFlow()
 
     fun seedEvents(events: List<SystemEventRecord>) {
@@ -110,7 +115,7 @@ class TelemetrySocket {
                     val (updatedEvents, added) = mergeTelemetryEvent(eventState.value, item, MAX_EVENT_HISTORY)
                     if (added) {
                         eventState.value = updatedEvents
-                        liveEventState.tryEmit(item)
+                        liveEventQueue.trySend(item).getOrThrow()
                     }
                 } else {
                     state.value = JsonParsers.snapshot(json)
