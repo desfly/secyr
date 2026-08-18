@@ -28,10 +28,14 @@ data class AccessSession(
     val name: String,
     val role: AccessRole,
     val capabilities: AccessCapabilities,
+    val controllerId: String = "",
 ) {
     fun allows(command: CommandType): Boolean = when (role) {
         AccessRole.ADMIN -> true
         AccessRole.USER -> capabilities.allowsOperatorCommand(command)
         AccessRole.GUEST -> false
     }
+
+    fun belongsTo(deviceId: String): Boolean =
+        controllerId.isNotBlank() && controllerId.trim().equals(deviceId.trim(), ignoreCase = true)
 }

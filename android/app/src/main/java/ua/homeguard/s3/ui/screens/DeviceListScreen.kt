@@ -1,6 +1,5 @@
 package ua.homeguard.s3.ui.screens
 
-import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -42,11 +40,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.R
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.network.ControllerIdentity
+import ua.homeguard.s3.storage.LocalProfileStore
 import ua.homeguard.s3.storage.RegisteredDevice
 import ua.homeguard.s3.ui.components.BruceBrand
 
@@ -63,17 +63,13 @@ fun DeviceListScreen(
     onOpenDevice: (RegisteredDevice) -> Unit,
 ) {
     val context = LocalContext.current
-    val profilePrefs = remember { context.getSharedPreferences("myfist_profile", Context.MODE_PRIVATE) }
-    var profileRegistered by remember { mutableStateOf(profilePrefs.getBoolean("registered", false)) }
+    val profileStore = remember { LocalProfileStore(context) }
+    var profileRegistered by remember { mutableStateOf(profileStore.isRegistered()) }
 
     if (!profileRegistered) {
         FirstRunRegistrationScreen(
             onRegister = { name, password ->
-                profilePrefs.edit()
-                    .putBoolean("registered", true)
-                    .putString("name", name)
-                    .putString("password", password)
-                    .apply()
+                profileStore.register(name, password)
                 profileRegistered = true
             },
         )
@@ -116,7 +112,15 @@ fun DeviceListScreen(
         AlertDialog(
             onDismissRequest = { deleteDevice = null },
             title = { Text("Видалити пристрій?") },
-            text = { Text("«${device.name}» буде видалено зі списку цього телефону. Сам контролер HomeGuard не скидається і не видаляється з мережі.") },
+            text = {
+                Text(
+                    if (device.name.isBlank()) {
+                        "Цей пристрій буде видалено зі списку цього телефону. Сам контролер HomeGuard не скидається і не видаляється з мережі."
+                    } else {
+                        "«${device.name}» буде видалено зі списку цього телефону. Сам контролер HomeGuard не скидається і не видаляється з мережі."
+                    }
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -137,7 +141,7 @@ fun DeviceListScreen(
         val active = device.deviceId.trim().equals(activeDeviceId.trim(), ignoreCase = true)
         AlertDialog(
             onDismissRequest = { propertiesDevice = null },
-            title = { Text("Властивості · ${device.name}") },
+            title = { Text(if (device.name.isBlank()) "Властивості" else "Властивості · ${device.name}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     StatusLine("ID", device.deviceId)
@@ -169,18 +173,9 @@ fun DeviceListScreen(
                         Text("Мої пристрої", style = MaterialTheme.typography.headlineSmall)
                         Text("Пристрої: ${devices.size}", style = MaterialTheme.typography.titleMedium)
                         Text("Стани оновлюються автоматично", style = MaterialTheme.typography.bodySmall)
-                        Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати пристрій") }
+                        TextButton(onClick = onAddDevice) { Text("Додати пристрій") }
                     }
                 }
-            }
-
-            item {
-                SafeBruceImage(
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f),
-                )
             }
 
             items(devices, key = { it.deviceId }) { device ->
@@ -190,16 +185,34 @@ fun DeviceListScreen(
                 val active = device.deviceId.trim().equals(activeDeviceId.trim(), ignoreCase = true)
                 val online = discoveredOnline || (active && snapshot.sequence > 0)
                 val expanded = expandedId == device.deviceId
-                val titleColor = if (device.authorized) Color.Unspecified else MaterialTheme.colorScheme.error
+                val needsName = device.name.isBlank()
+                val titleColor = if (!device.authorized || needsName) MaterialTheme.colorScheme.error else Color.Unspecified
 
                 Card(
                     modifier = Modifier.fillMaxWidth().combinedClickable(
-                        onClick = { expandedId = if (expanded) null else device.deviceId },
-                        onDoubleClick = { onOpenDevice(device) },
+                        onClick = {
+                            if (needsName) {
+                                renameText = ""
+                                renameDevice = device
+                            } else {
+                                expandedId = if (expanded) null else device.deviceId
+                            }
+                        },
+                        onDoubleClick = {
+                            if (needsName) {
+                                renameText = ""
+                                renameDevice = device
+                            } else {
+                                onOpenDevice(device)
+                            }
+                        },
                     )
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        Text(device.name, style = MaterialTheme.typography.titleMedium, color = titleColor)
+                        Text(if (needsName) "Потрібна назва" else device.name, style = MaterialTheme.typography.titleMedium, color = titleColor)
+                        if (needsName) {
+                            Text("Збережений раніше пристрій не має власної назви. Торкніться, щоб назвати його.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
                         DeviceStatePicons(online = online, authorized = device.authorized, active = active, snapshot = snapshot)
                         if (!device.authorized) Text("Авторизацію втрачено", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         if (expanded) {
@@ -233,7 +246,7 @@ fun DeviceListScreen(
                             Button(onClick = { onOpenDevice(device) }, modifier = Modifier.fillMaxWidth()) { Text("Відкрити") }
                             OutlinedButton(onClick = { deleteDevice = device }, modifier = Modifier.fillMaxWidth()) { Text("Видалити зі списку", color = MaterialTheme.colorScheme.error) }
                             Text("Подвійне торкання також відкриває повний моніторинг", style = MaterialTheme.typography.bodySmall)
-                        } else {
+                        } else if (!needsName) {
                             Text("Торкніться для короткого стану · двічі для моніторингу", style = MaterialTheme.typography.bodySmall)
                         }
                     }
@@ -292,11 +305,46 @@ private fun SafeBruceImage(
 
 @Composable
 private fun DeviceStatePicons(online: Boolean, authorized: Boolean, active: Boolean, snapshot: SystemSnapshot) {
-    val systemOk = active && snapshot.sequence > 0 && !snapshot.health.name.contains("alarm", true) && !snapshot.health.name.contains("critical", true)
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(if (online) "📶 online" else "📵 offline", color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-        Text(if (authorized) "🛡 знято" else "🔒 доступ втрачено", color = if (authorized) Color.Unspecified else MaterialTheme.colorScheme.error)
-        if (active) Text(if (systemOk) "✓ норма" else "⚠ ${snapshot.health.name}", color = if (systemOk) Color.Unspecified else MaterialTheme.colorScheme.error)
+    val hasSnapshot = active && snapshot.sequence > 0
+    val healthName = snapshot.health.name
+    val healthUnknown = !hasSnapshot || healthName.equals("UNKNOWN", ignoreCase = true)
+    val healthProblem = hasSnapshot && !healthUnknown && listOf("alarm", "critical", "fault", "warn", "error", "tamper").any {
+        healthName.contains(it, ignoreCase = true)
+    }
+    val healthLabel = when {
+        !active -> null
+        healthUnknown -> "… стан"
+        healthProblem -> "⚠ $healthName"
+        else -> "✓ норма"
+    }
+
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            if (online) "📶 online" else "📵 offline",
+            color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            if (authorized) "🛡 доступ" else "🔒 втрачено",
+            color = if (authorized) Color.Unspecified else MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        healthLabel?.let { label ->
+            Text(
+                label,
+                color = if (healthProblem) MaterialTheme.colorScheme.error else Color.Unspecified,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 

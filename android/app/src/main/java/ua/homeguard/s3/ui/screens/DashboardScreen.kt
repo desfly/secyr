@@ -36,6 +36,17 @@ import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.ui.components.MaintenancePanel
 
+internal fun eventsForController(events: List<SystemEventRecord>, deviceId: String): List<SystemEventRecord> {
+    val selectedId = deviceId.trim()
+    return events.filter { event ->
+        val eventController = event.controllerId.trim()
+        eventController.isBlank() || eventController.equals(selectedId, ignoreCase = true)
+    }
+}
+
+internal fun eventListKey(event: SystemEventRecord): String =
+    "${event.controllerId.trim().lowercase()}#${event.sequence}"
+
 @Composable
 fun DashboardScreen(
     versionName: String,
@@ -83,7 +94,8 @@ fun DashboardScreen(
     val adminAuthenticated = accessSession?.role?.name == "ADMIN"
     val canCommand: (CommandType) -> Boolean = { command -> accessSession?.allows(command) == true }
     val sourceFilter = eventSourceText.trim().toIntOrNull()
-    val filteredEvents = EventLogFilterEngine.apply(events, EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter))
+    val selectedEvents = eventsForController(events, deviceId)
+    val filteredEvents = EventLogFilterEngine.apply(selectedEvents, EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter))
 
     pendingDangerousCommand?.let { command ->
         AlertDialog(
@@ -285,7 +297,7 @@ fun DashboardScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Журнал подій", style = MaterialTheme.typography.titleMedium)
-                    Text("Збережено ${events.size} / 256 · показано ${filteredEvents.size}", style = MaterialTheme.typography.bodySmall)
+                    Text("Збережено ${selectedEvents.size} / 256 · показано ${filteredEvents.size}", style = MaterialTheme.typography.bodySmall)
                     EventCategoryButton("Усі", EventLogCategory.ALL, eventCategory) { eventCategory = it }
                     EventCategoryButton("Критичні", EventLogCategory.CRITICAL, eventCategory) { eventCategory = it }
                     EventCategoryButton("Статус", EventLogCategory.STATUS, eventCategory) { eventCategory = it }
@@ -303,8 +315,8 @@ fun DashboardScreen(
             }
         }
 
-        if (filteredEvents.isEmpty()) item { Text(if (events.isEmpty()) "Подій ще немає" else "За вибраними фільтрами подій немає") }
-        else items(filteredEvents.take(32), key = { it.sequence }) { event ->
+        if (filteredEvents.isEmpty()) item { Text(if (selectedEvents.isEmpty()) "Подій ще немає" else "За вибраними фільтрами подій немає") }
+        else items(filteredEvents.take(32), key = ::eventListKey) { event ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(event.event, style = MaterialTheme.typography.titleSmall)

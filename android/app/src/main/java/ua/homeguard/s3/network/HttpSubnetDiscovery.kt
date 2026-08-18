@@ -19,11 +19,42 @@ import org.json.JSONObject
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.DiscoverySource
 import ua.homeguard.s3.model.Transport
+import java.io.Reader
 import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.URL
+import java.util.concurrent.atomic.AtomicInteger
+
+internal const val HTTP_DISCOVERY_MAX_RESPONSE_CHARS = 64 * 1024
+
+internal fun readBoundedDiscoveryText(
+    reader: Reader,
+    maxChars: Int = HTTP_DISCOVERY_MAX_RESPONSE_CHARS,
+): String? {
+    val limit = maxChars.coerceAtLeast(0)
+    val result = StringBuilder(minOf(limit, 4_096))
+    val buffer = CharArray(2_048)
+    var total = 0
+    while (true) {
+        val count = reader.read(buffer)
+        if (count < 0) break
+        total += count
+        if (total > limit) return null
+        result.append(buffer, 0, count)
+    }
+    return result.toString()
+}
 
 class HttpSubnetDiscovery(context: Context) {
+    data class ScanStatus(
+        val phase: String = "idle",
+        val progress: Float = 0f,
+        val total: Int = 0,
+        val completed: Int = 0,
+        val found: Int = 0,
+        val error: String = "",
+    )
+
     companion object {
         private const val TAG = "HomeGuardHttpScan"
         private const val CONNECT_TIMEOUT_MS = 220
@@ -38,27 +69,74 @@ class HttpSubnetDiscovery(context: Context) {
     private val connectivity = context.applicationContext.getSystemService(ConnectivityManager::class.java)
     private val _devices = MutableStateFlow<List<DiscoveredDevice>>(emptyList())
     val devices: StateFlow<List<DiscoveredDevice>> = _devices.asStateFlow()
+    private val _status = MutableStateFlow(ScanStatus())
+    val status: StateFlow<ScanStatus> = _status.asStateFlow()
 
     suspend fun scanOnce() = withContext(Dispatchers.IO) {
-        val network = findWifiNetwork() ?: return@withContext
+        _status.value = ScanStatus(phase = "preparing", progress = 0f)
+
+        val network = findWifiNetwork()
+        if (network == null) {
+            _devices.value = emptyList()
+            _status.value = ScanStatus(
+                phase = "error",
+                progress = 1f,
+                error = "Wi-Fi network unavailable",
+            )
+            return@withContext
+        }
+
         val local = connectivity.getLinkProperties(network)
             ?.linkAddresses
             ?.map { it.address }
             ?.filterIsInstance<Inet4Address>()
             ?.firstOrNull { !it.isLoopbackAddress && !it.isLinkLocalAddress }
-            ?: return@withContext
+        if (local == null) {
+            _devices.value = emptyList()
+            _status.value = ScanStatus(
+                phase = "error",
+                progress = 1f,
+                error = "Wi-Fi IPv4 address unavailable",
+            )
+            return@withContext
+        }
 
         val bytes = local.address
         val prefix = "${bytes[0].toInt() and 0xff}.${bytes[1].toInt() and 0xff}.${bytes[2].toInt() and 0xff}"
         val ownHost = bytes[3].toInt() and 0xff
+        val probeSetupController = prefix == SETUP_PREFIX && ownHost != 1
+        val hosts = (1..254)
+            .filter { it != ownHost }
+            .filterNot { prefix == SETUP_PREFIX && it == 1 }
+        val total = hosts.size + if (probeSetupController) 1 else 0
+        val completed = AtomicInteger(0)
+        val foundCount = AtomicInteger(0)
+        val progressLock = Any()
 
-        val setupDevice = if (prefix == SETUP_PREFIX && ownHost != 1) {
-            probe(
-                network = network,
-                ip = SETUP_CONTROLLER_IP,
-                connectTimeoutMs = SETUP_CONNECT_TIMEOUT_MS,
-                readTimeoutMs = SETUP_READ_TIMEOUT_MS,
-                allowNetworkStatusFallback = true,
+        fun record(result: DiscoveredDevice?): DiscoveredDevice? = synchronized(progressLock) {
+            val done = completed.incrementAndGet()
+            val foundNow = if (result != null) foundCount.incrementAndGet() else foundCount.get()
+            _status.value = ScanStatus(
+                phase = "probing",
+                progress = if (total == 0) 1f else done.toFloat() / total.toFloat(),
+                total = total,
+                completed = done,
+                found = foundNow,
+            )
+            result
+        }
+
+        _status.value = ScanStatus(phase = "probing", progress = 0f, total = total)
+
+        val setupDevice = if (probeSetupController) {
+            record(
+                probe(
+                    network = network,
+                    ip = SETUP_CONTROLLER_IP,
+                    connectTimeoutMs = SETUP_CONNECT_TIMEOUT_MS,
+                    readTimeoutMs = SETUP_READ_TIMEOUT_MS,
+                    allowNetworkStatusFallback = true,
+                ),
             )
         } else {
             null
@@ -66,30 +144,37 @@ class HttpSubnetDiscovery(context: Context) {
 
         val semaphore = Semaphore(MAX_PARALLEL)
         val found = coroutineScope {
-            (1..254)
-                .filter { it != ownHost }
-                .filterNot { prefix == SETUP_PREFIX && it == 1 }
-                .map { host ->
-                    async(Dispatchers.IO) {
-                        semaphore.withPermit {
+            hosts.map { host ->
+                async(Dispatchers.IO) {
+                    semaphore.withPermit {
+                        record(
                             probe(
                                 network = network,
                                 ip = "$prefix.$host",
                                 connectTimeoutMs = CONNECT_TIMEOUT_MS,
                                 readTimeoutMs = READ_TIMEOUT_MS,
                                 allowNetworkStatusFallback = true,
-                            )
-                        }
+                            ),
+                        )
                     }
                 }
+            }
                 .awaitAll()
                 .filterNotNull()
         }
 
-        _devices.value = (listOfNotNull(setupDevice) + found)
+        val devices = (listOfNotNull(setupDevice) + found)
             .associateBy { it.baseUrl.trimEnd('/').lowercase() }
             .values
             .sortedBy { it.deviceId }
+        _devices.value = devices
+        _status.value = ScanStatus(
+            phase = "done",
+            progress = 1f,
+            total = total,
+            completed = total,
+            found = devices.size,
+        )
     }
 
     private fun findWifiNetwork(): Network? = runCatching {
@@ -153,7 +238,7 @@ class HttpSubnetDiscovery(context: Context) {
             connection.useCaches = false
             connection.instanceFollowRedirects = false
             if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
-            val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use(::readBoundedDiscoveryText) ?: return null
             JSONObject(body)
         } catch (_: Exception) {
             null

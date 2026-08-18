@@ -14,6 +14,8 @@ data class HomeGuardWifiNetwork(
     val rssi: Int,
 )
 
+internal const val WIFI_SCAN_MAX_BODY_BYTES = 256_000
+
 object HomeGuardWifiScanner {
     suspend fun scan(rawAddress: String): List<HomeGuardWifiNetwork> = withContext(Dispatchers.IO) {
         val uri = normalizeLocalUri(rawAddress)
@@ -91,6 +93,7 @@ object HomeGuardWifiScanner {
 
             val bodyBytes = ByteArrayOutputStream()
             if (contentLength != null && contentLength >= 0) {
+                if (contentLength > WIFI_SCAN_MAX_BODY_BYTES) error("Завелика відповідь Wi-Fi scan")
                 val buffer = ByteArray(2048)
                 var remaining = contentLength
                 while (remaining > 0) {
@@ -113,6 +116,7 @@ object HomeGuardWifiScanner {
                     for (i in 0 until count) {
                         val b = buffer[i]
                         bodyBytes.write(b.toInt())
+                        if (bodyBytes.size() > WIFI_SCAN_MAX_BODY_BYTES) error("Завелика відповідь Wi-Fi scan")
                         val ch = b.toInt().toChar()
                         if (!jsonStarted) {
                             if (ch == '{') { jsonStarted = true; depth = 1 }
@@ -132,7 +136,6 @@ object HomeGuardWifiScanner {
                         if (jsonStarted && depth == 0) break
                     }
                     if (jsonStarted && depth == 0) break
-                    if (bodyBytes.size() > 256_000) error("Завелика відповідь Wi-Fi scan")
                 }
             }
 

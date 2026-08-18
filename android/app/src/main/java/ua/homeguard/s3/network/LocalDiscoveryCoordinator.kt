@@ -2,71 +2,145 @@ package ua.homeguard.s3.network
 
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.DiscoveredDevice
-import ua.homeguard.s3.model.DiscoverySource
+import java.util.concurrent.atomic.AtomicBoolean
+
+internal const val DISCOVERY_FRESHNESS_MS = 30_000L
+private const val DISCOVERY_FRESHNESS_TICK_MS = 1_000L
+private const val DISCOVERY_RESUME_GRACE_MS = 3_000L
+
+internal fun freshDiscoveryReports(
+    reports: List<DiscoveredDevice>,
+    nowMs: Long,
+    maxAgeMs: Long = DISCOVERY_FRESHNESS_MS,
+): List<DiscoveredDevice> {
+    val cutoff = nowMs - maxAgeMs.coerceAtLeast(0L)
+    return reports.filter { it.seenAtMs >= cutoff }
+}
+
+internal fun combineDiscoveryScanStatus(
+    udp: UdpDeviceDiscovery.ScanStatus,
+    http: HttpSubnetDiscovery.ScanStatus,
+    manualRescanActive: Boolean,
+): UdpDeviceDiscovery.ScanStatus {
+    val udpActive = udp.phase == "sending" || udp.phase == "listening"
+    val hasError = udp.phase == "error" || http.phase == "error"
+    val error = listOf(udp.error, http.error)
+        .filter { it.isNotBlank() }
+        .distinct()
+        .joinToString(" · ")
+
+    val phase = when {
+        manualRescanActive -> "scanning"
+        udpActive -> udp.phase
+        hasError -> "error"
+        udp.phase == "done" || http.phase == "done" -> "done"
+        else -> udp.phase
+    }
+
+    val progress = when {
+        manualRescanActive -> ((udp.progress.coerceIn(0f, 1f) + http.progress.coerceIn(0f, 1f)) / 2f)
+            .coerceAtMost(0.99f)
+        phase == "done" || phase == "error" -> 1f
+        else -> udp.progress.coerceIn(0f, 1f)
+    }
+
+    return udp.copy(
+        phase = phase,
+        progress = progress,
+        accepted = udp.accepted + http.found,
+        error = error,
+    )
+}
 
 class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineScope) {
     private val appContext = context.applicationContext
     private val nsd = NsdDeviceDiscovery(appContext)
     private val udp = UdpDeviceDiscovery(appContext, scope)
     private val http = HttpSubnetDiscovery(appContext)
+    private val manualRescanActive = MutableStateFlow(false)
+    private val manualRescanRunning = AtomicBoolean(false)
+    private val freshnessClock = MutableStateFlow(System.currentTimeMillis())
+    private var freshnessJob: Job? = null
 
-    val scanStatus: StateFlow<UdpDeviceDiscovery.ScanStatus> = udp.status
-    val isScanning: StateFlow<Boolean> = udp.status
-        .map { it.phase == "sending" || it.phase == "listening" }
+    val scanStatus: StateFlow<UdpDeviceDiscovery.ScanStatus> = combine(
+        udp.status,
+        http.status,
+        manualRescanActive,
+        ::combineDiscoveryScanStatus,
+    ).stateIn(scope, SharingStarted.Eagerly, UdpDeviceDiscovery.ScanStatus())
+
+    val isScanning: StateFlow<Boolean> = scanStatus
+        .map { it.phase == "sending" || it.phase == "listening" || it.phase == "scanning" }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
-    val devices: StateFlow<List<DiscoveredDevice>> = combine(nsd.devices, udp.devices, http.devices) { mdns, udpFallback, httpFallback ->
-        (mdns + udpFallback + httpFallback)
-            // Cemented rule: one physical ESP controller is one UI device.
-            // Discovery transports may report different IDs, schemes or ports for the
-            // same controller, therefore URL is not a safe identity. The controller's
-            // LAN host is the primary identity; deviceId is only a fallback.
-            .groupBy(::physicalControllerKey)
-            .mapNotNull { (_, candidates) ->
-                candidates.maxWithOrNull(
-                    compareBy<DiscoveredDevice> { it.seenAtMs }
-                        .thenBy {
-                            when (it.source) {
-                                DiscoverySource.MDNS -> 2
-                                DiscoverySource.UDP -> 1
-                                DiscoverySource.HTTP -> 0
-                            }
-                        },
-                )
-            }
-            .sortedBy { it.deviceId }
+    val devices: StateFlow<List<DiscoveredDevice>> = combine(
+        nsd.devices,
+        udp.devices,
+        http.devices,
+        freshnessClock,
+    ) { mdns, udpFallback, httpFallback, nowMs ->
+        val fresh = freshDiscoveryReports(
+            mdns + udpFallback + httpFallback,
+            nowMs,
+        )
+        DiscoveryDeduplicator.collapse(fresh)
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     fun start() {
         nsd.start()
         udp.start()
+        if (freshnessJob?.isActive == true) return
+        freshnessJob = scope.launch {
+            // A resumed activity may still have a healthy WebSocket and cached discovery
+            // state. Give the first immediate UDP pass time to refresh it before expiring
+            // old reports, avoiding a synthetic LOCAL -> LAST_KNOWN_LOCAL reconnect.
+            delay(DISCOVERY_RESUME_GRACE_MS)
+            while (isActive) {
+                freshnessClock.value = System.currentTimeMillis()
+                delay(DISCOVERY_FRESHNESS_TICK_MS)
+            }
+        }
     }
 
     fun stop() {
         nsd.stop()
         udp.stop()
+        freshnessJob?.cancel()
+        freshnessJob = null
     }
 
-    suspend fun rescan() = coroutineScope {
-        awaitAll(
-            async { udp.scanOnce() },
-            async { http.scanOnce() },
-        )
-        Unit
-    }
+    suspend fun rescan() {
+        // A rapid double tap can call rescan() twice before Compose disables the button.
+        // Do not queue another full UDP+HTTP pass behind the first one: that causes
+        // duplicate network work and can make scan state briefly report idle/done while
+        // another scan is still executing.
+        if (!manualRescanRunning.compareAndSet(false, true)) return
 
-    private fun physicalControllerKey(device: DiscoveredDevice): String {
-        val host = device.host.trim().trim('[', ']').lowercase()
-        if (host.isNotBlank()) return "host:$host"
-        return "id:${device.deviceId.trim().lowercase()}"
+        manualRescanActive.value = true
+        try {
+            coroutineScope {
+                awaitAll(
+                    async { udp.scanOnce() },
+                    async { http.scanOnce() },
+                )
+            }
+        } finally {
+            manualRescanActive.value = false
+            manualRescanRunning.set(false)
+        }
     }
 }

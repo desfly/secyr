@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -7,6 +8,18 @@ nsd = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/NsdDeviceDiscov
 http = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/HttpSubnetDiscovery.kt").read_text(encoding="utf-8")
 coordinator = (ROOT / "android/app/src/main/java/ua/homeguard/s3/network/LocalDiscoveryCoordinator.kt").read_text(encoding="utf-8")
 models = (ROOT / "android/app/src/main/java/ua/homeguard/s3/model/ConnectivityModels.kt").read_text(encoding="utf-8")
+
+devices_combine = re.search(
+    r"val\s+devices\s*:\s*StateFlow<List<DiscoveredDevice>>\s*=\s*combine\((.*?)\)\s*\{",
+    coordinator,
+    re.DOTALL,
+)
+devices_combine_inputs = devices_combine.group(1) if devices_combine else ""
+
+independent_resolve_function = re.search(
+    r"private\s+fun\s+resolve\(\s*serviceInfo\s*:\s*NsdServiceInfo(?:\s*,\s*\w+\s*:\s*Long)?\s*\)",
+    nsd,
+) is not None
 
 checks = {
     "UDP discovery port": "const val PORT = 45678" in udp,
@@ -18,12 +31,15 @@ checks = {
     "UDP diagnostics counters": all(token in udp for token in ("sent: Int", "received: Int", "accepted: Int", "lastResponder: String", "network: String", "error: String")),
     "mDNS service type": 'SERVICE_TYPE = "_homeguard._tcp."' in nsd,
     "mDNS concrete IP preference": "info.host?.hostAddress" in nsd,
-    "mDNS independent resolver": "private fun resolve(serviceInfo: NsdServiceInfo)" in nsd and "val listener = object : NsdManager.ResolveListener" in nsd,
+    "mDNS independent resolver": independent_resolve_function and "val listener = object : NsdManager.ResolveListener" in nsd,
     "mDNS shared resolver removed": "private val resolveListener" not in nsd,
     "HTTP subnet discovery source": "class HttpSubnetDiscovery" in http,
     "HTTP HomeGuard identity endpoint": "/api/v1/cloud/status" in http,
     "HTTP discovery source model": "enum class DiscoverySource { MDNS, UDP, HTTP }" in models,
-    "Coordinator combines mDNS+UDP+HTTP": "combine(nsd.devices, udp.devices, http.devices)" in coordinator,
+    "Coordinator combines mDNS+UDP+HTTP": all(
+        source in devices_combine_inputs
+        for source in ("nsd.devices", "udp.devices", "http.devices")
+    ),
     "Coordinator triggers HTTP fallback": "http.scanOnce()" in coordinator,
     "Coordinator exposes scan status": "val scanStatus" in coordinator and "udp.status" in coordinator,
 }

@@ -8,6 +8,7 @@ import android.net.NetworkRequest
 import android.net.wifi.WifiNetworkSpecifier
 import android.os.Build
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -25,17 +26,32 @@ class SetupNetworkConnector(context: Context) {
             .setNetworkSpecifier(specifier)
             .build()
         return suspendCancellableCoroutine { continuation ->
+            val terminal = AtomicBoolean(false)
             val callback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    connectivity.bindProcessToNetwork(network)
-                    if (continuation.isActive) continuation.resume(BoundSetupNetwork(connectivity, network, this))
+                    if (!terminal.compareAndSet(false, true)) return
+                    val bound = BoundSetupNetwork(connectivity, network, this)
+                    runCatching { connectivity.bindProcessToNetwork(network) }
+                        .onSuccess {
+                            continuation.resume(bound) { _, unclaimed, _ -> unclaimed.close() }
+                        }
+                        .onFailure { error ->
+                            bound.close()
+                            continuation.resumeWithException(error)
+                        }
                 }
+
                 override fun onUnavailable() {
-                    if (continuation.isActive) continuation.resumeWithException(IllegalStateException("Setup AP недоступна"))
+                    if (!terminal.compareAndSet(false, true)) return
+                    continuation.resumeWithException(IllegalStateException("Setup AP недоступна"))
                 }
             }
             connectivity.requestNetwork(request, callback, 45_000)
-            continuation.invokeOnCancellation { runCatching { connectivity.unregisterNetworkCallback(callback) } }
+            continuation.invokeOnCancellation {
+                if (terminal.compareAndSet(false, true)) {
+                    runCatching { connectivity.unregisterNetworkCallback(callback) }
+                }
+            }
         }
     }
 }

@@ -3,12 +3,14 @@ package ua.homeguard.s3.network
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.EventListener
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.json.JSONObject
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -18,10 +20,24 @@ enum class FactoryResetResult {
     CONNECTION_LOST,
 }
 
+internal fun classifyFactoryResetIOException(requestBodySent: Boolean): FactoryResetResult =
+    if (requestBodySent) FactoryResetResult.CONNECTION_LOST else FactoryResetResult.REJECTED
+
+internal class FactoryResetRunGate {
+    private val running = AtomicBoolean(false)
+
+    fun tryAcquire(): Boolean = running.compareAndSet(false, true)
+    fun release() { running.set(false) }
+}
+
 class FactoryResetClient(
     baseUrl: String,
     certificatePin: String = "",
 ) {
+    companion object {
+        private val resetGate = FactoryResetRunGate()
+    }
+
     private val root = baseUrl.trimEnd('/')
     private val client = PinnedTlsClientFactory.create(certificatePin)
 
@@ -30,38 +46,54 @@ class FactoryResetClient(
         require(normalizedActor.isNotBlank()) { "Admin ID is required" }
         require(credential.length in 4..12 && credential.all(Char::isDigit)) { "PIN must contain 4-12 digits" }
         require(root.isNotBlank()) { "Local controller endpoint is unavailable" }
+        check(resetGate.tryAcquire()) { "Factory Reset already in progress" }
 
-        val body = JSONObject()
-            .put("actor", normalizedActor)
-            .put("credential", credential)
-            .put("confirm", "ERASE_ALL")
+        try {
+            val body = JSONObject()
+                .put("actor", normalizedActor)
+                .put("credential", credential)
+                .put("confirm", "ERASE_ALL")
 
-        val request = Request.Builder()
-            .url(root + RuntimeApiContract.FACTORY_RESET_PATH)
-            .header("Accept", "application/json")
-            .header("Cache-Control", "no-store")
-            .post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .build()
+            val request = Request.Builder()
+                .url(root + RuntimeApiContract.FACTORY_RESET_PATH)
+                .header("Accept", "application/json")
+                .header("Cache-Control", "no-store")
+                .post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
 
-        val response = try {
-            client.newCall(request).await()
-        } catch (_: IOException) {
-            // The controller may erase Wi-Fi state and reboot before the HTTP
-            // response reaches Android. After the destructive request has been
-            // submitted, transport loss must fail closed locally.
-            return FactoryResetResult.CONNECTION_LOST
-        }
+            val requestBodySent = AtomicBoolean(false)
+            val trackedClient = client.newBuilder()
+                .eventListener(object : EventListener() {
+                    override fun requestBodyEnd(call: Call, byteCount: Long) {
+                        requestBodySent.set(true)
+                    }
+                })
+                .build()
 
-        response.use {
-            val text = it.body?.string().orEmpty()
-            if (!it.isSuccessful) return FactoryResetResult.REJECTED
-            val json = runCatching { if (text.isBlank()) JSONObject() else JSONObject(text) }.getOrNull()
-                ?: return FactoryResetResult.REJECTED
-            return if (json.optBoolean("ok", false) && json.optBoolean("rebooting", false)) {
-                FactoryResetResult.ACCEPTED
-            } else {
-                FactoryResetResult.REJECTED
+            val response = try {
+                trackedClient.newCall(request).await()
+            } catch (_: IOException) {
+                // A reset controller may erase Wi-Fi and reboot after it has already
+                // received the destructive request. Only classify transport loss as an
+                // expected reset disconnect when the request body was actually sent.
+                // DNS/connect/TLS failures before submission must not clear local state
+                // as if the reset had succeeded.
+                return classifyFactoryResetIOException(requestBodySent.get())
             }
+
+            response.use {
+                val text = it.body?.string().orEmpty()
+                if (!it.isSuccessful) return FactoryResetResult.REJECTED
+                val json = runCatching { if (text.isBlank()) JSONObject() else JSONObject(text) }.getOrNull()
+                    ?: return FactoryResetResult.REJECTED
+                return if (json.optBoolean("ok", false) && json.optBoolean("rebooting", false)) {
+                    FactoryResetResult.ACCEPTED
+                } else {
+                    FactoryResetResult.REJECTED
+                }
+            }
+        } finally {
+            resetGate.release()
         }
     }
 

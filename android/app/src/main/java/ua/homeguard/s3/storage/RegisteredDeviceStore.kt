@@ -9,6 +9,8 @@ import org.json.JSONObject
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.network.ControllerIdentity
 
+internal const val REGISTERED_DEVICE_LAST_SEEN_PERSIST_MS = 60_000L
+
 data class RegisteredDevice(
     val deviceId: String,
     val name: String,
@@ -17,34 +19,21 @@ data class RegisteredDevice(
     val authorized: Boolean = true,
 )
 
+internal fun shouldPersistDiscoveredRefresh(
+    previous: RegisteredDevice,
+    discovered: DiscoveredDevice,
+    minLastSeenIntervalMs: Long = REGISTERED_DEVICE_LAST_SEEN_PERSIST_MS,
+): Boolean {
+    val discoveredId = discovered.deviceId.trim()
+    if (!previous.deviceId.equals(discoveredId, ignoreCase = true)) return true
+    if (previous.baseUrl != discovered.baseUrl) return true
+    return discovered.seenAtMs - previous.lastSeenAtMs >= minLastSeenIntervalMs.coerceAtLeast(0L)
+}
+
 class RegisteredDeviceStore(context: Context) {
-    companion object {
-        @Volatile private var activeStore: RegisteredDeviceStore? = null
-
-        suspend fun markActiveAuthorization(deviceId: String, authorized: Boolean) {
-            if (deviceId.isBlank()) return
-            activeStore?.markAuthorization(deviceId, authorized)
-        }
-
-        suspend fun reconcileActiveManual(manualDeviceId: String, discovered: DiscoveredDevice): Boolean {
-            return activeStore?.reconcileManual(manualDeviceId, discovered) ?: false
-        }
-
-        suspend fun refreshActiveDiscovered(discovered: DiscoveredDevice): Boolean {
-            return activeStore?.refreshDiscovered(discovered) ?: false
-        }
-
-        suspend fun removeActive(deviceId: String): Boolean {
-            if (deviceId.isBlank()) return false
-            return activeStore?.remove(deviceId) ?: false
-        }
-    }
-
     private val preferences = context.applicationContext.getSharedPreferences("homeguard_devices", Context.MODE_PRIVATE)
     private val _devices = MutableStateFlow(load())
     val devices: StateFlow<List<RegisteredDevice>> = _devices.asStateFlow()
-
-    init { activeStore = this }
 
     suspend fun addOrUpdate(device: DiscoveredDevice, requestedName: String? = null) {
         val current = _devices.value.toMutableList()
@@ -53,9 +42,6 @@ class RegisteredDeviceStore(context: Context) {
         }
         val previous = current.getOrNull(previousIndex)
         val requested = requestedName?.trim()?.take(40).orEmpty()
-
-        // A new controller may never acquire a generated/service/technical name.
-        // The owner must explicitly provide the friendly name before first save.
         if (previous == null && requested.isBlank()) return
 
         val registered = RegisteredDevice(
@@ -138,15 +124,15 @@ class RegisteredDeviceStore(context: Context) {
         if (index < 0) return false
 
         val previous = current[index]
-        val updated = previous.copy(
+        if (!shouldPersistDiscoveredRefresh(previous, discovered)) return false
+
+        current[index] = previous.copy(
             deviceId = discovered.deviceId.trim(),
             baseUrl = discovered.baseUrl,
             lastSeenAtMs = discovered.seenAtMs,
         )
-        current[index] = updated
-        val beforeCount = current.size
         persist(current)
-        return previous != updated || beforeCount != _devices.value.size
+        return true
     }
 
     suspend fun rename(deviceId: String, name: String) {
@@ -174,7 +160,9 @@ class RegisteredDeviceStore(context: Context) {
     }
 
     private suspend fun persist(value: List<RegisteredDevice>) {
-        val clean = deduplicate(value)
+        val clean = deduplicate(value).sortedBy { it.name.lowercase() }
+        if (clean == _devices.value) return
+
         val json = JSONArray()
         clean.forEach { device ->
             json.put(JSONObject().apply {
@@ -186,7 +174,7 @@ class RegisteredDeviceStore(context: Context) {
             })
         }
         preferences.edit().putString("devices", json.toString()).apply()
-        _devices.emit(clean.sortedBy { it.name.lowercase() })
+        _devices.emit(clean)
     }
 
     private fun load(): List<RegisteredDevice> = runCatching {
@@ -200,7 +188,7 @@ class RegisteredDeviceStore(context: Context) {
                 add(
                     RegisteredDevice(
                         deviceId = id.trim(),
-                        name = item.optString("name", "HomeGuard"),
+                        name = item.optString("name").trim().take(40),
                         baseUrl = item.optString("base_url"),
                         lastSeenAtMs = item.optLong("last_seen_at_ms"),
                         authorized = item.optBoolean("authorized", true),

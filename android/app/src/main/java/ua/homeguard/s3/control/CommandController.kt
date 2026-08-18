@@ -1,6 +1,11 @@
 package ua.homeguard.s3.control
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.selects.select
 import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandReply
 import ua.homeguard.s3.model.CommandType
@@ -11,6 +16,9 @@ import ua.homeguard.s3.network.HttpDeviceApi
 import ua.homeguard.s3.storage.SettingsStore
 import java.util.concurrent.atomic.AtomicLong
 
+internal fun sameSelectedController(expectedDeviceId: String, selectedDeviceId: String): Boolean =
+    expectedDeviceId.isNotBlank() && expectedDeviceId.trim().equals(selectedDeviceId.trim(), ignoreCase = true)
+
 class CommandController(
     private val endpoint: StateFlow<DeviceEndpoint>,
     private val settings: SettingsStore,
@@ -19,21 +27,29 @@ class CommandController(
 
     suspend fun login(actor: String, credential: String): AccessSession {
         val target = endpoint.value
+        val appSettings = settings.settings.value
         require(target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank()) {
             "controller offline"
         }
-        val api = createApi(target)
-        val session = api.login(actor, credential)
+        requireStillSelected(target)
+        val api = createApi(target, appSettings.apiToken)
+        val session = runWhileSelected(target) { api.login(actor, credential) }
+
         if (target.path != ControlPath.CLOUD) {
-            val telemetryToken = api.telemetrySession(actor, credential)
+            val telemetryToken = runWhileSelected(target) { api.telemetrySession(actor, credential) }
+            requireStillSelected(target)
             settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
         }
-        return session
+        requireStillSelected(target)
+        return session.copy(controllerId = target.deviceId)
     }
 
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
         val target = endpoint.value
         val appSettings = settings.settings.value
+        if (!sameSelectedController(target.deviceId, appSettings.deviceId)) {
+            return CommandReply(accepted = false, code = "controller_changed")
+        }
         if (target.path == ControlPath.OFFLINE || target.apiBaseUrl.isBlank()) {
             return CommandReply(accepted = false, code = "offline")
         }
@@ -46,28 +62,67 @@ class CommandController(
             return CommandReply(accepted = false, code = "authorization_required")
         }
 
-        val api = createApi(target)
-        // The active local HTTP runtime authenticates every command with actor + PIN
-        // and does not expose the obsolete /api/challenge endpoint. Keep challenge
-        // flow only for the legacy/cloud command transport.
-        val challenge = if (target.path == ControlPath.CLOUD && requiresChallenge(type)) api.challenge(type) else null
-        val command = DeviceCommand(
-            requestId = requestIds.incrementAndGet(),
-            issuedAtMs = System.currentTimeMillis(),
-            type = type,
-            challenge = challenge,
-            actor = actor.trim(),
-            credential = credential,
-        )
-        return api.command(command)
+        // Freeze the token with the target. A device switch must never make an in-flight
+        // request to controller A read controller B's token from SettingsStore.
+        val api = createApi(target, appSettings.apiToken)
+        return runCatching {
+            val challenge = if (target.path == ControlPath.CLOUD && requiresChallenge(type)) {
+                runWhileSelected(target) { api.challenge(type) }
+            } else {
+                null
+            }
+            val command = DeviceCommand(
+                requestId = requestIds.incrementAndGet(),
+                issuedAtMs = System.currentTimeMillis(),
+                type = type,
+                challenge = challenge,
+                actor = actor.trim(),
+                credential = credential,
+            )
+            runWhileSelected(target) { api.command(command) }
+        }.getOrElse { error ->
+            if (error is ControllerChangedException) {
+                CommandReply(accepted = false, code = "controller_changed")
+            } else {
+                throw error
+            }
+        }
     }
 
-    private fun createApi(target: DeviceEndpoint): HttpDeviceApi {
+    private suspend fun <T> runWhileSelected(target: DeviceEndpoint, block: suspend () -> T): T = coroutineScope {
+        requireStillSelected(target)
+        val request = async { block() }
+        val selectionChanged = async {
+            settings.settings.first { current -> !sameSelectedController(target.deviceId, current.deviceId) }
+        }
+        try {
+            select {
+                request.onAwait { result ->
+                    selectionChanged.cancel()
+                    result
+                }
+                selectionChanged.onAwait {
+                    request.cancelAndJoin()
+                    throw ControllerChangedException()
+                }
+            }
+        } finally {
+            selectionChanged.cancel()
+        }
+    }
+
+    private fun requireStillSelected(target: DeviceEndpoint) {
+        if (!sameSelectedController(target.deviceId, settings.settings.value.deviceId)) {
+            throw ControllerChangedException()
+        }
+    }
+
+    private fun createApi(target: DeviceEndpoint, apiToken: String): HttpDeviceApi {
         val localRuntime = target.path != ControlPath.CLOUD
         val pin = if (target.path == ControlPath.CLOUD) "" else target.certificateSha256
         return HttpDeviceApi(
             baseUrl = target.apiBaseUrl,
-            tokenProvider = { settings.settings.value.apiToken },
+            tokenProvider = { apiToken },
             certificatePin = pin,
             runtimeV1 = localRuntime,
         )
@@ -81,4 +136,6 @@ class CommandController(
         -> true
         else -> false
     }
+
+    private class ControllerChangedException : IllegalStateException("controller changed during request")
 }

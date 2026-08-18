@@ -43,8 +43,9 @@ class ProvisioningHandoff(
             state = HandoffState.TIMED_OUT
             return snapshot()
         }
-        if (state != HandoffState.DISCOVERING_LOCAL || deviceId != expectedDeviceId ||
-            !secure || pairingRequired || !url.startsWith("https://")) return snapshot()
+        if (state != HandoffState.DISCOVERING_LOCAL ||
+            !deviceId.trim().equals(expectedDeviceId.trim(), ignoreCase = true) ||
+            !secure || pairingRequired || !url.startsWith("https://", ignoreCase = true)) return snapshot()
         localUrl = url
         state = HandoffState.COMPLETE
         return snapshot(accepted = true)

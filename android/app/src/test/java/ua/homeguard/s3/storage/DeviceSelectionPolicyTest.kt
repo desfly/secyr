@@ -48,6 +48,20 @@ class DeviceSelectionPolicyTest {
     }
 
     @Test
+    fun `same device id with different case preserves route and certificate`() {
+        val result = DeviceSelectionPolicy.select(
+            currentDeviceId = "HG-AbC123",
+            currentLocalUrl = "https://192.168.1.31:8443/",
+            currentCertificateSha256 = "CERT",
+            nextDeviceId = "hg-abc123",
+        )
+
+        assertEquals("hg-abc123", result.deviceId)
+        assertEquals("https://192.168.1.31:8443", result.lastKnownLocalUrl)
+        assertEquals("CERT", result.localCertificateSha256)
+    }
+
+    @Test
     fun `confirmed route is normalized by trimming spaces and trailing slash`() {
         val result = DeviceSelectionPolicy.select(
             currentDeviceId = "",
