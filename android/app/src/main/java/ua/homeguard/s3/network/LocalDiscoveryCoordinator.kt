@@ -5,16 +5,19 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import ua.homeguard.s3.model.DiscoveredDevice
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal const val DISCOVERY_FRESHNESS_MS = 30_000L
+private const val DISCOVERY_FRESHNESS_TICK_MS = 1_000L
 
 internal fun freshDiscoveryReports(
     reports: List<DiscoveredDevice>,
@@ -67,6 +70,12 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
     private val http = HttpSubnetDiscovery(appContext)
     private val manualRescanActive = MutableStateFlow(false)
     private val manualRescanRunning = AtomicBoolean(false)
+    private val freshnessClock = flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            delay(DISCOVERY_FRESHNESS_TICK_MS)
+        }
+    }
 
     val scanStatus: StateFlow<UdpDeviceDiscovery.ScanStatus> = combine(
         udp.status,
@@ -79,10 +88,15 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         .map { it.phase == "sending" || it.phase == "listening" || it.phase == "scanning" }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
-    val devices: StateFlow<List<DiscoveredDevice>> = combine(nsd.devices, udp.devices, http.devices) { mdns, udpFallback, httpFallback ->
+    val devices: StateFlow<List<DiscoveredDevice>> = combine(
+        nsd.devices,
+        udp.devices,
+        http.devices,
+        freshnessClock,
+    ) { mdns, udpFallback, httpFallback, nowMs ->
         val fresh = freshDiscoveryReports(
             mdns + udpFallback + httpFallback,
-            System.currentTimeMillis(),
+            nowMs,
         )
         DiscoveryDeduplicator.collapse(fresh)
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
