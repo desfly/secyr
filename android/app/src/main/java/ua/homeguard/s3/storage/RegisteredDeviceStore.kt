@@ -160,7 +160,9 @@ class RegisteredDeviceStore(context: Context) {
     }
 
     private suspend fun persist(value: List<RegisteredDevice>) {
-        val clean = deduplicate(value)
+        val clean = deduplicate(value).sortedBy { it.name.lowercase() }
+        if (clean == _devices.value) return
+
         val json = JSONArray()
         clean.forEach { device ->
             json.put(JSONObject().apply {
@@ -172,7 +174,7 @@ class RegisteredDeviceStore(context: Context) {
             })
         }
         preferences.edit().putString("devices", json.toString()).apply()
-        _devices.emit(clean.sortedBy { it.name.lowercase() })
+        _devices.emit(clean)
     }
 
     private fun load(): List<RegisteredDevice> = runCatching {
