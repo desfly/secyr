@@ -49,12 +49,37 @@ object DiscoveryDeduplicator {
         }
 
         return groups.values
-            .mapNotNull { candidates -> candidates.maxWithOrNull(preference) }
+            .map(::mergeCluster)
             .sortedBy { it.deviceId.lowercase() }
     }
 
-    private val preference = compareBy<DiscoveredDevice> { it.seenAtMs }
+    private fun mergeCluster(candidates: List<DiscoveredDevice>): DiscoveredDevice {
+        val endpoint = candidates.maxWithOrNull(endpointPreference) ?: candidates.first()
+        val identity = candidates.maxWithOrNull(identityPreference) ?: endpoint
+
+        // Keep the freshest/best endpoint details, but never replace a stable
+        // controller ID with a setup fallback merely because that HTTP probe was
+        // observed a few milliseconds later.
+        return if (identity.deviceId.equals(endpoint.deviceId, ignoreCase = true)) {
+            endpoint
+        } else {
+            endpoint.copy(deviceId = identity.deviceId)
+        }
+    }
+
+    private val endpointPreference = compareBy<DiscoveredDevice> { it.seenAtMs }
         .thenBy { sourcePriority(it.source) }
+
+    private val identityPreference = compareBy<DiscoveredDevice> { identityPriority(it.deviceId) }
+        .thenBy { sourcePriority(it.source) }
+        .thenBy { it.seenAtMs }
+
+    private fun identityPriority(deviceId: String): Int {
+        val id = deviceId.trim()
+        if (id.startsWith("HG-", ignoreCase = true)) return 3
+        if (id.isNotBlank() && !id.startsWith("setup-", ignoreCase = true)) return 2
+        return if (id.isNotBlank()) 1 else 0
+    }
 
     private fun sourcePriority(source: DiscoverySource): Int = when (source) {
         DiscoverySource.MDNS -> 2
