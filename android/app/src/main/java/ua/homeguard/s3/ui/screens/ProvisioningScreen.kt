@@ -1,6 +1,5 @@
 package ua.homeguard.s3.ui.screens
 
-import android.app.Activity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,16 +18,13 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -40,73 +36,8 @@ import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.ProvisioningUiState
 import ua.homeguard.s3.network.HomeGuardWifiNetwork
 import ua.homeguard.s3.network.HomeGuardWifiScanner
-import ua.homeguard.s3.network.LocalDiscoveryCoordinator
 import ua.homeguard.s3.network.UdpDeviceDiscovery
-import ua.homeguard.s3.storage.RegisteredDeviceStore
-import ua.homeguard.s3.storage.SettingsStore
 import java.net.URI
-
-@Composable
-fun ProvisioningScreen(
-    state: ProvisioningUiState,
-    onBack: () -> Unit,
-    onScan: () -> Unit,
-    onProvision: (ProvisioningForm) -> Unit,
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val discovery = remember(context) { LocalDiscoveryCoordinator(context, scope) }
-    val localSettings = remember(context) { SettingsStore(context) }
-    val devices by discovery.devices.collectAsState()
-    val isScanning by discovery.isScanning.collectAsState()
-    val scanStatus by discovery.scanStatus.collectAsState()
-
-    DisposableEffect(discovery) {
-        discovery.start()
-        onDispose { discovery.stop() }
-    }
-
-    fun finishManualSelection(address: String, requestedName: String) {
-        val cleanName = requestedName.trim().take(40)
-        if (cleanName.isBlank()) return
-        val endpoint = normalizeLocalAddress(address) ?: return
-        val uri = runCatching { URI(endpoint) }.getOrNull() ?: return
-        val host = uri.host ?: return
-        val port = when {
-            uri.port in 1..65535 -> uri.port
-            uri.scheme.equals("https", ignoreCase = true) -> 443
-            else -> 80
-        }
-        val deviceId = "manual-${host.lowercase()}-$port"
-        scope.launch {
-            if (!RegisteredDeviceStore.registerActive(deviceId, endpoint, cleanName)) return@launch
-            localSettings.selectDevice(deviceId, endpoint)
-            (context as? Activity)?.recreate()
-        }
-    }
-
-    ProvisioningScreen(
-        state = state,
-        devices = devices,
-        isScanningNetwork = isScanning,
-        scanStatus = scanStatus,
-        onBack = onBack,
-        onScanQr = onScan,
-        onDiscover = { scope.launch { discovery.rescan() } },
-        onUseDevice = { device, requestedName ->
-            val cleanName = requestedName.trim().take(40)
-            if (cleanName.isNotBlank()) {
-                scope.launch {
-                    if (!RegisteredDeviceStore.registerActive(device.deviceId, device.baseUrl, cleanName)) return@launch
-                    localSettings.remember(device)
-                    (context as? Activity)?.recreate()
-                }
-            }
-        },
-        onUseManualIp = ::finishManualSelection,
-        onProvision = onProvision,
-    )
-}
 
 @Composable
 fun ProvisioningScreen(
@@ -234,9 +165,7 @@ fun ProvisioningScreen(
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = if (wifiPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
-                IconButton(onClick = { wifiPasswordVisible = !wifiPasswordVisible }) {
-                    Text("👁")
-                }
+                IconButton(onClick = { wifiPasswordVisible = !wifiPasswordVisible }) { Text("👁") }
             },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         )
@@ -251,9 +180,7 @@ fun ProvisioningScreen(
             onClick = { onProvision(form) },
             enabled = state.qr != null && ownerNameValid && form.wifiSsid.isNotBlank() && form.wifiPassword.length in 8..64 && !busy,
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Підключити HomeGuard до Wi-Fi")
-        }
+        ) { Text("Підключити HomeGuard до Wi-Fi") }
         Text(state.message)
         if (state.error.isNotBlank()) Text("Помилка: ${state.error}")
         if (state.localUrl.isNotBlank()) Text("Локальна адреса: ${state.localUrl}")
@@ -287,9 +214,7 @@ fun ProvisioningScreen(
             onClick = onDiscover,
             enabled = !isScanningNetwork && !busy,
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(if (isScanningNetwork) "Пошук у мережі…" else "Знайти у локальній мережі")
-        }
+        ) { Text(if (isScanningNetwork) "Пошук у мережі…" else "Знайти у локальній мережі") }
         if (isScanningNetwork) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CircularProgressIndicator()
@@ -326,10 +251,7 @@ fun ProvisioningScreen(
             },
             label = { Text("IP або IP:порт") },
             supportingText = {
-                Text(
-                    if (devices.isNotEmpty()) "Автозаповнено зі знайденого HomeGuard"
-                    else "За замовчуванням: 192.168.4.1"
-                )
+                Text(if (devices.isNotEmpty()) "Автозаповнено зі знайденого HomeGuard" else "За замовчуванням: 192.168.4.1")
             },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
@@ -339,9 +261,7 @@ fun ProvisioningScreen(
             onClick = { onUseManualIp(manualAddress, form.ownerLabel) },
             enabled = canUseProvisioningShortcut(form.ownerLabel, busy, manualAddressValid),
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Підключити по IP")
-        }
+        ) { Text("Підключити по IP") }
     }
 }
 
