@@ -31,13 +31,23 @@ class DeviceSession(
         targetJob = scope.launch {
             combine(endpointProvider, settings.settings) { endpoint, appSettings ->
                 val token = appSettings.telemetryToken.ifBlank { appSettings.apiToken }
-                SessionTarget(endpoint, token)
+                SessionTarget(endpoint, token, appSettings.autoReconnect)
             }.distinctUntilChanged().collect { target ->
+                val previous = currentTarget
                 currentTarget = target
-                reconnectJob?.cancel()
-                reconnectJob = null
-                reconnectAttempt = 0
-                connect(target)
+
+                if (previous == null || !target.sameConnection(previous)) {
+                    reconnectJob?.cancel()
+                    reconnectJob = null
+                    reconnectAttempt = 0
+                    connect(target)
+                } else if (!target.autoReconnect) {
+                    reconnectJob?.cancel()
+                    reconnectJob = null
+                    reconnectAttempt = 0
+                } else if (telemetry.connection().value == TelemetryConnectionState.OFFLINE) {
+                    scheduleReconnect()
+                }
             }
         }
 
@@ -88,7 +98,7 @@ class DeviceSession(
 
     private fun scheduleReconnect() {
         if (reconnectJob?.isActive == true) return
-        val target = currentTarget?.takeIf(SessionTarget::isConnectable) ?: return
+        val target = currentTarget?.takeIf(SessionTarget::canReconnect) ?: return
         val attempt = reconnectAttempt++
 
         reconnectJob = scope.launch {
@@ -99,11 +109,22 @@ class DeviceSession(
         }
     }
 
-    private data class SessionTarget(val endpoint: DeviceEndpoint, val token: String) {
+    private data class SessionTarget(
+        val endpoint: DeviceEndpoint,
+        val token: String,
+        val autoReconnect: Boolean,
+    ) {
         fun isConnectable(): Boolean =
             endpoint.path != ControlPath.OFFLINE && endpoint.websocketUrl.isNotBlank() && token.isNotBlank()
+
+        fun canReconnect(): Boolean = reconnectAllowed(autoReconnect, endpoint, token)
+
+        fun sameConnection(other: SessionTarget): Boolean = endpoint == other.endpoint && token == other.token
     }
 }
+
+internal fun reconnectAllowed(autoReconnect: Boolean, endpoint: DeviceEndpoint, token: String): Boolean =
+    autoReconnect && endpoint.path != ControlPath.OFFLINE && endpoint.websocketUrl.isNotBlank() && token.isNotBlank()
 
 internal fun reconnectDelayMs(attempt: Int): Long = when (attempt.coerceAtLeast(0)) {
     0 -> 2_000L
