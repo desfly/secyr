@@ -93,7 +93,7 @@ class DeviceSession(
             return
         }
         val pin = if (endpoint.path == ControlPath.CLOUD) "" else endpoint.certificateSha256
-        telemetry.connect(endpoint.websocketUrl, target.token, pin)
+        telemetry.connect(endpoint.websocketUrl, target.token, pin, endpoint.deviceId)
     }
 
     private fun scheduleReconnect() {
