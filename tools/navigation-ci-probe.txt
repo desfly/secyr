@@ -1,0 +1,1 @@
+Navigation CI verification probe for single-active Web UI audit.
