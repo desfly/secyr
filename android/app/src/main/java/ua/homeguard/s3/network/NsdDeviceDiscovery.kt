@@ -22,7 +22,7 @@ class NsdDeviceDiscovery(context: Context) {
     private val found = ConcurrentHashMap<String, DiscoveredDevice>()
     private val _devices = MutableStateFlow<List<DiscoveredDevice>>(emptyList())
     val devices: StateFlow<List<DiscoveredDevice>> = _devices.asStateFlow()
-    private var started = false
+    @Volatile private var started = false
 
     private fun resolve(serviceInfo: NsdServiceInfo) {
         // A ResolveListener represents one in-flight NSD resolve operation. Reusing the
@@ -30,10 +30,13 @@ class NsdDeviceDiscovery(context: Context) {
         // Android implementations when announcements arrive close together.
         val listener = object : NsdManager.ResolveListener {
             override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {
+                if (!started) return
                 Log.w(TAG, "mDNS resolve failed: service=${info.serviceName} code=$errorCode")
             }
 
             override fun onServiceResolved(info: NsdServiceInfo) {
+                if (!started) return
+
                 val attributes = info.attributes
                 fun attribute(name: String): String? = attributes[name]?.toString(StandardCharsets.UTF_8)
 
@@ -87,6 +90,7 @@ class NsdDeviceDiscovery(context: Context) {
         }
 
         override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+            if (!started) return
             if (serviceInfo.serviceType.startsWith("_homeguard._tcp")) {
                 Log.d(TAG, "mDNS service announced: ${serviceInfo.serviceName}")
                 resolve(serviceInfo)
@@ -107,7 +111,12 @@ class NsdDeviceDiscovery(context: Context) {
     fun start() {
         if (started) return
         started = true
-        nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+        runCatching {
+            nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+        }.onFailure { error ->
+            started = false
+            Log.w(TAG, "Unable to start mDNS discovery", error)
+        }
     }
 
     @Synchronized
