@@ -34,6 +34,13 @@ class RegisteredDeviceStore(context: Context) {
             return activeStore?.refreshDiscovered(discovered) ?: false
         }
 
+        suspend fun registerActive(deviceId: String, baseUrl: String, name: String): Boolean {
+            val store = activeStore ?: return false
+            if (deviceId.isBlank() || name.trim().isBlank()) return false
+            store.addManual(deviceId, baseUrl, name)
+            return true
+        }
+
         suspend fun removeActive(deviceId: String): Boolean {
             if (deviceId.isBlank()) return false
             return activeStore?.remove(deviceId) ?: false
@@ -200,7 +207,9 @@ class RegisteredDeviceStore(context: Context) {
                 add(
                     RegisteredDevice(
                         deviceId = id.trim(),
-                        name = item.optString("name", "HomeGuard"),
+                        // Missing legacy names stay blank so the UI can force an owner rename;
+                        // never synthesize HomeGuard/ID/IP as a visible friendly name.
+                        name = item.optString("name").trim().take(40),
                         baseUrl = item.optString("base_url"),
                         lastSeenAtMs = item.optLong("last_seen_at_ms"),
                         authorized = item.optBoolean("authorized", true),
