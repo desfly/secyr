@@ -85,6 +85,12 @@ File:
 
 The provisioning callback previously set `provisioningOpen=false` unconditionally after calling `addManualDevice()`. If address validation rejected the IP, the device was not added but the provisioning screen still closed. The close transition now lives only in the successful canonical `addManualDevice()` path, after validation and registry/settings update.
 
+#### A-029 — NSD start failure/stale resolve could poison discovery lifecycle — FIXED ON AUDIT BRANCH
+File:
+- `android/app/src/main/java/ua/homeguard/s3/network/NsdDeviceDiscovery.kt`
+
+`start()` previously set `started=true` before `NsdManager.discoverServices()`. A synchronous platform exception could therefore leave discovery permanently marked started and suppress all future retries. Also an in-flight resolve callback could arrive after `stop()` and republish a device into the stopped runtime. Start now rolls the flag back on synchronous failure, `started` is visible across callback threads, and late found/resolve callbacks are ignored after stop.
+
 ### MEDIUM
 
 #### A-004 — MainActivity is an orchestration god-object — OPEN
@@ -128,19 +134,20 @@ Removed `activeStore` and static registry mutation helpers. `ProvisioningCoordin
 - Build #1146 passed after A-027 telemetry setup-failure containment and tests.
 
 ## Current execution status
-Latest code head before this register update: `4c1af111e6324da8eb6936993eed4e6a5360364e`.
+Latest code head before this register update: `ca2c0e9ac44c0268e827dcbf93fbee1245162e65`.
 
 Latest pass:
 - Build #1148 showed Android APK/tests green but failed the host discovery contract because that script matched the old literal three-input `combine(...)` form; the product code now correctly has a fourth freshness-clock input;
-- updated `tools/check_android_discovery_contract.py` to verify that the actual `devices` combine contains mDNS + UDP + HTTP regardless of additional inputs, rather than matching one formatting string;
-- found and fixed A-028 so invalid manual-IP input no longer closes provisioning;
+- updated `tools/check_android_discovery_contract.py` to inspect the actual `devices` combine inputs instead of matching one formatting string;
+- fixed A-028 so invalid manual-IP input no longer closes provisioning;
+- fixed A-029 so synchronous NSD start failure cannot permanently suppress retries and stale resolve callbacks do not republish after stop;
 - no new runtime/store/coordinator was introduced.
 
-Build #1150 is pending on the latest code head. Do not mark the newest A-022/A-028 changes CI-validated until it succeeds.
+CI for the latest head is pending. Do not mark A-022/A-028/A-029 fully CI-validated until an exact-head run succeeds.
 
 ## Next immediate blocks
-1. Check Build #1150 and fix the exact failing job first if red.
-2. Continue lifecycle review around NSD/network callbacks and repeated start/stop/reconnect paths.
+1. Check latest CI and fix the exact failing job first if red.
+2. Continue lifecycle review around network callbacks and repeated start/stop/reconnect paths.
 3. Audit `MainActivity` for removable orchestration chains without adding abstraction layers.
 4. Audit manifest/build/security surface, especially global cleartext and permission timing.
 5. Strengthen acceptance tests around restart, device switching, network loss/recovery, invalid inputs and repeated user actions.
