@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import ua.homeguard.s3.model.DiscoveredDevice
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal const val DISCOVERY_FRESHNESS_MS = 30_000L
 
@@ -65,6 +66,7 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
     private val udp = UdpDeviceDiscovery(appContext, scope)
     private val http = HttpSubnetDiscovery(appContext)
     private val manualRescanActive = MutableStateFlow(false)
+    private val manualRescanRunning = AtomicBoolean(false)
 
     val scanStatus: StateFlow<UdpDeviceDiscovery.ScanStatus> = combine(
         udp.status,
@@ -78,11 +80,6 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         .stateIn(scope, SharingStarted.Eagerly, false)
 
     val devices: StateFlow<List<DiscoveredDevice>> = combine(nsd.devices, udp.devices, http.devices) { mdns, udpFallback, httpFallback ->
-        // Cemented rule: one physical ESP controller is one UI device.
-        // Use transitive identity reconciliation instead of grouping by host only:
-        // mDNS/UDP/HTTP may observe the same controller through different hosts or IDs.
-        // Filter stale reports before collapsing them. This is especially important for
-        // mDNS implementations that do not reliably deliver onServiceLost callbacks.
         val fresh = freshDiscoveryReports(
             mdns + udpFallback + httpFallback,
             System.currentTimeMillis(),
@@ -100,16 +97,24 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         udp.stop()
     }
 
-    suspend fun rescan() = coroutineScope {
+    suspend fun rescan() {
+        // A rapid double tap can call rescan() twice before Compose disables the button.
+        // Do not queue another full UDP+HTTP pass behind the first one: that causes
+        // duplicate network work and can make scan state briefly report idle/done while
+        // another scan is still executing.
+        if (!manualRescanRunning.compareAndSet(false, true)) return
+
         manualRescanActive.value = true
         try {
-            awaitAll(
-                async { udp.scanOnce() },
-                async { http.scanOnce() },
-            )
+            coroutineScope {
+                awaitAll(
+                    async { udp.scanOnce() },
+                    async { http.scanOnce() },
+                )
+            }
         } finally {
             manualRescanActive.value = false
+            manualRescanRunning.set(false)
         }
-        Unit
     }
 }
