@@ -41,6 +41,15 @@ void get_u8(std::span<const std::byte> in, std::size_t& cursor, std::array<std::
     for (auto& value : out) value = std::to_integer<std::uint8_t>(in[cursor++]);
 }
 
+void read_record(std::span<const std::byte> image, std::size_t& cursor, AccessUser& record) {
+    get_chars(image, cursor, record.id);
+    get_chars(image, cursor, record.name);
+    record.role = static_cast<AccessRole>(std::to_integer<std::uint8_t>(image[cursor++]));
+    record.enabled = std::to_integer<std::uint8_t>(image[cursor++]) != 0U;
+    get_u8(image, cursor, record.salt);
+    get_u8(image, cursor, record.pin_digest);
+}
+
 bool valid_record_for_import(const AccessUser& user) {
     const bool id_terminated = std::find(user.id.begin(), user.id.end(), '\0') != user.id.end();
     const bool name_terminated = std::find(user.name.begin(), user.name.end(), '\0') != user.name.end();
@@ -87,31 +96,25 @@ bool AccessStoreCodec::decode(std::span<const std::byte> image, AccessControl& a
     const auto actual = hg::crc32(image.first(image.size() - crc_size));
     if (expected != actual) return false;
 
-    // Keep the decode scratch proportional to persisted user data only.
-    // AccessControl also owns a 64-entry audit ring, so constructing a full
-    // temporary AccessControl here consumes several KiB of task stack and can
-    // overflow ESP-IDF's main task while restoring NVS at boot.
-    std::array<AccessUser, AccessControl::user_capacity> restored_users{};
+    // First pass validates every persisted user before the destination is
+    // mutated. Keep only one AccessUser on the task stack. A full temporary
+    // AccessControl also carries the 64-entry audit ring and previously
+    // overflowed ESP-IDF's main task while restoring NVS at boot.
     std::size_t cursor = header_size;
     for (std::size_t i = 0; i < AccessControl::user_capacity; ++i) {
         AccessUser record{};
-        get_chars(image, cursor, record.id);
-        get_chars(image, cursor, record.name);
-        record.role = static_cast<AccessRole>(std::to_integer<std::uint8_t>(image[cursor++]));
-        record.enabled = std::to_integer<std::uint8_t>(image[cursor++]) != 0U;
-        get_u8(image, cursor, record.salt);
-        get_u8(image, cursor, record.pin_digest);
-        if (i < count) {
-            if (!valid_record_for_import(record)) return false;
-            restored_users[i] = record;
-        }
+        read_record(image, cursor, record);
+        if (i < count && !valid_record_for_import(record)) return false;
     }
 
-    // All records are validated before mutating the destination. With count
-    // capped at user_capacity, import_user cannot run out of capacity here.
+    // Second pass performs the import after validation. count is already
+    // bounded by user_capacity, so a validated image cannot exhaust capacity.
     access.clear_users();
+    cursor = header_size;
     for (std::size_t i = 0; i < count; ++i) {
-        if (!access.import_user(restored_users[i])) {
+        AccessUser record{};
+        read_record(image, cursor, record);
+        if (!access.import_user(record)) {
             access.clear_users();
             return false;
         }
