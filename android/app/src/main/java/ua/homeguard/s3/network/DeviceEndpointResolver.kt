@@ -14,6 +14,7 @@ import ua.homeguard.s3.storage.SettingsStore
 class DeviceEndpointResolver(
     settings: SettingsStore,
     discovery: LocalDiscoveryCoordinator,
+    registeredDevices: RegisteredDeviceStore,
     scope: CoroutineScope
 ) {
     val endpoint: StateFlow<DeviceEndpoint> = combine(settings.settings, discovery.devices) { config, devices ->
@@ -31,7 +32,7 @@ class DeviceEndpointResolver(
 
         if (manualLocal != null) {
             scope.launch {
-                if (RegisteredDeviceStore.reconcileActiveManual(config.deviceId, manualLocal)) {
+                if (registeredDevices.reconcileManual(config.deviceId, manualLocal)) {
                     settings.remember(manualLocal)
                 }
             }
@@ -45,7 +46,7 @@ class DeviceEndpointResolver(
                 .orEmpty()
             if (discoveredUrl != rememberedUrl) {
                 scope.launch {
-                    RegisteredDeviceStore.refreshActiveDiscovered(directLocal)
+                    registeredDevices.refreshDiscovered(directLocal)
                     settings.remember(directLocal)
                 }
             }
