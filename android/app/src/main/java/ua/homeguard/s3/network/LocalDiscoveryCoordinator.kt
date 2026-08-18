@@ -13,6 +13,17 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import ua.homeguard.s3.model.DiscoveredDevice
 
+internal const val DISCOVERY_FRESHNESS_MS = 30_000L
+
+internal fun freshDiscoveryReports(
+    reports: List<DiscoveredDevice>,
+    nowMs: Long,
+    maxAgeMs: Long = DISCOVERY_FRESHNESS_MS,
+): List<DiscoveredDevice> {
+    val cutoff = nowMs - maxAgeMs.coerceAtLeast(0L)
+    return reports.filter { it.seenAtMs >= cutoff }
+}
+
 internal fun combineDiscoveryScanStatus(
     udp: UdpDeviceDiscovery.ScanStatus,
     http: HttpSubnetDiscovery.ScanStatus,
@@ -70,7 +81,13 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         // Cemented rule: one physical ESP controller is one UI device.
         // Use transitive identity reconciliation instead of grouping by host only:
         // mDNS/UDP/HTTP may observe the same controller through different hosts or IDs.
-        DiscoveryDeduplicator.collapse(mdns + udpFallback + httpFallback)
+        // Filter stale reports before collapsing them. This is especially important for
+        // mDNS implementations that do not reliably deliver onServiceLost callbacks.
+        val fresh = freshDiscoveryReports(
+            mdns + udpFallback + httpFallback,
+            System.currentTimeMillis(),
+        )
+        DiscoveryDeduplicator.collapse(fresh)
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     fun start() {
