@@ -52,6 +52,7 @@ One canonical runtime path for discovery, registry, selection, auth/session, pro
 - **A-046 — Operator session and Factory Reset completion were not bound to the controller that issued them — FIXED + ANDROID/HOST CI VALIDATED.** `AccessSession` now carries `controllerId`; device selection changes clear a stale operator session/PIN; commands and Factory Reset require the session to belong to the selected controller. Factory Reset captures its target controller and will not clear a different controller selected while the destructive request is in flight. Build #1213 Android + host jobs passed on the exact code head.
 - **A-047 — Live telemetry fan-out could silently drop bursts beyond 16 queued events — FIXED + ANDROID/HOST CI VALIDATED.** The unchecked `MutableSharedFlow(extraBufferCapacity=16).tryEmit()` path was replaced by the single-consumer event queue used by persistent history + notifications. Accepted unique events are no longer silently dropped because the old 16-event intermediate buffer filled. Build #1213 Android + host jobs passed on the exact code head.
 - **A-048 — WebSocket callback could race assignment of the active socket — FIXED + ANDROID/HOST CI VALIDATED.** Connection callbacks are gated by a monotonic generation token created before `newWebSocket()`. Stale generations are rejected and disconnect invalidates the previous generation, removing dependence on callback-vs-assignment timing. Unit test covers current/stale generation acceptance. Build #1213 Android + host jobs passed on the exact code head.
+- **A-050 — In-flight command/login could cross a controller switch and read the newly selected controller token — FIXED + ANDROID/HOST CI VALIDATED.** Command/login network work now captures the target controller and API token together, watches `SettingsStore` selection changes while cancellable HTTP work is in flight, and cancels that request if selection changes. A request to controller A can no longer dynamically read controller B's API token after a switch. Build #1213 Android + host jobs passed on the exact code head.
 
 ### MEDIUM
 - **A-004 — MainActivity remains a large orchestration object — OPEN / DEFERRED.** Do not mechanically split it before runtime contracts are frozen; adding layers now risks recreating the parallel runtimes just removed.
@@ -101,6 +102,7 @@ Only measured repository/CI numbers are reported. Phone-only performance numbers
 - Event history cap: **256 records**; after store construction append performs **0 persisted-history reads** versus one full persisted JSON read/parse per append previously.
 - NSD and WebSocket stale-callback policy: only current generation accepted; stale-generation callbacks accepted: **0 by contract**.
 - Factory Reset: **one destructive request maximum** through the process-wide run gate; completion affects only the controller the request targeted.
+- Login/command target binding: selected-controller change during cancellable HTTP work cancels that request; target API token is immutable for the request lifetime rather than dynamically reread from global settings.
 
 ## CI status chronology relevant to current code
 - Build #1143: dead-code island removal green.
@@ -126,6 +128,7 @@ Use the same phone, Android version, Wi-Fi/AP, ESP firmware/config and charger s
 8. **Provisioning repeated-action soak:** repeatedly double-tap provisioning confirmation around the enabled→busy transition; verify only one Setup-AP request/run is active.
 9. **Multi-controller event soak:** produce equal event sequence numbers on two controllers; verify both persist, both notify independently, and each Dashboard shows only its controller history.
 10. **Factory Reset switch race:** start confirmed reset on controller A, switch to B before completion, and verify B remains selected while A is marked unauthorized/reset.
+11. **Command switch race:** start a local command/login against controller A, immediately switch to B, and verify the old HTTP call is cancelled or returns controller-changed, never uses B's token, and never reports a successful A result as if it belonged to B.
 
 ## Freeze decision
 - Android cleanup/lifecycle/reconnect/dead-code pass is **CODE-FROZEN at `e35d8dd230ecf254e2857df9788ab9f2274835a1`** after exact-head Host validation + Android debug APK success in Build #1213.
