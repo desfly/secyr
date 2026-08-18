@@ -309,7 +309,7 @@ fun ProvisioningScreen(
                     manualAddress = if (device.port == 80) device.host else "${device.host}:${device.port}"
                     onUseDevice(device, form.ownerLabel)
                 },
-                enabled = ownerNameValid && !busy,
+                enabled = canUseProvisioningShortcut(form.ownerLabel, busy),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("${device.serviceName.ifBlank { "HomeGuard-S3" }} · ${device.host}:${device.port}")
@@ -337,13 +337,16 @@ fun ProvisioningScreen(
         )
         Button(
             onClick = { onUseManualIp(manualAddress, form.ownerLabel) },
-            enabled = ownerNameValid && manualAddressValid && !busy,
+            enabled = canUseProvisioningShortcut(form.ownerLabel, busy, manualAddressValid),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Підключити по IP")
         }
     }
 }
+
+internal fun canUseProvisioningShortcut(ownerLabel: String, busy: Boolean, addressValid: Boolean = true): Boolean =
+    ownerLabel.trim().isNotBlank() && !busy && addressValid
 
 private fun normalizeLocalAddress(raw: String): String? {
     val value = raw.trim().trimEnd('/')
