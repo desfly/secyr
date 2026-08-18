@@ -3,6 +3,8 @@ package ua.homeguard.s3.network
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ua.homeguard.s3.model.DiscoveredDevice
+import ua.homeguard.s3.model.DiscoverySource
 
 class DiscoveryScanStatusTest {
     @Test
@@ -57,5 +59,29 @@ class DiscoveryScanStatusTest {
 
         assertEquals("listening", status.phase)
         assertEquals(0.42f, status.progress)
+    }
+
+    @Test
+    fun staleDiscoveryReportsAreDroppedBeforeDeviceListDeduplication() {
+        val now = 100_000L
+        val fresh = DiscoveredDevice(
+            deviceId = "HG-S3-FRESH",
+            serviceName = "fresh",
+            host = "192.168.1.20",
+            port = 443,
+            secure = true,
+            source = DiscoverySource.MDNS,
+            seenAtMs = now - DISCOVERY_FRESHNESS_MS,
+        )
+        val stale = fresh.copy(
+            deviceId = "HG-S3-STALE",
+            serviceName = "stale",
+            host = "192.168.1.21",
+            seenAtMs = now - DISCOVERY_FRESHNESS_MS - 1,
+        )
+
+        val result = freshDiscoveryReports(listOf(fresh, stale), now)
+
+        assertEquals(listOf("HG-S3-FRESH"), result.map { it.deviceId })
     }
 }
