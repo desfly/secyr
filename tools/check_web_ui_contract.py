@@ -63,6 +63,47 @@ html_ids = set(re.findall(r'\bid=["\']([^"\']+)["\']', html))
 for item in sorted(required_ids):
     require(item in html_ids, f"required DOM id missing: {item}")
 
+# Navigation regression gate. Historically several menu pairs shared one hash
+# target, and routeFromHash() therefore assigned the blue .active class to both
+# matching anchors. Every visible navigation item now owns a unique hash route;
+# paired items may still scroll to nearby views, but never share the route key.
+nav_match = re.search(r"<nav>(.*?)</nav>", html, re.S)
+nav_html = nav_match.group(1) if nav_match else ""
+require(bool(nav_match), "sidebar navigation block missing")
+nav_routes = re.findall(r'<a\b[^>]*\bhref=["\'](#[^"\']+)["\'][^>]*>', nav_html, re.S)
+expected_nav_routes = (
+    "#overview", "#zones-section", "#zones", "#io-section", "#ioState",
+    "#events", "#history", "#networkPage", "#system",
+)
+require(tuple(nav_routes) == expected_nav_routes,
+        f"navigation hash routes changed or reordered: {nav_routes}")
+require(len(nav_routes) == len(set(nav_routes)),
+        f"duplicate navigation href detected; this can create double blue active state: {nav_routes}")
+for route in nav_routes:
+    matches = sum(candidate == route for candidate in nav_routes)
+    require(matches == 1, f"hash transition {route} would activate {matches} menu items")
+    target = route[1:]
+    require(re.search(rf'\bid=["\']{re.escape(target)}["\']', html) is not None,
+            f"navigation route {route} has no DOM target id={target}")
+require(re.search(r'<div\s+class=["\']nav-group-label["\'][^>]*>.*?<span>Налаштування</span>.*?</div>', nav_html, re.S) is not None,
+        "Налаштування must remain a non-clickable navigation group label")
+require(re.search(r'<a\b[^>]*>.*?<span>Налаштування</span>.*?</a>', nav_html, re.S) is None,
+        "Налаштування regressed into an active-capable navigation link")
+require(len(re.findall(r'class=["\'][^"\']*\bactive\b[^"\']*["\']', nav_html)) == 1,
+        "HTML must boot with exactly one active navigation item")
+require('class="active" href="#overview"' in nav_html,
+        "overview must be the single initial active navigation item")
+require(js.count('classList.toggle("active"') == 1,
+        "active navigation class must have one authoritative JS assignment site")
+require('link.getAttribute("href") === hash' in js,
+        "routeFromHash must select active navigation by exact hash equality")
+require("hashchange" in js and "routeFromHash" in js,
+        "hash transitions are not wired to the navigation state resolver")
+require("nav a.active{" in css,
+        "blue selected-state CSS rule missing")
+require("nav a:hover{background" not in css and "nav a:focus{background" not in css and "nav a:focus-visible{background" not in css,
+        "hover/focus must not paint a second blue navigation background")
+
 security_commands = (
     "security.arm_away", "security.disarm", "security.arm_home", "security.panic",
 )
@@ -171,6 +212,7 @@ if errors:
 
 print("Web UI contract PASS")
 print(f" - DOM ids checked: {len(required_ids)}")
+print(f" - navigation hash transitions checked: {len(nav_routes)}; single-active invariant enforced")
 print(" - quick security buttons -> authorized firmware route: 4")
 print(" - live valve buttons -> authorized firmware route: present")
 print(" - first Admin bootstrap: factory-fresh NVS only; corruption stays fail-closed")
