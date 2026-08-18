@@ -30,6 +30,12 @@ import java.net.SocketTimeoutException
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
+internal const val UDP_DISCOVERY_EMPTY_INTERVAL_MS = 5_000L
+internal const val UDP_DISCOVERY_FOUND_INTERVAL_MS = 15_000L
+
+internal fun nextUdpDiscoveryDelayMs(hasDevices: Boolean): Long =
+    if (hasDevices) UDP_DISCOVERY_FOUND_INTERVAL_MS else UDP_DISCOVERY_EMPTY_INTERVAL_MS
+
 class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
     data class ScanStatus(
         val phase: String = "idle",
@@ -71,7 +77,7 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
                             error = error.message ?: error.javaClass.simpleName,
                         )
                     }
-                delay(5_000L)
+                delay(nextUdpDiscoveryDelayMs(found.isNotEmpty()))
             }
         }
     }
