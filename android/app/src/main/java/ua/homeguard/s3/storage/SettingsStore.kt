@@ -59,6 +59,8 @@ class SettingsStore(context: Context) {
             )
         }
 
+        if (normalized == current) return
+
         preferences.edit()
             .putString("device_id", normalized.deviceId)
             .putBoolean("auto_reconnect", normalized.autoReconnect)
@@ -70,8 +72,8 @@ class SettingsStore(context: Context) {
             .putBoolean("notifications_status", normalized.statusNotificationsEnabled)
             .putBoolean("notifications_zones", normalized.zoneNotificationsEnabled)
             .apply()
-        secure.put("api_token", normalized.apiToken)
-        secure.put("telemetry_token", normalized.telemetryToken)
+        if (normalized.apiToken != current.apiToken) secure.put("api_token", normalized.apiToken)
+        if (normalized.telemetryToken != current.telemetryToken) secure.put("telemetry_token", normalized.telemetryToken)
         settings.emit(normalized)
     }
 
