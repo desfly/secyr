@@ -53,7 +53,10 @@ class DeviceSession(
 
         connectionJob = scope.launch {
             telemetry.connection().collect { state ->
-                val deviceId = settings.settings.value.deviceId
+                // Authorization belongs to the controller targeted by this session,
+                // not whichever device settings happen to select while an async
+                // socket callback is being delivered.
+                val deviceId = currentTarget?.endpoint?.deviceId.orEmpty()
                 when (state) {
                     TelemetryConnectionState.CONNECTED -> {
                         reconnectAttempt = 0
