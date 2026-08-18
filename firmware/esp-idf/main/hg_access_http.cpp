@@ -6,6 +6,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <new>
 #include <string>
 #include <string_view>
 
@@ -166,7 +168,6 @@ esp_err_t AccessHttp::handle_login(httpd_req_t* request) {
         return send_rate_limited(request, *access_, actor, now_ms);
     }
     if (decision != AuditDecision::Allowed) {
-        // Do not reveal whether an account exists or merely has a wrong PIN.
         httpd_resp_set_status(request, "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
     }
@@ -299,18 +300,24 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"last_admin_required\"}");
     }
 
-    const auto previous_access = *access_;
+    std::unique_ptr<AccessControl> previous_access{
+        new (std::nothrow) AccessControl(*access_)};
+    if (!previous_access) {
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return send_json(request, "{\"ok\":false,\"reason\":\"rollback_snapshot_unavailable\"}");
+    }
+
     std::array<std::uint8_t, 16> salt{};
     esp_fill_random(salt.data(), salt.size());
     if (!access_->set_user(id, name, role, pin, salt, enabled)) {
-        *access_ = previous_access;
+        *access_ = *previous_access;
         httpd_resp_set_status(request, "409 Conflict");
         return send_json(request, "{\"ok\":false,\"reason\":\"user_capacity_or_validation\"}");
     }
 
     const auto persist = store_->save(*access_);
     if (persist != ESP_OK) {
-        *access_ = previous_access;
+        *access_ = *previous_access;
         httpd_resp_set_status(request, "500 Internal Server Error");
         return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
     }
