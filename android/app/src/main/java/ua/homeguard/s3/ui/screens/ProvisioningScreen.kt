@@ -42,6 +42,7 @@ import ua.homeguard.s3.network.HomeGuardWifiNetwork
 import ua.homeguard.s3.network.HomeGuardWifiScanner
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
 import ua.homeguard.s3.network.UdpDeviceDiscovery
+import ua.homeguard.s3.storage.RegisteredDeviceStore
 import ua.homeguard.s3.storage.SettingsStore
 import java.net.URI
 
@@ -65,7 +66,9 @@ fun ProvisioningScreen(
         onDispose { discovery.stop() }
     }
 
-    fun finishManualSelection(address: String) {
+    fun finishManualSelection(address: String, requestedName: String) {
+        val cleanName = requestedName.trim().take(40)
+        if (cleanName.isBlank()) return
         val endpoint = normalizeLocalAddress(address) ?: return
         val uri = runCatching { URI(endpoint) }.getOrNull() ?: return
         val host = uri.host ?: return
@@ -74,8 +77,10 @@ fun ProvisioningScreen(
             uri.scheme.equals("https", ignoreCase = true) -> 443
             else -> 80
         }
+        val deviceId = "manual-${host.lowercase()}-$port"
         scope.launch {
-            localSettings.selectDevice("manual-${host.lowercase()}-$port", endpoint)
+            if (!RegisteredDeviceStore.registerActive(deviceId, endpoint, cleanName)) return@launch
+            localSettings.selectDevice(deviceId, endpoint)
             (context as? Activity)?.recreate()
         }
     }
@@ -88,10 +93,14 @@ fun ProvisioningScreen(
         onBack = onBack,
         onScanQr = onScan,
         onDiscover = { scope.launch { discovery.rescan() } },
-        onUseDevice = { device ->
-            scope.launch {
-                localSettings.remember(device)
-                (context as? Activity)?.recreate()
+        onUseDevice = { device, requestedName ->
+            val cleanName = requestedName.trim().take(40)
+            if (cleanName.isNotBlank()) {
+                scope.launch {
+                    if (!RegisteredDeviceStore.registerActive(device.deviceId, device.baseUrl, cleanName)) return@launch
+                    localSettings.remember(device)
+                    (context as? Activity)?.recreate()
+                }
             }
         },
         onUseManualIp = ::finishManualSelection,
@@ -108,8 +117,8 @@ fun ProvisioningScreen(
     onBack: () -> Unit,
     onScanQr: () -> Unit,
     onDiscover: () -> Unit,
-    onUseDevice: (DiscoveredDevice) -> Unit,
-    onUseManualIp: (String) -> Unit,
+    onUseDevice: (DiscoveredDevice, String) -> Unit,
+    onUseManualIp: (String, String) -> Unit,
     onProvision: (ProvisioningForm) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -298,9 +307,9 @@ fun ProvisioningScreen(
                 onClick = {
                     manualAddressTouched = false
                     manualAddress = if (device.port == 80) device.host else "${device.host}:${device.port}"
-                    onUseDevice(device)
+                    onUseDevice(device, form.ownerLabel)
                 },
-                enabled = !busy,
+                enabled = ownerNameValid && !busy,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("${device.serviceName.ifBlank { "HomeGuard-S3" }} · ${device.host}:${device.port}")
@@ -327,8 +336,8 @@ fun ProvisioningScreen(
             modifier = Modifier.fillMaxWidth(),
         )
         Button(
-            onClick = { onUseManualIp(manualAddress) },
-            enabled = manualAddressValid && !busy,
+            onClick = { onUseManualIp(manualAddress, form.ownerLabel) },
+            enabled = ownerNameValid && manualAddressValid && !busy,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Підключити по IP")
