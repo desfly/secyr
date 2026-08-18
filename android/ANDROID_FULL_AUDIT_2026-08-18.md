@@ -71,12 +71,10 @@ Files:
 
 Fix: secrets are now device-bound. Same-device restore preserves omitted local secrets; normal device selection clears carried-over API/telemetry tokens; provisioning may still install a genuinely new token while changing devices. This also clears stale device-bound secrets when the selected controller is cleared after Factory Reset.
 
-#### A-010 — Prominent Add Device action conflicts with the cemented hidden/secondary Add flow — OPEN
+#### A-010 — Prominent Add Device action conflicts with the cemented hidden/secondary Add flow — FIXED ON AUDIT BRANCH
 File: `android/app/src/main/java/ua/homeguard/s3/ui/screens/DeviceListScreen.kt`
 
-The normal device list still exposes a full-width `+ Додати пристрій` button. The product rule says the current Add flow remains hidden/secondary until its structure is redesigned separately.
-
-Action: replace the primary action with the smallest secondary entry point and lock it with a UI/source contract test; do not redesign Add Device.
+Fix: the full-width primary `+ Додати пристрій` button was removed from the normal device-list header and replaced with a small secondary `TextButton`. The Add screen itself is not redesigned and Android still starts on the device list.
 
 #### A-011 — Manual rescan progress reflected UDP only, not UDP+HTTP — FIXED
 Files:
@@ -111,7 +109,7 @@ Files:
 
 Previous flow accepted `ownerLabel` in the UI but did not require it and did not register the QR-provisioned controller in `RegisteredDeviceStore`. A successfully provisioned controller could therefore be selected in settings without a proper owner-named device card.
 
-Fix: provisioning now rejects a blank owner label, registers the stable QR device ID with the owner-provided name after the controller accepts configuration, and refreshes that registry entry with the discovered LAN endpoint after reboot. The UI button still needs a small follow-up so it is disabled before the name is entered instead of surfacing the validation error after tap.
+Fix: provisioning now rejects a blank owner label, registers the stable QR device ID with the owner-provided name after the controller accepts configuration, and refreshes that registry entry with the discovered LAN endpoint after reboot. UI-side button gating remains a small follow-up.
 
 #### A-018 — ProvisioningScreen creates a second discovery/settings runtime inside Compose — OPEN
 File: `android/app/src/main/java/ua/homeguard/s3/ui/screens/ProvisioningScreen.kt`
@@ -120,12 +118,10 @@ The top-level `ProvisioningScreen` constructs another `LocalDiscoveryCoordinator
 
 Action: after behavior contracts are locked, pass the existing runtime state/actions into the screen and remove the screen-owned discovery/settings instances.
 
-#### A-019 — HttpDeviceApi cancellation can race with OkHttp response delivery and leak Response — OPEN
+#### A-019 — HttpDeviceApi cancellation could race with OkHttp response delivery and leak Response — FIXED ON AUDIT BRANCH
 File: `android/app/src/main/java/ua/homeguard/s3/network/HttpDeviceApi.kt`
 
-`Call.await()` cancels OkHttp when the coroutine is cancelled, but `onResponse()` unconditionally resumes with the `Response`. If cancellation wins between network completion and resume, the response may no longer reach the caller's `.use` block and can be leaked; `onFailure()` also uses an `isActive` check rather than atomic `tryResume*` handling.
-
-Action: use atomic cancellable-continuation resume (`tryResume` / `tryResumeWithException`) and explicitly close an unclaimed response.
+Fix: `Call.await()` now uses atomic `tryResumeWithException` / `tryResume` + `completeResume`. If cancellation wins before response delivery, an unclaimed OkHttp `Response` is explicitly closed instead of relying on the caller's `.use` block.
 
 ### MEDIUM
 
@@ -148,19 +144,17 @@ File: `android/app/src/main/java/ua/homeguard/s3/network/DeviceEndpointResolver.
 
 Direct local selection now compares stable device IDs case-insensitively.
 
-#### A-013 — Legacy registry entries could synthesize visible name `HomeGuard` — PARTIAL FIX
-File: `android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt`
+#### A-013 — Legacy registry entries could synthesize visible name `HomeGuard` — FIXED ON AUDIT BRANCH
+Files:
+- `android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt`
+- `android/app/src/main/java/ua/homeguard/s3/ui/screens/DeviceListScreen.kt`
 
-Fix applied: a missing legacy `name` no longer defaults to `HomeGuard`; it remains blank, preserving the invariant that the storage layer does not invent a normal-card name.
+Fix: a missing legacy `name` no longer defaults to `HomeGuard`; it remains unnamed in storage. The device card shows a migration prompt `Потрібна назва`, and single/double tap routes directly to rename until the owner provides a real friendly name. No generated HomeGuard/ID/IP name is exposed as the normal card title.
 
-Remaining UI migration: an unnamed legacy entry needs an explicit “name required” prompt/rename path so the device remains recoverable without showing a generated product/ID/IP name.
-
-#### A-020 — Device-state picons conflate authorization with armed state and treat UNKNOWN as a red fault — OPEN
+#### A-020 — Device-state picons conflated authorization with armed state and treated UNKNOWN as a red fault — FIXED ON AUDIT BRANCH
 File: `android/app/src/main/java/ua/homeguard/s3/ui/screens/DeviceListScreen.kt`
 
-Current `authorized=true` renders `🛡 знято`, although authorization is not the security arm/disarm state. The health picon also renders `⚠ UNKNOWN` before a valid snapshot and three long labels share one non-wrapping Row, reproducing the narrow-screen health-layout problem.
-
-Action: make authorization wording explicit, render unknown/no-snapshot neutrally, classify actual fault/alarm states separately, and prevent label wrapping/overflow.
+Fix: authorization now renders as `🛡 доступ` instead of the misleading `🛡 знято`; missing/UNKNOWN telemetry is neutral (`… стан`), actual fault/alarm-like health remains red, and all compact labels are single-line weighted cells with ellipsis on narrow screens.
 
 ### CLEANUP
 
@@ -198,18 +192,19 @@ Completed in the active audit branch:
 - device-bound API/telemetry secret policy + tests;
 - provisioning ID normalization + test;
 - provisioning owner-friendly-name registration path;
-- removal of the `HomeGuard` fallback for missing legacy names.
+- legacy unnamed-device recovery prompt;
+- Add Device demoted from a primary full-width action to a secondary entry;
+- Device List picon/UNKNOWN/narrow-layout correction;
+- cancellation-safe OkHttp coroutine bridge.
 
 Next immediate blocks:
-1. run CI for the latest provisioning/registry changes and fix any exact failure first;
-2. Add Device hidden/secondary entry contract;
-3. legacy unnamed-card rename prompt;
-4. Device List picon/health layout regression;
-5. HttpDeviceApi cancellation safety;
-6. lifecycle/coroutine review, including duplicate ProvisioningScreen runtime;
-7. MainActivity decomposition plan;
-8. dead/duplicate architecture and PR #51 comparison;
-9. manifest/build/security-surface review.
+1. finish CI for the latest device-list/OkHttp changes and fix any exact failure first;
+2. UI-side ownerLabel gating in provisioning;
+3. lifecycle/coroutine review, including duplicate ProvisioningScreen runtime;
+4. MainActivity decomposition plan;
+5. dead/duplicate architecture and PR #51 comparison;
+6. manifest/build/security-surface review;
+7. add/strengthen acceptance gates for the newly fixed Device List rules.
 
 ## Audit rule
 Do not merge to `main` during discovery. Keep changes isolated on the audit branch, run CI continuously, and only later split/merge verified minimal changes.
