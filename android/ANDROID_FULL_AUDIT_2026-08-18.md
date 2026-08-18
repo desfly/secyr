@@ -55,8 +55,8 @@ Removed the screen-owned `LocalDiscoveryCoordinator`, screen-owned `SettingsStor
 #### A-019 — HttpDeviceApi cancellation could leak Response — FIXED
 Cancellation cancels the OkHttp call and closes an undeliverable response.
 
-#### A-022 — Stale mDNS report could stay online indefinitely — FIXED
-All discovery sources use one 30-second freshness window before deduplication.
+#### A-022 — Stale discovery could remain visible without a new source emission — FIXED ON AUDIT BRANCH
+All discovery sources use one 30-second freshness window before deduplication, and `LocalDiscoveryCoordinator` now drives expiry with a 1-second clock tick. Previously the freshness predicate only re-ran when mDNS/UDP/HTTP emitted; if Android omitted `onServiceLost` and no other source changed, a stale device could remain visible indefinitely despite the nominal 30-second window.
 
 #### A-023 — Provisioning shortcuts bypassed registry naming — FIXED
 Already-connected/manual-IP paths require owner-friendly name and use the canonical app-owned registry/settings path.
@@ -70,14 +70,14 @@ Cancellation and terminal callback cleanup now unbind/unregister safely.
 #### A-026 — Telemetry stayed offline forever after transient WebSocket failure — FIXED
 `DeviceSession` owns one reconnect job with 2/5/10/20/30-second capped backoff. CONNECTED, UNAUTHORIZED, target change and stop cancel retries; stale targets cannot reconnect.
 
-#### A-027 — Synchronous telemetry connect setup failure could kill DeviceSession collector — FIXED ON AUDIT BRANCH
+#### A-027 — Synchronous telemetry connect setup failure could kill DeviceSession collector — FIXED + CI VALIDATED
 Files:
 - `android/app/src/main/java/ua/homeguard/s3/network/TelemetrySocket.kt`
 - `android/app/src/test/java/ua/homeguard/s3/network/TelemetrySocketConnectFailureTest.kt`
 
 Before a WebSocket exists, URL parsing, certificate-pin validation or client construction can throw synchronously. Previously that exception escaped `TelemetrySocket.connect()` into the `DeviceSession` Flow collector, killing the target coroutine. A later settings/device change would then have no collector left to reconnect.
 
-Fix: connect setup is contained inside `TelemetrySocket`; synchronous setup failures now move the socket to `OFFLINE` instead of escaping. Tests cover malformed URL and invalid certificate pin. This keeps the session runtime alive so later valid target/settings changes remain recoverable.
+Fix: connect setup is contained inside `TelemetrySocket`; synchronous setup failures now move the socket to `OFFLINE` instead of escaping. Tests cover malformed URL and invalid certificate pin. Build #1146 passed on head `b9f31a0a4e7052daf709a052471f26d3e62f0523`.
 
 ### MEDIUM
 
@@ -119,20 +119,20 @@ Removed `activeStore` and static registry mutation helpers. `ProvisioningCoordin
 - Device List has rename/delete/properties, unauthorized state and one-controller-one-card reconciliation.
 - Factory Reset requires explicit destructive confirmation.
 - Build #1143 passed after the 11-file dead-architecture removal.
+- Build #1146 passed after A-027 telemetry setup-failure containment and tests.
 
 ## Current execution status
-Latest code/test head before this register update: `0f5989901526eee71080f790dc7dce97d41095cb`.
+Latest code head before this register update: `774726a80d8947a031b2b73d6766e2bd6c13d0a6`.
 
 Latest pass:
-- confirmed Build #1143 success on the full dead-code cleanup head;
-- closed A-006 after 11-file atomic removal;
-- found and fixed A-027 so malformed telemetry URL/pin cannot kill the long-lived `DeviceSession` collector;
-- added focused tests for malformed URL and invalid certificate pin.
+- confirmed Build #1146 success on previous audit head `b9f31a0a4e7052daf709a052471f26d3e62f0523`;
+- closed the remaining hole in A-022: stale discovery expiry is now time-driven, not dependent on a future source emission;
+- changed only `LocalDiscoveryCoordinator.kt` for this behavioral fix; no new runtime/coordinator/store was introduced.
 
-The CI run for the newest A-027 test head had not appeared yet when this register was updated; do not treat A-027 as CI-validated until that run succeeds.
+CI for the newest A-022 clock-tick head is pending and must pass before this specific change is considered fully validated.
 
 ## Next immediate blocks
-1. Check CI for A-027 and fix any exact compile/test failure first if red.
+1. Check CI for the active-expiry change and fix any exact compile/test failure first if red.
 2. Continue lifecycle review around NSD/network callbacks and repeated start/stop/reconnect paths.
 3. Audit `MainActivity` for removable orchestration chains without adding abstraction layers.
 4. Audit manifest/build/security surface, especially global cleartext and permission timing.
