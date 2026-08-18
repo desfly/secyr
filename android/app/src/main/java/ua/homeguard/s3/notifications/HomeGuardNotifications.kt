@@ -85,7 +85,8 @@ class HomeGuardNotifications(private val context: Context) {
     }
 
     private fun notificationId(event: SystemEventRecord): Int {
-        val sequence = event.sequence xor (event.sequence ushr 32)
-        return (sequence.toInt() and 0x7fffffff).coerceAtLeast(1)
+        val sequence = (event.sequence xor (event.sequence ushr 32)).toInt()
+        val controller = event.controllerId.trim().lowercase().hashCode()
+        return ((sequence xor controller) and 0x7fffffff).coerceAtLeast(1)
     }
 }
