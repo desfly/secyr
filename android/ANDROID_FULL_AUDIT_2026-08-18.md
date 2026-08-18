@@ -76,7 +76,7 @@ File: `android/app/src/main/java/ua/homeguard/s3/ui/screens/DeviceListScreen.kt`
 
 The normal device list still exposes a full-width `+ Додати пристрій` button. The product rule says the current Add flow remains hidden/secondary until its structure is redesigned separately.
 
-Action: define the smallest secondary entry point without redesigning the Add screen, then lock it with UI contract tests.
+Action: replace the primary action with the smallest secondary entry point and lock it with a UI/source contract test; do not redesign Add Device.
 
 #### A-011 — Manual rescan progress reflected UDP only, not UDP+HTTP — FIXED
 Files:
@@ -95,6 +95,37 @@ Fix: missing Wi-Fi network/IPv4 now clears stale HTTP discovery results and repo
 File: `android/app/src/main/java/ua/homeguard/s3/ui/screens/AddDeviceScreen.kt`
 
 Fix: the scan-status panel now reports only search state/completion; the actual result count is rendered once with the result list.
+
+#### A-016 — Provisioning handoff compared controller IDs case-sensitively — FIXED
+Files:
+- `android/app/src/main/java/ua/homeguard/s3/provisioning/ProvisioningHandoff.kt`
+- `android/pure-tests/ProvisioningHandoffTest.kt`
+- `android/app/src/main/java/ua/homeguard/s3/repository/ProvisioningCoordinator.kt`
+
+Fix: QR/handoff and post-reboot discovery now trim and compare stable controller IDs case-insensitively. HTTPS scheme validation is also case-insensitive. The pure handoff test now proves a lower-case discovered ID still matches the QR identity.
+
+#### A-017 — Provisioning could bypass the owner-friendly-name registry contract — FIXED AT COORDINATOR LEVEL
+Files:
+- `android/app/src/main/java/ua/homeguard/s3/repository/ProvisioningCoordinator.kt`
+- `android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt`
+
+Previous flow accepted `ownerLabel` in the UI but did not require it and did not register the QR-provisioned controller in `RegisteredDeviceStore`. A successfully provisioned controller could therefore be selected in settings without a proper owner-named device card.
+
+Fix: provisioning now rejects a blank owner label, registers the stable QR device ID with the owner-provided name after the controller accepts configuration, and refreshes that registry entry with the discovered LAN endpoint after reboot. The UI button still needs a small follow-up so it is disabled before the name is entered instead of surfacing the validation error after tap.
+
+#### A-018 — ProvisioningScreen creates a second discovery/settings runtime inside Compose — OPEN
+File: `android/app/src/main/java/ua/homeguard/s3/ui/screens/ProvisioningScreen.kt`
+
+The top-level `ProvisioningScreen` constructs another `LocalDiscoveryCoordinator` and another `SettingsStore` even though `MainActivity` already owns the application discovery/settings runtime. This duplicates network work and can produce competing state/lifecycle behavior.
+
+Action: after behavior contracts are locked, pass the existing runtime state/actions into the screen and remove the screen-owned discovery/settings instances.
+
+#### A-019 — HttpDeviceApi cancellation can race with OkHttp response delivery and leak Response — OPEN
+File: `android/app/src/main/java/ua/homeguard/s3/network/HttpDeviceApi.kt`
+
+`Call.await()` cancels OkHttp when the coroutine is cancelled, but `onResponse()` unconditionally resumes with the `Response`. If cancellation wins between network completion and resume, the response may no longer reach the caller's `.use` block and can be leaked; `onFailure()` also uses an `isActive` check rather than atomic `tryResume*` handling.
+
+Action: use atomic cancellable-continuation resume (`tryResume` / `tryResumeWithException`) and explicitly close an unclaimed response.
 
 ### MEDIUM
 
@@ -117,12 +148,19 @@ File: `android/app/src/main/java/ua/homeguard/s3/network/DeviceEndpointResolver.
 
 Direct local selection now compares stable device IDs case-insensitively.
 
-#### A-013 — Legacy registry entries can synthesize the visible name `HomeGuard` — OPEN
+#### A-013 — Legacy registry entries could synthesize visible name `HomeGuard` — PARTIAL FIX
 File: `android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt`
 
-`load()` defaults a missing persisted name to `HomeGuard`, conflicting with the rule that normal cards show only the owner-assigned friendly name.
+Fix applied: a missing legacy `name` no longer defaults to `HomeGuard`; it remains blank, preserving the invariant that the storage layer does not invent a normal-card name.
 
-Action: migrate or quarantine unnamed legacy entries rather than generating a product name in the normal list.
+Remaining UI migration: an unnamed legacy entry needs an explicit “name required” prompt/rename path so the device remains recoverable without showing a generated product/ID/IP name.
+
+#### A-020 — Device-state picons conflate authorization with armed state and treat UNKNOWN as a red fault — OPEN
+File: `android/app/src/main/java/ua/homeguard/s3/ui/screens/DeviceListScreen.kt`
+
+Current `authorized=true` renders `🛡 знято`, although authorization is not the security arm/disarm state. The health picon also renders `⚠ UNKNOWN` before a valid snapshot and three long labels share one non-wrapping Row, reproducing the narrow-screen health-layout problem.
+
+Action: make authorization wording explicit, render unknown/no-snapshot neutrally, classify actual fault/alarm states separately, and prevent label wrapping/overflow.
 
 ### CLEANUP
 
@@ -133,6 +171,11 @@ Paths include:
 - `ua.homeguard.s3.data...`
 
 PR #51 proves a first candidate set for removal, but its old standalone alarm mapping test also references the obsolete layer. Cleanup must include tests/call graph, not blind file deletion.
+
+#### A-021 — RegisteredDeviceStore global activeStore bridge is architectural debt — OPEN
+File: `android/app/src/main/java/ua/homeguard/s3/storage/RegisteredDeviceStore.kt`
+
+The existing static `activeStore` bridge is now also used by the minimal provisioning contract fix. It is acceptable as an isolated audit-branch bridge, but final cleanup should inject the registry into the application runtime/coordinator instead of relying on a process-global active instance.
 
 ## Confirmed positives
 - API and telemetry tokens are protected through `SecureTokenStore`.
@@ -152,16 +195,21 @@ Completed in the active audit branch:
 - stale telemetry isolation;
 - Factory Reset transport classification + tests;
 - selected-ID normalization;
-- device-bound API/telemetry secret policy + tests.
+- device-bound API/telemetry secret policy + tests;
+- provisioning ID normalization + test;
+- provisioning owner-friendly-name registration path;
+- removal of the `HomeGuard` fallback for missing legacy names.
 
 Next immediate blocks:
-1. registry legacy-name migration;
+1. run CI for the latest provisioning/registry changes and fix any exact failure first;
 2. Add Device hidden/secondary entry contract;
-3. Device List picon/health layout regression;
-4. lifecycle/coroutine review;
-5. MainActivity decomposition plan;
-6. dead/duplicate architecture and PR #51 comparison;
-7. manifest/build/security-surface review.
+3. legacy unnamed-card rename prompt;
+4. Device List picon/health layout regression;
+5. HttpDeviceApi cancellation safety;
+6. lifecycle/coroutine review, including duplicate ProvisioningScreen runtime;
+7. MainActivity decomposition plan;
+8. dead/duplicate architecture and PR #51 comparison;
+9. manifest/build/security-surface review.
 
 ## Audit rule
 Do not merge to `main` during discovery. Keep changes isolated on the audit branch, run CI continuously, and only later split/merge verified minimal changes.
