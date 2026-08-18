@@ -113,7 +113,8 @@ Only measured repository/CI numbers are reported. Phone-only performance numbers
 - Build #1177: exact head `1704247e...` green before the final lifecycle/device-switch pass.
 - Build #1186: host validation caught a test-contract mismatch after generation-aware NSD change; the contract was updated to validate semantics rather than the obsolete literal function signature.
 - Build #1207: host validation and Android debug APK jobs passed; produced the measured APK above.
-- **Build #1213 on frozen code head `e35d8dd2...`: Host validation = SUCCESS and Android debug APK = SUCCESS.** The unrelated firmware job was still in progress when this code-freeze record was written; Android code validation is complete for this head.
+- **Build #1213 on frozen code head `e35d8dd2...`: Host validation = SUCCESS and Android debug APK = SUCCESS.** Android code validation is complete for this head.
+- **Build #1215 on current documentation-only head `51305427...`: HomeGuard-S3 Build = SUCCESS.** No production Android code changed after frozen head `e35d8dd2...`.
 
 ## Phone benchmark plan after Android code freeze
 Use the same phone, Android version, Wi-Fi/AP, ESP firmware/config and charger state. Run at least 5 samples; report median and p95 where practical.
@@ -131,10 +132,11 @@ Use the same phone, Android version, Wi-Fi/AP, ESP firmware/config and charger s
 11. **Command switch race:** start a local command/login against controller A, immediately switch to B, and verify the old HTTP call is cancelled or returns controller-changed, never uses B's token, and never reports a successful A result as if it belonged to B.
 
 ## Freeze decision
-- Android cleanup/lifecycle/reconnect/dead-code pass is **CODE-FROZEN at `e35d8dd230ecf254e2857df9788ab9f2274835a1`** after exact-head Host validation + Android debug APK success in Build #1213.
+- Android PHD/code cleanup is **COMPLETE/FROZEN** at production code head `e35d8dd230ecf254e2857df9788ab9f2274835a1`.
+- Frozen code head passed exact-head Host validation + Android debug APK in Build #1213; current documentation-only head `51305427...` passed Build #1215.
 - `main` remains untouched; PR #53 remains draft/unmerged.
 - Further Android production-code changes require a new concrete defect or failed acceptance/phone benchmark, not speculative refactoring.
-- Next phase is the controlled phone benchmark/acceptance run and filling real cold/warm startup, PSS/RSS/heap, CPU, discovery and reconnect measurements.
+- Next phase is the single controlled phone benchmark/acceptance run and filling real cold/warm startup, PSS/RSS/heap, CPU, discovery and reconnect measurements.
 
 ## Audit rule
 Do not merge to `main` during audit. Keep all work isolated on `audit/android-full-20260818` / draft PR #53 until phone validation passes and a deliberate merge decision is made.
