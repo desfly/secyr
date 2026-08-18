@@ -133,7 +133,7 @@ class MainActivity : ComponentActivity() {
                         onScanQr = ::requestQrScan,
                         onDiscover = { lifecycleScope.launch { discovery.rescan() } },
                         onUseDevice = { device, name -> lifecycleScope.launch { registeredDevices.addOrUpdate(device, name); settings.remember(device); provisioningOpen.value = false; deviceListOpen.value = true } },
-                        onUseManualIp = { address, name -> addManualDevice(name, address); provisioningOpen.value = false },
+                        onUseManualIp = { address, name -> addManualDevice(name, address) },
                         onProvision = provisioning::provision,
                     )
                     showAddDevice -> AddDeviceScreen(devices, isScanning, scanStatus, { addDeviceOpen.value = false; deviceListOpen.value = true }, { lifecycleScope.launch { discovery.rescan() } }, { device, name -> lifecycleScope.launch { registeredDevices.addOrUpdate(device, name); settings.remember(device); addDeviceOpen.value = false; deviceListOpen.value = true } }, { name, address -> addManualDevice(name, address) }, { name, deviceId -> addManualDeviceId(name, deviceId) }, { addDeviceOpen.value = false; provisioningOpen.value = true })
@@ -147,7 +147,7 @@ class MainActivity : ComponentActivity() {
     private fun addManualDevice(name: String, rawAddress: String) {
         val baseUrl = DiscoveryInputValidator.normalizeManualAddress(rawAddress) ?: run { commandStatus.value = "Некоректна адреса. Введіть IP або IP:порт"; return }
         val deviceId = "manual-${baseUrl.lowercase().hashCode().toUInt().toString(16)}"
-        lifecycleScope.launch { registeredDevices.addManual(deviceId, baseUrl, name); settings.selectDevice(deviceId, baseUrl); addDeviceOpen.value = false; deviceListOpen.value = true }
+        lifecycleScope.launch { registeredDevices.addManual(deviceId, baseUrl, name); settings.selectDevice(deviceId, baseUrl); addDeviceOpen.value = false; provisioningOpen.value = false; deviceListOpen.value = true }
     }
     private fun addManualDeviceId(name: String, rawDeviceId: String) {
         val deviceId = DiscoveryInputValidator.normalizeDeviceId(rawDeviceId) ?: run { commandStatus.value = "Некоректний ID пристрою"; return }
