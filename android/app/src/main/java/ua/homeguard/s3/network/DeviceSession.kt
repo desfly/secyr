@@ -15,7 +15,8 @@ class DeviceSession(
     private val scope: CoroutineScope,
     private val endpointProvider: kotlinx.coroutines.flow.StateFlow<DeviceEndpoint>,
     private val settings: SettingsStore,
-    private val telemetry: TelemetrySocket
+    private val telemetry: TelemetrySocket,
+    private val registeredDevices: RegisteredDeviceStore,
 ) {
     private var job: Job? = null
     private var authorizationJob: Job? = null
@@ -40,8 +41,8 @@ class DeviceSession(
             telemetry.connection().collect { state ->
                 val deviceId = settings.settings.value.deviceId
                 when (state) {
-                    TelemetryConnectionState.UNAUTHORIZED -> RegisteredDeviceStore.markActiveAuthorization(deviceId, false)
-                    TelemetryConnectionState.CONNECTED -> RegisteredDeviceStore.markActiveAuthorization(deviceId, true)
+                    TelemetryConnectionState.UNAUTHORIZED -> registeredDevices.markAuthorization(deviceId, false)
+                    TelemetryConnectionState.CONNECTED -> registeredDevices.markAuthorization(deviceId, true)
                     else -> Unit
                 }
             }
