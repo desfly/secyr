@@ -18,10 +18,10 @@ fun main() {
     checkThat(!handoff.observe("HG-S3-OTHER", true, false, "https://192.168.1.20:443", 3_000).accepted)
     checkThat(!handoff.observe("HG-S3-7A31BC", false, false, "http://192.168.1.20:80", 3_100).accepted)
     checkThat(!handoff.observe("HG-S3-7A31BC", true, true, "https://192.168.1.20:443", 3_200).accepted)
-    val accepted = handoff.observe("HG-S3-7A31BC", true, false, "https://192.168.1.20:443", 3_300)
+    val accepted = handoff.observe("hg-s3-7a31bc", true, false, "HTTPS://192.168.1.20:443", 3_300)
     checkThat(accepted.accepted)
     checkThat(accepted.state == HandoffState.COMPLETE)
-    checkThat(accepted.localUrl == "https://192.168.1.20:443")
+    checkThat(accepted.localUrl == "HTTPS://192.168.1.20:443")
     checkThat(handoff.tick(100_000).state == HandoffState.COMPLETE)
 
     val timeout = ProvisioningHandoff("HG-S3-7A31BC", 100)
