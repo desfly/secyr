@@ -1,6 +1,5 @@
 package ua.homeguard.s3.ui.screens
 
-import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -47,6 +45,7 @@ import ua.homeguard.s3.R
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.network.ControllerIdentity
+import ua.homeguard.s3.storage.LocalProfileStore
 import ua.homeguard.s3.storage.RegisteredDevice
 import ua.homeguard.s3.ui.components.BruceBrand
 
@@ -63,17 +62,13 @@ fun DeviceListScreen(
     onOpenDevice: (RegisteredDevice) -> Unit,
 ) {
     val context = LocalContext.current
-    val profilePrefs = remember { context.getSharedPreferences("myfist_profile", Context.MODE_PRIVATE) }
-    var profileRegistered by remember { mutableStateOf(profilePrefs.getBoolean("registered", false)) }
+    val profileStore = remember { LocalProfileStore(context) }
+    var profileRegistered by remember { mutableStateOf(profileStore.isRegistered()) }
 
     if (!profileRegistered) {
         FirstRunRegistrationScreen(
             onRegister = { name, password ->
-                profilePrefs.edit()
-                    .putBoolean("registered", true)
-                    .putString("name", name)
-                    .putString("password", password)
-                    .apply()
+                profileStore.register(name, password)
                 profileRegistered = true
             },
         )
@@ -172,15 +167,6 @@ fun DeviceListScreen(
                         Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати пристрій") }
                     }
                 }
-            }
-
-            item {
-                SafeBruceImage(
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f),
-                )
             }
 
             items(devices, key = { it.deviceId }) { device ->
