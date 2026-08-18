@@ -3,12 +3,14 @@ package ua.homeguard.s3.network
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.EventListener
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.json.JSONObject
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -17,6 +19,9 @@ enum class FactoryResetResult {
     REJECTED,
     CONNECTION_LOST,
 }
+
+internal fun classifyFactoryResetIOException(requestBodySent: Boolean): FactoryResetResult =
+    if (requestBodySent) FactoryResetResult.CONNECTION_LOST else FactoryResetResult.REJECTED
 
 class FactoryResetClient(
     baseUrl: String,
@@ -43,13 +48,24 @@ class FactoryResetClient(
             .post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
 
+        val requestBodySent = AtomicBoolean(false)
+        val trackedClient = client.newBuilder()
+            .eventListener(object : EventListener() {
+                override fun requestBodyEnd(call: Call, byteCount: Long) {
+                    requestBodySent.set(true)
+                }
+            })
+            .build()
+
         val response = try {
-            client.newCall(request).await()
+            trackedClient.newCall(request).await()
         } catch (_: IOException) {
-            // The controller may erase Wi-Fi state and reboot before the HTTP
-            // response reaches Android. After the destructive request has been
-            // submitted, transport loss must fail closed locally.
-            return FactoryResetResult.CONNECTION_LOST
+            // A reset controller may erase Wi-Fi and reboot after it has already
+            // received the destructive request. Only classify transport loss as an
+            // expected reset disconnect when the request body was actually sent.
+            // DNS/connect/TLS failures before submission must not clear local state
+            // as if the reset had succeeded.
+            return classifyFactoryResetIOException(requestBodySent.get())
         }
 
         response.use {
