@@ -1,0 +1,2 @@
+Traceable CI audit marker for HomeGuard-S3 Wi-Fi factory-reset fix.
+No runtime code in this branch differs from main.
