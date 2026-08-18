@@ -19,10 +19,31 @@ import org.json.JSONObject
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.DiscoverySource
 import ua.homeguard.s3.model.Transport
+import java.io.Reader
 import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.URL
 import java.util.concurrent.atomic.AtomicInteger
+
+internal const val HTTP_DISCOVERY_MAX_RESPONSE_CHARS = 64 * 1024
+
+internal fun readBoundedDiscoveryText(
+    reader: Reader,
+    maxChars: Int = HTTP_DISCOVERY_MAX_RESPONSE_CHARS,
+): String? {
+    val limit = maxChars.coerceAtLeast(0)
+    val result = StringBuilder(minOf(limit, 4_096))
+    val buffer = CharArray(2_048)
+    var total = 0
+    while (true) {
+        val count = reader.read(buffer)
+        if (count < 0) break
+        total += count
+        if (total > limit) return null
+        result.append(buffer, 0, count)
+    }
+    return result.toString()
+}
 
 class HttpSubnetDiscovery(context: Context) {
     data class ScanStatus(
@@ -217,7 +238,7 @@ class HttpSubnetDiscovery(context: Context) {
             connection.useCaches = false
             connection.instanceFollowRedirects = false
             if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
-            val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use(::readBoundedDiscoveryText) ?: return null
             JSONObject(body)
         } catch (_: Exception) {
             null
