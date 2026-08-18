@@ -204,11 +204,17 @@ class HttpDeviceApi(
         continuation.invokeOnCancellation { cancel() }
         enqueue(object : Callback {
             override fun onFailure(call: Call, error: IOException) {
-                if (continuation.isActive) continuation.resumeWithException(error)
+                val token = continuation.tryResumeWithException(error)
+                if (token != null) continuation.completeResume(token)
             }
 
             override fun onResponse(call: Call, response: Response) {
-                continuation.resume(response)
+                val token = continuation.tryResume(response)
+                if (token == null) {
+                    response.close()
+                    return
+                }
+                continuation.completeResume(token)
             }
         })
     }
