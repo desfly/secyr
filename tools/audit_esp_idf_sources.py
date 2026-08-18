@@ -4,6 +4,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "firmware" / "esp-idf" / "main"
+CORE = ROOT / "firmware" / "src"
 
 errors = []
 warnings = []
@@ -63,6 +64,18 @@ large_access_stack_copy = re.compile(
 if large_access_stack_copy.search(access_http):
     errors.append(
         "hg_access_http.cpp: AccessControl rollback snapshot must not be copied into the httpd task stack"
+    )
+
+# Build-1218 exposed the same class of bug during boot: AccessStoreCodec::decode
+# constructed a full temporary AccessControl on ESP-IDF's main task stack while
+# AccessNvsStore::load also held the persisted image. Forbid full automatic
+# AccessControl temporaries in the NVS codec; decode scratch must stay limited
+# to the compact persisted records.
+access_store = (CORE / "access_store.cpp").read_text(encoding="utf-8")
+full_access_local = re.compile(r"\bAccessControl\s+[A-Za-z_]\w*\s*(?:;|\{)")
+if full_access_local.search(access_store):
+    errors.append(
+        "access_store.cpp: full AccessControl temporary must not be placed on the NVS decode task stack"
     )
 
 for warning in warnings:
