@@ -51,7 +51,7 @@
   }
 
   function authHeader() {
-    return session ? `HomeGuard ${session.actor}:${session.credential}` : "";
+    return session?.token ? `Bearer ${session.token}` : "";
   }
 
   window.fetch = function(input, init = {}) {
@@ -62,7 +62,10 @@
     }
     const headers = new Headers(init.headers || (typeof input !== "string" ? input.headers : undefined) || {});
     if (!headers.has("Authorization")) headers.set("Authorization", authHeader());
-    return originalFetch(input, { ...init, headers });
+    return originalFetch(input, { ...init, headers }).then(response => {
+      if (response.status === 401 && session) logout("Сеанс завершено. Увійдіть знову.");
+      return response;
+    });
   };
 
   function syncLegacyCredentials() {
@@ -188,8 +191,10 @@
       });
       const body = await apiBody(response);
       if (!response.ok || body.ok === false) throw new Error(body.reason || String(response.status));
+      const token = String(body.sessionToken || "");
+      if (!/^[0-9a-f]{64}$/.test(token)) throw new Error("session_unavailable");
       session = {
-        actor: String(body.actor || actor), credential,
+        actor: String(body.actor || actor), credential, token,
         name: String(body.name || actor), role: String(body.role || "guest"),
         capabilities: body.capabilities || {}
       };
@@ -207,7 +212,7 @@
     }
   }
 
-  function logout() {
+  function logout(reason = "") {
     session = null;
     ["#operatorId", "#operatorPin", "#networkActor", "#networkCredential", "#accessActor", "#accessCredential", "#cloudActor", "#cloudCredential"].forEach(selector => {
       const field = document.querySelector(selector);
@@ -217,6 +222,7 @@
     gate.hidden = false;
     document.documentElement.classList.add("hg-auth-locked");
     showLogin();
+    if (reason) message.textContent = reason;
   }
 
   function ensureLogoutButton() {
@@ -225,7 +231,7 @@
     button.id = "hgSessionLogout";
     button.type = "button";
     button.textContent = "Вийти";
-    button.onclick = logout;
+    button.onclick = () => logout();
     document.body.appendChild(button);
   }
 
