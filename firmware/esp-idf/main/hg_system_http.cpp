@@ -57,11 +57,6 @@ const char* arm_state_name(hg::PartitionArmState state) {
         default: return "disarmed";
     }
 }
-
-bool allow_monitor(SystemHttp* self, httpd_req_t* request) {
-    return self != nullptr && self->access_control_ != nullptr &&
-           request_auth::authenticated(request, *self->access_control_);
-}
 }
 
 esp_err_t SystemHttp::register_handlers(
@@ -92,6 +87,10 @@ esp_err_t SystemHttp::register_handlers(
     return ESP_OK;
 }
 
+bool SystemHttp::authenticated_request(httpd_req_t* request) const {
+    return access_control_ != nullptr && request_auth::authenticated(request, *access_control_);
+}
+
 esp_err_t SystemHttp::send_json(httpd_req_t* request, const char* body, std::size_t size) const {
     httpd_resp_set_type(request, "application/json");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
@@ -101,7 +100,7 @@ esp_err_t SystemHttp::send_json(httpd_req_t* request, const char* body, std::siz
 esp_err_t SystemHttp::status_get(httpd_req_t* request) {
     auto* self = self_from(request);
     if (self == nullptr || self->model_ == nullptr || self->bus_ == nullptr) return ESP_FAIL;
-    if (!allow_monitor(self, request)) return request_auth::send_login_required(request);
+    if (!self->authenticated_request(request)) return request_auth::send_login_required(request);
     const auto body = hg::system_status_json(*self->model_, *self->bus_);
     return self->send_json(request, body.c_str(), body.size());
 }
@@ -109,7 +108,7 @@ esp_err_t SystemHttp::status_get(httpd_req_t* request) {
 esp_err_t SystemHttp::zones_get(httpd_req_t* request) {
     auto* self = self_from(request);
     if (self == nullptr || self->model_ == nullptr) return ESP_FAIL;
-    if (!allow_monitor(self, request)) return request_auth::send_login_required(request);
+    if (!self->authenticated_request(request)) return request_auth::send_login_required(request);
     const auto body = hg::system_zones_json(*self->model_);
     return self->send_json(request, body.c_str(), body.size());
 }
@@ -117,7 +116,7 @@ esp_err_t SystemHttp::zones_get(httpd_req_t* request) {
 esp_err_t SystemHttp::outputs_get(httpd_req_t* request) {
     auto* self = self_from(request);
     if (self == nullptr || self->model_ == nullptr) return ESP_FAIL;
-    if (!allow_monitor(self, request)) return request_auth::send_login_required(request);
+    if (!self->authenticated_request(request)) return request_auth::send_login_required(request);
     const auto body = hg::system_outputs_json(*self->model_);
     return self->send_json(request, body.c_str(), body.size());
 }
@@ -125,7 +124,7 @@ esp_err_t SystemHttp::outputs_get(httpd_req_t* request) {
 esp_err_t SystemHttp::partitions_get(httpd_req_t* request) {
     auto* self = self_from(request);
     if (self == nullptr || self->model_ == nullptr) return ESP_FAIL;
-    if (!allow_monitor(self, request)) return request_auth::send_login_required(request);
+    if (!self->authenticated_request(request)) return request_auth::send_login_required(request);
     const auto body = hg::system_partitions_json(*self->model_);
     return self->send_json(request, body.c_str(), body.size());
 }
@@ -133,7 +132,7 @@ esp_err_t SystemHttp::partitions_get(httpd_req_t* request) {
 esp_err_t SystemHttp::events_get(httpd_req_t* request) {
     auto* self = self_from(request);
     if (self == nullptr) return ESP_FAIL;
-    if (!allow_monitor(self, request)) return request_auth::send_login_required(request);
+    if (!self->authenticated_request(request)) return request_auth::send_login_required(request);
     const auto body = self->events_json();
     return self->send_json(request, body.c_str(), body.size());
 }
@@ -256,7 +255,7 @@ void SystemHttp::remember_client(int socket_fd) {
 esp_err_t SystemHttp::websocket(httpd_req_t* request) {
     auto* self = self_from(request);
     if (!self) return ESP_FAIL;
-    if (!allow_monitor(self, request)) return request_auth::send_login_required(request);
+    if (!self->authenticated_request(request)) return request_auth::send_login_required(request);
     self->remember_client(httpd_req_to_sockfd(request));
     return ESP_OK;
 }
