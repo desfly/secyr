@@ -20,6 +20,8 @@ require(MAIN / "hg_access_http.cpp", [
     '"/api/v1/access/state"', "access_runtime::setup_required", "setup_required", "login_required",
     "http_session::issue(user->id.data(), user->role)", "sessionToken",
     '"/api/v1/access/logout"', "http_session::revoke(authorization)",
+    "http_session::authorized_for_actor(authorization, *access_, actor)",
+    'access_->authorize(actor, credential, "access.manage", now_ms)',
     "std::unique_ptr<AccessControl> previous_access",
     "*access_ = *previous_access",
     "const auto persist = store_->save(*access_)",
