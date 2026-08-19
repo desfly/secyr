@@ -47,26 +47,44 @@ full_access_local = re.compile(r"\bAccessControl\s+[A-Za-z_]\w*\s*(?:;|\{)")
 if full_access_local.search(access_store):
     errors.append("access_store.cpp: full AccessControl temporary must not be placed on the NVS decode task stack")
 
+# The shared HTTP helper is the authoritative parser/scrubber for handlers that
+# opt into hg_http_util.hpp. Audit the helper once, then require its consumers to
+# actually use it rather than demanding duplicate parser implementations.
+http_util = (MAIN / "hg_http_util.hpp").read_text(encoding="utf-8")
+if "bool escaped = false" not in http_util or "std::fill(secret.begin(), secret.end(), '\\0')" not in http_util:
+    errors.append("hg_http_util.hpp: shared JSON parser/scrubber security contract is incomplete")
+
 reset_sequence = (MAIN / "hg_reset_sequence.cpp").read_text(encoding="utf-8")
-if "Factory Reset was partial; rebooting into recovery-safe boot path" not in reset_sequence:
-    errors.append("hg_reset_sequence.cpp: partial triple-RST factory reset must force a recovery reboot")
-if not re.search(r"if\s*\(!report\.ok\(\)\)\s*\{.*?esp_restart\(\);.*?return\s+true\s*;", reset_sequence, re.S):
+# Destructive reset is intentionally staged and consumed only during early boot.
+# On erase failure the committed pending marker remains and the device restarts,
+# making the operation retry-safe instead of returning to a partially reset runtime.
+if "perform_early_boot_factory_reset" not in reset_sequence or "FactoryResetManager{}.erase_mutable_state()" not in reset_sequence:
+    errors.append("hg_reset_sequence.cpp: staged reset is not consumed in the early-boot destructive path")
+if not re.search(r"if\s*\(!report\.ok\(\)\)\s*\{.*?esp_restart\(\);.*?return\s*;", reset_sequence, re.S):
     errors.append("hg_reset_sequence.cpp: failed destructive reset path can return without esp_restart")
+if reset_sequence.find("set_pending_reset(false)") < reset_sequence.find("FactoryResetManager{}.erase_mutable_state()"):
+    errors.append("hg_reset_sequence.cpp: pending reset marker must survive until destructive erase succeeds")
+if "stage_factory_reset_request()" not in reset_sequence or "esp_restart();" not in reset_sequence:
+    errors.append("hg_reset_sequence.cpp: triple-hold gesture must stage reset and reboot into early-boot recovery")
 
 system_http = (MAIN / "hg_system_http.cpp").read_text(encoding="utf-8")
-if not re.search(r"if\s*\(!report\.ok\(\)\)\s*\{.*?rebooting.*?xTaskCreate\s*\(\s*&delayed_factory_reboot", system_http, re.S):
-    errors.append("hg_system_http.cpp: partial Web factory reset must report rebooting and schedule recovery reboot")
-if "bool escaped = false" not in system_http or "scrub(body);" not in system_http or "scrub(credential);" not in system_http:
-    errors.append("hg_system_http.cpp: System auth must use escaped JSON parsing and scrub raw credential-bearing bodies")
+# Web reset must only stage the request in live HTTP context, report rebooting,
+# and schedule a reboot. It must never erase mutable stores while services run.
+for required in ("stage_factory_reset_request()", "schedule_factory_reboot()", '"rebooting\\\":true'):
+    if required not in system_http:
+        errors.append(f"hg_system_http.cpp: staged Web factory reset missing required step: {required}")
+if "FactoryResetManager{}.erase_mutable_state()" in system_http:
+    errors.append("hg_system_http.cpp: live HTTP factory reset must not erase mutable state directly")
+if '#include "hg_http_util.hpp"' not in system_http or "http_util::parse_json_string" not in system_http or \
+        "http_util::scrub(body);" not in system_http or "http_util::scrub(credential);" not in system_http:
+    errors.append("hg_system_http.cpp: System auth must use shared escaped JSON parsing and scrub credential-bearing bodies")
 registered_system_routes = system_http.split("esp_err_t SystemHttp::send_json", 1)[0]
 if '"/ws/system"' in registered_system_routes:
     errors.append("hg_system_http.cpp: unauthenticated /ws/system event stream must remain disabled")
 
 factory_reset_js = (WEB / "factory-reset.js").read_text(encoding="utf-8")
 if "body.rebooting === true" not in factory_reset_js:
-    errors.append("factory-reset.js: partial destructive reset recovery response is not handled")
-if "Скидання виконано частково" not in factory_reset_js:
-    errors.append("factory-reset.js: partial reset must be reported distinctly from a rejected request")
+    errors.append("factory-reset.js: staged destructive reset reboot response is not handled")
 
 network_http = (MAIN / "hg_network_http.cpp").read_text(encoding="utf-8")
 if "while (offset < body.size())" not in network_http or "body.data() + offset" not in network_http:
@@ -91,7 +109,7 @@ if "read_request_body(request, 384U, body)" not in output_http or "while (offset
     errors.append("hg_output_http.cpp: output command must read the complete HTTP body")
 if "std::isspace" not in output_http or "value_offset" not in output_http:
     errors.append("hg_output_http.cpp: output JSON scalar parser must accept legal whitespace")
-if "credential.clear();" not in output_http:
+if "scrub(credential);" not in output_http:
     errors.append("hg_output_http.cpp: output credential must be scrubbed immediately after authorization")
 
 telemetry_http = (MAIN / "hg_telemetry_session_http.cpp").read_text(encoding="utf-8")
@@ -101,8 +119,9 @@ if "scrub(body);" not in telemetry_http or "scrub(token);" not in telemetry_http
     errors.append("hg_telemetry_session_http.cpp: telemetry login body and issued session token must be scrubbed after use")
 
 service_http = (MAIN / "hg_service_http.cpp").read_text(encoding="utf-8")
-if "scrub(credential);" not in service_http or "bool escaped = false" not in service_http:
-    errors.append("hg_service_http.cpp: service auth must use escaped JSON parsing and scrub credentials")
+if '#include "hg_http_util.hpp"' not in service_http or "http_util::parse_json_string" not in service_http or \
+        "http_util::scrub(credential);" not in service_http or "http_util::scrub(body);" not in service_http:
+    errors.append("hg_service_http.cpp: service auth must use shared escaped JSON parsing and scrub credentials")
 
 infrastructure_http = (MAIN / "hg_infrastructure_http.cpp").read_text(encoding="utf-8")
 registered_part = infrastructure_http.split("esp_err_t InfrastructureHttp::rgb_test_post", 1)[0]
