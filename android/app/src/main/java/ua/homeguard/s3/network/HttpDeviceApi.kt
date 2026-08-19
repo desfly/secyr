@@ -23,19 +23,47 @@ class HttpDeviceApi(
     private val root = baseUrl.trimEnd('/')
     private val client: OkHttpClient = PinnedTlsClientFactory.create(certificatePin)
 
+    suspend fun accessState(): AccessLifecycleState {
+        val json = execute(RuntimeApiContract.ACCESS_STATE_PATH)
+        return when (json.optString("state", "")) {
+            "setup_required" -> AccessLifecycleState.SETUP_REQUIRED
+            "login_required" -> AccessLifecycleState.LOGIN_REQUIRED
+            else -> AccessLifecycleState.UNAVAILABLE
+        }
+    }
+
+    suspend fun bootstrapAdmin(id: String, name: String, pin: String) {
+        require(id.isNotBlank() && id.length <= 23) { "Admin ID is invalid" }
+        require(name.isNotBlank() && name.length <= 31) { "Admin name is invalid" }
+        require(pin.length in 4..12 && pin.all(Char::isDigit)) { "PIN must contain 4-12 digits" }
+        val json = execute(
+            RuntimeApiContract.ACCESS_USERS_PATH,
+            "POST",
+            JSONObject().put("action", "bootstrap").put("id", id.trim()).put("name", name.trim()).put("pin", pin),
+        )
+        if (!json.optBoolean("ok", false) || json.optString("state") != "login_required") {
+            throw IOException("Bootstrap rejected: ${json.optString("reason", "unknown")}")
+        }
+    }
+
+    suspend fun setupWifiScan(): JSONObject = execute(RuntimeApiContract.NETWORK_SCAN_PATH)
+
+    suspend fun setupConfigureWifi(ssid: String, password: String): JSONObject {
+        require(ssid.isNotBlank() && ssid.length <= 32) { "SSID is invalid" }
+        require(password.isEmpty() || password.length in 8..64) { "Wi-Fi password is invalid" }
+        return execute(
+            RuntimeApiContract.NETWORK_CONNECT_PATH,
+            "POST",
+            JSONObject().put("ssid", ssid).put("password", password),
+        )
+    }
+
     suspend fun login(actor: String, credential: String): AccessSession {
         val normalizedActor = actor.trim()
         require(normalizedActor.isNotEmpty()) { "User ID is required" }
         require(credential.length in 4..12 && credential.all(Char::isDigit)) { "PIN must contain 4-12 digits" }
-
-        val json = execute(
-            RuntimeApiContract.ACCESS_LOGIN_PATH,
-            "POST",
-            JSONObject().put("actor", normalizedActor).put("credential", credential),
-        )
-        if (!json.optBoolean("ok", false)) {
-            throw IOException("Login rejected: ${json.optString("reason", "unknown")}")
-        }
+        val json = execute(RuntimeApiContract.ACCESS_LOGIN_PATH, "POST", JSONObject().put("actor", normalizedActor).put("credential", credential))
+        if (!json.optBoolean("ok", false)) throw IOException("Login rejected: ${json.optString("reason", "unknown")}")
 
         val role = when (json.optString("role", "guest").lowercase()) {
             "admin" -> AccessRole.ADMIN
@@ -44,22 +72,16 @@ class HttpDeviceApi(
         }
         val raw = json.optJSONObject("capabilities") ?: JSONObject()
         val sessionToken = json.optString("sessionToken", "")
-        if (runtimeV1 && !sessionToken.matches(Regex("^[0-9a-f]{64}$"))) {
-            throw IOException("HTTP session token missing")
-        }
+        if (runtimeV1 && !sessionToken.matches(Regex("^[0-9a-f]{64}$"))) throw IOException("HTTP session token missing")
         return AccessSession(
             actor = json.optString("actor", normalizedActor),
             name = json.optString("name", normalizedActor),
             role = role,
             capabilities = AccessCapabilities(
-                monitor = raw.optBoolean("monitor", true),
-                armHome = raw.optBoolean("armHome", false),
-                armAway = raw.optBoolean("armAway", false),
-                disarm = raw.optBoolean("disarm", false),
-                panic = raw.optBoolean("panic", false),
-                valves = raw.optBoolean("valves", false),
-                networkConfigure = raw.optBoolean("networkConfigure", false),
-                accessManage = raw.optBoolean("accessManage", false),
+                monitor = raw.optBoolean("monitor", true), armHome = raw.optBoolean("armHome", false),
+                armAway = raw.optBoolean("armAway", false), disarm = raw.optBoolean("disarm", false),
+                panic = raw.optBoolean("panic", false), valves = raw.optBoolean("valves", false),
+                networkConfigure = raw.optBoolean("networkConfigure", false), accessManage = raw.optBoolean("accessManage", false),
                 serviceInvalidate = raw.optBoolean("serviceInvalidate", false),
             ),
             sessionToken = sessionToken,
@@ -82,11 +104,7 @@ class HttpDeviceApi(
     }
 
     suspend fun telemetrySession(actor: String, credential: String): String {
-        val json = execute(
-            RuntimeApiContract.TELEMETRY_SESSION_PATH,
-            "POST",
-            JSONObject().put("actor", actor.trim()).put("credential", credential),
-        )
+        val json = execute(RuntimeApiContract.TELEMETRY_SESSION_PATH, "POST", JSONObject().put("actor", actor.trim()).put("credential", credential))
         if (!json.optBoolean("ok", false)) throw IOException("Telemetry login rejected: ${json.optString("reason", "unknown")}")
         return json.optString("telemetryToken", "").also { if (it.length < 32) throw IOException("Telemetry session token missing") }
     }
@@ -94,22 +112,17 @@ class HttpDeviceApi(
     override suspend fun command(command: DeviceCommand): CommandReply = if (runtimeV1) runtimeCommand(command) else legacyCommand(command)
 
     private suspend fun legacyCommand(command: DeviceCommand): CommandReply {
-        val body = JSONObject()
-            .put("requestId", LegacyApiContract.requestId(command.requestId))
-            .put("issuedAtMs", command.issuedAtMs.toString())
-            .put("command", command.type.name.lowercase())
-            .apply {
-                command.challenge?.let { put("challenge", it) }
-                if (command.actor.isNotBlank()) put("actor", command.actor)
-                if (command.credential.isNotBlank()) put("credential", command.credential)
-            }
+        val body = JSONObject().put("requestId", LegacyApiContract.requestId(command.requestId)).put("issuedAtMs", command.issuedAtMs.toString()).put("command", command.type.name.lowercase()).apply {
+            command.challenge?.let { put("challenge", it) }
+            if (command.actor.isNotBlank()) put("actor", command.actor)
+            if (command.credential.isNotBlank()) put("credential", command.credential)
+        }
         val json = execute(LegacyApiContract.COMMAND_PATH, "POST", body)
         return CommandReply(json.optBoolean("accepted", false), json.optBoolean("duplicate", false), json.optString("code", "unknown"))
     }
 
     private suspend fun runtimeCommand(command: DeviceCommand): CommandReply {
-        val actor = command.actor.trim()
-        val credential = command.credential
+        val actor = command.actor.trim(); val credential = command.credential
         if (actor.isBlank() || credential.isBlank()) return CommandReply(false, code = "authorization_required")
         return when (command.type) {
             CommandType.ARM_HOME -> runtimeSecurityCommand("security.arm_home", actor, credential)
@@ -129,11 +142,7 @@ class HttpDeviceApi(
 
     private suspend fun runtimeValveCommand(active: Boolean, actor: String, credential: String): CommandReply {
         for (outputId in 2..3) {
-            val json = execute(
-                RuntimeApiContract.OUTPUT_COMMAND_PATH,
-                "POST",
-                JSONObject().put("outputId", outputId).put("active", active).put("alarmActive", false).put("actor", actor).put("credential", credential),
-            )
+            val json = execute(RuntimeApiContract.OUTPUT_COMMAND_PATH, "POST", JSONObject().put("outputId", outputId).put("active", active).put("alarmActive", false).put("actor", actor).put("credential", credential))
             if (!json.optBoolean("ok", false)) return CommandReply(false, code = json.optString("reason", json.optString("status", "rejected")))
         }
         return CommandReply(true, code = "accepted")
@@ -141,23 +150,14 @@ class HttpDeviceApi(
 
     override suspend fun diagnostics(): Diagnostics = JsonParsers.diagnostics(execute(LegacyApiContract.HEALTH_PATH))
     override suspend fun snapshot(): SystemSnapshot = JsonParsers.snapshot(execute(LegacyApiContract.STATUS_PATH))
-
-    suspend fun challenge(type: CommandType): Long {
-        val json = execute(LegacyApiContract.CHALLENGE_PATH, "POST", JSONObject().put("command", type.name.lowercase()))
-        return json.getLong("challenge")
-    }
+    suspend fun challenge(type: CommandType): Long = execute(LegacyApiContract.CHALLENGE_PATH, "POST", JSONObject().put("command", type.name.lowercase())).getLong("challenge")
 
     private suspend fun execute(path: String, method: String = "GET", json: JSONObject? = null): JSONObject {
         val mediaType = "application/json; charset=utf-8".toMediaType()
-        val request = Request.Builder()
-            .url(root + path)
-            .header("Accept", "application/json")
-            .apply {
-                val token = tokenProvider()
-                if (token.isNotBlank()) header("Authorization", "Bearer $token")
-                if (method == "POST") post((json ?: JSONObject()).toString().toRequestBody(mediaType))
-            }
-            .build()
+        val request = Request.Builder().url(root + path).header("Accept", "application/json").apply {
+            val token = tokenProvider(); if (token.isNotBlank()) header("Authorization", "Bearer $token")
+            if (method == "POST") post((json ?: JSONObject()).toString().toRequestBody(mediaType))
+        }.build()
         return client.newCall(request).await().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) throw IOException("HTTP ${response.code}: $text")
