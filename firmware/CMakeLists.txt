@@ -32,8 +32,6 @@ add_library(homeguard_core
     src/pressure.cpp
     src/health_monitor.cpp
     src/telemetry.cpp
-    src/power_monitor.cpp
-    src/boot_self_test.cpp
 )
 target_include_directories(homeguard_core PUBLIC include)
 
