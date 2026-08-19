@@ -1,7 +1,5 @@
 #pragma once
 
-#include "homeguard/maintenance.hpp"
-
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -37,11 +35,19 @@ struct HardwareTestRequest {
     std::uint32_t duration_ms{};
 };
 
+struct HardwareTestOutputs {
+    bool siren{};
+    bool valve1{};
+    bool valve2{};
+    bool aux1{};
+    bool aux2{};
+};
+
 struct HardwareTestResult {
     HardwareTestDecision decision{HardwareTestDecision::BlockedOutputsUnavailable};
     HardwareTestTarget target{HardwareTestTarget::Siren};
     std::uint32_t requested_duration_ms{};
-    Outputs requested_outputs{};
+    HardwareTestOutputs requested_outputs{};
 
     [[nodiscard]] bool allowed() const noexcept { return decision == HardwareTestDecision::Allowed; }
 };
@@ -74,7 +80,7 @@ public:
         bool event_log_available,
         bool physical_outputs_available) const;
 
-    [[nodiscard]] static Outputs output_for(HardwareTestTarget target) noexcept;
+    [[nodiscard]] static HardwareTestOutputs output_for(HardwareTestTarget target) noexcept;
 };
 
 const char* to_string(HardwareTestTarget target) noexcept;
