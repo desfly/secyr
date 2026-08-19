@@ -3,6 +3,7 @@
 #include "homeguard/access_control.hpp"
 #include "esp_http_server.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <string>
