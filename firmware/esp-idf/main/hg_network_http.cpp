@@ -1,4 +1,6 @@
 #include "hg_network_http.hpp"
+#include "hg_access_runtime.hpp"
+#include "hg_request_auth.hpp"
 
 #include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
@@ -105,7 +107,14 @@ std::string ssid_from_bytes(const std::uint8_t* bytes, std::size_t capacity)
 esp_err_t send_json(httpd_req_t* request, const std::string& body)
 {
     httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, body.c_str(), static_cast<ssize_t>(body.size()));
+}
+
+bool setup_network_allowed(const NetworkHttp* self)
+{
+    return self != nullptr && self->access_control() != nullptr &&
+           access_runtime::setup_required(*self->access_control());
 }
 
 }  // namespace
@@ -197,11 +206,17 @@ esp_err_t NetworkHttp::connect_post(httpd_req_t* request)
 
 esp_err_t NetworkHttp::handle_status(httpd_req_t* request)
 {
+    if (!setup_network_allowed(this) && !request_auth::authenticated(request, *access_)) {
+        return request_auth::send_login_required(request);
+    }
     return send_json(request, status_json());
 }
 
 esp_err_t NetworkHttp::handle_scan(httpd_req_t* request)
 {
+    if (!setup_network_allowed(this) && !request_auth::authenticated(request, *access_)) {
+        return request_auth::send_login_required(request);
+    }
     return send_json(request, scan_json());
 }
 
@@ -212,31 +227,35 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"invalid_body\"}");
     }
 
-    // httpd_req_recv() may return a short TCP read. Do not parse or authorize
-    // until the complete declared request body has been received.
     std::string body(request->content_len, '\0');
     std::size_t offset = 0U;
     while (offset < body.size()) {
         const auto received = httpd_req_recv(request, body.data() + offset, body.size() - offset);
         if (received <= 0) {
+            std::fill(body.begin(), body.end(), '\0');
             httpd_resp_set_status(request, "400 Bad Request");
             return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"read_failed\"}");
         }
         offset += static_cast<std::size_t>(received);
     }
 
-    std::string actor;
-    std::string credential;
-    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
-        httpd_resp_set_status(request, "401 Unauthorized");
-        return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"admin_credential_required\"}");
-    }
+    const bool setup_mode = setup_network_allowed(this);
+    if (!setup_mode) {
+        std::string actor;
+        std::string credential;
+        if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
+            std::fill(body.begin(), body.end(), '\0');
+            httpd_resp_set_status(request, "401 Unauthorized");
+            return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"admin_credential_required\"}");
+        }
 
-    const auto decision = access_->authorize(actor, credential, "network.configure");
-    std::fill(credential.begin(), credential.end(), '\0');
-    if (decision != AuditDecision::Allowed) {
-        httpd_resp_set_status(request, "403 Forbidden");
-        return send_json(request, std::string{"{\"ok\":false,\"state\":\"error\",\"reason\":\""} + to_string(decision) + "\"}");
+        const auto decision = access_->authorize(actor, credential, "network.configure");
+        std::fill(credential.begin(), credential.end(), '\0');
+        if (decision != AuditDecision::Allowed) {
+            std::fill(body.begin(), body.end(), '\0');
+            httpd_resp_set_status(request, "403 Forbidden");
+            return send_json(request, std::string{"{\"ok\":false,\"state\":\"error\",\"reason\":\""} + to_string(decision) + "\"}");
+        }
     }
 
     std::string ssid;
@@ -244,9 +263,11 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
     if (!parse_json_string(body, "ssid", ssid) || !parse_json_string(body, "password", password) ||
         ssid.empty() || ssid.size() > 32 || password.size() > 64 || (!password.empty() && password.size() < 8)) {
         std::fill(password.begin(), password.end(), '\0');
+        std::fill(body.begin(), body.end(), '\0');
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"invalid_credentials\"}");
     }
+    std::fill(body.begin(), body.end(), '\0');
 
     wifi_config_t sta{};
     std::memcpy(sta.sta.ssid, ssid.data(), std::min(ssid.size(), sizeof(sta.sta.ssid)));
@@ -263,9 +284,6 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_connect_failed\"}");
     }
     if (!save_credentials(ssid, password)) {
-        // Keep runtime and persistent credentials atomic. If NVS cannot commit
-        // the new credentials, restore the previous STA configuration instead
-        // of leaving this boot on credentials that will vanish after restart.
         if (have_previous_sta) (void)esp_wifi_set_config(WIFI_IF_STA, &previous_sta);
         std::fill(password.begin(), password.end(), '\0');
         httpd_resp_set_status(request, "503 Service Unavailable");
@@ -274,7 +292,8 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
     std::fill(password.begin(), password.end(), '\0');
 
     const auto response_error = send_json(request,
-        std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) + "\"}");
+        std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) +
+        "\",\"setupMode\":" + (setup_mode ? "true" : "false") + "}");
     if (response_error != ESP_OK) return response_error;
 
     vTaskDelay(kStaHandoverDelay);
