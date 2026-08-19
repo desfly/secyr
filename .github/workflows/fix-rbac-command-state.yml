@@ -24,10 +24,10 @@ jobs:
           p = Path('web/app.js')
           s = p.read_text(encoding='utf-8')
           old = '''  const buttons = [...document.querySelectorAll("[data-command]")];
-  buttons.forEach(item => { item.disabled = true; });'''
+          buttons.forEach(item => { item.disabled = true; });'''
           new = '''  const buttons = [...document.querySelectorAll("[data-command]")];
-  const previousDisabled = new Map(buttons.map(item => [item, item.disabled]));
-  buttons.forEach(item => { item.disabled = true; });'''
+          const previousDisabled = new Map(buttons.map(item => [item, item.disabled]));
+          buttons.forEach(item => { item.disabled = true; });'''
           if old not in s:
               raise SystemExit('expected sendSecurityCommand prelude not found')
           s = s.replace(old, new, 1)
