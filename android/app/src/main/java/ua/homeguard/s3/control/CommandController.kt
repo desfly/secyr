@@ -48,13 +48,14 @@ class CommandController(
         val target = endpoint.value
         require(target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank()) { "controller offline" }
 
-        // Never reuse a bearer session across a fresh login attempt/device.
+        // PIN exists only during this login call. Never persist or reuse it for
+        // commands. The returned Bearer token becomes the local auth boundary.
         localHttpSessionToken = ""
         val api = createApi(target)
         val session = api.login(actor, credential)
         if (target.path != ControlPath.CLOUD) {
             localHttpSessionToken = session.sessionToken
-            val telemetryToken = api.telemetrySession(actor, credential)
+            val telemetryToken = api.telemetrySession(session.actor)
             settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
         }
         return session
@@ -69,7 +70,9 @@ class CommandController(
         val appSettings = settings.settings.value
         if (target.path == ControlPath.OFFLINE || target.apiBaseUrl.isBlank()) return CommandReply(accepted = false, code = "offline")
         if (target.path == ControlPath.CLOUD && appSettings.apiToken.isBlank()) return CommandReply(accepted = false, code = "offline")
-        if (target.path != ControlPath.CLOUD && actor.isBlank()) return CommandReply(accepted = false, code = "authorization_required")
+        if (target.path != ControlPath.CLOUD && (actor.isBlank() || localHttpSessionToken.isBlank())) {
+            return CommandReply(accepted = false, code = "authorization_required")
+        }
 
         val api = createApi(target)
         val challenge = if (target.path == ControlPath.CLOUD && requiresChallenge(type)) api.challenge(type) else null
@@ -79,7 +82,9 @@ class CommandController(
             type = type,
             challenge = challenge,
             actor = actor.trim(),
-            credential = credential,
+            // LEGACY cloud-only compatibility: local runtime never needs or
+            // serializes this credential after login.
+            credential = if (target.path == ControlPath.CLOUD) credential else "",
         )
         return api.command(command)
     }
