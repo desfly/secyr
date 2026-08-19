@@ -21,6 +21,7 @@
     #hgAuthGate button.secondary{background:#18324c;color:#fff;border:1px solid rgba(255,255,255,.24)}
     #hgAuthGate button:disabled{opacity:.55;cursor:default}#hgAuthMessage{min-height:20px;margin-top:12px;color:#ffd2d2;font-size:14px}.hg-setup-status{min-height:18px;color:#c8d4df;font-size:13px;margin-top:8px}
     #hgSessionLogout{position:fixed;right:14px;bottom:14px;z-index:2000;padding:9px 12px;border-radius:9px;border:1px solid #d7deea;background:#fff;font:inherit;font-weight:700}
+    .hg-legacy-auth-field{display:none!important}
   `;
   document.head.appendChild(style);
   document.documentElement.classList.add("hg-auth-locked");
@@ -53,13 +54,40 @@
 
   function authHeader() { return session?.token ? `Bearer ${session.token}` : ""; }
 
+  const bearerMutationRoutes = new Set([
+    "/api/v1/system/security-command",
+    "/api/v1/system/output-command",
+    "/api/v1/system/factory-reset",
+    "/api/v1/network/connect",
+    "/api/v1/access/users",
+    "/api/v1/cloud/config",
+    "/api/v1/service/invalidate"
+  ]);
+
   window.fetch = function(input, init = {}) {
     if (!session) return originalFetch(input, init);
     const url = typeof input === "string" ? input : String(input?.url || "");
     if (!url.startsWith("/api/v1/") || url === "/api/v1/access/login" || url === "/api/v1/access/state") return originalFetch(input, init);
     const headers = new Headers(init.headers || (typeof input !== "string" ? input.headers : undefined) || {});
     if (!headers.has("Authorization")) headers.set("Authorization", authHeader());
-    return originalFetch(input, { ...init, headers }).then(response => {
+
+    let nextInit = { ...init, headers };
+    if (bearerMutationRoutes.has(url) && typeof init.body === "string") {
+      try {
+        const payload = JSON.parse(init.body);
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+          // v2 session model: actor is identity metadata bound to Bearer; the
+          // old per-request PIN credential is deliberately not transmitted.
+          payload.actor = session.actor;
+          delete payload.credential;
+          nextInit = { ...nextInit, body: JSON.stringify(payload) };
+        }
+      } catch (_) {
+        // Leave non-JSON bodies untouched; endpoint validation will reject it.
+      }
+    }
+
+    return originalFetch(input, nextInit).then(response => {
       if (response.status === 401 && session) logout("Сеанс завершено. Увійдіть знову.");
       return response;
     });
@@ -70,6 +98,26 @@
     ["#operatorId","#networkActor","#accessActor","#cloudActor","#factoryResetActor"].forEach(selector => {
       const actor=document.querySelector(selector); if(actor) actor.value=session.actor;
     });
+  }
+
+  function hideLegacyAuthUi() {
+    ["#operatorId","#operatorPin","#networkActor","#networkCredential","#accessActor","#accessCredential","#cloudActor","#cloudCredential","#factoryResetActor","#factoryResetCredential"].forEach(selector => {
+      const field=document.querySelector(selector);
+      const label=field?.closest?.("label");
+      (label || field)?.classList?.add("hg-legacy-auth-field");
+    });
+  }
+
+  function primeLegacyHandlers() {
+    if (!session) return;
+    syncActorFields();
+    // Temporary compatibility only: app.js still validates the old PIN input
+    // before it calls fetch(). The v2 fetch wrapper above strips this sentinel,
+    // so no fake or real credential leaves the browser.
+    ["#operatorPin","#networkCredential","#accessCredential","#cloudCredential","#factoryResetCredential"].forEach(selector => {
+      const field=document.querySelector(selector); if(field) field.value="0000";
+    });
+    hideLegacyAuthUi();
   }
 
   function commandAllowed(command) {
@@ -90,6 +138,7 @@
     document.querySelectorAll("[data-output-id]").forEach(button => { button.disabled = caps.valves !== true; });
     const wifiConnect = document.querySelector("#wifiConnect"); if (wifiConnect) wifiConnect.disabled = caps.networkConfigure !== true;
     ["#accessLoad", "#accessSave"].forEach(selector => { const button=document.querySelector(selector); if(button) button.disabled=caps.accessManage!==true; });
+    primeLegacyHandlers();
   }
 
   function showLogin(prefill = "") {
@@ -175,7 +224,12 @@
   form.addEventListener("submit",event=>{event.preventDefault();if(gateMode==="setup_required")submitSetup();else submitLogin();});
   form.addEventListener("click",event=>{if(gateMode!=="setup_required")return;if(event.target?.id==="hgSetupWifiScan"){event.preventDefault();setupScanWifi();}else if(event.target?.id==="hgSetupWifiConnect"){event.preventDefault();setupConnectWifi();}});
 
-  document.addEventListener("click",event=>{if(!session)return;const control=event.target.closest?.("[data-command],[data-output-id],#wifiConnect,#accessLoad,#accessSave,#cloudApply,#cloudDisable");if(!control)return;const caps=session.capabilities||{};let allowed=true;if(control.matches("[data-command]"))allowed=commandAllowed(control.dataset.command||"");else if(control.matches("[data-output-id]"))allowed=caps.valves===true;else if(control.matches("#wifiConnect"))allowed=caps.networkConfigure===true;else if(control.matches("#accessLoad,#accessSave"))allowed=caps.accessManage===true;else if(control.matches("#cloudApply,#cloudDisable"))allowed=session.role==="admin";if(!allowed){event.preventDefault();event.stopImmediatePropagation();if(typeof showToast==="function")showToast("Команда недоступна для цієї ролі");return;}syncActorFields();},true);
+  document.addEventListener("click",event=>{if(!session)return;const control=event.target.closest?.("[data-command],[data-output-id],#wifiConnect,#accessLoad,#accessSave,#cloudApply,#cloudDisable");if(!control)return;const caps=session.capabilities||{};let allowed=true;if(control.matches("[data-command]"))allowed=commandAllowed(control.dataset.command||"");else if(control.matches("[data-output-id]"))allowed=caps.valves===true;else if(control.matches("#wifiConnect"))allowed=caps.networkConfigure===true;else if(control.matches("#accessLoad,#accessSave"))allowed=caps.accessManage===true;else if(control.matches("#cloudApply,#cloudDisable"))allowed=session.role==="admin";if(!allowed){event.preventDefault();event.stopImmediatePropagation();if(typeof showToast==="function")showToast("Команда недоступна для цієї ролі");return;}primeLegacyHandlers();},true);
+
+  // LEGACY v1 fields stay in app.js/index.html for rollback, but are hidden and
+  // never sent. They will be physically removed after the v2 session rollout.
+  const legacyObserver=new MutationObserver(()=>{if(session)hideLegacyAuthUi();});
+  legacyObserver.observe(document.body,{childList:true,subtree:true});
 
   window.HomeGuardAuth={authenticated:()=>Boolean(session),actor:()=>session?.actor||"",role:()=>session?.role||"",logout};
   loadAccessState();
