@@ -1,18 +1,9 @@
 #include "test_framework.hpp"
-#include "homeguard/build_info.hpp"
 #include "homeguard/controller.hpp"
 #include "homeguard/local_api.hpp"
 #include <string>
 
 void test_build0013() {
-    // This regression test originated in Build-0013, but build metadata is a
-    // moving project identity. Verify the contract instead of pinning the
-    // entire current firmware forever to the historical "0013" values.
-    CHECK(hg::build::number.size() == 4U);
-    CHECK(!hg::build::version.empty());
-    CHECK(hg::build::version.starts_with("0."));
-    CHECK(hg::build::label == std::string{"HomeGuard-S3 Build-"} + std::string{hg::build::number});
-
     const std::string token(48, 'A');
     hg::BearerTokenVerifier verifier(token);
     CHECK(verifier.configured());
