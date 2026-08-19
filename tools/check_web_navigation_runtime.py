@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """Headless-browser regression gate for HomeGuard-S3 navigation.
 
-Loads the real Web UI in Chromium for every sidebar hash route and verifies the
-runtime DOM, not just static source: exactly one active sidebar anchor for every
-known route, the active anchor matches the URL hash, dashboard/network/system
-visibility follows the route, and unknown hashes never create multiple active
-items.
+Checks both cold loads and in-document transitions. The latter is important for
+this UI because click handlers, hashchange listeners and the firmware-served JS
+suffix all react to the same route change. The invariant is simple: at most one
+sidebar anchor may own the blue ``active`` state, and every known route must end
+with exactly its own anchor active.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -57,13 +57,10 @@ class NavParser(HTMLParser):
             self.in_nav = True
             self.nav_depth = 1
             return
-        if self.in_nav:
-            if tag == "nav":
-                self.nav_depth += 1
-            if tag == "a":
-                href = values.get("href") or ""
-                classes = set((values.get("class") or "").split())
-                self.anchors.append((href, classes))
+        if self.in_nav and tag == "a":
+            href = values.get("href") or ""
+            classes = set((values.get("class") or "").split())
+            self.anchors.append((href, classes))
         element_id = values.get("id")
         if element_id:
             self.ids.add(element_id)
@@ -91,18 +88,18 @@ def find_chrome() -> str:
     raise RuntimeError("Chrome/Chromium executable not found")
 
 
-def dump_dom(chrome: str, url: str) -> str:
+def dump_dom(chrome: str, url: str, budget_ms: int = 3500) -> str:
     command = [
         chrome,
         "--headless",
         "--no-sandbox",
         "--disable-gpu",
         "--disable-dev-shm-usage",
-        "--virtual-time-budget=3500",
+        f"--virtual-time-budget={budget_ms}",
         "--dump-dom",
         url,
     ]
-    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=20)
+    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=25)
     if result.returncode != 0:
         raise RuntimeError(f"Chromium failed for {url}: {result.stderr[-1200:]}")
     return result.stdout
@@ -125,7 +122,6 @@ def assert_route(route: str, parsed: NavParser, errors: list[str]) -> None:
     if active != [route]:
         errors.append(f"{route}: expected exactly one active href {route}, got {active}")
 
-    dashboard_ids = {"overview"}
     if route == "#networkPage":
         if "networkPage" in parsed.hidden_ids:
             errors.append(f"{route}: networkPage remained hidden")
@@ -141,8 +137,91 @@ def assert_route(route: str, parsed: NavParser, errors: list[str]) -> None:
             errors.append(f"{route}: dashboard route leaked a hidden page")
 
     target = route[1:]
-    if target not in parsed.ids and target not in dashboard_ids:
+    if target not in parsed.ids and target != "overview":
         errors.append(f"{route}: runtime target id missing: {target}")
+
+
+def sequence_probe_html(index_html: str) -> str:
+    routes_json = json.dumps(EXPECTED_ROUTES)
+    probe = f"""
+<script id="homeguard-nav-sequence-probe">
+(async () => {{
+  const routes = {routes_json};
+  const failures = [];
+  const wait = (ms = 45) => new Promise(resolve => setTimeout(resolve, ms));
+  const activeHrefs = () => [...document.querySelectorAll('.sidebar nav a.active')].map(a => a.getAttribute('href'));
+  const check = (route, phase) => {{
+    const active = activeHrefs();
+    if (active.length !== 1 || active[0] !== route) failures.push(`${{phase}}:${{route}} active=${{JSON.stringify(active)}}`);
+    const group = document.querySelector('.nav-group-label');
+    if (!group || group.matches('a') || group.classList.contains('active')) failures.push(`${{phase}}:${{route}} settings-group-active`);
+  }};
+
+  await wait(80);
+  // Real click path: bindNavigation() prevents default and changes location.hash.
+  for (const route of routes) {{
+    const link = document.querySelector(`.sidebar nav a[href="${{route}}"]`);
+    if (!link) {{ failures.push(`click:${{route}} missing-link`); continue; }}
+    link.click();
+    await wait();
+    check(route, 'click');
+  }}
+
+  // Focus must never mutate the authoritative active class.
+  const current = window.location.hash || '#overview';
+  for (const link of document.querySelectorAll('.sidebar nav a')) {{
+    link.focus();
+    await wait(5);
+    check(current, 'focus');
+  }}
+
+  // Burst routing catches stale callbacks / competing hashchange controllers.
+  window.location.hash = '#zones-section';
+  window.location.hash = '#ioState';
+  window.location.hash = '#networkPage';
+  window.location.hash = '#system';
+  await wait(120);
+  check('#system', 'burst');
+
+  // Same-hash click takes the explicit routeFromHash() branch in bindNavigation.
+  const systemLink = document.querySelector('.sidebar nav a[href="#system"]');
+  if (systemLink) {{ systemLink.click(); await wait(); check('#system', 'same-hash-click'); }}
+
+  const marker = document.createElement('div');
+  marker.id = 'homeguard-nav-sequence-result';
+  marker.hidden = true;
+  marker.dataset.result = failures.length ? 'FAIL' : 'PASS';
+  marker.dataset.failures = failures.join('|');
+  document.body.appendChild(marker);
+}})();
+</script>
+"""
+    if "</body>" not in index_html:
+        raise RuntimeError("index.html has no </body> for sequence probe injection")
+    return index_html.replace("</body>", probe + "\n</body>", 1)
+
+
+def run_sequence_probe(chrome: str, web_root: Path, base: str, errors: list[str]) -> None:
+    probe_name = "__homeguard_navigation_sequence_probe.html"
+    probe_path = web_root / probe_name
+    try:
+        probe_path.write_text(sequence_probe_html((web_root / "index.html").read_text(encoding="utf-8")), encoding="utf-8")
+        dom = dump_dom(chrome, base + probe_name + "#overview", budget_ms=6500)
+        marker = re.search(
+            r'id="homeguard-nav-sequence-result"[^>]*data-result="([^"]+)"[^>]*data-failures="([^"]*)"',
+            dom,
+        )
+        if not marker:
+            errors.append("transition probe did not complete in Chromium")
+        elif marker.group(1) != "PASS":
+            errors.append(f"transition probe failed: {marker.group(2)}")
+    except Exception as exc:
+        errors.append(f"transition probe browser audit failed: {exc}")
+    finally:
+        try:
+            probe_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def main() -> int:
@@ -174,7 +253,7 @@ def main() -> int:
             except Exception as exc:
                 errors.append(f"{route}: browser audit failed: {exc}")
 
-        # Unknown hashes are allowed to select no menu item, but never more than one.
+        # Unknown hashes may select no item, but can never create a double-active state.
         try:
             unknown = parse_dom(dump_dom(chrome, base + "#unknown-route"))
             unknown_active = [href for href, classes in unknown.anchors if "active" in classes]
@@ -182,6 +261,8 @@ def main() -> int:
                 errors.append(f"unknown route produced multiple active items: {unknown_active}")
         except Exception as exc:
             errors.append(f"unknown route browser audit failed: {exc}")
+
+        run_sequence_probe(chrome, web_root, base, errors)
     finally:
         server.shutdown()
         server.server_close()
@@ -193,8 +274,10 @@ def main() -> int:
         return 1
 
     print("Web navigation runtime audit PASS")
-    print(f" - browser-rendered hash routes checked: {len(EXPECTED_ROUTES)}")
-    print(" - exactly one active sidebar item on every known route")
+    print(f" - browser-rendered cold-load hash routes checked: {len(EXPECTED_ROUTES)}")
+    print(" - click + hashchange transitions checked in one live document")
+    print(" - rapid hash burst and same-hash click are race-safe")
+    print(" - focus cannot mutate the single active navigation owner")
     print(" - unique hrefs + target visibility verified at runtime")
     print(" - unknown hash cannot create a double-active state")
     return 0
