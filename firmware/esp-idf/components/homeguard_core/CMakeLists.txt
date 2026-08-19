@@ -31,12 +31,6 @@ set(HG_CORE_SRCS
     "../../../src/alarm_ack_event.cpp"
     "../../../src/alarm_ack_telemetry.cpp"
 )
-set(HOMEGUARD_BUILD0017_SOURCES
-    "../../../src/supervised_loop.cpp"
-    "../../../src/pt506_filter.cpp"
-    "../../../src/valve_machine.cpp"
-    "../../../src/temperature_statistics.cpp"
-)
 
 idf_component_register(SRCS ${HG_CORE_SRCS} INCLUDE_DIRS "../../../include")
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_20)
