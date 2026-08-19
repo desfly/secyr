@@ -1,5 +1,5 @@
 #include "hg_telemetry_session_http.hpp"
-#include "hg_access_time.hpp"
+#include "hg_request_auth.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -62,12 +62,6 @@ bool read_body(httpd_req_t* request, std::size_t limit, std::string& body) {
     return true;
 }
 
-bool valid_pin(const std::string& pin) {
-    if (pin.size() < 4U || pin.size() > 12U) return false;
-    for (const char ch : pin) if (ch < '0' || ch > '9') return false;
-    return true;
-}
-
 void scrub(std::string& secret) {
     std::fill(secret.begin(), secret.end(), '\0');
     secret.clear();
@@ -75,6 +69,7 @@ void scrub(std::string& secret) {
 
 esp_err_t send_json(httpd_req_t* request, const std::string& body) {
     httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, body.c_str(), static_cast<ssize_t>(body.size()));
 }
 
@@ -104,34 +99,27 @@ esp_err_t TelemetrySessionHttp::handle_login(httpd_req_t* request) {
     if (access_ == nullptr || telemetry_ == nullptr) return ESP_FAIL;
 
     std::string body;
-    if (!read_body(request, 384U, body)) {
+    if (!read_body(request, 256U, body)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_body\"}");
     }
 
     std::string actor;
-    std::string credential;
-    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential) ||
-        actor.empty() || actor.size() > 23U || !valid_pin(credential)) {
-        scrub(credential);
+    if (!parse_json_string(body, "actor", actor) || actor.empty() || actor.size() > 23U) {
         scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
-        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
+        return send_json(request, "{\"ok\":false,\"reason\":\"session_actor_required\"}");
     }
-
     scrub(body);
-    const auto decision = access_->authenticate(actor, credential, access_now_ms());
-    scrub(credential);
-    if (decision != AuditDecision::Allowed) {
-        httpd_resp_set_status(request, decision == AuditDecision::DeniedRateLimited ? "429 Too Many Requests" : "401 Unauthorized");
-        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
+
+    // v2: telemetry token is derived from an already authenticated HTTP Bearer
+    // session. No second PIN verification and no PIN lifetime extension.
+    if (!request_auth::authenticated_actor(request, *access_, actor)) {
+        return request_auth::send_login_required(request);
     }
 
-    const auto* user = access_->find_user(actor);
-    if (user == nullptr || !user->enabled) {
-        httpd_resp_set_status(request, "401 Unauthorized");
-        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
-    }
+    /* LEGACY v1 disabled: this endpoint previously parsed credential and
+       called access_->authenticate(actor, credential) a second time. */
 
     std::string token = telemetry_->issue_session_token();
     if (token.size() < 32U) {
