@@ -3,6 +3,9 @@ name: Web UI Preview
 on:
   push:
     branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/webui-preview.yml"
   workflow_dispatch:
 
 jobs:
