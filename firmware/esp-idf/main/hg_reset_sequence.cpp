@@ -45,7 +45,6 @@ esp_err_t set_pending_reset(bool pending) {
         error = nvs_erase_key(handle, kPendingKey);
         if (error == ESP_ERR_NVS_NOT_FOUND) error = ESP_OK;
     }
-
     if (error == ESP_OK) error = nvs_commit(handle);
     nvs_close(handle);
     return error;
@@ -68,8 +67,6 @@ esp_err_t read_pending_reset(bool& pending) {
 }
 
 void perform_early_boot_factory_reset() {
-    // Consume the request before destructive work to avoid a permanent boot
-    // loop if flash/NVS later reports a non-recoverable partial failure.
     const auto clear_error = set_pending_reset(false);
     if (clear_error != ESP_OK) {
         ESP_LOGE(kTag, "Cannot consume pending Factory Reset request: %s", esp_err_to_name(clear_error));
@@ -101,31 +98,26 @@ void perform_early_boot_factory_reset() {
         vTaskDelay(kSuccessRedTicks);
         (void)RgbDiagnostic::off(kResetRgbGpio);
     }
-
     ESP_LOGW(kTag, "Factory Reset confirmed; rebooting clean");
     esp_restart();
 }
 
 void stage_factory_reset() {
     (void)RgbDiagnostic::off(kResetRgbGpio);
-
     const auto error = set_pending_reset(true);
     if (error != ESP_OK) {
         ESP_LOGE(kTag, "Cannot stage Factory Reset request; no destructive reset performed: %s", esp_err_to_name(error));
         return;
     }
-
     ESP_LOGW(kTag, "Three confirmed holds complete; Factory Reset staged for safe early boot");
     esp_restart();
 }
 
 void service_button_reset_task(void*) {
     std::uint8_t confirmed_holds = 0U;
-
     bool raw_pressed = service_button_pressed();
     bool stable_pressed = raw_pressed;
     bool hold_confirmed = false;
-
     TickType_t now = xTaskGetTickCount();
     TickType_t raw_changed_at = now;
     TickType_t press_started_at = now;
@@ -138,7 +130,6 @@ void service_button_reset_task(void*) {
     for (;;) {
         now = xTaskGetTickCount();
         const bool sampled_pressed = service_button_pressed();
-
         if (sampled_pressed != raw_pressed) {
             raw_pressed = sampled_pressed;
             raw_changed_at = now;
@@ -146,7 +137,6 @@ void service_button_reset_task(void*) {
 
         if (raw_pressed != stable_pressed && (now - raw_changed_at) >= kDebounceTicks) {
             stable_pressed = raw_pressed;
-
             if (stable_pressed) {
                 const bool timed_out = confirmed_holds != 0U &&
                     (now - last_confirmed_release_at) > kSequenceTimeoutTicks;
@@ -155,29 +145,20 @@ void service_button_reset_task(void*) {
                     ESP_LOGI(kTag, "Factory-reset gesture timed out; sequence cleared");
                     confirmed_holds = retained;
                 }
-
                 press_started_at = now;
                 hold_confirmed = false;
                 ESP_LOGI(kTag, "Service button pressed; waiting for hold threshold");
             } else {
                 if (hold_confirmed) {
                     (void)RgbDiagnostic::off(kResetRgbGpio);
-                    const auto step = hg::advance_confirmed_hold(
-                        confirmed_holds,
-                        true,
-                        kRequiredHolds);
+                    const auto step = hg::advance_confirmed_hold(confirmed_holds, true, kRequiredHolds);
                     confirmed_holds = step.count;
                     last_confirmed_release_at = now;
-
                     ESP_LOGW(kTag,
                              "Factory-reset hold confirmed: %u/%u",
-                             static_cast<unsigned>(
-                                 step.trigger_factory_reset ? kRequiredHolds : confirmed_holds),
+                             static_cast<unsigned>(step.trigger_factory_reset ? kRequiredHolds : confirmed_holds),
                              static_cast<unsigned>(kRequiredHolds));
-
-                    if (step.trigger_factory_reset) {
-                        stage_factory_reset();
-                    }
+                    if (step.trigger_factory_reset) stage_factory_reset();
                 } else {
                     ESP_LOGI(kTag, "Short/unconfirmed service-button press ignored");
                 }
@@ -188,8 +169,6 @@ void service_button_reset_task(void*) {
         if (stable_pressed && !hold_confirmed && (now - press_started_at) >= kHoldTicks) {
             const auto rgb_error = RgbDiagnostic::set_white(kResetRgbGpio);
             if (rgb_error != ESP_OK) {
-                // WHITE is the positive acknowledgement that the hold is accepted.
-                // If feedback cannot be shown, fail safe and do not count it.
                 ESP_LOGE(kTag, "Cannot show WHITE hold confirmation; hold not armed: %s", esp_err_to_name(rgb_error));
             } else {
                 hold_confirmed = true;
@@ -205,7 +184,6 @@ void service_button_reset_task(void*) {
                 confirmed_holds = retained;
             }
         }
-
         vTaskDelay(kPollTicks);
     }
 }
@@ -220,12 +198,15 @@ bool handle_pending_factory_reset() {
         return false;
     }
     if (!pending) return false;
-
     perform_early_boot_factory_reset();
     return true;
 }
 
 esp_err_t start_service_button_factory_reset() {
+    // app_main invokes this immediately after nvs_flash_init(), before network,
+    // HTTP, cloud, or other mutable-state users. A staged reset is consumed here.
+    if (handle_pending_factory_reset()) return ESP_OK;
+
     gpio_config_t config{};
     config.pin_bit_mask = 1ULL << static_cast<unsigned>(board::kServiceButton);
     config.mode = GPIO_MODE_INPUT;
@@ -235,17 +216,14 @@ esp_err_t start_service_button_factory_reset() {
 
     auto error = gpio_config(&config);
     if (error != ESP_OK) return error;
-
-    if (xTaskCreate(
-            &service_button_reset_task,
-            "hg_rst_button",
-            kResetTaskStackBytes,
-            nullptr,
-            5,
-            nullptr) != pdPASS) {
+    if (xTaskCreate(&service_button_reset_task,
+                    "hg_rst_button",
+                    kResetTaskStackBytes,
+                    nullptr,
+                    5,
+                    nullptr) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
-
     return ESP_OK;
 }
 
