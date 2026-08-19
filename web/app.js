@@ -71,6 +71,9 @@ function renderOutputs(data) {
     return `<div class="${item.active ? "" : "muted"}"><b>⇆</b><span>${isValve ? "Клапан" : "Вих."} ${id}</span><small>${item.active ? "Увімк." : "Вимк."}</small>${controls}</div>`;
   }).join("") : "<div><span>Очікування реальних даних контролера…</span></div>";
   target.querySelectorAll("[data-output-id]").forEach(button => { button.onclick = () => sendOutputCommand(button); });
+  if (window.HomeGuardAuth?.role?.() === "guest") {
+    target.querySelectorAll("[data-output-id]").forEach(button => { button.disabled = true; });
+  }
 }
 
 function renderNetwork(status) {
