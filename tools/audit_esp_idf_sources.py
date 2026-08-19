@@ -66,6 +66,10 @@ if large_access_stack_copy.search(access_http):
     errors.append(
         "hg_access_http.cpp: AccessControl rollback snapshot must not be copied into the httpd task stack"
     )
+if "bool escaped = false" not in access_http or "scrub(credential);" not in access_http:
+    errors.append("hg_access_http.cpp: Access auth must use escaped JSON parsing and scrub credentials")
+if 'allowed("network.configure")' not in access_http or 'allowed("system.network.configure")' in access_http:
+    errors.append("hg_access_http.cpp: networkConfigure capability must match network.configure authorization action")
 
 access_store = (CORE / "access_store.cpp").read_text(encoding="utf-8")
 full_access_local = re.compile(r"\bAccessControl\s+[A-Za-z_]\w*\s*(?:;|\{)")
@@ -97,6 +101,11 @@ if not re.search(
     errors.append(
         "hg_system_http.cpp: partial Web factory reset must report rebooting and schedule recovery reboot"
     )
+if "bool escaped = false" not in system_http or "scrub(body);" not in system_http or "scrub(credential);" not in system_http:
+    errors.append("hg_system_http.cpp: System auth must use escaped JSON parsing and scrub raw credential-bearing bodies")
+registered_system_routes = system_http.split("esp_err_t SystemHttp::send_json", 1)[0]
+if '"/ws/system"' in registered_system_routes:
+    errors.append("hg_system_http.cpp: unauthenticated /ws/system event stream must remain disabled")
 
 factory_reset_js = (WEB / "factory-reset.js").read_text(encoding="utf-8")
 if "body.rebooting === true" not in factory_reset_js:
@@ -144,8 +153,6 @@ if "restore_runtime_error = cloud_->start(" not in cloud_http:
         "hg_cloud_http.cpp: failed MQTT runtime start must restore the previous live config"
     )
 
-# Physical control paths must tolerate TCP short reads and minimize credential
-# lifetime. They are more sensitive than ordinary configuration endpoints.
 output_http = (MAIN / "hg_output_http.cpp").read_text(encoding="utf-8")
 if "read_request_body(request, 384U, body)" not in output_http or "while (offset < body.size())" not in output_http:
     errors.append("hg_output_http.cpp: output command must read the complete HTTP body")
@@ -162,9 +169,6 @@ service_http = (MAIN / "hg_service_http.cpp").read_text(encoding="utf-8")
 if "scrub(credential);" not in service_http or "bool escaped = false" not in service_http:
     errors.append("hg_service_http.cpp: service auth must use escaped JSON parsing and scrub credentials")
 
-# Remote diagnostics must not expose the old unauthenticated three-second RGB
-# test. It blocked the single HTTP control task and was reachable by any LAN
-# client. Internal RgbDiagnostic remains available for controlled reset paths.
 infrastructure_http = (MAIN / "hg_infrastructure_http.cpp").read_text(encoding="utf-8")
 registered_part = infrastructure_http.split("esp_err_t InfrastructureHttp::rgb_test_post", 1)[0]
 if "/api/v1/diagnostics/rgb-test" in registered_part:
