@@ -26,6 +26,11 @@ checks = {
     "Coordinator combines mDNS+UDP+HTTP": "combine(nsd.devices, udp.devices, http.devices)" in coordinator,
     "Coordinator triggers HTTP fallback": "http.scanOnce()" in coordinator,
     "Coordinator exposes scan status": "val scanStatus" in coordinator and "udp.status" in coordinator,
+    "Physical duplicate merge helper": "mergePhysicalControllers(mdns + udpFallback + httpFallback)" in coordinator,
+    "Stable ID survives DHCP address change": "stableDeviceId(a)" in coordinator and "aId != null && aId == bId" in coordinator,
+    "Host bridges temporary setup identity": "aHost.isNotBlank() && aHost == bHost" in coordinator,
+    "Temporary setup ID excluded from stable identity": 'id.startsWith("setup-")' in coordinator,
+    "Old host-primary grouping removed": ".groupBy(::physicalControllerKey)" not in coordinator,
 }
 
 failed = [name for name, ok in checks.items() if not ok]
