@@ -161,6 +161,10 @@ esp_err_t SystemHttp::handle_factory_reset(httpd_req_t* request) {
         httpd_resp_set_status(request,"401 Unauthorized");
         return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"credential_required\"}",-1);
     }
+    if (!request_auth::authenticated_actor(request, *access_control_, actor)) {
+        http_util::scrub(credential); http_util::scrub(body);
+        return request_auth::send_login_required(request);
+    }
     if (!http_util::parse_json_string(body,"confirm",confirm) || confirm != "ERASE_ALL") {
         http_util::scrub(credential); http_util::scrub(body);
         httpd_resp_set_status(request,"409 Conflict");
@@ -205,6 +209,10 @@ esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
         http_util::scrub(credential); http_util::scrub(body);
         httpd_resp_set_status(request,"401 Unauthorized");
         return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"credential_required\"}",-1);
+    }
+    if (!request_auth::authenticated_actor(request, *access_control_, actor)) {
+        http_util::scrub(credential); http_util::scrub(body);
+        return request_auth::send_login_required(request);
     }
     http_util::scrub(body);
     const auto decision = access_control_->authorize(actor,credential,command);
