@@ -30,4 +30,15 @@ void test_reset_sequence() {
     step = hg::advance_confirmed_hold(1U, true, 2U);
     CHECK(step.count == 0U);
     CHECK(step.trigger_factory_reset);
+
+    // A disabled gesture can never trigger destructive work.
+    step = hg::advance_confirmed_hold(2U, true, 0U);
+    CHECK(step.count == 2U);
+    CHECK(!step.trigger_factory_reset);
+
+    // Saturated/corrupt counters fail deterministically into a reset trigger
+    // once a confirmed hold arrives, rather than wrapping back to zero silently.
+    step = hg::advance_confirmed_hold(0xffU, true, 3U);
+    CHECK(step.count == 0U);
+    CHECK(step.trigger_factory_reset);
 }
