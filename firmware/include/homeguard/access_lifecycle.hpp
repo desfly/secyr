@@ -28,12 +28,16 @@ constexpr AccessLifecycleState access_lifecycle_state(
         : AccessLifecycleState::LoginRequired;
 }
 
-constexpr bool unauthenticated_system_state_visible(AccessLifecycleState state) noexcept {
+constexpr bool bootstrap_allowed(AccessLifecycleState state) noexcept {
     return state == AccessLifecycleState::SetupRequired;
 }
 
-constexpr bool bootstrap_allowed(AccessLifecycleState state) noexcept {
+constexpr bool setup_surface_allowed(AccessLifecycleState state) noexcept {
     return state == AccessLifecycleState::SetupRequired;
+}
+
+constexpr bool protected_system_state_allowed(AccessLifecycleState state) noexcept {
+    return state == AccessLifecycleState::Authenticated;
 }
 
 constexpr bool protected_api_allowed(AccessLifecycleState state) noexcept {
