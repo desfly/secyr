@@ -212,13 +212,18 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"invalid_body\"}");
     }
 
+    // httpd_req_recv() may return a short TCP read. Do not parse or authorize
+    // until the complete declared request body has been received.
     std::string body(request->content_len, '\0');
-    const auto received = httpd_req_recv(request, body.data(), body.size());
-    if (received <= 0) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"read_failed\"}");
+    std::size_t offset = 0U;
+    while (offset < body.size()) {
+        const auto received = httpd_req_recv(request, body.data() + offset, body.size() - offset);
+        if (received <= 0) {
+            httpd_resp_set_status(request, "400 Bad Request");
+            return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"read_failed\"}");
+        }
+        offset += static_cast<std::size_t>(received);
     }
-    body.resize(static_cast<std::size_t>(received));
 
     std::string actor;
     std::string credential;
@@ -250,10 +255,21 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
     sta.sta.pmf_cfg.capable = true;
     sta.sta.pmf_cfg.required = false;
 
-    if (esp_wifi_set_config(WIFI_IF_STA, &sta) != ESP_OK || !save_credentials(ssid, password)) {
+    wifi_config_t previous_sta{};
+    const bool have_previous_sta = esp_wifi_get_config(WIFI_IF_STA, &previous_sta) == ESP_OK;
+    if (esp_wifi_set_config(WIFI_IF_STA, &sta) != ESP_OK) {
         std::fill(password.begin(), password.end(), '\0');
         httpd_resp_set_status(request, "503 Service Unavailable");
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_connect_failed\"}");
+    }
+    if (!save_credentials(ssid, password)) {
+        // Keep runtime and persistent credentials atomic. If NVS cannot commit
+        // the new credentials, restore the previous STA configuration instead
+        // of leaving this boot on credentials that will vanish after restart.
+        if (have_previous_sta) (void)esp_wifi_set_config(WIFI_IF_STA, &previous_sta);
+        std::fill(password.begin(), password.end(), '\0');
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_persist_failed\"}");
     }
     std::fill(password.begin(), password.end(), '\0');
 
@@ -278,8 +294,13 @@ bool NetworkHttp::apply_sta(const std::string& ssid, const std::string& password
     sta.sta.pmf_cfg.capable = true;
     sta.sta.pmf_cfg.required = false;
 
+    wifi_config_t previous_sta{};
+    const bool have_previous_sta = persist && esp_wifi_get_config(WIFI_IF_STA, &previous_sta) == ESP_OK;
     if (esp_wifi_set_config(WIFI_IF_STA, &sta) != ESP_OK) return false;
-    if (persist && !save_credentials(ssid, password)) return false;
+    if (persist && !save_credentials(ssid, password)) {
+        if (have_previous_sta) (void)esp_wifi_set_config(WIFI_IF_STA, &previous_sta);
+        return false;
+    }
 
     (void)esp_wifi_disconnect();
     return esp_wifi_connect() == ESP_OK;
