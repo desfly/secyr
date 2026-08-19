@@ -1,6 +1,7 @@
 package ua.homeguard.s3.model
 
 enum class AccessRole { ADMIN, USER, GUEST }
+enum class AccessLifecycleState { SETUP_REQUIRED, LOGIN_REQUIRED, UNAVAILABLE }
 
 data class AccessCapabilities(
     val monitor: Boolean = true,
