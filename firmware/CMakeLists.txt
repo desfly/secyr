@@ -18,7 +18,6 @@ add_library(homeguard_core
     src/hardware_verification.cpp
     src/boot_readiness.cpp
     src/service_readiness.cpp
-    src/device_identity.cpp
     src/discovery.cpp
     src/event_log.cpp
     src/system_model.cpp
