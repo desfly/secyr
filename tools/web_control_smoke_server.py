@@ -2,8 +2,8 @@
 """Headless-browser control smoke server for the HomeGuard-S3 Web UI.
 
 `serve` exposes the real checked-in web assets plus deterministic mock API
-responses and injects a test-only script that exercises login, role gating and
-high-priority controls. `verify` checks the captured HTTP requests.
+responses and injects a test-only script that exercises the current setup ->
+Bearer login -> role-gated control lifecycle. `verify` checks captured requests.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ HARNESS = r"""
 <script>
 (async () => {
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const waitFor = async (selector, timeout = 5000) => {
+  const waitFor = async (selector, timeout = 6000) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       const item = document.querySelector(selector);
@@ -27,7 +27,7 @@ HARNESS = r"""
     }
     throw new Error(`timeout waiting for ${selector}`);
   };
-  const waitEnabled = async (selector, timeout = 5000) => {
+  const waitEnabled = async (selector, timeout = 6000) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       const item = document.querySelector(selector);
@@ -36,30 +36,45 @@ HARNESS = r"""
     }
     throw new Error(`timeout waiting for enabled ${selector}`);
   };
+  const setValue = (selector, value) => {
+    const item = document.querySelector(selector);
+    if (!item) throw new Error(`missing ${selector}`);
+    item.value = value;
+    item.dispatchEvent(new Event('input', {bubbles:true}));
+    item.dispatchEvent(new Event('change', {bubbles:true}));
+  };
+  const setCriticalPin = pin => {
+    for (const selector of ['#operatorPin','#networkCredential','#accessCredential','#cloudCredential','#factoryResetCredential']) {
+      const item = document.querySelector(selector);
+      if (item) item.value = pin;
+    }
+  };
   const login = async (actor, pin) => {
-    document.querySelector('#operatorId').value = actor;
-    document.querySelector('#operatorPin').value = pin;
-    (await waitEnabled('#accessLogin')).click();
-    await waitFor('#accessLogout:not([hidden])');
-    await sleep(250);
+    const actorField = await waitFor('#hgLoginActor');
+    const pinField = await waitFor('#hgLoginPin');
+    actorField.value = actor;
+    pinField.value = pin;
+    (await waitEnabled('#hgAuthForm button[type="submit"]')).click();
+    await waitFor('#hgAuthGate[hidden]');
+    setCriticalPin(pin);
+    await sleep(300);
   };
   const logout = async () => {
-    (await waitEnabled('#accessLogout')).click();
-    await waitFor('#accessLogin:not([hidden])');
-    await sleep(150);
+    (await waitEnabled('#hgSessionLogout')).click();
+    await waitFor('#hgLoginActor');
+    await sleep(200);
   };
 
   await waitFor('html[data-homeguard-ui="ready"]');
-  await waitFor('#accessBootstrap');
   await waitFor('[data-output-id="2"][data-output-active="true"]');
 
-  // Factory-fresh bootstrap is the only unauthenticated write path.
-  document.querySelector('#managedUserId').value = 'admin-smoke';
-  document.querySelector('#managedUserName').value = 'Smoke Admin';
-  document.querySelector('#managedUserRole').value = 'admin';
-  document.querySelector('#managedUserPin').value = '4321';
-  (await waitEnabled('#accessBootstrap')).click();
-  await sleep(500);
+  // Factory-fresh setup gate: bootstrap the first Admin through the real UI.
+  await waitFor('#hgSetupId');
+  setValue('#hgSetupId', 'admin-smoke');
+  setValue('#hgSetupName', 'Smoke Admin');
+  setValue('#hgSetupPin', '4321');
+  (await waitEnabled('#hgAuthForm button[type="submit"]')).click();
+  await waitFor('#hgLoginActor');
 
   // Admin: full access, including Panic, network and account management.
   await login('admin-smoke', '4321');
@@ -68,26 +83,26 @@ HARNESS = r"""
 
   (await waitEnabled('#wifiScan')).click();
   await sleep(500);
-  document.querySelector('#wifiSsid').value = 'SmokeNet';
-  document.querySelector('#wifiPassword').value = 'password123';
+  setValue('#wifiSsid', 'SmokeNet');
+  setValue('#wifiPassword', 'password123');
   (await waitEnabled('#wifiConnect')).click();
   await sleep(2100);
 
   (await waitEnabled('#accessLoad')).click();
   await sleep(500);
 
-  document.querySelector('#managedUserId').value = 'smoke-user';
-  document.querySelector('#managedUserName').value = 'Smoke User';
-  document.querySelector('#managedUserRole').value = 'user';
-  document.querySelector('#managedUserPin').value = '1234';
+  setValue('#managedUserId', 'smoke-user');
+  setValue('#managedUserName', 'Smoke User');
+  setValue('#managedUserRole', 'user');
+  setValue('#managedUserPin', '1234');
   document.querySelector('#managedUserEnabled').checked = true;
   (await waitEnabled('#accessSave')).click();
   await sleep(500);
 
-  document.querySelector('#managedUserId').value = 'guest-smoke';
-  document.querySelector('#managedUserName').value = 'Smoke Guest';
-  document.querySelector('#managedUserRole').value = 'guest';
-  document.querySelector('#managedUserPin').value = '6789';
+  setValue('#managedUserId', 'guest-smoke');
+  setValue('#managedUserName', 'Smoke Guest');
+  setValue('#managedUserRole', 'guest');
+  setValue('#managedUserPin', '6789');
   document.querySelector('#managedUserEnabled').checked = true;
   (await waitEnabled('#accessSave')).click();
   await sleep(500);
@@ -99,15 +114,9 @@ HARNESS = r"""
     (await waitEnabled(`[data-command="${command}"]`)).click();
     await sleep(450);
   }
-  if (!document.querySelector('[data-command="security.panic"]')?.disabled) {
-    throw new Error('panic unexpectedly enabled for user');
-  }
-  if (!document.querySelector('#wifiConnect')?.disabled) {
-    throw new Error('Wi-Fi connect unexpectedly enabled for user');
-  }
-  if (!document.querySelector('#accessSave')?.disabled) {
-    throw new Error('access management unexpectedly enabled for user');
-  }
+  if (!document.querySelector('[data-command="security.panic"]')?.disabled) throw new Error('panic unexpectedly enabled for user');
+  if (!document.querySelector('#wifiConnect')?.disabled) throw new Error('Wi-Fi connect unexpectedly enabled for user');
+  if (!document.querySelector('#accessSave')?.disabled) throw new Error('access management unexpectedly enabled for user');
 
   (await waitEnabled('[data-output-id="2"][data-output-active="true"]')).click();
   await sleep(650);
@@ -118,12 +127,9 @@ HARNESS = r"""
   // Guest: monitoring only; every command control remains disabled.
   await login('guest-smoke', '6789');
   for (const selector of [
-    '[data-command="security.arm_away"]',
-    '[data-command="security.disarm"]',
-    '[data-command="security.arm_home"]',
-    '[data-command="security.panic"]',
-    '[data-output-id="2"][data-output-active="true"]',
-    '#wifiConnect', '#accessLoad', '#accessSave'
+    '[data-command="security.arm_away"]', '[data-command="security.disarm"]',
+    '[data-command="security.arm_home"]', '[data-command="security.panic"]',
+    '[data-output-id="2"][data-output-active="true"]', '#wifiConnect', '#accessLoad', '#accessSave'
   ]) {
     const item = await waitFor(selector);
     if (!item.disabled) throw new Error(`${selector} unexpectedly enabled for guest`);
@@ -164,7 +170,7 @@ class SmokeState:
 
 
 class SmokeHandler(BaseHTTPRequestHandler):
-    server_version = "HomeGuardWebSmoke/1.1"
+    server_version = "HomeGuardWebSmoke/1.2"
 
     @property
     def state(self) -> SmokeState:
@@ -186,8 +192,8 @@ class SmokeHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def _json(self, body: object, status: int = 200) -> None:
-        payload = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        self._send(status, "application/json; charset=utf-8", payload)
+        self._send(status, "application/json; charset=utf-8",
+                   json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
     def _asset(self, filename: str, content_type: str) -> None:
         path = self.web_root / filename
@@ -199,57 +205,49 @@ class SmokeHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         self.state.log("GET", path)
-
         if path in ("/", "/index.html"):
             html = (self.web_root / "index.html").read_text(encoding="utf-8")
-            html = html.replace("</body>", HARNESS + "\n</body>")
-            self._send(200, "text/html; charset=utf-8", html.encode("utf-8"))
+            self._send(200, "text/html; charset=utf-8", html.replace("</body>", HARNESS + "\n</body>").encode("utf-8"))
             return
-        if path == "/app.css":
-            self._asset("app.css", "text/css; charset=utf-8")
+        assets = {
+            "/app.css": ("app.css", "text/css; charset=utf-8"),
+            "/app.js": ("app.js", "application/javascript; charset=utf-8"),
+            "/access-session.js": ("access-session.js", "application/javascript; charset=utf-8"),
+            "/bruce.jpg": ("bruce.jpg", "image/jpeg"),
+        }
+        if path in assets:
+            self._asset(*assets[path])
             return
-        if path == "/app.js":
-            self._asset("app.js", "application/javascript; charset=utf-8")
+        if path == "/api/v1/access/state":
+            self._json({"ok": True, "state": "setup_required" if not self.state.users else "login_required"})
             return
-        if path == "/access-session.js":
-            self._asset("access-session.js", "application/javascript; charset=utf-8")
-            return
-        if path == "/bruce.jpg":
-            self._asset("bruce.jpg", "image/jpeg")
-            return
-
         if path == "/api/v1/system/zones":
-            self._json({"ok": True, "zones": [
-                {"id": 1, "name": "Door", "state": "normal", "alwaysOn": False},
-                {"id": 2, "name": "Smoke", "state": "normal", "alwaysOn": True},
-            ]})
+            self._json({"ok": True, "zones": [{"id": 1, "name": "Door", "state": "normal", "alwaysOn": False}, {"id": 2, "name": "Smoke", "state": "normal", "alwaysOn": True}]})
             return
         if path == "/api/v1/system/partitions":
             self._json({"ok": True, "partitions": [{"id": 1, "armState": "disarmed"}]})
             return
         if path == "/api/v1/system/outputs":
-            self._json({"ok": True, "outputs": [
-                {"id": 1, "type": "siren", "active": False},
-                {"id": 2, "type": "valve", "active": self.state.valve_active},
-                {"id": 3, "type": "valve", "active": False},
-            ]})
+            self._json({"ok": True, "outputs": [{"id": 1, "type": "siren", "active": False}, {"id": 2, "type": "valve", "active": self.state.valve_active}, {"id": 3, "type": "valve", "active": False}]})
             return
         if path == "/api/v1/system/events":
-            self._json({"ok": True, "events": [
-                {"sequence": self.state.sequence, "event": "smoke.boot", "severity": "info"}
-            ]})
+            self._json({"ok": True, "events": [{"sequence": self.state.sequence, "event": "smoke.boot", "severity": "info"}]})
             return
         if path == "/api/v1/build":
             self._json({"ok": True, "project": "HomeGuard-S3", "build": "browser-smoke"})
             return
         if path == "/api/v1/network/status":
-            self._json({"ok": True, "state": "connected", "ssid": self.state.network_ssid,
-                        "ip": "192.168.4.2", "rssi": -40})
+            self._json({"ok": True, "state": "connected", "ssid": self.state.network_ssid, "ip": "192.168.4.2", "rssi": -40})
             return
         if path == "/api/v1/network/scan":
             self._json({"ok": True, "networks": [{"ssid": "SmokeNet", "rssi": -42}]})
             return
-
+        if path == "/api/v1/cloud/status":
+            self._json({"ok": True, "enabled": False, "connected": False})
+            return
+        if path == "/api/v1/lan/devices":
+            self._json({"ok": True, "devices": []})
+            return
         self._json({"ok": False, "reason": "not_found"}, 404)
 
     def _read_json(self) -> dict[str, object]:
@@ -267,19 +265,10 @@ class SmokeHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _capabilities(role: str) -> dict[str, bool]:
-        admin = role == "admin"
-        user = role == "user"
-        return {
-            "monitor": True,
-            "armHome": admin or user,
-            "armAway": admin or user,
-            "disarm": admin or user,
-            "panic": admin,
-            "valves": admin or user,
-            "networkConfigure": admin,
-            "accessManage": admin,
-            "serviceInvalidate": admin,
-        }
+        admin, user = role == "admin", role == "user"
+        return {"monitor": True, "armHome": admin or user, "armAway": admin or user,
+                "disarm": admin or user, "panic": admin, "valves": admin or user,
+                "networkConfigure": admin, "accessManage": admin, "serviceInvalidate": admin}
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
@@ -292,17 +281,18 @@ class SmokeHandler(BaseHTTPRequestHandler):
         self.state.log("POST", path, body)
 
         if path == "/api/v1/access/login":
-            actor = body.get("actor")
-            credential = body.get("credential")
+            actor, credential = body.get("actor"), body.get("credential")
             user = self.state.find_user(actor)
             if user is None or not isinstance(actor, str) or self.state.credentials.get(actor) != credential:
                 self._json({"ok": False, "reason": "denied_credential"}, 401)
                 return
             role = str(user.get("role", "guest"))
-            self._json({
-                "ok": True, "actor": actor, "name": user.get("name", actor), "role": role,
-                "capabilities": self._capabilities(role),
-            })
+            token = (actor.encode("utf-8").hex() + "0" * 64)[:64]
+            self._json({"ok": True, "actor": actor, "name": user.get("name", actor), "role": role,
+                        "sessionToken": token, "capabilities": self._capabilities(role)})
+            return
+        if path == "/api/v1/access/logout":
+            self._json({"ok": True, "state": "login_required"})
             return
         if path == "/api/v1/system/security-command":
             self.state.sequence += 1
@@ -327,35 +317,27 @@ class SmokeHandler(BaseHTTPRequestHandler):
             action = body.get("action")
             if action == "bootstrap":
                 user_id = str(body.get("id", ""))
-                self.state.users = [{
-                    "id": user_id, "name": body.get("name", ""),
-                    "role": "admin", "enabled": True,
-                }]
+                self.state.users = [{"id": user_id, "name": body.get("name", ""), "role": "admin", "enabled": True}]
                 self.state.credentials[user_id] = str(body.get("pin", ""))
                 self._json({"ok": True, "role": "admin", "bootstrap": True})
                 return
             if action == "list":
-                self._json({"ok": True, "capacity": 8, "count": len(self.state.users),
-                            "users": self.state.users})
+                self._json({"ok": True, "capacity": 8, "count": len(self.state.users), "users": self.state.users})
                 return
             if action == "set":
                 user_id = str(body.get("id", ""))
-                user = {"id": user_id, "name": body.get("name", ""),
-                        "role": body.get("role", "guest"), "enabled": bool(body.get("enabled", True))}
-                self.state.users = [item for item in self.state.users if item.get("id") != user["id"]]
-                self.state.users.append(user)
+                user = {"id": user_id, "name": body.get("name", ""), "role": body.get("role", "guest"), "enabled": bool(body.get("enabled", True))}
+                self.state.users = [item for item in self.state.users if item.get("id") != user_id] + [user]
                 self.state.credentials[user_id] = str(body.get("pin", ""))
                 self._json({"ok": True})
                 return
             self._json({"ok": False, "reason": "unknown_action"}, 400)
             return
-
         self._json({"ok": False, "reason": "not_found"}, 404)
 
 
 def serve(args: argparse.Namespace) -> int:
-    web_root = Path(args.web).resolve()
-    log_path = Path(args.log).resolve()
+    web_root, log_path = Path(args.web).resolve(), Path(args.log).resolve()
     for required in ("index.html", "app.css", "app.js", "access-session.js", "bruce.jpg"):
         if not (web_root / required).is_file():
             raise SystemExit(f"missing web asset: {web_root / required}")
@@ -412,8 +394,7 @@ def verify(args: argparse.Namespace) -> int:
         errors.append(f"valve button payload mismatch: {outputs}")
 
     network = bodies("/api/v1/network/connect")
-    expected_network = [{"ssid": "SmokeNet", "password": "password123",
-                         "actor": "admin-smoke", "credential": "4321"}]
+    expected_network = [{"ssid": "SmokeNet", "password": "password123", "actor": "admin-smoke", "credential": "4321"}]
     if network != expected_network:
         errors.append(f"Wi-Fi connect payload mismatch: {network}")
     if not any(record.get("method") == "GET" and record.get("path") == "/api/v1/network/scan" for record in records):
@@ -428,13 +409,9 @@ def verify(args: argparse.Namespace) -> int:
             errors.append(f"first Admin bootstrap payload mismatch: {bootstrap}")
         if listing != {"actor": "admin-smoke", "credential": "4321", "action": "list"}:
             errors.append(f"access list payload mismatch: {listing}")
-        if user_set != {"actor": "admin-smoke", "credential": "4321", "action": "set",
-                       "id": "smoke-user", "name": "Smoke User", "role": "user",
-                       "pin": "1234", "enabled": True}:
+        if user_set != {"actor": "admin-smoke", "credential": "4321", "action": "set", "id": "smoke-user", "name": "Smoke User", "role": "user", "pin": "1234", "enabled": True}:
             errors.append(f"user set payload mismatch: {user_set}")
-        if guest_set != {"actor": "admin-smoke", "credential": "4321", "action": "set",
-                        "id": "guest-smoke", "name": "Smoke Guest", "role": "guest",
-                        "pin": "6789", "enabled": True}:
+        if guest_set != {"actor": "admin-smoke", "credential": "4321", "action": "set", "id": "guest-smoke", "name": "Smoke Guest", "role": "guest", "pin": "6789", "enabled": True}:
             errors.append(f"guest set payload mismatch: {guest_set}")
 
     if errors:
@@ -442,9 +419,8 @@ def verify(args: argparse.Namespace) -> int:
         for error in errors:
             print(f" - {error}")
         return 1
-
     print("Web UI role/control smoke PASS")
-    print(" - login: Admin + User + Guest")
+    print(" - setup gate -> first Admin -> Bearer login")
     print(" - Admin: Panic + Wi-Fi + user management")
     print(" - User: arm/disarm + valve open/close; restricted Admin controls")
     print(" - Guest: monitoring-only controls remain disabled")
