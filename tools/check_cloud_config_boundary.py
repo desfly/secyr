@@ -10,7 +10,7 @@ required = [
     '"/api/v1/cloud/config"',
     "HTTP_POST",
     "request_auth::authenticated_actor(request, *access_control_, actor)",
-    'access_control_->authorize(actor, credential, "cloud.configure")',
+    'access_control_->authorize_session(actor, "cloud.configure")',
     "store_->save(config)",
     "rolledBack",
 ]
@@ -19,10 +19,13 @@ for snippet in required:
         errors.append(f"hg_cloud_http.cpp missing cloud-config contract: {snippet}")
 
 auth_pos = text.find("request_auth::authenticated_actor(request, *access_control_, actor)")
-rbac_pos = text.find('access_control_->authorize(actor, credential, "cloud.configure")')
+rbac_pos = text.find('access_control_->authorize_session(actor, "cloud.configure")')
 save_pos = text.find("store_->save(config)")
 if min(auth_pos, rbac_pos, save_pos) < 0 or not (auth_pos < rbac_pos < save_pos):
-    errors.append("cloud config must authenticate actor and authorize command before persistence")
+    errors.append("cloud config must authenticate Bearer actor and authorize session role before persistence")
+
+if 'access_control_->authorize(actor, credential, "cloud.configure")' in text:
+    errors.append("cloud config must not re-check acting Admin PIN after Bearer login")
 
 if errors:
     for error in errors:
