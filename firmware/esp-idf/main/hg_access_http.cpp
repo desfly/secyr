@@ -1,5 +1,6 @@
 #include "hg_access_http.hpp"
 #include "hg_access_time.hpp"
+#include "hg_access_runtime.hpp"
 #include "hg_http_session.hpp"
 
 #include "esp_random.h"
@@ -151,6 +152,7 @@ esp_err_t AccessHttp::register_handlers(httpd_handle_t server,
     access_ = access;
     store_ = store;
     bootstrap_allowed_ = bootstrap_allowed;
+    access_runtime::set_bootstrap_allowed(bootstrap_allowed);
 
     const httpd_uri_t routes[] = {
         {.uri = "/api/v1/access/state", .method = HTTP_GET, .handler = &AccessHttp::state_get, .user_ctx = this},
@@ -181,15 +183,14 @@ esp_err_t AccessHttp::login_post(httpd_req_t* request) {
 
 esp_err_t AccessHttp::handle_state(httpd_req_t* request) {
     if (access_ == nullptr) return ESP_FAIL;
-    const bool setup_required = bootstrap_allowed_ && access_->user_count() == 0U;
-    return send_json(request, setup_required
+    return send_json(request, access_runtime::setup_required(*access_)
         ? "{\"ok\":true,\"state\":\"setup_required\"}"
         : "{\"ok\":true,\"state\":\"login_required\"}");
 }
 
 esp_err_t AccessHttp::handle_login(httpd_req_t* request) {
     if (access_ == nullptr) return ESP_FAIL;
-    if (bootstrap_allowed_ && access_->user_count() == 0U) {
+    if (access_runtime::setup_required(*access_)) {
         httpd_resp_set_status(request, "409 Conflict");
         return send_json(request, "{\"ok\":false,\"reason\":\"setup_required\"}");
     }
@@ -261,8 +262,9 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
     }
 
     if (action == "bootstrap") {
-        if (!bootstrap_allowed_ || access_->user_count() != 0U) {
+        if (!access_runtime::setup_required(*access_)) {
             bootstrap_allowed_ = false;
+            access_runtime::lock_bootstrap();
             scrub(body);
             httpd_resp_set_status(request, "409 Conflict");
             return send_json(request, "{\"ok\":false,\"reason\":\"bootstrap_unavailable\"}");
@@ -281,6 +283,7 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         }
 
         bootstrap_allowed_ = false;
+        access_runtime::lock_bootstrap();
         std::array<std::uint8_t, 16> salt{};
         esp_fill_random(salt.data(), salt.size());
         const bool user_set = access_->set_user(id, name, AccessRole::Admin, pin, salt, true);
@@ -288,6 +291,7 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         scrub(body);
         if (!user_set) {
             bootstrap_allowed_ = true;
+            access_runtime::set_bootstrap_allowed(true);
             httpd_resp_set_status(request, "409 Conflict");
             return send_json(request, "{\"ok\":false,\"reason\":\"bootstrap_failed\"}");
         }
@@ -296,6 +300,7 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         if (persist != ESP_OK) {
             access_->clear_users();
             bootstrap_allowed_ = true;
+            access_runtime::set_bootstrap_allowed(true);
             httpd_resp_set_status(request, "500 Internal Server Error");
             return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
         }
