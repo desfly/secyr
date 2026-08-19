@@ -249,7 +249,7 @@ esp_err_t AccessHttp::handle_login(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
     }
 
-    std::string session_token = http_session::issue();
+    std::string session_token = http_session::issue(user->id.data(), user->role);
     if (session_token.size() != 64U) {
         scrub(session_token);
         httpd_resp_set_status(request, "503 Service Unavailable");
