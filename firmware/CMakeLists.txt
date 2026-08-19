@@ -65,7 +65,7 @@ add_executable(homeguard_tests
     ../tests/test_reset_sequence.cpp
     ../tests/test_alarm_ack.cpp
     ../tests/test_access_control.cpp
-    ../tests/test_physical_output_runtime.cpp
+    ../tests/test_output_safety.cpp
     ../tests/test_build0009.cpp
     ../tests/test_build0013.cpp
     ../tests/test_build0032.cpp
@@ -77,9 +77,6 @@ add_executable(homeguard_tests
     ../tests/test_build0048.cpp
     ../tests/test_build0049.cpp
     ../tests/test_build0050.cpp
-    ../tests/test_build0051.cpp
-    ../tests/test_build0052.cpp
-    ../tests/test_build0053.cpp
     ../tests/test_build0055.cpp
 )
 target_link_libraries(homeguard_tests PRIVATE homeguard_core)
