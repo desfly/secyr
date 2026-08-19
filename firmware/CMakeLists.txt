@@ -46,6 +46,7 @@ add_executable(homeguard_tests
     ../tests/test_reset_sequence.cpp
     ../tests/test_access_control.cpp
     ../tests/test_access_permissions.cpp
+    ../tests/test_access_runtime.cpp
     ../tests/test_output_safety.cpp
     ../tests/test_readiness.cpp
     ../tests/test_runtime_support.cpp
