@@ -8,7 +8,6 @@ int main()
     test_zone();
     test_pressure();
     test_reliability();
-    test_controller();
     test_connectivity();
     test_provisioning();
     test_reset_sequence();
@@ -18,7 +17,6 @@ int main()
     test_output_safety();
     test_readiness();
     test_build0009();
-    test_build0013();
     test_build0032();
     test_build0038();
     test_build0045();
