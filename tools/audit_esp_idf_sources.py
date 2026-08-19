@@ -37,8 +37,6 @@ access_http = (MAIN / "hg_access_http.cpp").read_text(encoding="utf-8")
 large_access_stack_copy = re.compile(r"\b(?:const\s+)?(?:auto|(?:homeguard::)?AccessControl)\s+\w+\s*=\s*\*access_\s*;")
 if large_access_stack_copy.search(access_http):
     errors.append("hg_access_http.cpp: AccessControl rollback snapshot must not be copied into the httpd task stack")
-# Login still receives the PIN and must parse/scrub it. User-set PIN is account
-# configuration, not the acting Admin credential.
 if "bool escaped = false" not in access_http or "scrub(credential);" not in access_http:
     errors.append("hg_access_http.cpp: login auth must use escaped JSON parsing and scrub the login credential")
 if 'allowed("network.configure")' not in access_http or 'allowed("system.network.configure")' in access_http:
@@ -53,9 +51,6 @@ full_access_local = re.compile(r"\bAccessControl\s+[A-Za-z_]\w*\s*(?:;|\{)")
 if full_access_local.search(access_store):
     errors.append("access_store.cpp: full AccessControl temporary must not be placed on the NVS decode task stack")
 
-# The shared HTTP helper is the authoritative parser/scrubber for handlers that
-# opt into hg_http_util.hpp. Audit the helper once, then require consumers to use
-# it for request bodies; v2 protected handlers do not contain acting PINs.
 http_util = (MAIN / "hg_http_util.hpp").read_text(encoding="utf-8")
 if "bool escaped = false" not in http_util or "std::fill(secret.begin(), secret.end(), '\\0')" not in http_util:
     errors.append("hg_http_util.hpp: shared JSON parser/scrubber security contract is incomplete")
@@ -115,19 +110,24 @@ if 'access_control_->authorize_session(actor, "cloud.configure")' not in cloud_h
     errors.append("hg_cloud_http.cpp: Cloud changes must use Bearer-session role authorization")
 
 output_http = (MAIN / "hg_output_http.cpp").read_text(encoding="utf-8")
-if "read_request_body(request, 384U, body)" not in output_http or "while (offset < body.size())" not in output_http:
-    errors.append("hg_output_http.cpp: output command must read the complete HTTP body")
-if "std::isspace" not in output_http or "value_offset" not in output_http:
-    errors.append("hg_output_http.cpp: output JSON scalar parser must accept legal whitespace")
+if '#include "hg_http_util.hpp"' not in output_http or \
+        "http_util::read_body(request, 384U, body)" not in output_http or \
+        "http_util::parse_json_string(body, \"actor\", actor)" not in output_http or \
+        "http_util::scrub(body);" not in output_http:
+    errors.append("hg_output_http.cpp: output command must use the shared HTTP parser/scrubber")
+if "value_offset" not in output_http or "http_util::value_offset(body, key)" not in output_http:
+    errors.append("hg_output_http.cpp: output JSON scalar parser must delegate whitespace handling to shared helper")
 if "access_control_->authorize_session(actor, command)" not in output_http:
     errors.append("hg_output_http.cpp: output command must use Bearer-session role authorization")
 if "std::string credential" in output_http:
     errors.append("hg_output_http.cpp: acting credential must not exist in v2 output runtime")
 
 telemetry_http = (MAIN / "hg_telemetry_session_http.cpp").read_text(encoding="utf-8")
-if "bool escaped = false" not in telemetry_http:
-    errors.append("hg_telemetry_session_http.cpp: telemetry actor parser must remain escaped-JSON safe")
-if "scrub(body);" not in telemetry_http or "scrub(token);" not in telemetry_http:
+if '#include "hg_http_util.hpp"' not in telemetry_http or \
+        "http_util::read_body(request, 256U, body)" not in telemetry_http or \
+        "http_util::parse_json_string(body, \"actor\", actor)" not in telemetry_http:
+    errors.append("hg_telemetry_session_http.cpp: telemetry request parsing must use the shared escaped-JSON helper")
+if "http_util::scrub(body);" not in telemetry_http or "http_util::scrub(token);" not in telemetry_http:
     errors.append("hg_telemetry_session_http.cpp: telemetry request body and issued token must be scrubbed after use")
 if '#include "hg_request_auth.hpp"' not in telemetry_http or \
         "request_auth::authenticated_actor(request, *access_, actor)" not in telemetry_http:
