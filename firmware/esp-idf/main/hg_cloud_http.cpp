@@ -2,81 +2,29 @@
 
 #include "hg_cloud_link.hpp"
 #include "hg_cloud_nvs.hpp"
+#include "hg_http_util.hpp"
 #include "hg_request_auth.hpp"
 #include "homeguard/access_control.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cstddef>
 #include <string>
 
 namespace homeguard::idf {
 namespace {
 
-bool parse_json_string(const std::string& body, const char* key, std::string& value)
-{
-    const std::string marker = std::string{"\""} + key + "\"";
-    auto pos = body.find(marker);
-    if (pos == std::string::npos) return false;
-    pos = body.find(':', pos + marker.size());
-    if (pos == std::string::npos) return false;
-    ++pos;
-    while (pos < body.size() && std::isspace(static_cast<unsigned char>(body[pos]))) ++pos;
-    if (pos >= body.size() || body[pos] != '"') return false;
-    ++pos;
-    value.clear();
-    bool escaped = false;
-    for (; pos < body.size(); ++pos) {
-        const char ch = body[pos];
-        if (escaped) {
-            if (ch == '"' || ch == '\\' || ch == '/') value.push_back(ch);
-            else if (ch == 'n') value.push_back('\n');
-            else if (ch == 'r') value.push_back('\r');
-            else if (ch == 't') value.push_back('\t');
-            else return false;
-            escaped = false;
-        } else if (ch == '\\') {
-            escaped = true;
-        } else if (ch == '"') {
-            return true;
-        } else {
-            value.push_back(ch);
-        }
-    }
-    return false;
-}
-
 bool parse_json_bool(const std::string& body, const char* key, bool& value)
 {
-    const std::string marker = std::string{"\""} + key + "\"";
-    auto pos = body.find(marker);
+    const auto pos = http_util::value_offset(body, key);
     if (pos == std::string::npos) return false;
-    pos = body.find(':', pos + marker.size());
-    if (pos == std::string::npos) return false;
-    ++pos;
-    while (pos < body.size() && std::isspace(static_cast<unsigned char>(body[pos]))) ++pos;
     if (body.compare(pos, 4, "true") == 0) { value = true; return true; }
     if (body.compare(pos, 5, "false") == 0) { value = false; return true; }
     return false;
 }
 
-bool read_request_body(httpd_req_t* request, std::size_t limit, std::string& body)
-{
-    if (request == nullptr || request->content_len == 0 || request->content_len > limit) return false;
-    body.assign(request->content_len, '\0');
-    std::size_t offset = 0U;
-    while (offset < body.size()) {
-        const auto received = httpd_req_recv(request, body.data() + offset, body.size() - offset);
-        if (received <= 0) return false;
-        offset += static_cast<std::size_t>(received);
-    }
-    return true;
-}
-
 void scrub_cloud_password(CloudConfig& config)
 {
-    std::fill(config.password.begin(), config.password.end(), '\0');
-    config.password.clear();
+    http_util::scrub(config.password);
 }
 
 esp_err_t send_json(httpd_req_t* request, const std::string& body)
@@ -140,37 +88,34 @@ esp_err_t CloudHttp::config_post(httpd_req_t* request)
 esp_err_t CloudHttp::handle_config(httpd_req_t* request)
 {
     std::string body;
-    if (!read_request_body(request, 1024U, body)) {
+    if (!http_util::read_body(request, 1024U, body)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_body\"}");
     }
 
     std::string actor;
-    if (!parse_json_string(body, "actor", actor) || actor.empty()) {
-        std::fill(body.begin(), body.end(), '\0');
+    if (!http_util::parse_json_string(body, "actor", actor) || actor.empty()) {
+        http_util::scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"session_actor_required\"}");
     }
     if (!request_auth::authenticated_actor(request, *access_control_, actor)) {
-        std::fill(body.begin(), body.end(), '\0');
+        http_util::scrub(body);
         return request_auth::send_login_required(request);
     }
     const auto decision = access_control_->authorize_session(actor, "cloud.configure");
     if (decision != homeguard::AuditDecision::Allowed) {
-        std::fill(body.begin(), body.end(), '\0');
+        http_util::scrub(body);
         httpd_resp_set_status(request, "403 Forbidden");
         return send_json(request, "{\"ok\":false,\"reason\":\"forbidden\"}");
     }
 
-    /* LEGACY v1 disabled: cloud config used to parse credential and re-check
-       Admin PIN on every Apply/Disable request. */
-
     CloudConfig config{};
     if (!parse_json_bool(body, "enabled", config.enabled)) config.enabled = true;
-    (void)parse_json_string(body, "brokerUri", config.broker_uri);
-    (void)parse_json_string(body, "username", config.username);
-    (void)parse_json_string(body, "password", config.password);
-    std::fill(body.begin(), body.end(), '\0');
+    (void)http_util::parse_json_string(body, "brokerUri", config.broker_uri);
+    (void)http_util::parse_json_string(body, "username", config.username);
+    (void)http_util::parse_json_string(body, "password", config.password);
+    http_util::scrub(body);
     if (config.enabled && (config.broker_uri.empty() || config.broker_uri.size() > 256 ||
                            config.username.size() > 128 || config.password.size() > 128)) {
         scrub_cloud_password(config);
