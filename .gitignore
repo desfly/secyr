@@ -12,6 +12,7 @@ mock-syntax-report.json
 firmware-budget.json
 release-readiness-build*.json
 ci-diagnostics/
+BUILD-*.json
 
 # Android / Gradle
 android/.gradle/
