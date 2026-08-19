@@ -18,7 +18,7 @@ def require(path: Path, snippets: list[str]) -> None:
 # made this gate fail when formatting changed despite identical runtime behavior.
 require(MAIN / "hg_access_http.cpp", [
     '"/api/v1/access/state"', "access_runtime::setup_required", "setup_required", "login_required",
-    "http_session::issue()", "sessionToken",
+    "http_session::issue(user->id.data(), user->role)", "sessionToken",
     '"/api/v1/access/logout"', "http_session::revoke(authorization)",
 ])
 
@@ -59,8 +59,16 @@ require(MAIN / "hg_network_http.cpp", [
     "access_runtime::setup_required", "request_auth::",
 ])
 
-require(MAIN / "hg_request_auth.hpp", ["hg_http_session.hpp", "http_session::authorized", "WWW-Authenticate"])
-require(MAIN / "hg_http_session.hpp", ["kLifetimeUs", "BearerTokenVerifier", "revoke(", "revoke_all"])
+require(MAIN / "hg_request_auth.hpp", [
+    "hg_http_session.hpp", "http_session::authorized(authorization, access)", "WWW-Authenticate",
+])
+require(MAIN / "hg_http_session.hpp", [
+    "kLifetimeUs", "BearerTokenVerifier", "g_actors", "g_roles",
+    "issue(std::string_view actor, homeguard::AccessRole role)",
+    "authorized(std::string_view authorization, homeguard::AccessControl& access)",
+    "access.find_user(g_actors[i].data())", "user->role != g_roles[i]",
+    "revoke(", "revoke_all",
+])
 
 # Release-critical mutating APIs must still pass through command-level RBAC.
 require(MAIN / "hg_system_http.cpp", [
@@ -92,6 +100,8 @@ for snippet in (
         errors.append(f"hg_reset_sequence.cpp missing reset contract: {snippet}")
 if reset.find("set_pending_reset(false)") < reset.find("FactoryResetManager{}.erase_mutable_state()"):
     errors.append("hg_reset_sequence.cpp must keep factory-reset pending until erase succeeds")
+if reset.find("RgbDiagnostic::set_red(board::kOnboardRgb)") > reset.find("RgbDiagnostic::set_white(board::kOnboardRgb)"):
+    errors.append("hg_reset_sequence.cpp RGB contract must be RED hold confirmation before WHITE reset-success confirmation")
 
 require(WEB / "access-session.js", [
     "hg-auth-locked", "/api/v1/access/state", "/api/v1/access/login",
