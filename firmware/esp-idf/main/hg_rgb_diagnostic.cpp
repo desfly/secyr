@@ -50,7 +50,7 @@ esp_err_t transmit_rgb(int gpio, const std::array<std::uint8_t, 3>& grb) {
     if (error == ESP_OK) {
         rmt_transmit_config_t tx_config{};
         tx_config.loop_count = 0;
-        tx_config.eot_level = 0;
+        tx_config.flags.eot_level = 0;
         error = rmt_transmit(channel, encoder, grb.data(), grb.size(), &tx_config);
         if (error == ESP_OK) error = rmt_tx_wait_all_done(channel, pdMS_TO_TICKS(100));
         if (error == ESP_OK) esp_rom_delay_us(kWs2812ResetUs);
