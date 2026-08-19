@@ -1,5 +1,6 @@
 #include "hg_service_http.hpp"
 #include "hg_http_util.hpp"
+#include "hg_request_auth.hpp"
 #include "homeguard/service_readiness.hpp"
 
 #include <string>
@@ -7,7 +8,7 @@
 namespace homeguard::idf {
 namespace {
 ServiceHttp* self_from(httpd_req_t* request) {
-    return static_cast<ServiceHttp*>(request->user_ctx);
+    return request == nullptr ? nullptr : static_cast<ServiceHttp*>(request->user_ctx);
 }
 }
 
@@ -40,12 +41,16 @@ esp_err_t ServiceHttp::register_handlers(
 
 esp_err_t ServiceHttp::send_json(httpd_req_t* request, const std::string& body) const {
     httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, body.c_str(), static_cast<ssize_t>(body.size()));
 }
 
 esp_err_t ServiceHttp::readiness_get(httpd_req_t* request) {
     auto* self = self_from(request);
-    if (self == nullptr) return ESP_FAIL;
+    if (self == nullptr || self->access_control_ == nullptr) return ESP_FAIL;
+    if (!request_auth::authenticated(request, *self->access_control_)) {
+        return request_auth::send_login_required(request);
+    }
     const auto snapshot = hg::make_service_readiness_snapshot(self->hardware_, self->commissioning_);
     return self->send_json(request, hg::service_readiness_json(snapshot));
 }
