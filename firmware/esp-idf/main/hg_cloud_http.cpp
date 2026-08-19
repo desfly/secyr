@@ -5,6 +5,7 @@
 #include "hg_http_util.hpp"
 #include "hg_request_auth.hpp"
 #include "homeguard/access_control.hpp"
+#include "nvs.h"
 
 #include <algorithm>
 #include <cstddef>
