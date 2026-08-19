@@ -47,7 +47,7 @@ inline homeguard::AuditDecision authenticate(httpd_req_t* request, homeguard::Ac
     std::string authorization;
     if (!read_header(request, authorization)) return homeguard::AuditDecision::DeniedCredential;
 
-    if (http_session::authorized(authorization)) return homeguard::AuditDecision::Allowed;
+    if (http_session::authorized(authorization, access)) return homeguard::AuditDecision::Allowed;
 
     std::string actor;
     std::string credential;
