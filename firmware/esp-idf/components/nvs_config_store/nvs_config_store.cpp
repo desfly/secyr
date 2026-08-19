@@ -6,7 +6,6 @@
 #include <utility>
 
 namespace {
-constexpr char config_namespace[] = "hg-config";
 constexpr char provision_namespace[] = "hg-provision";
 constexpr char factory_namespace[] = "hg-factory";
 
@@ -23,23 +22,6 @@ bool get_string(nvs_handle_t handle, const char* key, std::string& value) {
 bool set_string(nvs_handle_t handle, const char* key, const std::string& value) {
     return nvs_set_str(handle, key, value.c_str()) == ESP_OK;
 }
-}
-
-bool NvsConfigStore::load(hg::ControllerConfig& config) {
-    nvs_handle_t handle{};
-    if (nvs_open(config_namespace, NVS_READONLY, &handle) != ESP_OK) return false;
-    size_t length = sizeof(config);
-    const bool ok = nvs_get_blob(handle, "controller", &config, &length) == ESP_OK && length == sizeof(config);
-    nvs_close(handle);
-    return ok;
-}
-
-bool NvsConfigStore::save(const hg::ControllerConfig& config) {
-    nvs_handle_t handle{};
-    if (nvs_open(config_namespace, NVS_READWRITE, &handle) != ESP_OK) return false;
-    const bool ok = nvs_set_blob(handle, "controller", &config, sizeof(config)) == ESP_OK && nvs_commit(handle) == ESP_OK;
-    nvs_close(handle);
-    return ok;
 }
 
 bool NvsConfigStore::is_provisioned() const {
@@ -101,7 +83,6 @@ bool NvsConfigStore::erase_provisioning(bool physical_presence) {
     nvs_close(handle);
     return ok;
 }
-
 
 bool FactoryProvisioningIdentity::valid() const {
     return !certificate_pem.empty() && !private_key_pem.empty() &&
