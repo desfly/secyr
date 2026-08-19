@@ -6,11 +6,12 @@ namespace homeguard::idf {
 
 class RgbDiagnostic {
 public:
-    // Direct feedback controls for the onboard addressable RGB LED.
+    // Persistent feedback primitives for the confirmed onboard WS2812.
+    static esp_err_t set_white(int gpio);
     static esp_err_t set_red(int gpio);
     static esp_err_t off(int gpio);
 
-    // Sends white to the addressable RGB LED, holds it for duration_ms, then turns it off.
+    // Sends white, holds it for duration_ms, then turns it off.
     static esp_err_t test_white(int gpio, unsigned duration_ms = 3000U);
 
 private:
