@@ -2,8 +2,9 @@
 """Headless-browser control smoke server for the HomeGuard-S3 Web UI.
 
 `serve` exposes the real checked-in web assets plus deterministic mock API
-responses and injects a test-only script that exercises the current setup ->
-Bearer login -> role-gated control lifecycle. `verify` checks captured requests.
+responses and injects a test-only script that exercises setup -> PIN login ->
+Bearer-session role-gated control. `verify` proves that login alone carries the
+acting PIN; protected control payloads carry actor identity but no credential.
 """
 from __future__ import annotations
 
@@ -43,12 +44,6 @@ HARNESS = r"""
     item.dispatchEvent(new Event('input', {bubbles:true}));
     item.dispatchEvent(new Event('change', {bubbles:true}));
   };
-  const setCriticalPin = pin => {
-    for (const selector of ['#operatorPin','#networkCredential','#accessCredential','#cloudCredential','#factoryResetCredential']) {
-      const item = document.querySelector(selector);
-      if (item) item.value = pin;
-    }
-  };
   const login = async (actor, pin) => {
     const actorField = await waitFor('#hgLoginActor');
     const pinField = await waitFor('#hgLoginPin');
@@ -56,7 +51,6 @@ HARNESS = r"""
     pinField.value = pin;
     (await waitEnabled('#hgAuthForm button[type="submit"]')).click();
     await waitFor('#hgAuthGate[hidden]');
-    setCriticalPin(pin);
     await sleep(300);
   };
   const logout = async () => {
@@ -68,7 +62,7 @@ HARNESS = r"""
   await waitFor('html[data-homeguard-ui="ready"]');
   await waitFor('[data-output-id="2"][data-output-active="true"]');
 
-  // Factory-fresh setup gate: bootstrap the first Admin through the real UI.
+  // Factory-fresh setup: PIN is legitimately sent once to create first Admin.
   await waitFor('#hgSetupId');
   setValue('#hgSetupId', 'admin-smoke');
   setValue('#hgSetupName', 'Smoke Admin');
@@ -76,7 +70,7 @@ HARNESS = r"""
   (await waitEnabled('#hgAuthForm button[type="submit"]')).click();
   await waitFor('#hgLoginActor');
 
-  // Admin: full access, including Panic, network and account management.
+  // Admin: login carries PIN. Everything after login must use Bearer session.
   await login('admin-smoke', '4321');
   (await waitEnabled('[data-command="security.panic"]')).click();
   await sleep(450);
@@ -152,13 +146,16 @@ class SmokeState:
         self.network_ssid = "InitialNet"
         self.users: list[dict[str, object]] = []
         self.credentials: dict[str, str] = {}
+        self.sessions: dict[str, str] = {}
         self.sequence = 1
         self.log_path.write_text("", encoding="utf-8")
 
-    def log(self, method: str, path: str, body: object | None = None) -> None:
+    def log(self, method: str, path: str, body: object | None = None, authorization: str = "") -> None:
         record = {"method": method, "path": path}
         if body is not None:
             record["body"] = body
+        if authorization:
+            record["authorization"] = authorization
         with self.lock:
             with self.log_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
@@ -168,9 +165,15 @@ class SmokeState:
             return None
         return next((user for user in self.users if user.get("id") == actor and user.get("enabled") is True), None)
 
+    def authorize_bearer(self, authorization: str, actor: object) -> bool:
+        if not authorization.startswith("Bearer ") or not isinstance(actor, str):
+            return False
+        token = authorization[7:]
+        return self.sessions.get(token) == actor
+
 
 class SmokeHandler(BaseHTTPRequestHandler):
-    server_version = "HomeGuardWebSmoke/1.2"
+    server_version = "HomeGuardWebSmoke/2.0"
 
     @property
     def state(self) -> SmokeState:
@@ -204,7 +207,8 @@ class SmokeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
-        self.state.log("GET", path)
+        authorization = self.headers.get("Authorization", "")
+        self.state.log("GET", path, authorization=authorization)
         if path in ("/", "/index.html"):
             html = (self.web_root / "index.html").read_text(encoding="utf-8")
             self._send(200, "text/html; charset=utf-8", html.replace("</body>", HARNESS + "\n</body>").encode("utf-8"))
@@ -272,13 +276,14 @@ class SmokeHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        authorization = self.headers.get("Authorization", "")
         try:
             body = self._read_json()
         except Exception:
-            self.state.log("POST", path, {"_invalid": True})
+            self.state.log("POST", path, {"_invalid": True}, authorization)
             self._json({"ok": False, "reason": "invalid_json"}, 400)
             return
-        self.state.log("POST", path, body)
+        self.state.log("POST", path, body, authorization)
 
         if path == "/api/v1/access/login":
             actor, credential = body.get("actor"), body.get("credential")
@@ -288,12 +293,40 @@ class SmokeHandler(BaseHTTPRequestHandler):
                 return
             role = str(user.get("role", "guest"))
             token = (actor.encode("utf-8").hex() + "0" * 64)[:64]
+            self.state.sessions[token] = actor
             self._json({"ok": True, "actor": actor, "name": user.get("name", actor), "role": role,
                         "sessionToken": token, "capabilities": self._capabilities(role)})
             return
-        if path == "/api/v1/access/logout":
-            self._json({"ok": True, "state": "login_required"})
+
+        if path == "/api/v1/access/users" and body.get("action") == "bootstrap":
+            user_id = str(body.get("id", ""))
+            self.state.users = [{"id": user_id, "name": body.get("name", ""), "role": "admin", "enabled": True}]
+            self.state.credentials[user_id] = str(body.get("pin", ""))
+            self._json({"ok": True, "role": "admin", "bootstrap": True})
             return
+
+        protected = {
+            "/api/v1/access/logout", "/api/v1/system/security-command",
+            "/api/v1/system/output-command", "/api/v1/network/connect",
+            "/api/v1/access/users",
+        }
+        if path in protected:
+            actor = body.get("actor")
+            if path == "/api/v1/access/logout":
+                token = authorization[7:] if authorization.startswith("Bearer ") else ""
+                if token not in self.state.sessions:
+                    self._json({"ok": False, "reason": "invalid_session"}, 401)
+                    return
+                self.state.sessions.pop(token, None)
+                self._json({"ok": True, "state": "login_required"})
+                return
+            if not self.state.authorize_bearer(authorization, actor):
+                self._json({"ok": False, "reason": "invalid_session"}, 401)
+                return
+            if "credential" in body:
+                self._json({"ok": False, "reason": "legacy_credential_transmitted"}, 400)
+                return
+
         if path == "/api/v1/system/security-command":
             self.state.sequence += 1
             self._json({"ok": True})
@@ -315,12 +348,6 @@ class SmokeHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/v1/access/users":
             action = body.get("action")
-            if action == "bootstrap":
-                user_id = str(body.get("id", ""))
-                self.state.users = [{"id": user_id, "name": body.get("name", ""), "role": "admin", "enabled": True}]
-                self.state.credentials[user_id] = str(body.get("pin", ""))
-                self._json({"ok": True, "role": "admin", "bootstrap": True})
-                return
             if action == "list":
                 self._json({"ok": True, "capacity": 8, "count": len(self.state.users), "users": self.state.users})
                 return
@@ -366,6 +393,9 @@ def verify(args: argparse.Namespace) -> int:
     def bodies(path: str) -> list[dict[str, object]]:
         return [record.get("body", {}) for record in posts if record.get("path") == path]
 
+    def protected_records(path: str) -> list[dict[str, object]]:
+        return [record for record in posts if record.get("path") == path]
+
     logins = bodies("/api/v1/access/login")
     expected_logins = [
         {"actor": "admin-smoke", "credential": "4321"},
@@ -377,24 +407,24 @@ def verify(args: argparse.Namespace) -> int:
 
     security = bodies("/api/v1/system/security-command")
     expected_security = [
-        {"command": "security.panic", "actor": "admin-smoke", "credential": "4321"},
-        {"command": "security.arm_away", "actor": "smoke-user", "credential": "1234"},
-        {"command": "security.disarm", "actor": "smoke-user", "credential": "1234"},
-        {"command": "security.arm_home", "actor": "smoke-user", "credential": "1234"},
+        {"command": "security.panic", "actor": "admin-smoke"},
+        {"command": "security.arm_away", "actor": "smoke-user"},
+        {"command": "security.disarm", "actor": "smoke-user"},
+        {"command": "security.arm_home", "actor": "smoke-user"},
     ]
     if security != expected_security:
         errors.append(f"security role/payload mismatch: {security}")
 
     outputs = bodies("/api/v1/system/output-command")
     expected_outputs = [
-        {"outputId": 2, "active": True, "actor": "smoke-user", "credential": "1234"},
-        {"outputId": 2, "active": False, "actor": "smoke-user", "credential": "1234"},
+        {"outputId": 2, "active": True, "actor": "smoke-user"},
+        {"outputId": 2, "active": False, "actor": "smoke-user"},
     ]
     if outputs != expected_outputs:
         errors.append(f"valve button payload mismatch: {outputs}")
 
     network = bodies("/api/v1/network/connect")
-    expected_network = [{"ssid": "SmokeNet", "password": "password123", "actor": "admin-smoke", "credential": "4321"}]
+    expected_network = [{"ssid": "SmokeNet", "password": "password123", "actor": "admin-smoke"}]
     if network != expected_network:
         errors.append(f"Wi-Fi connect payload mismatch: {network}")
     if not any(record.get("method") == "GET" and record.get("path") == "/api/v1/network/scan" for record in records):
@@ -407,12 +437,25 @@ def verify(args: argparse.Namespace) -> int:
         bootstrap, listing, user_set, guest_set = access
         if bootstrap != {"action": "bootstrap", "id": "admin-smoke", "name": "Smoke Admin", "pin": "4321"}:
             errors.append(f"first Admin bootstrap payload mismatch: {bootstrap}")
-        if listing != {"actor": "admin-smoke", "credential": "4321", "action": "list"}:
+        if listing != {"actor": "admin-smoke", "action": "list"}:
             errors.append(f"access list payload mismatch: {listing}")
-        if user_set != {"actor": "admin-smoke", "credential": "4321", "action": "set", "id": "smoke-user", "name": "Smoke User", "role": "user", "pin": "1234", "enabled": True}:
+        if user_set != {"actor": "admin-smoke", "action": "set", "id": "smoke-user", "name": "Smoke User", "role": "user", "pin": "1234", "enabled": True}:
             errors.append(f"user set payload mismatch: {user_set}")
-        if guest_set != {"actor": "admin-smoke", "credential": "4321", "action": "set", "id": "guest-smoke", "name": "Smoke Guest", "role": "guest", "pin": "6789", "enabled": True}:
+        if guest_set != {"actor": "admin-smoke", "action": "set", "id": "guest-smoke", "name": "Smoke Guest", "role": "guest", "pin": "6789", "enabled": True}:
             errors.append(f"guest set payload mismatch: {guest_set}")
+
+    # Runtime invariant: every non-bootstrap protected mutation has Bearer and
+    # no acting credential. `pin` on action:set is the new account's PIN and is
+    # intentionally allowed.
+    for path in ("/api/v1/system/security-command", "/api/v1/system/output-command", "/api/v1/network/connect", "/api/v1/access/users"):
+        for record in protected_records(path):
+            body = record.get("body", {})
+            if path == "/api/v1/access/users" and isinstance(body, dict) and body.get("action") == "bootstrap":
+                continue
+            if not str(record.get("authorization", "")).startswith("Bearer "):
+                errors.append(f"missing Bearer header for protected request: {path}")
+            if isinstance(body, dict) and "credential" in body:
+                errors.append(f"legacy acting credential leaked in protected request: {path} {body}")
 
     if errors:
         print("Web UI role/control smoke FAIL")
@@ -420,7 +463,8 @@ def verify(args: argparse.Namespace) -> int:
             print(f" - {error}")
         return 1
     print("Web UI role/control smoke PASS")
-    print(" - setup gate -> first Admin -> Bearer login")
+    print(" - setup gate -> first Admin -> PIN login -> Bearer session")
+    print(" - protected mutations carry Bearer and no acting PIN")
     print(" - Admin: Panic + Wi-Fi + user management")
     print(" - User: arm/disarm + valve open/close; restricted Admin controls")
     print(" - Guest: monitoring-only controls remain disabled")
