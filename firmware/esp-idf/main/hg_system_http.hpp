@@ -16,6 +16,7 @@ public:
         hg::SystemModel* model,
         hg::SystemEventBus* bus,
         homeguard::AccessControl* access_control);
+    void detach_transport();
 
 private:
     static esp_err_t status_get(httpd_req_t* request);
