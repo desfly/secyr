@@ -82,6 +82,11 @@ bool read_request_body(httpd_req_t* request, std::size_t limit, std::string& bod
     }
     return true;
 }
+
+void scrub(std::string& secret) {
+    std::fill(secret.begin(), secret.end(), '\0');
+    secret.clear();
+}
 }
 
 esp_err_t OutputHttp::register_handlers(
@@ -115,6 +120,7 @@ esp_err_t OutputHttp::command_post(httpd_req_t* request) {
 esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
     std::string body;
     if (!read_request_body(request, 384U, body)) {
+        scrub(body);
         httpd_resp_set_status(request, "400 Bad Request");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_body\"}", -1);
     }
@@ -125,18 +131,22 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
     std::string actor;
     std::string credential;
     if (!parse_uint(body, "outputId", output_id) || !parse_bool(body, "active", active)) {
+        scrub(body);
         httpd_resp_set_status(request, "400 Bad Request");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_command\"}", -1);
     }
     (void)parse_bool(body, "alarmActive", alarm_active);
 
     if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
+        scrub(credential);
+        scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
         httpd_resp_set_type(request, "application/json");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"credential_required\"}", -1);
     }
+    scrub(body);
     if (access_control_ == nullptr) {
-        std::fill(credential.begin(), credential.end(), '\0');
+        scrub(credential);
         httpd_resp_set_status(request, "503 Service Unavailable");
         httpd_resp_set_type(request, "application/json");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"access_unavailable\"}", -1);
@@ -147,8 +157,7 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         ? (active ? "valve.open" : "valve.close")
         : "output.control";
     const auto decision = access_control_->authorize(actor, credential, command);
-    std::fill(credential.begin(), credential.end(), '\0');
-    credential.clear();
+    scrub(credential);
     if (decision != homeguard::AuditDecision::Allowed) {
         httpd_resp_set_status(request, "403 Forbidden");
         httpd_resp_set_type(request, "application/json");
