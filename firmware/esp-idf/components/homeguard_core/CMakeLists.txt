@@ -15,11 +15,6 @@ set(HG_CORE_SRCS
     "../../../src/telemetry.cpp"
     "../../../src/power_monitor.cpp"
     "../../../src/boot_self_test.cpp"
-    "../../../src/alarm_acknowledgement.cpp"
-    "../../../src/alarm_ack_command.cpp"
-    "../../../src/alarm_ack_api.cpp"
-    "../../../src/alarm_ack_event.cpp"
-    "../../../src/alarm_ack_telemetry.cpp"
 )
 
 idf_component_register(SRCS ${HG_CORE_SRCS} INCLUDE_DIRS "../../../include")
