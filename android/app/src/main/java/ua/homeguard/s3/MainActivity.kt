@@ -62,6 +62,8 @@ class MainActivity : ComponentActivity() {
     private val commandStatus = MutableStateFlow("Готово")
     private val backupStatus = MutableStateFlow("Backup/restore готовий")
     private val operatorId = MutableStateFlow("admin")
+    // LEGACY v1 UI field kept for rollback. In v2 it is populated only while
+    // submitting login and is cleared immediately after success/failure.
     private val operatorPin = MutableStateFlow("")
     private val accessSession = MutableStateFlow<AccessSession?>(null)
     private val accessLifecycle = MutableStateFlow(AccessLifecycleState.UNAVAILABLE)
@@ -313,7 +315,11 @@ class MainActivity : ComponentActivity() {
                             lifecycleScope.launch { discovery.rescan() }
                         },
                         onOperatorIdChange = { value -> operatorId.value = value.take(23) },
-                        onOperatorPinChange = { value -> operatorPin.value = value.filter(Char::isDigit).take(12) },
+                        // LEGACY v1 dashboard PIN editor is inert after v2 login.
+                        onOperatorPinChange = { value ->
+                            if (accessSession.value == null) operatorPin.value = value.filter(Char::isDigit).take(12)
+                            else operatorPin.value = ""
+                        },
                         onLogin = ::loginOperator,
                         onLogout = ::logoutOperator,
                         onCriticalNotificationsChange = { enabled -> lifecycleScope.launch { settings.update(settings.settings.value.copy(criticalNotificationsEnabled = enabled)) } },
@@ -481,12 +487,16 @@ class MainActivity : ComponentActivity() {
             accessGateMessage.value = commandStatus.value
             runCatching { commands.login(actor, credential) }
                 .onSuccess { authenticated ->
+                    // v2 security boundary: erase UI copy of PIN immediately.
+                    operatorPin.value = ""
+                    operatorId.value = authenticated.actor
                     accessSession.value = authenticated
                     accessLifecycle.value = AccessLifecycleState.LOGIN_REQUIRED
                     commandStatus.value = "Вхід: ${authenticated.name} · ${authenticated.role.name.lowercase()}"
                     accessGateMessage.value = ""
                 }
                 .onFailure { error ->
+                    operatorPin.value = ""
                     commands.logout()
                     accessSession.value = null
                     commandStatus.value = "Вхід відхилено: ${error.message ?: "network"}"
@@ -507,15 +517,8 @@ class MainActivity : ComponentActivity() {
 
     private fun factoryResetController() {
         val authenticated = accessSession.value
-        val actor = operatorId.value.trim()
-        val credential = operatorPin.value
-        if (authenticated == null || authenticated.actor != actor || authenticated.role.name != "ADMIN") {
+        if (authenticated == null || authenticated.role.name != "ADMIN") {
             commandStatus.value = "Factory Reset доступний тільки після входу Admin"
-            return
-        }
-        if (credential.length !in 4..12 || !credential.all(Char::isDigit)) {
-            logoutOperator()
-            commandStatus.value = "PIN сеансу відсутній — увійдіть знову"
             return
         }
         val target = resolver.endpoint.value
@@ -527,7 +530,11 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             commandStatus.value = "Factory Reset…"
             val outcome = runCatching {
-                FactoryResetClient(target.apiBaseUrl, target.certificateSha256).reset(actor, credential)
+                FactoryResetClient(
+                    target.apiBaseUrl,
+                    authenticated.sessionToken,
+                    target.certificateSha256,
+                ).reset(authenticated.actor)
             }.getOrElse { error ->
                 commandStatus.value = "Factory Reset: ${error.message ?: "помилка"}"
                 return@launch
@@ -556,10 +563,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun executeCommand(type: CommandType) {
-        val actor = operatorId.value.trim()
-        val credential = operatorPin.value
         val authenticated = accessSession.value
-        if (authenticated == null || authenticated.actor != actor) {
+        if (authenticated == null) {
             commandStatus.value = "Спочатку увійдіть"
             return
         }
@@ -567,22 +572,20 @@ class MainActivity : ComponentActivity() {
             commandStatus.value = "Недоступно для ролі ${authenticated.role.name.lowercase()}"
             return
         }
-        if (credential.length !in 4..12 || !credential.all(Char::isDigit)) {
-            logoutOperator()
-            commandStatus.value = "PIN сеансу відсутній — увійдіть знову"
-            return
-        }
         lifecycleScope.launch {
             commandStatus.value = "Виконується: ${type.name}…"
-            val result = runCatching { commands.execute(type, actor, credential) }
+            val result = runCatching { commands.execute(type, authenticated.actor) }
             commandStatus.value = result.fold(
                 { reply ->
                     if (reply.accepted || reply.duplicate) "OK: ${reply.code}" else {
-                        if (reply.code.contains("unauthorized", true) || reply.code.contains("credential", true) || reply.code.contains("rate", true)) logoutOperator()
+                        if (reply.code.contains("unauthorized", true) || reply.code.contains("session", true) || reply.code.contains("authorization", true)) logoutOperator()
                         "Відхилено: ${reply.code}"
                     }
                 },
-                { error -> "Помилка: ${error.message ?: "network"}" },
+                { error ->
+                    if (error.message?.contains("401") == true) logoutOperator()
+                    "Помилка: ${error.message ?: "network"}"
+                },
             )
         }
     }
