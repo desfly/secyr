@@ -9,7 +9,6 @@ set(HG_CORE_SRCS
     "../../../src/startup_flow.cpp"
     "../../../src/device_identity.cpp"
     "../../../src/discovery.cpp"
-    "../../../src/cloud_link.cpp"
     "../../../src/event_log.cpp"
     "../../../src/access_control.cpp"
     "../../../src/zone.cpp"
