@@ -6,6 +6,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 ESP = ROOT / "firmware" / "esp-idf"
 MAIN = ESP / "main"
+WORKFLOW = ROOT / ".github" / "workflows" / "homeguard-build.yml"
 
 errors = []
 warnings = []
@@ -17,6 +18,7 @@ required = [
     MAIN / "CMakeLists.txt",
     MAIN / "app_main.cpp",
     MAIN / "hg_version.hpp",
+    WORKFLOW,
 ]
 
 for path in required:
@@ -57,6 +59,24 @@ required_sdk = [
 for item in required_sdk:
     if item not in sdk:
         errors.append(f"sdkconfig missing: {item}")
+
+version_text = (MAIN / "hg_version.hpp").read_text(encoding="utf-8")
+version_fields = dict(re.findall(r'^#define\s+(HG_[A-Z0-9_]+)\s+"([^"]*)"', version_text, flags=re.MULTILINE))
+for field in ("HG_PROJECT_NAME", "HG_BUILD_NUMBER", "HG_FIRMWARE_VERSION", "HG_ESP_IDF_REQUIRED"):
+    if not version_fields.get(field):
+        errors.append(f"hg_version.hpp missing or empty: {field}")
+
+build_number = version_fields.get("HG_BUILD_NUMBER", "")
+if build_number and not re.fullmatch(r"\d{4}", build_number):
+    errors.append("HG_BUILD_NUMBER must be exactly four digits")
+
+workflow_text = WORKFLOW.read_text(encoding="utf-8") if WORKFLOW.exists() else ""
+idf_required = version_fields.get("HG_ESP_IDF_REQUIRED", "")
+if idf_required:
+    if f"ESP-IDF {idf_required} firmware" not in workflow_text:
+        errors.append("hg_version.hpp ESP-IDF version does not match workflow job name")
+    if f"espressif/idf:v{idf_required}" not in workflow_text:
+        errors.append("hg_version.hpp ESP-IDF version does not match workflow container")
 
 cmake = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
 source_refs = re.findall(r'"([^\"]+\.(?:cpp|c))"', cmake)
