@@ -1,6 +1,8 @@
 package ua.homeguard.s3.control
 
 import kotlinx.coroutines.flow.StateFlow
+import org.json.JSONObject
+import ua.homeguard.s3.model.AccessLifecycleState
 import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandReply
 import ua.homeguard.s3.model.CommandType
@@ -17,6 +19,30 @@ class CommandController(
 ) {
     private val requestIds = AtomicLong(System.currentTimeMillis())
     @Volatile private var localHttpSessionToken: String = ""
+
+    suspend fun accessState(): AccessLifecycleState {
+        val target = localTarget()
+        localHttpSessionToken = ""
+        return createApi(target).accessState()
+    }
+
+    suspend fun bootstrapAdmin(id: String, name: String, pin: String) {
+        val target = localTarget()
+        localHttpSessionToken = ""
+        createApi(target).bootstrapAdmin(id, name, pin)
+    }
+
+    suspend fun setupWifiScan(): JSONObject {
+        val target = localTarget()
+        localHttpSessionToken = ""
+        return createApi(target).setupWifiScan()
+    }
+
+    suspend fun setupConfigureWifi(ssid: String, password: String): JSONObject {
+        val target = localTarget()
+        localHttpSessionToken = ""
+        return createApi(target).setupConfigureWifi(ssid, password)
+    }
 
     suspend fun login(actor: String, credential: String): AccessSession {
         val target = endpoint.value
@@ -56,6 +82,14 @@ class CommandController(
             credential = credential,
         )
         return api.command(command)
+    }
+
+    private fun localTarget(): DeviceEndpoint {
+        val target = endpoint.value
+        require(target.path != ControlPath.OFFLINE && target.path != ControlPath.CLOUD && target.apiBaseUrl.isNotBlank()) {
+            "local controller unavailable"
+        }
+        return target
     }
 
     private fun createApi(target: DeviceEndpoint): HttpDeviceApi {
