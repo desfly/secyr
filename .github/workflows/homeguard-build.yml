@@ -69,7 +69,7 @@ jobs:
       - name: Cloud runtime contract
         run: python tools/check_cloud_runtime_contract.py
       - name: Web UI JavaScript syntax
-        run: node --check web/app.js && node --check web/access-session.js
+        run: node --check web/app.js && node --check web/access-session.js && node --check web/factory-reset.js
       - name: Web UI browser boot smoke
         shell: bash
         run: |
