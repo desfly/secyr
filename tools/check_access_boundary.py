@@ -19,9 +19,26 @@ require(MAIN / "hg_access_http.cpp", [
     '"/api/v1/access/state"',
     '"setup_required"',
     '"login_required"',
+    'access_runtime::setup_required(*access_)',
     'http_session::issue()',
     '\"sessionToken\"',
 ])
+
+# Factory setup is repeatable: opening/reloading the web UI never consumes it.
+# It is keyed only to the persisted first-Admin lifecycle and remains available
+# after failed bootstrap attempts. The shared runtime gate is the single source
+# used by setup-capable modules such as NetworkHttp.
+require(MAIN / "hg_access_runtime.hpp", [
+    "setup_required(const homeguard::AccessControl& access)",
+    "access.user_count() == 0U",
+    "bootstrap_allowed()",
+    "lock_bootstrap()",
+])
+access_http = (MAIN / "hg_access_http.cpp").read_text(encoding="utf-8")
+if "access_runtime::set_bootstrap_allowed(true);" not in access_http:
+    errors.append("failed bootstrap must restore setup_required for unlimited retries")
+if access_http.count("access_runtime::set_bootstrap_allowed(true);") < 2:
+    errors.append("both user-create and persist failures must restore repeatable setup access")
 
 # Protected read APIs must invoke the shared request authentication gate.
 for filename in (
