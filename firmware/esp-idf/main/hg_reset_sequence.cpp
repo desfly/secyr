@@ -177,6 +177,11 @@ bool handle_triple_rst_factory_reset() {
                  report.controller_config,
                  report.provisioning,
                  report.commissioning);
+        // The reset operation may already have erased a subset of namespaces.
+        // Never return from app_main into an inert partial-boot state: reboot
+        // and let the normal fail-closed/bootstrap paths recover consistently.
+        ESP_LOGW(kTag, "Factory Reset was partial; rebooting into recovery-safe boot path");
+        esp_restart();
         return true;
     }
 
