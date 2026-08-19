@@ -46,6 +46,11 @@ add_library(homeguard_core
     src/local_api.cpp
     src/controller.cpp
     src/boot_self_test.cpp
+    src/alarm_acknowledgement.cpp
+    src/alarm_ack_command.cpp
+    src/alarm_ack_api.cpp
+    src/alarm_ack_event.cpp
+    src/alarm_ack_telemetry.cpp
 )
 target_include_directories(homeguard_core PUBLIC include)
 
@@ -58,6 +63,7 @@ add_executable(homeguard_tests
     ../tests/test_connectivity.cpp
     ../tests/test_provisioning.cpp
     ../tests/test_reset_sequence.cpp
+    ../tests/test_alarm_ack.cpp
     ../tests/test_build0009.cpp
     ../tests/test_build0013.cpp
     ../tests/test_build0032.cpp
