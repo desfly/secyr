@@ -26,6 +26,7 @@ class Parser(HTMLParser):
         super().__init__()
         self.in_nav = False
         self.hrefs: list[str] = []
+        self.active_hrefs: list[str] = []
         self.ids: set[str] = set()
         self.group_labels: list[tuple[str, set[str]]] = []
 
@@ -41,7 +42,10 @@ class Parser(HTMLParser):
             return
         classes = set((values.get("class") or "").split())
         if tag == "a":
-            self.hrefs.append(values.get("href") or "")
+            href = values.get("href") or ""
+            self.hrefs.append(href)
+            if "active" in classes:
+                self.active_hrefs.append(href)
         if "nav-group-label" in classes:
             self.group_labels.append((tag, classes))
 
@@ -69,6 +73,8 @@ def main() -> int:
         errors.append(f"sidebar routes changed/reordered: {parser.hrefs}")
     if len(parser.hrefs) != len(set(parser.hrefs)):
         errors.append(f"duplicate sidebar hrefs: {parser.hrefs}")
+    if parser.active_hrefs != ["#overview"]:
+        errors.append(f"initial sidebar state must have only #overview active: {parser.active_hrefs}")
     for route in EXPECTED_ROUTES:
         target = route[1:]
         if target != "overview" and target not in parser.ids:
@@ -121,6 +127,7 @@ def main() -> int:
 
     print("Web navigation state contract PASS")
     print(f" - unique sidebar routes: {len(EXPECTED_ROUTES)}")
+    print(" - initial active route: #overview only")
     print(" - settings is a non-clickable group label")
     print(" - blue background ownership is reserved for nav a.active")
     print(" - no competing JS active-state writer detected")
