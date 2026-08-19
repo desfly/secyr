@@ -162,8 +162,68 @@ Verify on phone:
 
 No broad redesign was intended. Approved Bruce JPEG itself was not replaced.
 
+## Continuation audit — 2026-08-19
+
+Audit resumed from this journal and continued directly on `main`.
+
+### New commits
+
+1. `b99482acdc1809ceff0b04a7e656a87a35ac010a` — **Guard esp_rom_delay_us include in source audit**
+   - Closed the exact unfinished journal item.
+   - `tools/audit_esp_idf_sources.py` now rejects an ESP-IDF source that calls `esp_rom_delay_us()` without `#include "esp_rom_sys.h"`.
+
+2. `271521169d71403418783cef5aea1bd9f88577f5` — **Cover factory reset module in Web UI syntax gate**
+   - Found `web/factory-reset.js` was critical runtime code but was omitted from the explicit `node --check` CI step.
+   - Added it to the JavaScript syntax gate.
+
+3. `ec72929b86644d782562133844529c905f1f63ae` — **Reboot after partial triple-RST factory reset**
+   - Found a destructive failure path where `erase_mutable_state()` could partially erase NVS, return an error, and then `handle_triple_rst_factory_reset()` returned `true`.
+   - Because `app_main()` returns when that handler returns `true`, the controller could remain in an inert partial-boot state instead of recovering.
+   - Failure path now logs the per-namespace errors and calls `esp_restart()` so the next boot reconstructs state from NVS/fail-closed paths.
+
+4. `dbd8106f84983e6e4e0f2f9f29195009f5b8877f` — **Reboot after partial Web factory reset**
+   - Found the same multi-step erase hazard in the Web API.
+   - A later namespace erase could fail after `hg_access` or another earlier namespace was already committed, while old users/config still remained live in RAM.
+   - Error response now reports `rebooting:true` and schedules a recovery reboot; if the reboot task cannot be created, it restarts immediately.
+
+5. `197d75f08b6a87ac0f10623da0b02b4b5e70b720` — **Guard partial factory reset recovery paths**
+   - Added static audit guards for both destructive reset failure paths so future edits cannot silently restore the no-reboot behavior.
+   - Retains the `esp_rom_delay_us` include guard from the first continuation commit.
+
+### New confirmed root causes
+
+#### E. Triple-RST partial erase could strand boot
+
+`FactoryResetManager::erase_mutable_state()` is intentionally multi-step and non-transactional. The prior triple-RST failure branch logged an error and returned success-to-stop (`true`) without restarting. Since `app_main()` then returned, the firmware could stop normal initialization after a partially destructive operation.
+
+Status: fixed in `ec72929b`; protected by `197d75f0`.
+
+#### F. Web factory reset could leave RAM and NVS inconsistent
+
+The Web endpoint previously returned HTTP 500 after a partial erase but kept running. Example failure mode: access NVS erased successfully, later Wi-Fi/config erase fails, HTTP server remains alive with the old in-memory `AccessControl`. A subsequent reboot would expose a different state than the still-running process.
+
+Status: fixed in `dbd8106f`; protected by `197d75f0`.
+
+#### G. Factory-reset JavaScript lacked direct syntax coverage
+
+`web/factory-reset.js` was served and loaded but the explicit CI JavaScript syntax gate only checked `app.js` and `access-session.js`.
+
+Status: fixed in `27152116`.
+
+### CI state
+
+GitHub connector combined-status and commit-workflow lookup did not expose a successful run for the continuation commits. Therefore **CI is still unconfirmed and must not be called green**. Source auditing continues independently while Actions visibility is unresolved.
+
+### Active next audit targets
+
+- Android LAN discovery and duplicate-device merging.
+- LAN discovery identity rules: the same ESP found through more than one discovery path must collapse to one logical device.
+- Web factory-reset UX for partial erase/recovery reboot response.
+- Additional ESP-IDF failure paths where persistent state can diverge from in-memory state.
+- CI/build confirmation when actual Actions run/job output becomes available.
+
 ## Resume phrase
 
 When continuing from another device, say: **"продовжуй аудит з AUDIT-JOURNAL-2026-08-19.md"**.
 
-The next assistant should read this file from `desfly/secyr/main` first, then continue from **Pending work — continue exactly here**.
+The next assistant should read this file from `desfly/secyr/main` first, then continue from **Continuation audit — 2026-08-19 / Active next audit targets**.
