@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Static release gate for the embedded HomeGuard-S3 Web UI.
 
-The gate intentionally follows control actions end-to-end: visible button ->
-JavaScript handler -> HTTP endpoint -> access-control injection/policy. A page
-that merely renders is not sufficient for a green release gate.
+The gate follows control actions end-to-end: visible button -> JavaScript
+handler -> Bearer-session bridge -> HTTP endpoint -> role authorization.
+Legacy actor/PIN fields may remain temporarily for rollback, but the acting
+user PIN must never be transmitted after login.
 """
 from __future__ import annotations
 
@@ -62,6 +63,7 @@ for header in ("Cache-Control", "no-store", "Pragma", "Expires"):
 require(re.search(r'/app\.css\?v=[^"\']+', html) is not None, "index.html CSS cache-buster missing")
 require(re.search(r'/app\.js\?v=[^"\']+', html) is not None, "index.html JS cache-buster missing")
 
+# Legacy IDs intentionally stay during v2 rollout so rollback remains possible.
 required_ids = {
     "networkNav", "networkCard", "networkPage", "wifiScan", "wifiNetworks",
     "wifiSsid", "wifiPassword", "wifiConnect", "networkState", "networkSsid",
@@ -72,10 +74,7 @@ html_ids = set(re.findall(r'\bid=["\']([^"\']+)["\']', html))
 for item in sorted(required_ids):
     require(item in html_ids, f"required DOM id missing: {item}")
 
-# Navigation regression gate. Historically several menu pairs shared one hash
-# target, and routeFromHash() therefore assigned the blue .active class to both
-# matching anchors. Every visible navigation item now owns a unique hash route;
-# paired items may still scroll to nearby views, but never share the route key.
+# Navigation regression gate: each visible item owns one unique hash.
 nav_match = re.search(r"<nav>(.*?)</nav>", html, re.S)
 nav_html = nav_match.group(1) if nav_match else ""
 require(bool(nav_match), "sidebar navigation block missing")
@@ -89,9 +88,9 @@ require(tuple(nav_routes) == expected_nav_routes,
 require(len(nav_routes) == len(set(nav_routes)),
         f"duplicate navigation href detected; this can create double blue active state: {nav_routes}")
 for route in nav_routes:
-    matches = sum(candidate == route for candidate in nav_routes)
-    require(matches == 1, f"hash transition {route} would activate {matches} menu items")
     target = route[1:]
+    require(sum(candidate == route for candidate in nav_routes) == 1,
+            f"hash transition {route} would activate multiple menu items")
     require(re.search(rf'\bid=["\']{re.escape(target)}["\']', html) is not None,
             f"navigation route {route} has no DOM target id={target}")
 require(re.search(r'<div\s+class=["\']nav-group-label["\'][^>]*>.*?<span>Налаштування</span>.*?</div>', nav_html, re.S) is not None,
@@ -106,15 +105,14 @@ require('class="active" href="#overview"' in nav_html,
         "overview must be the single initial active navigation item")
 all_web_js = js + "\n" + access_js
 require(all_web_js.count('classList.toggle("active"') == 1,
-        "active navigation class must have one authoritative JS assignment site across all loaded scripts")
+        "active navigation class must have one authoritative JS assignment site")
 require("enforceSingleActive" not in access_js,
-        "obsolete second navigation active-state controller returned in access-session.js")
+        "obsolete second navigation active-state controller returned")
 require('link.getAttribute("href") === hash' in js,
         "routeFromHash must select active navigation by exact hash equality")
 require("hashchange" in js and "routeFromHash" in js,
         "hash transitions are not wired to the navigation state resolver")
-require("nav a.active{" in css,
-        "blue selected-state CSS rule missing")
+require("nav a.active{" in css, "blue selected-state CSS rule missing")
 require("nav a:hover{background" not in css and "nav a:focus{background" not in css and "nav a:focus-visible{background" not in css,
         "hover/focus must not paint a second blue navigation background")
 
@@ -133,19 +131,35 @@ for needle in (
 ):
     require(needle in js, f"app.js contract missing: {needle}")
 
-require("sendSecurityCommand" in js and "JSON.stringify({ command, actor, credential })" in js,
-        "security buttons are not posting command + operator credentials")
+# v2 auth bridge: old app.js handlers may still construct credential fields,
+# but the loaded session layer must replace actor with the logged-in identity,
+# strip credential, and add Bearer before any protected mutation reaches HTTP.
+for needle in (
+    "bearerMutationRoutes", "Bearer ${session.token}", "payload.actor = session.actor",
+    "delete payload.credential", "primeLegacyHandlers", "hg-legacy-auth-field",
+    '"/api/v1/system/security-command"', '"/api/v1/system/output-command"',
+    '"/api/v1/system/factory-reset"', '"/api/v1/network/connect"',
+    '"/api/v1/access/users"', '"/api/v1/cloud/config"',
+):
+    require(needle in access_js, f"Bearer Web bridge missing: {needle}")
+require("session.credential" not in access_js,
+        "long-lived Web session must not retain login PIN")
+require('credential="";session={' in access_js,
+        "login PIN must be cleared before session object is established")
+
+require("sendSecurityCommand" in js,
+        "security buttons are not bound to sendSecurityCommand")
 require('"/api/v1/system/security-command"' in system_http,
         "security-command firmware route missing")
-require(re.search(r'authorize\s*\(actor,\s*credential,\s*command\)', system_http) is not None,
-        "security-command route does not authorize the requested command")
+require("access_control_->authorize_session(actor,command)" in system_http,
+        "security-command route does not use Bearer-session role authorization")
 
 require('data-output-id="${id}"' in js and "sendOutputCommand(button)" in js,
         "live valve controls are not bound to sendOutputCommand")
-require("JSON.stringify({ outputId, active, actor, credential })" in js,
-        "valve buttons are not posting output state + operator credentials")
 require('"/api/v1/system/output-command"' in output_http,
         "output-command firmware route missing")
+require("access_control_->authorize_session(actor, command)" in output_http,
+        "output command does not use Bearer-session role authorization")
 require("g_output_http.set_access_control(&g_access_control)" in app_main,
         "output access-control injection missing from app_main")
 
@@ -155,29 +169,27 @@ require("if (role == AccessRole::Admin) return true" in access_core,
         "Admin is not unrestricted in access policy")
 require("if (role == AccessRole::Guest) return false" in access_core,
         "Guest is not fail-closed for control commands")
+require("AuditDecision AccessControl::authorize_session" in access_core,
+        "session authorization path missing from AccessControl")
 
-# First-Admin bootstrap must break the fresh-device deadlock without becoming
-# an unauthenticated account-reset path after storage corruption. The current
-# implementation centralizes the one-time gate in hg_access_runtime.hpp, so the
-# contract follows that authoritative helper instead of depending on old local
-# condition spelling inside AccessHttp.
+# First-Admin bootstrap remains the only unauthenticated account creation path.
 for needle in ("accessBootstrap", 'action: "bootstrap"', "bootstrapAccessAdmin"):
     require(needle in js, f"first-Admin Web UI bootstrap missing: {needle}")
 require('action == "bootstrap"' in access_http, "firmware first-Admin bootstrap action missing")
 require("bootstrap_allowed_" in access_http,
         "AccessHttp does not keep an explicit one-time bootstrap gate")
 require("access_runtime::setup_required(*access_)" in access_http,
-        "bootstrap endpoint does not use the centralized factory-fresh gate")
+        "bootstrap endpoint does not use centralized factory-fresh gate")
 require("bootstrap_allowed() && access.user_count() == 0U" in access_runtime,
-        "centralized bootstrap gate must require both physical/factory allowance and zero users")
+        "centralized bootstrap gate must require physical/factory allowance and zero users")
 require("access_runtime::lock_bootstrap()" in access_http,
-        "bootstrap path does not irrevocably close the runtime gate before account creation")
+        "bootstrap path does not close runtime gate before account creation")
 require("AccessRole::Admin" in access_http,
-        "bootstrap does not force the first account to Admin")
+        "bootstrap does not force first account to Admin")
 require("access_->clear_users()" in access_http,
-        "failed bootstrap persistence does not roll back the RAM user")
+        "failed bootstrap persistence does not roll back RAM user")
 require("bootstrap_allowed_ = false" in access_http,
-        "successful bootstrap does not close the one-time gate")
+        "successful bootstrap does not close one-time gate")
 require("bootstrap_allowed_ = true" in access_http,
         "failed factory bootstrap cannot be retried safely")
 require("bool g_access_bootstrap_allowed = false" in app_main,
@@ -192,11 +204,9 @@ require("&g_access_store, g_access_bootstrap_allowed" in app_main,
 for endpoint in ("/api/v1/network/status", "/api/v1/network/scan", "/api/v1/network/connect"):
     require(endpoint in network, f"network firmware endpoint missing: {endpoint}")
 require("networkActor" in js and "networkCredential" in js,
-        "Wi-Fi page does not request administrator credentials")
-require("JSON.stringify({ ssid, password, actor, credential })" in js,
-        "Wi-Fi connect does not send administrator credentials")
-require(re.search(r'authorize\s*\(actor,\s*credential,\s*"network\.configure"\)', network) is not None,
-        "Wi-Fi configuration is not protected by access control")
+        "legacy Wi-Fi auth fields disappeared before rollback cleanup phase")
+require('access_->authorize_session(actor, "network.configure")' in network,
+        "Wi-Fi configuration is not protected by Bearer-session RBAC")
 require("g_network_http.set_access_control(&g_access_control)" in app_main,
         "NetworkHttp access-control injection missing from app_main")
 require("rssi" in network, "Wi-Fi scan/status backend does not expose RSSI")
@@ -204,22 +214,27 @@ require("ip" in network, "Wi-Fi status backend does not expose IP")
 require("save_credentials" in network and "load_credentials" in network,
         "Wi-Fi reconnect persistence missing")
 
-# Factory reset must be reachable in the actually served UI, not merely checked
-# into /web or embedded as an unused asset.
+# Factory reset: Admin Bearer session + explicit ERASE_ALL + final browser confirm.
 require('/api/v1/system/factory-reset' in factory_reset_js,
-        "factory-reset.js does not call the firmware factory-reset endpoint")
+        "factory-reset.js does not call firmware factory-reset endpoint")
 require('ERASE_ALL' in factory_reset_js,
         "factory-reset.js lost explicit destructive-action confirmation")
+require("HomeGuardAuth" in factory_reset_js and 'role?.() === "admin"' in factory_reset_js,
+        "factory reset UI is not gated by logged-in Admin session")
+require("credential: credential.value" not in factory_reset_js,
+        "factory reset still transmits acting Admin PIN")
+require('actor: window.HomeGuardAuth.actor()' in factory_reset_js,
+        "factory reset does not bind request actor to active session")
 require('"/api/v1/system/factory-reset"' in system_http,
         "firmware factory-reset endpoint missing")
-require(re.search(r'authorize\s*\(actor,\s*credential,\s*"system\.factory_reset"\)', system_http) is not None,
-        "factory reset is not protected by system.factory_reset authorization")
+require('access_control_->authorize_session(actor,"system.factory_reset")' in system_http,
+        "factory reset is not protected by session role authorization")
 require("factory_reset_js_start" in web_http and "factory_reset_js_end" in web_http,
         "factory-reset embedded linker symbols missing")
 require("factory_reset_js_get" in web_http,
         "factory-reset HTTP asset handler missing")
 require("text_asset_size(factory_reset_js_start, factory_reset_js_end)" in web_http,
-        "factory-reset module is embedded but not wired into the Web UI boot path")
+        "factory-reset module is embedded but not wired into Web UI boot path")
 
 require((WEB / "bruce.jpg").is_file(), "Bruce JPEG asset missing")
 require((WEB / "bruce.jpg").stat().st_size > 1024 if (WEB / "bruce.jpg").exists() else False,
@@ -237,9 +252,9 @@ require('"image/jpeg"' in web_http, "Bruce route does not use image/jpeg")
 require("bruce_jpg_start" in web_http and "bruce_jpg_end" in web_http,
         "Bruce embedded linker symbols missing")
 require(".bruce img{object-fit:contain!important;object-position:center center!important}" in web_http,
-        "firmware mobile CSS must preserve the complete Bruce portrait")
+        "firmware mobile CSS must preserve complete Bruce portrait")
 require(".bruce img{object-fit:cover!important" not in web_http,
-        "firmware mobile CSS regressed to cropping Bruce with object-fit:cover")
+        "firmware mobile CSS regressed to cropping Bruce")
 require(".sidebar nav{display:none!important" in web_http and ".sidebar.mobile-nav-open nav{display:flex!important}" in web_http,
         "firmware mobile navigation must remain collapsed until explicitly opened")
 
@@ -257,12 +272,13 @@ if errors:
 print("Web UI contract PASS")
 print(f" - DOM ids checked: {len(required_ids)}")
 print(f" - navigation hash transitions checked: {len(nav_routes)}; single-active invariant enforced")
-print(" - quick security buttons -> authorized firmware route: 4")
-print(" - live valve buttons -> authorized firmware route: present")
+print(" - login PIN -> Bearer session; protected mutations strip acting credential")
+print(" - quick security buttons -> Bearer/RBAC firmware route: 4")
+print(" - live valve buttons -> Bearer/RBAC firmware route: present")
 print(" - first Admin bootstrap: factory-fresh NVS only; corruption stays fail-closed")
-print(" - Wi-Fi configuration: Admin-authorized; status/scan + RSSI/IP/persistence present")
+print(" - Wi-Fi configuration: Admin session-authorized; status/scan + RSSI/IP/persistence present")
 print(" - roles: Admin full; User arm/disarm + valves; Guest control denied")
-print(" - factory reset: authorized endpoint + live served UI module present")
+print(" - factory reset: Admin Bearer + ERASE_ALL + final confirmation")
 print(" - Bruce: single approved JPEG; mobile contain/no-crop contract enforced")
 print(" - embedded assets + anti-cache headers: present")
 print(" - runtime build number sourced from GitHub Actions run number")
