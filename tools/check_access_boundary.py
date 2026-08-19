@@ -83,7 +83,19 @@ require(MAIN / "hg_system_http.cpp", [
 ])
 require(MAIN / "hg_network_http.cpp", [
     'access_->authorize(actor, credential, "network.configure")',
+    "had_persisted_credentials = load_credentials(previous_ssid, previous_password)",
+    "persist_rollback_ok = had_persisted_credentials",
+    "? save_credentials(previous_ssid, previous_password)",
+    ": clear_credentials()",
+    "wifi_connect_failed_rollback_failed",
+    '"rolledBack\\\":true}',
 ])
+network_http = (MAIN / "hg_network_http.cpp").read_text(encoding="utf-8")
+connect_call = network_http.find("const auto connect_error = esp_wifi_connect()")
+success_reply = network_http.find('"ok\\\":true,\\\"state\\\":\\\"connecting"')
+if connect_call < 0 or success_reply < 0 or success_reply < connect_call:
+    errors.append("Wi-Fi connect API must not report success before esp_wifi_connect() has been accepted")
+require(MAIN / "hg_network_http.hpp", ["bool clear_credentials() const;"])
 require(MAIN / "hg_output_http.cpp", [
     "access_control_->authorize(actor, credential, command)",
 ])
