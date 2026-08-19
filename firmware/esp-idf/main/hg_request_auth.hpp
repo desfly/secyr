@@ -4,11 +4,9 @@
 #include "homeguard/access_control.hpp"
 #include "esp_http_server.h"
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <string>
-#include <string_view>
 
 namespace homeguard::idf::request_auth {
 
@@ -23,39 +21,12 @@ inline bool read_header(httpd_req_t* request, std::string& value) {
     return true;
 }
 
-inline bool read_legacy_authorization(std::string_view value, std::string& actor, std::string& credential) {
-    actor.clear();
-    credential.clear();
-    constexpr std::string_view prefix{"HomeGuard "};
-    if (!value.starts_with(prefix)) return false;
-
-    const auto payload = value.substr(prefix.size());
-    const auto separator = payload.find(':');
-    if (separator == std::string_view::npos || separator == 0U || separator + 1U >= payload.size()) return false;
-
-    const auto actor_view = payload.substr(0U, separator);
-    const auto credential_view = payload.substr(separator + 1U);
-    if (actor_view.size() > 23U || credential_view.size() < 4U || credential_view.size() > 12U) return false;
-    for (const char ch : credential_view) if (ch < '0' || ch > '9') return false;
-
-    actor.assign(actor_view);
-    credential.assign(credential_view);
-    return true;
-}
-
 inline homeguard::AuditDecision authenticate(httpd_req_t* request, homeguard::AccessControl& access) {
     std::string authorization;
     if (!read_header(request, authorization)) return homeguard::AuditDecision::DeniedCredential;
-
-    if (http_session::authorized(authorization, access)) return homeguard::AuditDecision::Allowed;
-
-    std::string actor;
-    std::string credential;
-    if (!read_legacy_authorization(authorization, actor, credential)) return homeguard::AuditDecision::DeniedCredential;
-    const auto decision = access.authenticate(actor, credential);
-    std::fill(credential.begin(), credential.end(), '\0');
-    credential.clear();
-    return decision;
+    return http_session::authorized(authorization, access)
+        ? homeguard::AuditDecision::Allowed
+        : homeguard::AuditDecision::DeniedCredential;
 }
 
 inline bool authenticated(httpd_req_t* request, homeguard::AccessControl& access) {
