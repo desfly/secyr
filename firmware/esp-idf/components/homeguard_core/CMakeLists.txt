@@ -13,8 +13,6 @@ set(HG_CORE_SRCS
     "../../../src/pressure.cpp"
     "../../../src/health_monitor.cpp"
     "../../../src/telemetry.cpp"
-    "../../../src/power_monitor.cpp"
-    "../../../src/boot_self_test.cpp"
 )
 
 idf_component_register(SRCS ${HG_CORE_SRCS} INCLUDE_DIRS "../../../include")
