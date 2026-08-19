@@ -145,6 +145,27 @@ if not re.search(
         "hg_network_http.cpp: Wi-Fi persistence rollback guard is missing"
     )
 
+# Cloud configuration has the same two boundaries: a request can arrive in
+# multiple TCP reads, and a config that cannot start must not remain persisted
+# as the next-boot configuration after the API reports failure.
+cloud_http = (MAIN / "hg_cloud_http.cpp").read_text(encoding="utf-8")
+if "read_request_body(request, 1024U, body)" not in cloud_http or "while (offset < body.size())" not in cloud_http:
+    errors.append(
+        "hg_cloud_http.cpp: Cloud config handler must read the complete declared HTTP body"
+    )
+if '"rolledBack\\\":true' not in cloud_http and 'rolledBack' not in cloud_http:
+    errors.append(
+        "hg_cloud_http.cpp: MQTT start failure must expose successful rollback"
+    )
+if "had_previous ? store_->save(previous) : store_->clear()" not in cloud_http:
+    errors.append(
+        "hg_cloud_http.cpp: failed MQTT runtime start must restore the previous persisted config"
+    )
+if "restore_runtime_error = cloud_->start(" not in cloud_http:
+    errors.append(
+        "hg_cloud_http.cpp: failed MQTT runtime start must restore the previous live config"
+    )
+
 for warning in warnings:
     print(f"WARNING: {warning}")
 
