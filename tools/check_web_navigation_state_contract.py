@@ -84,8 +84,8 @@ def main() -> int:
         errors.append(f"expected exactly one settings group label, got {parser.group_labels}")
     else:
         tag, classes = parser.group_labels[0]
-        if tag == "a":
-            errors.append("settings group label must not be an anchor")
+        if tag != "div":
+            errors.append(f"settings group label must be an inert div, got {tag}")
         if "active" in classes:
             errors.append("settings group label must never be statically active")
 
@@ -128,7 +128,7 @@ def main() -> int:
     print("Web navigation state contract PASS")
     print(f" - unique sidebar routes: {len(EXPECTED_ROUTES)}")
     print(" - initial active route: #overview only")
-    print(" - settings is a non-clickable group label")
+    print(" - settings is an inert non-clickable group label")
     print(" - blue background ownership is reserved for nav a.active")
     print(" - no competing JS active-state writer detected")
     print(" - hashchange + same-hash routing contract present")
