@@ -14,7 +14,6 @@ void test_readiness();
 void test_build0009();
 void test_build0013();
 void test_build0032();
-void test_build0037();
 void test_build0038();
 void test_build0045();
 void test_build0046();
