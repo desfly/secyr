@@ -104,6 +104,14 @@ inline bool revoke(std::string_view authorization) {
     return false;
 }
 
+inline void revoke_actor(std::string_view actor) {
+    if (actor.empty()) return;
+    std::scoped_lock lock(g_mutex);
+    for (std::size_t i = 0; i < g_tokens.size(); ++i) {
+        if (actor == std::string_view{g_actors[i].data()}) clear_slot(i);
+    }
+}
+
 inline void revoke_all() {
     std::scoped_lock lock(g_mutex);
     for (std::size_t i = 0; i < g_tokens.size(); ++i) clear_slot(i);
