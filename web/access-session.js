@@ -65,10 +65,10 @@
     });
   };
 
-  function syncLegacyCredentials() {
+  function syncActorFields() {
     if (!session) return;
-    [["#operatorId","#operatorPin"],["#networkActor","#networkCredential"],["#accessActor","#accessCredential"],["#cloudActor","#cloudCredential"]].forEach(([a,p]) => {
-      const actor=document.querySelector(a),pin=document.querySelector(p); if(actor) actor.value=session.actor; if(pin) pin.value=session.credential;
+    ["#operatorId","#networkActor","#accessActor","#cloudActor","#factoryResetActor"].forEach(selector => {
+      const actor=document.querySelector(selector); if(actor) actor.value=session.actor;
     });
   }
 
@@ -157,15 +157,16 @@
   }
 
   async function submitLogin() {
-    const actor=form.querySelector("#hgLoginActor")?.value.trim()||"",credential=form.querySelector("#hgLoginPin")?.value.trim()||"";
+    const actor=form.querySelector("#hgLoginActor")?.value.trim()||"";
+    let credential=form.querySelector("#hgLoginPin")?.value.trim()||"";
     if(!actor||!/^\d{4,12}$/.test(credential)){message.textContent="Введіть користувача та PIN 4–12 цифр.";return;}
     const button=form.querySelector("button");button.disabled=true;message.textContent="Перевірка…";
-    try {const response=await originalFetch("/api/v1/access/login",{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({actor,credential})});const body=await apiBody(response);if(!response.ok||body.ok===false)throw new Error(body.reason||String(response.status));const token=String(body.sessionToken||"");if(!/^[0-9a-f]{64}$/.test(token))throw new Error("session_unavailable");session={actor:String(body.actor||actor),credential,token,name:String(body.name||actor),role:String(body.role||"guest"),capabilities:body.capabilities||{}};document.documentElement.classList.remove("hg-auth-locked");gate.hidden=true;syncLegacyCredentials();applyRoleUi();if(typeof refresh==="function")await refresh();ensureLogoutButton();}
-    catch(error){session=null;message.textContent=error.message==="setup_required"?"Спочатку виконайте первинне налаштування.":`Вхід відхилено: ${error.message}`;if(error.message==="setup_required")showSetup();else button.disabled=false;}
+    try {const response=await originalFetch("/api/v1/access/login",{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({actor,credential})});const body=await apiBody(response);if(!response.ok||body.ok===false)throw new Error(body.reason||String(response.status));const token=String(body.sessionToken||"");if(!/^[0-9a-f]{64}$/.test(token))throw new Error("session_unavailable");form.querySelector("#hgLoginPin").value="";credential="";session={actor:String(body.actor||actor),token,name:String(body.name||actor),role:String(body.role||"guest"),capabilities:body.capabilities||{}};document.documentElement.classList.remove("hg-auth-locked");gate.hidden=true;syncActorFields();applyRoleUi();if(typeof refresh==="function")await refresh();ensureLogoutButton();}
+    catch(error){credential="";session=null;message.textContent=error.message==="setup_required"?"Спочатку виконайте первинне налаштування.":`Вхід відхилено: ${error.message}`;if(error.message==="setup_required")showSetup();else button.disabled=false;}
   }
 
   function logout(reason="") {
-    session=null;["#operatorId","#operatorPin","#networkActor","#networkCredential","#accessActor","#accessCredential","#cloudActor","#cloudCredential"].forEach(selector=>{const field=document.querySelector(selector);if(field)field.value="";});
+    session=null;["#operatorId","#operatorPin","#networkActor","#networkCredential","#accessActor","#accessCredential","#cloudActor","#cloudCredential","#factoryResetActor","#factoryResetCredential"].forEach(selector=>{const field=document.querySelector(selector);if(field)field.value="";});
     document.querySelector("#hgSessionLogout")?.remove();gate.hidden=false;document.documentElement.classList.add("hg-auth-locked");showLogin();if(reason)message.textContent=reason;
   }
 
@@ -174,7 +175,7 @@
   form.addEventListener("submit",event=>{event.preventDefault();if(gateMode==="setup_required")submitSetup();else submitLogin();});
   form.addEventListener("click",event=>{if(gateMode!=="setup_required")return;if(event.target?.id==="hgSetupWifiScan"){event.preventDefault();setupScanWifi();}else if(event.target?.id==="hgSetupWifiConnect"){event.preventDefault();setupConnectWifi();}});
 
-  document.addEventListener("click",event=>{if(!session)return;const control=event.target.closest?.("[data-command],[data-output-id],#wifiConnect,#accessLoad,#accessSave,#cloudApply,#cloudDisable");if(!control)return;const caps=session.capabilities||{};let allowed=true;if(control.matches("[data-command]"))allowed=commandAllowed(control.dataset.command||"");else if(control.matches("[data-output-id]"))allowed=caps.valves===true;else if(control.matches("#wifiConnect"))allowed=caps.networkConfigure===true;else if(control.matches("#accessLoad,#accessSave"))allowed=caps.accessManage===true;else if(control.matches("#cloudApply,#cloudDisable"))allowed=session.role==="admin";if(!allowed){event.preventDefault();event.stopImmediatePropagation();if(typeof showToast==="function")showToast("Команда недоступна для цієї ролі");return;}syncLegacyCredentials();},true);
+  document.addEventListener("click",event=>{if(!session)return;const control=event.target.closest?.("[data-command],[data-output-id],#wifiConnect,#accessLoad,#accessSave,#cloudApply,#cloudDisable");if(!control)return;const caps=session.capabilities||{};let allowed=true;if(control.matches("[data-command]"))allowed=commandAllowed(control.dataset.command||"");else if(control.matches("[data-output-id]"))allowed=caps.valves===true;else if(control.matches("#wifiConnect"))allowed=caps.networkConfigure===true;else if(control.matches("#accessLoad,#accessSave"))allowed=caps.accessManage===true;else if(control.matches("#cloudApply,#cloudDisable"))allowed=session.role==="admin";if(!allowed){event.preventDefault();event.stopImmediatePropagation();if(typeof showToast==="function")showToast("Команда недоступна для цієї ролі");return;}syncActorFields();},true);
 
   window.HomeGuardAuth={authenticated:()=>Boolean(session),actor:()=>session?.actor||"",role:()=>session?.role||"",logout};
   loadAccessState();
