@@ -20,6 +20,7 @@
 #include "hg_access_time.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "hg_reset_sequence.hpp"
+#include "hg_nvs_recovery.hpp"
 #include "device_discovery.hpp"
 #include "nvs_config_store.hpp"
 #include "websocket_telemetry.hpp"
@@ -78,10 +79,8 @@ bool g_access_bootstrap_allowed = false;
 
 esp_err_t initialize_nvs()
 {
-    // Security invariant: never erase NVS implicitly during ordinary boot.
-    // Automatic nvs_flash_erase() could delete the access database and reopen
-    // passwordless bootstrap without a physical Factory Reset. Any NVS init
-    // failure therefore fails closed and is surfaced by ESP_ERROR_CHECK.
+    // Never erase NVS implicitly during ordinary boot. If initialization fails,
+    // app_main enters isolated physical recovery instead of reopening setup.
     return nvs_flash_init();
 }
 
@@ -187,19 +186,14 @@ esp_err_t start_http_server()
 
     auto error = g_web_http.register_handlers(g_http_server);
     if (error != ESP_OK) return rollback_http(error, "web routes");
-
     error = g_network_http.register_handlers(g_http_server);
     if (error != ESP_OK) return rollback_http(error, "network routes");
-
     error = g_lan_http.register_handlers(g_http_server, &g_access_control);
     if (error != ESP_OK) return rollback_http(error, "LAN discovery routes");
-
     error = g_cloud_http.register_handlers(g_http_server, &g_cloud_link, &g_cloud_store, &g_access_control);
     if (error != ESP_OK) return rollback_http(error, "cloud routes");
-
     error = g_http_api.register_handlers(g_http_server, &g_hardware, &g_access_control);
     if (error != ESP_OK) return rollback_http(error, "hardware routes");
-
     error = g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus, &g_access_control);
     if (error != ESP_OK) return rollback_http(error, "system routes");
 
@@ -209,7 +203,6 @@ esp_err_t start_http_server()
 
     error = g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed);
     if (error != ESP_OK) return rollback_http(error, "access routes");
-
     error = g_telemetry_session_http.register_handlers(g_http_server, &g_access_control, &g_websocket_telemetry);
     if (error != ESP_OK) return rollback_http(error, "telemetry session route");
 
@@ -271,7 +264,10 @@ void start_device_discovery()
 
 extern "C" void app_main()
 {
-    ESP_ERROR_CHECK(initialize_nvs());
+    const auto nvs_error = initialize_nvs();
+    if (nvs_error != ESP_OK) {
+        homeguard::idf::enter_nvs_recovery_mode(nvs_error);
+    }
 
     const auto reset_error = homeguard::idf::start_service_button_factory_reset();
     if (reset_error != ESP_OK) ESP_LOGE(kTag, "Service-button Factory Reset unavailable: %s", esp_err_to_name(reset_error));
