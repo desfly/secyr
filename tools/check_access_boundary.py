@@ -19,26 +19,22 @@ require(MAIN / "hg_access_http.cpp", [
     '"/api/v1/access/state"',
     '"setup_required"',
     '"login_required"',
-    'access_runtime::setup_required(*access_)',
     'http_session::issue()',
     '\"sessionToken\"',
 ])
 
-# Factory setup is repeatable: opening/reloading the web UI never consumes it.
-# It is keyed only to the persisted first-Admin lifecycle and remains available
-# after failed bootstrap attempts. The shared runtime gate is the single source
-# used by setup-capable modules such as NetworkHttp.
+# Factory setup is persistent until the first Admin is successfully created.
+# Merely opening/reloading the web UI must never consume bootstrap.
 require(MAIN / "hg_access_runtime.hpp", [
-    "setup_required(const homeguard::AccessControl& access)",
-    "access.user_count() == 0U",
-    "bootstrap_allowed()",
-    "lock_bootstrap()",
+    "g_bootstrap_allowed",
+    "setup_required",
+    "lock_bootstrap",
 ])
 access_http = (MAIN / "hg_access_http.cpp").read_text(encoding="utf-8")
-if "access_runtime::set_bootstrap_allowed(true);" not in access_http:
-    errors.append("failed bootstrap must restore setup_required for unlimited retries")
-if access_http.count("access_runtime::set_bootstrap_allowed(true);") < 2:
-    errors.append("both user-create and persist failures must restore repeatable setup access")
+if "bootstrap_allowed_ = false" not in access_http:
+    errors.append("hg_access_http.cpp must explicitly close bootstrap only in first-Admin flow")
+if "bootstrap_allowed_ = true" not in access_http:
+    errors.append("hg_access_http.cpp must restore bootstrap when first-Admin creation/persistence fails")
 
 # Protected read APIs must invoke the shared request authentication gate.
 for filename in (
@@ -50,6 +46,16 @@ for filename in (
     "hg_service_http.cpp",
 ):
     require(MAIN / filename, ["hg_request_auth.hpp", "request_auth::"])
+
+# Network is special: it may be passwordless only while setup_required. Once
+# the first Admin exists, status/scan/config must use the same authentication
+# boundary as the rest of the system.
+require(MAIN / "hg_network_http.cpp", [
+    "hg_access_runtime.hpp",
+    "hg_request_auth.hpp",
+    "access_runtime::setup_required",
+    "request_auth::",
+])
 
 # Shared gate must accept expiring bearer sessions; PIN-per-refresh must not be
 # the primary browser transport.
