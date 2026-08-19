@@ -6,6 +6,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <sstream>
@@ -37,18 +39,41 @@ const char* severity_name(hg::Severity severity) {
     }
 }
 
-bool parse_json_string(const std::string& body, const char* key, std::string& value) {
+std::size_t value_offset(const std::string& body, const char* key) {
     const std::string marker = std::string{"\""} + key + "\"";
     auto pos = body.find(marker);
-    if (pos == std::string::npos) return false;
+    if (pos == std::string::npos) return std::string::npos;
     pos = body.find(':', pos + marker.size());
-    if (pos == std::string::npos) return false;
-    pos = body.find('"', pos + 1U);
-    if (pos == std::string::npos) return false;
-    const auto end = body.find('"', pos + 1U);
-    if (end == std::string::npos) return false;
-    value.assign(body, pos + 1U, end - pos - 1U);
-    return true;
+    if (pos == std::string::npos) return std::string::npos;
+    ++pos;
+    while (pos < body.size() && std::isspace(static_cast<unsigned char>(body[pos]))) ++pos;
+    return pos;
+}
+
+bool parse_json_string(const std::string& body, const char* key, std::string& value) {
+    auto pos = value_offset(body, key);
+    if (pos == std::string::npos || pos >= body.size() || body[pos] != '"') return false;
+    ++pos;
+    value.clear();
+    bool escaped = false;
+    for (; pos < body.size(); ++pos) {
+        const char ch = body[pos];
+        if (escaped) {
+            if (ch == '"' || ch == '\\' || ch == '/') value.push_back(ch);
+            else if (ch == 'n') value.push_back('\n');
+            else if (ch == 'r') value.push_back('\r');
+            else if (ch == 't') value.push_back('\t');
+            else return false;
+            escaped = false;
+        } else if (ch == '\\') {
+            escaped = true;
+        } else if (ch == '"') {
+            return true;
+        } else {
+            value.push_back(ch);
+        }
+    }
+    return false;
 }
 
 bool read_request_body(httpd_req_t* request, std::size_t limit, std::string& body) {
@@ -61,6 +86,11 @@ bool read_request_body(httpd_req_t* request, std::size_t limit, std::string& bod
         offset += static_cast<std::size_t>(received);
     }
     return true;
+}
+
+void scrub(std::string& secret) {
+    std::fill(secret.begin(), secret.end(), '\0');
+    secret.clear();
 }
 
 void delayed_factory_reboot(void*) {
@@ -125,17 +155,24 @@ esp_err_t SystemHttp::handle_factory_reset(httpd_req_t* request) {
     std::string body;
     if (!read_request_body(request, 512U, body)) { httpd_resp_set_status(request,"400 Bad Request"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"invalid_body\"}",-1); }
     std::string actor, credential, confirm;
-    if (!parse_json_string(body,"actor",actor) || !parse_json_string(body,"credential",credential)) { httpd_resp_set_status(request,"401 Unauthorized"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"credential_required\"}",-1); }
-    if (!parse_json_string(body,"confirm",confirm) || confirm != "ERASE_ALL") { httpd_resp_set_status(request,"409 Conflict"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"explicit_confirmation_required\"}",-1); }
+    if (!parse_json_string(body,"actor",actor) || !parse_json_string(body,"credential",credential)) {
+        scrub(credential); scrub(body);
+        httpd_resp_set_status(request,"401 Unauthorized");
+        return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"credential_required\"}",-1);
+    }
+    if (!parse_json_string(body,"confirm",confirm) || confirm != "ERASE_ALL") {
+        scrub(credential); scrub(body);
+        httpd_resp_set_status(request,"409 Conflict");
+        return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"explicit_confirmation_required\"}",-1);
+    }
+    scrub(body);
     const auto decision=access_control_->authorize(actor,credential,"system.factory_reset");
+    scrub(credential);
     if (decision != homeguard::AuditDecision::Allowed) { httpd_resp_set_status(request,"403 Forbidden"); const std::string response=std::string{"{\"ok\":false,\"reason\":\""}+homeguard::to_string(decision)+"\"}"; return send_json(request,response.c_str(),response.size()); }
     const auto report=FactoryResetManager{}.erase_mutable_state();
     if (!report.ok()) {
         httpd_resp_set_status(request,"500 Internal Server Error");
         const std::string response=std::string{"{\"ok\":false,\"reason\":\"erase_failed\",\"access\":"}+std::to_string(report.access)+",\"wifi\":"+std::to_string(report.wifi)+",\"cloud\":"+std::to_string(report.cloud)+",\"controllerConfig\":"+std::to_string(report.controller_config)+",\"provisioning\":"+std::to_string(report.provisioning)+",\"commissioning\":"+std::to_string(report.commissioning)+",\"rebooting\":true}";
-        // erase_mutable_state() is multi-step; a failure can happen after an
-        // earlier namespace was already committed. Reboot after returning the
-        // diagnostic response so RAM is never left inconsistent with NVS.
         const auto reboot_task=xTaskCreate(&delayed_factory_reboot,"hg_factory_reset",2048,nullptr,5,nullptr);
         if (reboot_task != pdPASS) { esp_restart(); return ESP_FAIL; }
         return send_json(request,response.c_str(),response.size());
@@ -152,9 +189,15 @@ esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
     std::string body;
     if (!read_request_body(request,384U,body)) { httpd_resp_set_status(request,"400 Bad Request"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"invalid_body\"}",-1); }
     std::string command,actor,credential;
-    if (!parse_json_string(body,"command",command)) { httpd_resp_set_status(request,"400 Bad Request"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"missing_command\"}",-1); }
-    if (!parse_json_string(body,"actor",actor) || !parse_json_string(body,"credential",credential)) { httpd_resp_set_status(request,"401 Unauthorized"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"credential_required\"}",-1); }
+    if (!parse_json_string(body,"command",command)) { scrub(body); httpd_resp_set_status(request,"400 Bad Request"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"missing_command\"}",-1); }
+    if (!parse_json_string(body,"actor",actor) || !parse_json_string(body,"credential",credential)) {
+        scrub(credential); scrub(body);
+        httpd_resp_set_status(request,"401 Unauthorized");
+        return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"credential_required\"}",-1);
+    }
+    scrub(body);
     const auto decision=access_control_->authorize(actor,credential,command);
+    scrub(credential);
     if (decision != homeguard::AuditDecision::Allowed) { httpd_resp_set_status(request,"403 Forbidden"); const std::string response=std::string{"{\"ok\":false,\"reason\":\""}+homeguard::to_string(decision)+"\"}"; return send_json(request,response.c_str(),response.size()); }
     hg::PartitionArmState target{};
     if(command=="security.arm_away") target=hg::PartitionArmState::Away; else if(command=="security.arm_home") target=hg::PartitionArmState::Stay; else if(command=="security.disarm") target=hg::PartitionArmState::Disarmed; else if(command=="security.panic") target=hg::PartitionArmState::Alarm; else { httpd_resp_set_status(request,"400 Bad Request"); return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"unsupported_command\"}",-1); }
