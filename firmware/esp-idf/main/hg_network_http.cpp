@@ -242,25 +242,25 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
     const bool setup_mode = setup_network_allowed(this);
     if (!setup_mode) {
         std::string actor;
-        std::string credential;
-        if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
+        if (!parse_json_string(body, "actor", actor) || actor.empty()) {
             std::fill(body.begin(), body.end(), '\0');
             httpd_resp_set_status(request, "401 Unauthorized");
-            return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"admin_credential_required\"}");
+            return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"session_actor_required\"}");
         }
         if (!request_auth::authenticated_actor(request, *access_, actor)) {
-            std::fill(credential.begin(), credential.end(), '\0');
             std::fill(body.begin(), body.end(), '\0');
             return request_auth::send_login_required(request);
         }
 
-        const auto decision = access_->authorize(actor, credential, "network.configure");
-        std::fill(credential.begin(), credential.end(), '\0');
+        const auto decision = access_->authorize_session(actor, "network.configure");
         if (decision != AuditDecision::Allowed) {
             std::fill(body.begin(), body.end(), '\0');
             httpd_resp_set_status(request, "403 Forbidden");
             return send_json(request, std::string{"{\"ok\":false,\"state\":\"error\",\"reason\":\""} + to_string(decision) + "\"}");
         }
+
+        /* LEGACY v1 disabled: actor + credential used to be parsed and PIN
+           re-checked here for every Wi-Fi configuration request. */
     }
 
     std::string ssid;
