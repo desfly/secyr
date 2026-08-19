@@ -100,8 +100,19 @@ for snippet in (
         errors.append(f"hg_reset_sequence.cpp missing reset contract: {snippet}")
 if reset.find("set_pending_reset(false)") < reset.find("FactoryResetManager{}.erase_mutable_state()"):
     errors.append("hg_reset_sequence.cpp must keep factory-reset pending until erase succeeds")
-if reset.find("RgbDiagnostic::set_red(board::kOnboardRgb)") > reset.find("RgbDiagnostic::set_white(board::kOnboardRgb)"):
-    errors.append("hg_reset_sequence.cpp RGB contract must be RED hold confirmation before WHITE reset-success confirmation")
+
+# RED belongs to the live button-hold phase; WHITE belongs to the later early-boot
+# success phase after mutable state is erased.  Do not compare their first lexical
+# positions in the file: the helper functions may be ordered independently of the
+# runtime sequence.
+service_start = reset.find("void service_button_reset_task")
+service_end = reset.find("\n}\n\n}  // namespace", service_start)
+early_start = reset.find("void perform_early_boot_factory_reset")
+early_end = reset.find("\n}\n\nvoid stage_factory_reset_and_reboot", early_start)
+if service_start < 0 or service_end < 0 or "RgbDiagnostic::set_red(board::kOnboardRgb)" not in reset[service_start:service_end]:
+    errors.append("hg_reset_sequence.cpp RED confirmation must remain in service-button hold runtime")
+if early_start < 0 or early_end < 0 or "RgbDiagnostic::set_white(board::kOnboardRgb)" not in reset[early_start:early_end]:
+    errors.append("hg_reset_sequence.cpp WHITE confirmation must remain in successful early-boot reset runtime")
 
 require(WEB / "access-session.js", [
     "hg-auth-locked", "/api/v1/access/state", "/api/v1/access/login",
