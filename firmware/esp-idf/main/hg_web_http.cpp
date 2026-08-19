@@ -14,6 +14,8 @@ extern const uint8_t app_js_start[] asm("_binary_app_js_start");
 extern const uint8_t app_js_end[] asm("_binary_app_js_end");
 extern const uint8_t access_session_js_start[] asm("_binary_access_session_js_start");
 extern const uint8_t access_session_js_end[] asm("_binary_access_session_js_end");
+extern const uint8_t factory_reset_js_start[] asm("_binary_factory_reset_js_start");
+extern const uint8_t factory_reset_js_end[] asm("_binary_factory_reset_js_end");
 extern const uint8_t bruce_jpg_start[] asm("_binary_bruce_jpg_start");
 extern const uint8_t bruce_jpg_end[] asm("_binary_bruce_jpg_end");
 
@@ -62,6 +64,7 @@ esp_err_t WebHttp::register_handlers(httpd_handle_t server)
         {.uri="/app.css", .method=HTTP_GET, .handler=&WebHttp::css_get, .user_ctx=this},
         {.uri="/app.js", .method=HTTP_GET, .handler=&WebHttp::js_get, .user_ctx=this},
         {.uri="/access-session.js", .method=HTTP_GET, .handler=&WebHttp::access_session_js_get, .user_ctx=this},
+        {.uri="/factory-reset.js", .method=HTTP_GET, .handler=&WebHttp::factory_reset_js_get, .user_ctx=this},
         {.uri="/bruce.jpg", .method=HTTP_GET, .handler=&WebHttp::bruce_get, .user_ctx=this},
     };
 
@@ -110,9 +113,10 @@ esp_err_t WebHttp::css_get(httpd_req_t* request)
   .sidebar{position:relative!important;top:auto!important;width:100%!important;height:auto!important;min-height:0!important;padding:10px 10px 12px!important;overflow:visible!important}
   .brand{height:auto!important;min-height:34px!important;justify-content:flex-start!important;align-items:center!important;padding:0 8px!important}
   .brand h1{font-size:24px!important;letter-spacing:-.5px!important}
-  .bruce{height:86px!important;margin:4px 0 8px!important;border-radius:10px!important}
-  .bruce img{object-fit:cover!important;object-position:center 32%!important}
-  .sidebar nav{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important;margin:0!important;padding:0!important}
+  .bruce{height:180px!important;margin:4px 0 8px!important;border-radius:10px!important;overflow:visible!important}
+  .bruce img{object-fit:contain!important;object-position:center center!important}
+  .sidebar nav{display:none!important;margin:0!important;padding:0!important}
+  .sidebar.mobile-nav-open nav{display:flex!important}
   .sidebar nav a{min-height:44px!important;margin:0!important;padding:10px 12px!important;border-radius:10px!important;font-size:15px!important;display:flex!important;align-items:center!important;gap:8px!important}
   .side-foot{display:none!important}
   .workspace{min-width:0!important;width:100%!important}
@@ -259,6 +263,11 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
 esp_err_t WebHttp::access_session_js_get(httpd_req_t* request)
 {
     return send_asset(request, "application/javascript; charset=utf-8", access_session_js_start, access_session_js_end);
+}
+
+esp_err_t WebHttp::factory_reset_js_get(httpd_req_t* request)
+{
+    return send_asset(request, "application/javascript; charset=utf-8", factory_reset_js_start, factory_reset_js_end);
 }
 
 esp_err_t WebHttp::bruce_get(httpd_req_t* request)
