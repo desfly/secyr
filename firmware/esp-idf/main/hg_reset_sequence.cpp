@@ -29,18 +29,14 @@ constexpr TickType_t kSequenceTimeoutTicks = pdMS_TO_TICKS(5000);
 constexpr TickType_t kSuccessRedTicks = pdMS_TO_TICKS(5000);
 constexpr std::uint32_t kResetTaskStackBytes = 4096U;
 
-bool service_button_pressed() {
-    return gpio_get_level(board::kServiceButton) == 0;
-}
+bool service_button_pressed() { return gpio_get_level(board::kServiceButton) == 0; }
 
 esp_err_t set_pending_reset(bool pending) {
     nvs_handle_t handle{};
     auto error = nvs_open(kControlNamespace, NVS_READWRITE, &handle);
     if (error != ESP_OK) return error;
-
-    if (pending) {
-        error = nvs_set_u8(handle, kPendingKey, kPendingValue);
-    } else {
+    if (pending) error = nvs_set_u8(handle, kPendingKey, kPendingValue);
+    else {
         error = nvs_erase_key(handle, kPendingKey);
         if (error == ESP_ERR_NVS_NOT_FOUND) error = ESP_OK;
     }
@@ -55,7 +51,6 @@ esp_err_t read_pending_reset(bool& pending) {
     const auto open_error = nvs_open(kControlNamespace, NVS_READONLY, &handle);
     if (open_error == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
     if (open_error != ESP_OK) return open_error;
-
     std::uint8_t value = 0U;
     auto error = nvs_get_u8(handle, kPendingKey, &value);
     nvs_close(handle);
@@ -66,24 +61,23 @@ esp_err_t read_pending_reset(bool& pending) {
 }
 
 void perform_early_boot_factory_reset() {
-    const auto clear_error = set_pending_reset(false);
-    if (clear_error != ESP_OK) {
-        ESP_LOGE(kTag, "Cannot consume pending Factory Reset request: %s", esp_err_to_name(clear_error));
-        esp_restart();
-        return;
-    }
-
+    // Keep the pending marker committed while destructive work is in progress.
+    // All erases are idempotent, so a transient failure can safely retry on the
+    // next boot. Consuming the marker before erase would silently lose a reset.
     ESP_LOGW(kTag, "Pending Factory Reset accepted during early boot; erasing mutable state");
     const auto report = FactoryResetManager{}.erase_mutable_state();
     if (!report.ok()) {
         ESP_LOGE(kTag,
-                 "Factory Reset failed: access=%d wifi=%d cloud=%d config=%d provisioning=%d commissioning=%d",
-                 report.access,
-                 report.wifi,
-                 report.cloud,
-                 report.controller_config,
-                 report.provisioning,
-                 report.commissioning);
+                 "Factory Reset failed; request remains pending for retry: access=%d wifi=%d cloud=%d config=%d provisioning=%d commissioning=%d",
+                 report.access, report.wifi, report.cloud, report.controller_config, report.provisioning, report.commissioning);
+        (void)RgbDiagnostic::off(board::kOnboardRgb);
+        esp_restart();
+        return;
+    }
+
+    const auto clear_error = set_pending_reset(false);
+    if (clear_error != ESP_OK) {
+        ESP_LOGE(kTag, "Factory Reset erased state but cannot consume pending marker: %s; retrying next boot", esp_err_to_name(clear_error));
         (void)RgbDiagnostic::off(board::kOnboardRgb);
         esp_restart();
         return;
@@ -122,23 +116,17 @@ void service_button_reset_task(void*) {
     TickType_t press_started_at = now;
     TickType_t last_confirmed_release_at = now;
 
-    ESP_LOGI(kTag,
-             "Service-button Factory Reset armed on GPIO%d: hold 1.5 s until WHITE, release, repeat 3x",
-             static_cast<int>(board::kServiceButton));
+    ESP_LOGI(kTag, "Service-button Factory Reset armed on GPIO%d: hold 1.5 s until WHITE, release, repeat 3x", static_cast<int>(board::kServiceButton));
 
     for (;;) {
         now = xTaskGetTickCount();
         const bool sampled_pressed = service_button_pressed();
-        if (sampled_pressed != raw_pressed) {
-            raw_pressed = sampled_pressed;
-            raw_changed_at = now;
-        }
+        if (sampled_pressed != raw_pressed) { raw_pressed = sampled_pressed; raw_changed_at = now; }
 
         if (raw_pressed != stable_pressed && (now - raw_changed_at) >= kDebounceTicks) {
             stable_pressed = raw_pressed;
             if (stable_pressed) {
-                const bool timed_out = confirmed_holds != 0U &&
-                    (now - last_confirmed_release_at) > kSequenceTimeoutTicks;
+                const bool timed_out = confirmed_holds != 0U && (now - last_confirmed_release_at) > kSequenceTimeoutTicks;
                 const auto retained = hg::expire_reset_gesture(confirmed_holds, timed_out);
                 if (retained != confirmed_holds) {
                     ESP_LOGI(kTag, "Factory-reset gesture timed out; sequence cleared");
@@ -153,8 +141,7 @@ void service_button_reset_task(void*) {
                     const auto step = hg::advance_confirmed_hold(confirmed_holds, true, kRequiredHolds);
                     confirmed_holds = step.count;
                     last_confirmed_release_at = now;
-                    ESP_LOGW(kTag,
-                             "Factory-reset hold confirmed: %u/%u",
+                    ESP_LOGW(kTag, "Factory-reset hold confirmed: %u/%u",
                              static_cast<unsigned>(step.trigger_factory_reset ? kRequiredHolds : confirmed_holds),
                              static_cast<unsigned>(kRequiredHolds));
                     if (step.trigger_factory_reset) stage_factory_reset_and_reboot();
@@ -201,9 +188,7 @@ bool handle_pending_factory_reset() {
     return true;
 }
 
-esp_err_t stage_factory_reset_request() {
-    return set_pending_reset(true);
-}
+esp_err_t stage_factory_reset_request() { return set_pending_reset(true); }
 
 esp_err_t start_service_button_factory_reset() {
     // app_main invokes this immediately after nvs_flash_init(), before network,
@@ -219,14 +204,7 @@ esp_err_t start_service_button_factory_reset() {
 
     auto error = gpio_config(&config);
     if (error != ESP_OK) return error;
-    if (xTaskCreate(&service_button_reset_task,
-                    "hg_rst_button",
-                    kResetTaskStackBytes,
-                    nullptr,
-                    5,
-                    nullptr) != pdPASS) {
-        return ESP_ERR_NO_MEM;
-    }
+    if (xTaskCreate(&service_button_reset_task, "hg_rst_button", kResetTaskStackBytes, nullptr, 5, nullptr) != pdPASS) return ESP_ERR_NO_MEM;
     return ESP_OK;
 }
 
