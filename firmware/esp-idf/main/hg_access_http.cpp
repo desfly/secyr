@@ -1,5 +1,6 @@
 #include "hg_access_http.hpp"
 #include "hg_access_time.hpp"
+#include "hg_http_session.hpp"
 
 #include "esp_random.h"
 
@@ -106,6 +107,7 @@ AccessRole parse_role(std::string_view role, bool& valid) {
 
 esp_err_t send_json(httpd_req_t* request, const std::string& body) {
     httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, body.c_str(), static_cast<ssize_t>(body.size()));
 }
 
@@ -224,11 +226,22 @@ esp_err_t AccessHttp::handle_login(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
     }
 
-    return send_json(request,
+    std::string session_token = http_session::issue();
+    if (session_token.size() != 64U) {
+        scrub(session_token);
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return send_json(request, "{\"ok\":false,\"reason\":\"session_unavailable\"}");
+    }
+
+    const std::string response =
         std::string{"{\"ok\":true,\"actor\":\""} + json_escape(user->id.data()) +
         "\",\"name\":\"" + json_escape(user->name.data()) +
         "\",\"role\":\"" + to_string(user->role) +
-        "\",\"capabilities\":" + capabilities_json(*access_, user->role) + "}");
+        "\",\"sessionToken\":\"" + session_token +
+        "\",\"capabilities\":" + capabilities_json(*access_, user->role) + "}";
+    const auto result = send_json(request, response);
+    scrub(session_token);
+    return result;
 }
 
 esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
@@ -286,6 +299,7 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
             httpd_resp_set_status(request, "500 Internal Server Error");
             return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
         }
+        http_session::revoke_all();
         return send_json(request, "{\"ok\":true,\"state\":\"login_required\",\"role\":\"admin\"}");
     }
 
@@ -392,6 +406,7 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
     }
 
+    http_session::revoke_all();
     return send_json(request, "{\"ok\":true,\"enabledAdmins\":" + std::to_string(access_->enabled_admin_count()) + "}");
 }
 
