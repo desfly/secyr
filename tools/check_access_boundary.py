@@ -121,9 +121,16 @@ if early_start < 0 or early_end < 0 or "RgbDiagnostic::set_white(board::kOnboard
 
 require(WEB / "access-session.js", [
     "hg-auth-locked", "/api/v1/access/state", "/api/v1/access/login",
-    "sessionToken", "Bearer ${session.token}",
+    "sessionToken", "Bearer ${session.token}", "syncActorFields",
     "hgSetupWifiScan", "hgSetupWifiConnect", "/api/v1/network/connect",
 ])
+web_session = (WEB / "access-session.js").read_text(encoding="utf-8")
+if "session.credential" in web_session or "syncLegacyCredentials" in web_session:
+    errors.append("web access session must not retain or auto-fill the login PIN")
+if "session={actor:String(body.actor||actor),credential" in web_session:
+    errors.append("web access session object must not store the login credential")
+if 'credential="";session={' not in web_session:
+    errors.append("web login credential must be cleared before establishing the long-lived session object")
 require(WEB / "app.css", [".shell{visibility:hidden", "body:has(#hgAuthGate[hidden]) .shell{visibility:visible}"])
 
 if errors:
