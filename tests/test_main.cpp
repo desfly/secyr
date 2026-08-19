@@ -11,6 +11,7 @@ int main()
     test_reset_sequence();
     test_access_control();
     test_access_permissions();
+    test_access_runtime();
     test_output_safety();
     test_readiness();
     test_runtime_support();
