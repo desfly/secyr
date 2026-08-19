@@ -48,12 +48,7 @@ idf_component_register(
         "../../src/output_interlock.cpp"
         "../../src/output_command.cpp"
         "../../src/physical_output_runtime.cpp"
-        "../../src/event_log.cpp"
-        "../../src/access_control.cpp"
         "../../src/access_store.cpp"
-        "../../src/crc32.cpp"
-        "../../src/sha256.cpp"
-        "../../src/hardware_profile.cpp"
         "../../src/hardware_runtime.cpp"
         "../../src/hardware_test.cpp"
         "../../src/commissioning.cpp"
@@ -81,6 +76,7 @@ idf_component_register(
         esp_timer
         esp_wifi
         fatfs
+        homeguard_core
         mqtt
         nvs_flash
         sdmmc
