@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <sstream>
 #include <string>
