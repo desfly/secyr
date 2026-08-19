@@ -1,7 +1,7 @@
 #pragma once
 
 #include "homeguard/access_control.hpp"
-#include "homeguard/local_api.hpp"
+#include "homeguard/bearer_token.hpp"
 #include "esp_random.h"
 #include "esp_timer.h"
 
