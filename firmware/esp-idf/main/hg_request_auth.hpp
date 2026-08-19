@@ -50,12 +50,14 @@ inline homeguard::AuditDecision authenticate(httpd_req_t* request, homeguard::Ac
     return decision;
 }
 
-inline esp_err_t require_authenticated(httpd_req_t* request, homeguard::AccessControl& access) {
-    const auto decision = authenticate(request, access);
-    if (decision == homeguard::AuditDecision::Allowed) return ESP_OK;
-    httpd_resp_set_status(request, decision == homeguard::AuditDecision::DeniedRateLimited
-        ? "429 Too Many Requests" : "401 Unauthorized");
+inline bool authenticated(httpd_req_t* request, homeguard::AccessControl& access) {
+    return authenticate(request, access) == homeguard::AuditDecision::Allowed;
+}
+
+inline esp_err_t send_login_required(httpd_req_t* request) {
+    httpd_resp_set_status(request, "401 Unauthorized");
     httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"login_required\"}", HTTPD_RESP_USE_STRLEN);
 }
 
