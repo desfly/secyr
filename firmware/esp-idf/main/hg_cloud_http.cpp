@@ -2,6 +2,7 @@
 
 #include "hg_cloud_link.hpp"
 #include "hg_cloud_nvs.hpp"
+#include "hg_request_auth.hpp"
 #include "homeguard/access_control.hpp"
 
 #include <algorithm>
@@ -112,7 +113,10 @@ esp_err_t CloudHttp::status_get(httpd_req_t* request)
 {
     if (request == nullptr || request->user_ctx == nullptr) return ESP_ERR_INVALID_ARG;
     auto* self = static_cast<CloudHttp*>(request->user_ctx);
-    if (self->cloud_ == nullptr) return ESP_FAIL;
+    if (self->cloud_ == nullptr || self->access_control_ == nullptr) return ESP_FAIL;
+    if (!request_auth::authenticated(request, *self->access_control_)) {
+        return request_auth::send_login_required(request);
+    }
 
     const bool configured = self->cloud_->configured();
     const bool connected = self->cloud_->connected();
@@ -143,12 +147,14 @@ esp_err_t CloudHttp::handle_config(httpd_req_t* request)
 
     std::string actor, credential;
     if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
+        std::fill(body.begin(), body.end(), '\0');
         httpd_resp_set_status(request, "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"admin_credential_required\"}");
     }
     const auto decision = access_control_->authorize(actor, credential, "cloud.configure");
     std::fill(credential.begin(), credential.end(), '\0');
     if (decision != homeguard::AuditDecision::Allowed) {
+        std::fill(body.begin(), body.end(), '\0');
         httpd_resp_set_status(request, "403 Forbidden");
         return send_json(request, "{\"ok\":false,\"reason\":\"forbidden\"}");
     }
@@ -158,6 +164,7 @@ esp_err_t CloudHttp::handle_config(httpd_req_t* request)
     (void)parse_json_string(body, "brokerUri", config.broker_uri);
     (void)parse_json_string(body, "username", config.username);
     (void)parse_json_string(body, "password", config.password);
+    std::fill(body.begin(), body.end(), '\0');
     if (config.enabled && (config.broker_uri.empty() || config.broker_uri.size() > 256 ||
                            config.username.size() > 128 || config.password.size() > 128)) {
         scrub_cloud_password(config);
@@ -189,8 +196,6 @@ esp_err_t CloudHttp::handle_config(httpd_req_t* request)
     }
 
     if (start_error != ESP_OK) {
-        // The request is not successful unless both persistent and live state
-        // agree. Restore the exact previous NVS state and runtime connection.
         const auto rollback_error = had_previous ? store_->save(previous) : store_->clear();
         esp_err_t restore_runtime_error = ESP_OK;
         if (rollback_error == ESP_OK && had_previous && previous.enabled) {
