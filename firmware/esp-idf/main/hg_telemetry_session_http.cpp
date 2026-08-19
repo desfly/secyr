@@ -1,6 +1,8 @@
 #include "hg_telemetry_session_http.hpp"
 #include "hg_access_time.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <string>
 
@@ -11,18 +13,41 @@ TelemetrySessionHttp* self_from(httpd_req_t* request) {
     return static_cast<TelemetrySessionHttp*>(request->user_ctx);
 }
 
-bool parse_json_string(const std::string& body, const char* key, std::string& value) {
+std::size_t value_offset(const std::string& body, const char* key) {
     const std::string marker = std::string{"\""} + key + "\"";
     auto pos = body.find(marker);
-    if (pos == std::string::npos) return false;
+    if (pos == std::string::npos) return std::string::npos;
     pos = body.find(':', pos + marker.size());
-    if (pos == std::string::npos) return false;
-    pos = body.find('"', pos + 1U);
-    if (pos == std::string::npos) return false;
-    const auto end = body.find('"', pos + 1U);
-    if (end == std::string::npos) return false;
-    value.assign(body, pos + 1U, end - pos - 1U);
-    return true;
+    if (pos == std::string::npos) return std::string::npos;
+    ++pos;
+    while (pos < body.size() && std::isspace(static_cast<unsigned char>(body[pos]))) ++pos;
+    return pos;
+}
+
+bool parse_json_string(const std::string& body, const char* key, std::string& value) {
+    auto pos = value_offset(body, key);
+    if (pos == std::string::npos || pos >= body.size() || body[pos] != '"') return false;
+    ++pos;
+    value.clear();
+    bool escaped = false;
+    for (; pos < body.size(); ++pos) {
+        const char ch = body[pos];
+        if (escaped) {
+            if (ch == '"' || ch == '\\' || ch == '/') value.push_back(ch);
+            else if (ch == 'n') value.push_back('\n');
+            else if (ch == 'r') value.push_back('\r');
+            else if (ch == 't') value.push_back('\t');
+            else return false;
+            escaped = false;
+        } else if (ch == '\\') {
+            escaped = true;
+        } else if (ch == '"') {
+            return true;
+        } else {
+            value.push_back(ch);
+        }
+    }
+    return false;
 }
 
 bool read_body(httpd_req_t* request, std::size_t limit, std::string& body) {
@@ -41,6 +66,11 @@ bool valid_pin(const std::string& pin) {
     if (pin.size() < 4U || pin.size() > 12U) return false;
     for (const char ch : pin) if (ch < '0' || ch > '9') return false;
     return true;
+}
+
+void scrub(std::string& secret) {
+    std::fill(secret.begin(), secret.end(), '\0');
+    secret.clear();
 }
 
 esp_err_t send_json(httpd_req_t* request, const std::string& body) {
@@ -83,11 +113,13 @@ esp_err_t TelemetrySessionHttp::handle_login(httpd_req_t* request) {
     std::string credential;
     if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential) ||
         actor.empty() || actor.size() > 23U || !valid_pin(credential)) {
+        scrub(credential);
         httpd_resp_set_status(request, "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
     }
 
     const auto decision = access_->authenticate(actor, credential, access_now_ms());
+    scrub(credential);
     if (decision != AuditDecision::Allowed) {
         httpd_resp_set_status(request, decision == AuditDecision::DeniedRateLimited ? "429 Too Many Requests" : "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
