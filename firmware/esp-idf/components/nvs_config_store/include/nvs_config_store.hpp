@@ -1,5 +1,4 @@
 #pragma once
-#include "homeguard/controller.hpp"
 #include "homeguard/provisioning.hpp"
 #include <string>
 
@@ -15,8 +14,6 @@ struct FactoryProvisioningIdentity {
 
 class NvsConfigStore {
 public:
-    bool load(hg::ControllerConfig& config);
-    bool save(const hg::ControllerConfig& config);
     bool is_provisioned() const;
     bool load_provisioning(hg::ProvisioningPayload& payload) const;
     bool save_provisioning(const hg::ProvisioningPayload& payload);
