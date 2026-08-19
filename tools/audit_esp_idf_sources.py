@@ -101,8 +101,13 @@ if 'access_->authorize_session(actor, "network.configure")' not in network_http:
     errors.append("hg_network_http.cpp: Wi-Fi changes must use Bearer-session role authorization")
 
 cloud_http = (MAIN / "hg_cloud_http.cpp").read_text(encoding="utf-8")
-if "read_request_body(request, 1024U, body)" not in cloud_http or "while (offset < body.size())" not in cloud_http:
-    errors.append("hg_cloud_http.cpp: Cloud config handler must read the complete declared HTTP body")
+if '#include "hg_http_util.hpp"' not in cloud_http or \
+        "http_util::read_body(request, 1024U, body)" not in cloud_http or \
+        'http_util::parse_json_string(body, "actor", actor)' not in cloud_http or \
+        "http_util::scrub(body);" not in cloud_http:
+    errors.append("hg_cloud_http.cpp: Cloud config handler must use shared HTTP parser/scrubber")
+if "http_util::value_offset(body, key)" not in cloud_http:
+    errors.append("hg_cloud_http.cpp: Cloud boolean parser must delegate whitespace handling to shared helper")
 if "rolledBack" not in cloud_http:
     errors.append("hg_cloud_http.cpp: MQTT start failure must expose successful rollback")
 if "had_previous ? store_->save(previous) : store_->clear()" not in cloud_http:
@@ -111,6 +116,8 @@ if "restore_runtime_error = cloud_->start(" not in cloud_http:
     errors.append("hg_cloud_http.cpp: failed MQTT runtime start must restore the previous live config")
 if 'access_control_->authorize_session(actor, "cloud.configure")' not in cloud_http:
     errors.append("hg_cloud_http.cpp: Cloud changes must use Bearer-session role authorization")
+if "std::string credential" in cloud_http:
+    errors.append("hg_cloud_http.cpp: acting credential must not exist in v2 cloud runtime")
 
 output_http = (MAIN / "hg_output_http.cpp").read_text(encoding="utf-8")
 if '#include "hg_http_util.hpp"' not in output_http or \
