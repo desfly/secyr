@@ -62,6 +62,12 @@ require(MAIN / "hg_network_http.cpp", [
 require(MAIN / "hg_request_auth.hpp", [
     "hg_http_session.hpp", "http_session::authorized(authorization, access)", "WWW-Authenticate",
 ])
+request_auth = (MAIN / "hg_request_auth.hpp").read_text(encoding="utf-8")
+if "read_legacy_authorization" in request_auth or 'prefix{"HomeGuard "}' in request_auth:
+    errors.append("hg_request_auth.hpp must not permit legacy actor:PIN authorization on protected APIs")
+if "access.authenticate(actor, credential)" in request_auth:
+    errors.append("hg_request_auth.hpp protected reads must require login-issued Bearer sessions")
+
 require(MAIN / "hg_http_session.hpp", [
     "kLifetimeUs", "BearerTokenVerifier", "g_actors", "g_roles",
     "issue(std::string_view actor, homeguard::AccessRole role)",
@@ -102,9 +108,8 @@ if reset.find("set_pending_reset(false)") < reset.find("FactoryResetManager{}.er
     errors.append("hg_reset_sequence.cpp must keep factory-reset pending until erase succeeds")
 
 # RED belongs to the live button-hold phase; WHITE belongs to the later early-boot
-# success phase after mutable state is erased.  Do not compare their first lexical
-# positions in the file: the helper functions may be ordered independently of the
-# runtime sequence.
+# success phase after mutable state is erased. Do not compare their first lexical
+# positions in the file: helper functions may be ordered independently.
 service_start = reset.find("void service_button_reset_task")
 service_end = reset.find("\n}\n\n}  // namespace", service_start)
 early_start = reset.find("void perform_early_boot_factory_reset")
