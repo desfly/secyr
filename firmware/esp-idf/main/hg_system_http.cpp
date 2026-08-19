@@ -155,29 +155,32 @@ esp_err_t SystemHttp::handle_factory_reset(httpd_req_t* request) {
         httpd_resp_set_status(request,"400 Bad Request");
         return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"invalid_body\"}",-1);
     }
-    std::string actor, credential, confirm;
-    if (!http_util::parse_json_string(body,"actor",actor) || !http_util::parse_json_string(body,"credential",credential)) {
-        http_util::scrub(credential); http_util::scrub(body);
+    std::string actor, confirm;
+    if (!http_util::parse_json_string(body,"actor",actor) || actor.empty()) {
+        http_util::scrub(body);
         httpd_resp_set_status(request,"401 Unauthorized");
-        return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"credential_required\"}",-1);
+        return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"session_actor_required\"}",-1);
     }
     if (!request_auth::authenticated_actor(request, *access_control_, actor)) {
-        http_util::scrub(credential); http_util::scrub(body);
+        http_util::scrub(body);
         return request_auth::send_login_required(request);
     }
     if (!http_util::parse_json_string(body,"confirm",confirm) || confirm != "ERASE_ALL") {
-        http_util::scrub(credential); http_util::scrub(body);
+        http_util::scrub(body);
         httpd_resp_set_status(request,"409 Conflict");
         return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"explicit_confirmation_required\"}",-1);
     }
     http_util::scrub(body);
-    const auto decision = access_control_->authorize(actor,credential,"system.factory_reset");
-    http_util::scrub(credential);
+    const auto decision = access_control_->authorize_session(actor,"system.factory_reset");
     if (decision != homeguard::AuditDecision::Allowed) {
         httpd_resp_set_status(request,"403 Forbidden");
         const std::string response = std::string{"{\"ok\":false,\"reason\":\""} + homeguard::to_string(decision) + "\"}";
         return send_json(request,response.c_str(),response.size());
     }
+
+    /* LEGACY v1 disabled: factory reset used to require actor + credential on
+       every request. We keep the explicit ERASE_ALL confirmation, while PIN
+       verification happens once at Bearer login. */
 
     const auto stage_error = stage_factory_reset_request();
     if (stage_error != ESP_OK) {
@@ -199,29 +202,31 @@ esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
         httpd_resp_set_status(request,"400 Bad Request");
         return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"invalid_body\"}",-1);
     }
-    std::string command,actor,credential;
+    std::string command,actor;
     if (!http_util::parse_json_string(body,"command",command)) {
         http_util::scrub(body);
         httpd_resp_set_status(request,"400 Bad Request");
         return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"missing_command\"}",-1);
     }
-    if (!http_util::parse_json_string(body,"actor",actor) || !http_util::parse_json_string(body,"credential",credential)) {
-        http_util::scrub(credential); http_util::scrub(body);
+    if (!http_util::parse_json_string(body,"actor",actor) || actor.empty()) {
+        http_util::scrub(body);
         httpd_resp_set_status(request,"401 Unauthorized");
-        return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"credential_required\"}",-1);
+        return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"session_actor_required\"}",-1);
     }
     if (!request_auth::authenticated_actor(request, *access_control_, actor)) {
-        http_util::scrub(credential); http_util::scrub(body);
+        http_util::scrub(body);
         return request_auth::send_login_required(request);
     }
     http_util::scrub(body);
-    const auto decision = access_control_->authorize(actor,credential,command);
-    http_util::scrub(credential);
+    const auto decision = access_control_->authorize_session(actor,command);
     if (decision != homeguard::AuditDecision::Allowed) {
         httpd_resp_set_status(request,"403 Forbidden");
         const std::string response = std::string{"{\"ok\":false,\"reason\":\""} + homeguard::to_string(decision) + "\"}";
         return send_json(request,response.c_str(),response.size());
     }
+
+    /* LEGACY v1 disabled: credential parsing + authorize(actor, credential,
+       command) used to force the user to enter PIN for every button press. */
 
     hg::PartitionArmState target{};
     if (command == "security.arm_away") target = hg::PartitionArmState::Away;
