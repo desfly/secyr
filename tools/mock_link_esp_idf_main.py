@@ -6,11 +6,12 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-MAIN = ROOT / "firmware" / "esp-idf" / "main"
+FIRMWARE = ROOT / "firmware"
+MAIN = FIRMWARE / "esp-idf" / "main"
 MOCK = ROOT / "tests" / "esp-idf-mock" / "include"
-INCLUDE = ROOT / "firmware" / "include"
-CORE_SRC = ROOT / "firmware" / "src"
-COMPONENTS = ROOT / "firmware" / "esp-idf" / "components"
+INCLUDE = FIRMWARE / "include"
+CORE_SRC = FIRMWARE / "src"
+COMPONENTS = FIRMWARE / "esp-idf" / "components"
 HARNESS = ROOT / "tests" / "esp-idf-mock" / "mock_main.cpp"
 BUILD = ROOT / "mock-link-build"
 REPORT = ROOT / "mock-link-report.json"
@@ -30,16 +31,24 @@ if COMPONENTS.exists():
 
 sources = []
 
+
 def add_cmake_sources(cmake_path: Path, base_dir: Path) -> None:
     if not cmake_path.exists():
         return
     cmake_text = cmake_path.read_text(encoding="utf-8")
-    for ref in re.findall(r'"([^"]+\.cpp)"', cmake_text):
+    for ref in re.findall(r'"?([^\s"()]+\.cpp)"?', cmake_text):
         path = (base_dir / ref).resolve()
         if path.exists():
             sources.append(path)
 
+
 add_cmake_sources(MAIN / "CMakeLists.txt", MAIN)
+
+# Pull the complete host core source set from the canonical firmware CMake
+# target. ESP-IDF receives these implementations through homeguard_core; the
+# host mock must mirror that dependency or syntax can pass while final link
+# fails with undefined references after new core APIs are introduced.
+add_cmake_sources(FIRMWARE / "CMakeLists.txt", FIRMWARE)
 
 # Link the implementations of ESP-IDF components that app_main directly uses.
 # Keep this aligned with the component objects instantiated from app_main.cpp;
@@ -48,16 +57,10 @@ for component_name in ("nvs_config_store", "websocket_telemetry", "device_discov
     component_dir = COMPONENTS / component_name
     add_cmake_sources(component_dir / "CMakeLists.txt", component_dir)
 
-# These core implementations back the live telemetry/discovery paths but are
-# not all listed as main component sources because ESP-IDF normally gets them
-# through the homeguard_core component dependency.
-for filename in (
-    "provisioning.cpp",
-    "health_monitor.cpp",
-    "telemetry.cpp",
-    "local_api.cpp",
-    "discovery.cpp",
-):
+# Optional host-only core implementations that are intentionally not part of
+# the canonical homeguard_core target yet. Keep them conditional and dedupe the
+# final list below.
+for filename in ("local_api.cpp",):
     path = CORE_SRC / filename
     if path.exists():
         sources.append(path.resolve())
