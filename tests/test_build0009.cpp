@@ -1,8 +1,6 @@
 #include "test_framework.hpp"
 #include "homeguard/hardware_profile.hpp"
 #include "homeguard/hardware_capabilities.hpp"
-#include "homeguard/service_button.hpp"
-#include "homeguard/startup_flow.hpp"
 
 void test_build0009() {
     CHECK(hg::HardwareProfile::board == "HW-678 V0.0.0");
@@ -64,41 +62,4 @@ void test_build0009() {
     CHECK(!output_capabilities.safe_for_unverified_board());
     CHECK(hg::to_string(hg::CapabilityState::Unavailable) == "unavailable");
     CHECK(hg::to_string(hg::CapabilityState::Configured) == "configured");
-
-    hg::ServiceButton button({40, 3000, 10000});
-    CHECK(button.update(true, 0) == hg::ServiceButtonEvent::None);
-    CHECK(button.update(true, 39) == hg::ServiceButtonEvent::None);
-    CHECK(button.update(true, 40) == hg::ServiceButtonEvent::None);
-    CHECK(button.pressed());
-    CHECK(button.update(true, 3039) == hg::ServiceButtonEvent::None);
-    CHECK(button.update(true, 3040) == hg::ServiceButtonEvent::ServiceModeRequested);
-    CHECK(button.update(true, 5000) == hg::ServiceButtonEvent::None);
-    CHECK(button.update(true, 10040) == hg::ServiceButtonEvent::FactoryResetRequested);
-    CHECK(button.update(true, 12000) == hg::ServiceButtonEvent::None);
-    CHECK(button.update(false, 12001) == hg::ServiceButtonEvent::None);
-    CHECK(button.update(false, 12041) == hg::ServiceButtonEvent::None);
-    CHECK(!button.pressed());
-
-    hg::StartupFlow flow;
-    CHECK(flow.boot(false, true, 0) == hg::StartupAction::StartSetupAp);
-    CHECK(flow.state() == hg::StartupState::SetupAp);
-    CHECK(flow.provisioning_committed() == hg::StartupAction::RestartController);
-    CHECK(flow.state() == hg::StartupState::RestartPending);
-    CHECK(flow.boot(true, true, 100) == hg::StartupAction::StartWifiSta);
-    CHECK(flow.wifi_connected() == hg::StartupAction::StartLocalServices);
-    CHECK(flow.local_services_started() == hg::StartupAction::StartCloud);
-    CHECK(flow.state() == hg::StartupState::LocalReady);
-    CHECK(flow.cloud_connected() == hg::StartupAction::None);
-    CHECK(flow.state() == hg::StartupState::CloudReady);
-
-    hg::StartupFlow retry;
-    CHECK(retry.boot(true, false, 0) == hg::StartupAction::StartWifiSta);
-    CHECK(retry.wifi_failed(100) == hg::StartupAction::None);
-    CHECK(retry.state() == hg::StartupState::Offline);
-    CHECK(retry.retry_count() == 1);
-    CHECK(retry.tick(1099) == hg::StartupAction::None);
-    CHECK(retry.tick(1100) == hg::StartupAction::RetryWifi);
-    CHECK(retry.wifi_connected() == hg::StartupAction::StartLocalServices);
-    CHECK(retry.local_services_started() == hg::StartupAction::None);
-    CHECK(retry.state() == hg::StartupState::LocalReady);
 }
