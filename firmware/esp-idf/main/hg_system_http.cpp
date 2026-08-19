@@ -130,7 +130,16 @@ esp_err_t SystemHttp::handle_factory_reset(httpd_req_t* request) {
     const auto decision=access_control_->authorize(actor,credential,"system.factory_reset");
     if (decision != homeguard::AuditDecision::Allowed) { httpd_resp_set_status(request,"403 Forbidden"); const std::string response=std::string{"{\"ok\":false,\"reason\":\""}+homeguard::to_string(decision)+"\"}"; return send_json(request,response.c_str(),response.size()); }
     const auto report=FactoryResetManager{}.erase_mutable_state();
-    if (!report.ok()) { httpd_resp_set_status(request,"500 Internal Server Error"); const std::string response=std::string{"{\"ok\":false,\"reason\":\"erase_failed\",\"access\":"}+std::to_string(report.access)+",\"wifi\":"+std::to_string(report.wifi)+",\"cloud\":"+std::to_string(report.cloud)+",\"controllerConfig\":"+std::to_string(report.controller_config)+",\"provisioning\":"+std::to_string(report.provisioning)+",\"commissioning\":"+std::to_string(report.commissioning)+"}"; return send_json(request,response.c_str(),response.size()); }
+    if (!report.ok()) {
+        httpd_resp_set_status(request,"500 Internal Server Error");
+        const std::string response=std::string{"{\"ok\":false,\"reason\":\"erase_failed\",\"access\":"}+std::to_string(report.access)+",\"wifi\":"+std::to_string(report.wifi)+",\"cloud\":"+std::to_string(report.cloud)+",\"controllerConfig\":"+std::to_string(report.controller_config)+",\"provisioning\":"+std::to_string(report.provisioning)+",\"commissioning\":"+std::to_string(report.commissioning)+",\"rebooting\":true}";
+        // erase_mutable_state() is multi-step; a failure can happen after an
+        // earlier namespace was already committed. Reboot after returning the
+        // diagnostic response so RAM is never left inconsistent with NVS.
+        const auto reboot_task=xTaskCreate(&delayed_factory_reboot,"hg_factory_reset",2048,nullptr,5,nullptr);
+        if (reboot_task != pdPASS) { esp_restart(); return ESP_FAIL; }
+        return send_json(request,response.c_str(),response.size());
+    }
     access_control_->clear_users();
     const auto reboot_task=xTaskCreate(&delayed_factory_reboot,"hg_factory_reset",2048,nullptr,5,nullptr);
     if (reboot_task != pdPASS) { esp_restart(); return ESP_FAIL; }
