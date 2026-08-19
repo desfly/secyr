@@ -1,0 +1,40 @@
+name: Web Navigation Runtime Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "tools/check_web_navigation_runtime.py"
+      - ".github/workflows/web-navigation-runtime.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "tools/check_web_navigation_runtime.py"
+      - ".github/workflows/web-navigation-runtime.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-navigation-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-navigation:
+    name: Browser navigation invariant
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Static Web UI contract
+        run: python tools/check_web_ui_contract.py
+      - name: Browser hash-route audit
+        run: python tools/check_web_navigation_runtime.py
