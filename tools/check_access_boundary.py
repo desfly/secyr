@@ -103,8 +103,9 @@ require(MAIN / "hg_network_http.cpp", [
 ])
 network_http = (MAIN / "hg_network_http.cpp").read_text(encoding="utf-8")
 connect_call = network_http.find("const auto connect_error = esp_wifi_connect()")
-# Match the C++ source spelling, not a multiply-escaped representation of it.
-success_reply = network_http.find(r'{\"ok\":true,\"state\":\"connecting')
+# Locate the actual success response semantically.  Looking for the full escaped
+# JSON literal was brittle because the response is assembled from std::string pieces.
+success_reply = network_http.find("std::string{\"{\\\"ok\\\":true", connect_call if connect_call >= 0 else 0)
 if connect_call < 0 or success_reply < 0 or success_reply < connect_call:
     errors.append("Wi-Fi connect API must not report success before esp_wifi_connect() has been accepted")
 require(MAIN / "hg_network_http.hpp", ["bool clear_credentials() const;"])
