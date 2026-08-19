@@ -22,13 +22,10 @@ constexpr TickType_t kHoldTicks = pdMS_TO_TICKS(1500);
 constexpr TickType_t kDebounceTicks = pdMS_TO_TICKS(40);
 constexpr TickType_t kPollTicks = pdMS_TO_TICKS(20);
 constexpr TickType_t kSequenceTimeoutTicks = pdMS_TO_TICKS(5000);
-constexpr TickType_t kFailureFeedbackTicks = pdMS_TO_TICKS(5000);
-constexpr unsigned kResetWhiteMs = 5000U;
+constexpr TickType_t kSuccessRedTicks = pdMS_TO_TICKS(5000);
 constexpr std::uint32_t kResetTaskStackBytes = 4096U;
 
 bool service_button_pressed() {
-    // Dedicated service button is wired active-low; internal pull-up keeps the
-    // input deterministic when the button is open.
     return gpio_get_level(board::kServiceButton) == 0;
 }
 
@@ -47,20 +44,20 @@ void perform_factory_reset() {
                  report.provisioning,
                  report.commissioning);
 
-        // Never show WHITE for a partial/failed erase. RED for five seconds is
-        // an explicit failure indication before rebooting into recovery-safe boot.
-        (void)RgbDiagnostic::set_red(kResetRgbGpio);
-        vTaskDelay(kFailureFeedbackTicks);
+        // RED is reserved exclusively for a successful complete factory reset.
+        // On any partial erase, keep the LED off and reboot into recovery-safe boot.
         (void)RgbDiagnostic::off(kResetRgbGpio);
         esp_restart();
         return;
     }
 
-    // WHITE means exactly one thing: the complete factory erase succeeded.
-    ESP_LOGW(kTag, "Factory Reset complete; WHITE RGB confirmation for 5 seconds");
-    const auto rgb_error = RgbDiagnostic::test_white(kResetRgbGpio, kResetWhiteMs);
+    ESP_LOGW(kTag, "Factory Reset complete; RED RGB confirmation for 5 seconds");
+    const auto rgb_error = RgbDiagnostic::set_red(kResetRgbGpio);
     if (rgb_error != ESP_OK) {
-        ESP_LOGE(kTag, "Factory-reset WHITE confirmation failed: %s", esp_err_to_name(rgb_error));
+        ESP_LOGE(kTag, "Factory-reset RED confirmation failed: %s", esp_err_to_name(rgb_error));
+    } else {
+        vTaskDelay(kSuccessRedTicks);
+        (void)RgbDiagnostic::off(kResetRgbGpio);
     }
 
     ESP_LOGW(kTag, "Factory Reset confirmed; rebooting clean");
@@ -80,7 +77,7 @@ void service_button_reset_task(void*) {
     TickType_t last_confirmed_release_at = now;
 
     ESP_LOGI(kTag,
-             "Service-button Factory Reset armed on GPIO%d: hold 1.5 s until RED, release, repeat 3x",
+             "Service-button Factory Reset armed on GPIO%d: hold 1.5 s until WHITE, release, repeat 3x",
              static_cast<int>(board::kServiceButton));
 
     for (;;) {
@@ -128,12 +125,12 @@ void service_button_reset_task(void*) {
         }
 
         if (stable_pressed && !hold_confirmed && (now - press_started_at) >= kHoldTicks) {
-            const auto rgb_error = RgbDiagnostic::set_red(kResetRgbGpio);
+            const auto rgb_error = RgbDiagnostic::set_white(kResetRgbGpio);
             if (rgb_error != ESP_OK) {
-                ESP_LOGE(kTag, "Cannot show RED hold confirmation: %s", esp_err_to_name(rgb_error));
+                ESP_LOGE(kTag, "Cannot show WHITE hold confirmation: %s", esp_err_to_name(rgb_error));
             }
             hold_confirmed = true;
-            ESP_LOGW(kTag, "Hold threshold reached; RED means release now");
+            ESP_LOGW(kTag, "Hold threshold reached; WHITE means release now");
         }
 
         if (!stable_pressed && confirmed_holds != 0U &&
