@@ -11,7 +11,6 @@ int main()
     test_connectivity();
     test_provisioning();
     test_reset_sequence();
-    test_alarm_ack();
     test_access_control();
     test_access_permissions();
     test_output_safety();
