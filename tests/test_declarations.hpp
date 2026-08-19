@@ -1,9 +1,13 @@
 #pragma once
-void test_zone(); void test_pressure(); void test_reliability(); void test_controller();
+void test_zone();
+void test_pressure();
+void test_reliability();
+void test_controller();
 void test_connectivity();
 void test_provisioning();
 void test_reset_sequence();
 void test_alarm_ack();
+void test_access_control();
 void test_build0009();
 void test_build0013();
 void test_build0032();
@@ -20,6 +24,3 @@ void test_build0052();
 void test_build0053();
 void test_build0054();
 void test_build0055();
-void test_build0056();
-void test_build0057();
-void test_build0058();
