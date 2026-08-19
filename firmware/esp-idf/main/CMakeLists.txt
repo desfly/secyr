@@ -56,8 +56,6 @@ idf_component_register(
         "../../src/hardware_verification.cpp"
         "../../src/boot_readiness.cpp"
         "../../src/service_readiness.cpp"
-        "../../src/device_command_router.cpp"
-        "../../src/device_api_model.cpp"
         "../../src/hardware_calibration.cpp"
         "../../src/hardware_api.cpp"
         "../../src/infrastructure_status.cpp"
