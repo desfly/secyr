@@ -5,7 +5,6 @@ void test_reliability();
 void test_connectivity();
 void test_provisioning();
 void test_reset_sequence();
-void test_alarm_ack();
 void test_access_control();
 void test_access_permissions();
 void test_output_safety();
