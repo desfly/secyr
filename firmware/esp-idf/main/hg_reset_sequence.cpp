@@ -22,7 +22,6 @@ constexpr const char* kControlNamespace = "hg_rstctl";
 constexpr const char* kPendingKey = "pending";
 constexpr std::uint8_t kPendingValue = 1U;
 constexpr std::uint8_t kRequiredHolds = 3U;
-constexpr int kResetRgbGpio = 48;
 constexpr TickType_t kHoldTicks = pdMS_TO_TICKS(1500);
 constexpr TickType_t kDebounceTicks = pdMS_TO_TICKS(40);
 constexpr TickType_t kPollTicks = pdMS_TO_TICKS(20);
@@ -85,26 +84,26 @@ void perform_early_boot_factory_reset() {
                  report.controller_config,
                  report.provisioning,
                  report.commissioning);
-        (void)RgbDiagnostic::off(kResetRgbGpio);
+        (void)RgbDiagnostic::off(board::kOnboardRgb);
         esp_restart();
         return;
     }
 
     ESP_LOGW(kTag, "Factory Reset complete; RED RGB confirmation for 5 seconds");
-    const auto rgb_error = RgbDiagnostic::set_red(kResetRgbGpio);
+    const auto rgb_error = RgbDiagnostic::set_red(board::kOnboardRgb);
     if (rgb_error != ESP_OK) {
         ESP_LOGE(kTag, "Factory-reset RED confirmation failed: %s", esp_err_to_name(rgb_error));
     } else {
         vTaskDelay(kSuccessRedTicks);
-        (void)RgbDiagnostic::off(kResetRgbGpio);
+        (void)RgbDiagnostic::off(board::kOnboardRgb);
     }
     ESP_LOGW(kTag, "Factory Reset confirmed; rebooting clean");
     esp_restart();
 }
 
-void stage_factory_reset() {
-    (void)RgbDiagnostic::off(kResetRgbGpio);
-    const auto error = set_pending_reset(true);
+void stage_factory_reset_and_reboot() {
+    (void)RgbDiagnostic::off(board::kOnboardRgb);
+    const auto error = stage_factory_reset_request();
     if (error != ESP_OK) {
         ESP_LOGE(kTag, "Cannot stage Factory Reset request; no destructive reset performed: %s", esp_err_to_name(error));
         return;
@@ -150,7 +149,7 @@ void service_button_reset_task(void*) {
                 ESP_LOGI(kTag, "Service button pressed; waiting for hold threshold");
             } else {
                 if (hold_confirmed) {
-                    (void)RgbDiagnostic::off(kResetRgbGpio);
+                    (void)RgbDiagnostic::off(board::kOnboardRgb);
                     const auto step = hg::advance_confirmed_hold(confirmed_holds, true, kRequiredHolds);
                     confirmed_holds = step.count;
                     last_confirmed_release_at = now;
@@ -158,7 +157,7 @@ void service_button_reset_task(void*) {
                              "Factory-reset hold confirmed: %u/%u",
                              static_cast<unsigned>(step.trigger_factory_reset ? kRequiredHolds : confirmed_holds),
                              static_cast<unsigned>(kRequiredHolds));
-                    if (step.trigger_factory_reset) stage_factory_reset();
+                    if (step.trigger_factory_reset) stage_factory_reset_and_reboot();
                 } else {
                     ESP_LOGI(kTag, "Short/unconfirmed service-button press ignored");
                 }
@@ -167,7 +166,7 @@ void service_button_reset_task(void*) {
         }
 
         if (stable_pressed && !hold_confirmed && (now - press_started_at) >= kHoldTicks) {
-            const auto rgb_error = RgbDiagnostic::set_white(kResetRgbGpio);
+            const auto rgb_error = RgbDiagnostic::set_white(board::kOnboardRgb);
             if (rgb_error != ESP_OK) {
                 ESP_LOGE(kTag, "Cannot show WHITE hold confirmation; hold not armed: %s", esp_err_to_name(rgb_error));
             } else {
@@ -200,6 +199,10 @@ bool handle_pending_factory_reset() {
     if (!pending) return false;
     perform_early_boot_factory_reset();
     return true;
+}
+
+esp_err_t stage_factory_reset_request() {
+    return set_pending_reset(true);
 }
 
 esp_err_t start_service_button_factory_reset() {
