@@ -1,6 +1,4 @@
 #pragma once
-void test_zone();
-void test_pressure();
 void test_reliability();
 void test_connectivity();
 void test_provisioning();
