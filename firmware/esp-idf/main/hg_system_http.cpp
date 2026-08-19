@@ -1,5 +1,5 @@
 #include "hg_system_http.hpp"
-#include "hg_factory_reset.hpp"
+#include "hg_reset_sequence.hpp"
 #include "hg_http_util.hpp"
 #include "hg_request_auth.hpp"
 #include "homeguard/system_api.hpp"
@@ -174,22 +174,16 @@ esp_err_t SystemHttp::handle_factory_reset(httpd_req_t* request) {
         return send_json(request,response.c_str(),response.size());
     }
 
-    const auto report = FactoryResetManager{}.erase_mutable_state();
-    if (report.access == ESP_OK) access_control_->clear_users();
-    schedule_factory_reboot();
-
-    if (!report.ok()) {
+    const auto stage_error = stage_factory_reset_request();
+    if (stage_error != ESP_OK) {
         httpd_resp_set_status(request,"500 Internal Server Error");
-        const std::string response = std::string{"{\"ok\":false,\"reason\":\"erase_failed\",\"access\":"} +
-            std::to_string(report.access) + ",\"wifi\":" + std::to_string(report.wifi) +
-            ",\"cloud\":" + std::to_string(report.cloud) + ",\"controllerConfig\":" +
-            std::to_string(report.controller_config) + ",\"provisioning\":" +
-            std::to_string(report.provisioning) + ",\"commissioning\":" +
-            std::to_string(report.commissioning) + ",\"rebooting\":true}";
+        const std::string response = std::string{"{\"ok\":false,\"reason\":\"stage_failed\",\"error\":"} +
+            std::to_string(stage_error) + "}";
         return send_json(request,response.c_str(),response.size());
     }
 
-    static constexpr char response[] = "{\"ok\":true,\"state\":\"factory_reset_complete\",\"rebooting\":true}";
+    schedule_factory_reboot();
+    static constexpr char response[] = "{\"ok\":true,\"state\":\"factory_reset_staged\",\"rebooting\":true}";
     return send_json(request,response,sizeof(response)-1U);
 }
 
