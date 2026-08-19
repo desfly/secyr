@@ -124,6 +124,27 @@ if "Скидання виконано частково" not in factory_reset_js:
         "factory-reset.js: partial reset must be reported distinctly from a rejected request"
     )
 
+# Network reconfiguration is another persistence boundary. HTTP request bodies
+# can arrive in short reads and a failed NVS commit must not leave the live STA
+# config different from the credentials that will be restored after reboot.
+network_http = (MAIN / "hg_network_http.cpp").read_text(encoding="utf-8")
+if "while (offset < body.size())" not in network_http or "body.data() + offset" not in network_http:
+    errors.append(
+        "hg_network_http.cpp: Wi-Fi connect handler must read the complete declared HTTP body"
+    )
+if "wifi_persist_failed" not in network_http or "have_previous_sta" not in network_http:
+    errors.append(
+        "hg_network_http.cpp: failed Wi-Fi NVS commit must restore the previous live STA config"
+    )
+if not re.search(
+    r"if\s*\(!save_credentials\(ssid, password\)\)\s*\{.*?esp_wifi_set_config\(WIFI_IF_STA,\s*&previous_sta\)",
+    network_http,
+    re.S,
+):
+    errors.append(
+        "hg_network_http.cpp: Wi-Fi persistence rollback guard is missing"
+    )
+
 for warning in warnings:
     print(f"WARNING: {warning}")
 
