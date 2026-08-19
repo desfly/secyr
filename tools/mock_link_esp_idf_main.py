@@ -32,23 +32,26 @@ if COMPONENTS.exists():
 sources = []
 
 
-def add_cmake_sources(cmake_path: Path, base_dir: Path) -> None:
+def add_cmake_sources(cmake_path: Path, base_dir: Path, allowed_root: Path | None = None) -> None:
     if not cmake_path.exists():
         return
     cmake_text = cmake_path.read_text(encoding="utf-8")
+    allowed = allowed_root.resolve() if allowed_root is not None else None
     for ref in re.findall(r'"?([^\s"()]+\.cpp)"?', cmake_text):
         path = (base_dir / ref).resolve()
-        if path.exists():
-            sources.append(path)
+        if not path.exists():
+            continue
+        if allowed is not None and path != allowed and allowed not in path.parents:
+            continue
+        sources.append(path)
 
 
 add_cmake_sources(MAIN / "CMakeLists.txt", MAIN)
 
 # Pull the complete host core source set from the canonical firmware CMake
-# target. ESP-IDF receives these implementations through homeguard_core; the
-# host mock must mirror that dependency or syntax can pass while final link
-# fails with undefined references after new core APIs are introduced.
-add_cmake_sources(FIRMWARE / "CMakeLists.txt", FIRMWARE)
+# target. Restrict it to firmware/src so the test executable sources declared
+# in the same file cannot leak into the ESP-IDF mock link.
+add_cmake_sources(FIRMWARE / "CMakeLists.txt", FIRMWARE, CORE_SRC)
 
 # Link the implementations of ESP-IDF components that app_main directly uses.
 # Keep this aligned with the component objects instantiated from app_main.cpp;
