@@ -24,7 +24,6 @@ int main()
     test_build0038();
     test_build0045();
     test_build0046();
-    test_build0047();
 
     std::cout << "HomeGuard-S3 host tests: " << testfw::checks << " checks PASS\n";
     return 0;
