@@ -22,7 +22,6 @@ add_library(homeguard_core
     src/startup_flow.cpp
     src/device_identity.cpp
     src/discovery.cpp
-    src/cloud_link.cpp
     src/event_log.cpp
     src/system_model.cpp
     src/system_api.cpp
