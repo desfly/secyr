@@ -4,6 +4,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "firmware" / "esp-idf" / "main"
 WEB = ROOT / "web"
+CORE = ROOT / "firmware" / "src"
+INCLUDE = ROOT / "firmware" / "include" / "homeguard"
 
 errors = []
 
@@ -13,17 +15,30 @@ def require(path: Path, snippets: list[str]) -> None:
         if snippet not in text:
             errors.append(f"{path.relative_to(ROOT)} missing security contract: {snippet}")
 
-# Inspect semantic tokens rather than brittle escaped JSON spellings where possible.
+# Login is the only place where an acting user's PIN is verified. Protected
+# requests use an actor-bound Bearer session and command-level role policy.
+require(INCLUDE / "access_control.hpp", [
+    "authorize_session(",
+    "Session model (v2)",
+    "LEGACY v1",
+])
+require(CORE / "access_control.cpp", [
+    "AuditDecision AccessControl::authorize_session(",
+    "role_allows(user->role, command)",
+    "append_audit(actor, command, AuditDecision::Allowed)",
+    "LEGACY v1",
+])
+
 require(MAIN / "hg_access_http.cpp", [
     '"/api/v1/access/state"', "access_runtime::setup_required", "setup_required", "login_required",
     "http_session::issue(user->id.data(), user->role)", "sessionToken",
     '"/api/v1/access/logout"', "http_session::revoke(authorization)",
     "http_session::authorized_for_actor(authorization, *access_, actor)",
-    'access_->authorize(actor, credential, "access.manage", now_ms)',
+    'access_->authorize_session(actor, "access.manage")',
     "std::unique_ptr<AccessControl> previous_access",
     "*access_ = *previous_access",
     "const auto persist = store_->save(*access_)",
-    "http_session::revoke_all()",
+    "http_session::revoke_actor(id)",
 ])
 
 require(MAIN / "hg_access_runtime.hpp", ["g_bootstrap_allowed", "setup_required", "lock_bootstrap"])
@@ -32,8 +47,12 @@ if "bootstrap_allowed_ = false" not in access_http:
     errors.append("hg_access_http.cpp must explicitly close bootstrap only in first-Admin flow")
 if "bootstrap_allowed_ = true" not in access_http:
     errors.append("hg_access_http.cpp must restore bootstrap when first-Admin creation/persistence fails")
-if access_http.find("http_session::revoke_all()") < access_http.find("const auto persist = store_->save(*access_)"):
-    errors.append("user mutation must revoke sessions only after persistence succeeds")
+if access_http.find("http_session::revoke_actor(id)") < access_http.find("const auto persist = store_->save(*access_)"):
+    errors.append("user mutation must invalidate the changed account only after persistence succeeds")
+if access_http.count("http_session::revoke_all()") != 1:
+    errors.append("revoke_all must remain limited to first-Admin bootstrap; ordinary user edits use revoke_actor")
+if 'access_->authorize(actor, credential, "access.manage"' in access_http:
+    errors.append("access management must not re-check acting Admin PIN after Bearer login")
 
 app_main = (MAIN / "app_main.cpp").read_text(encoding="utf-8")
 if "nvs_flash_erase()" in app_main:
@@ -81,19 +100,19 @@ require(MAIN / "hg_http_session.hpp", [
     "authorized(std::string_view authorization, homeguard::AccessControl& access)",
     "authorized_for_actor", "authorized_impl", "session_actor != expected_actor",
     "access.find_user(session_actor)", "user->role != g_roles[i]",
-    "revoke(", "revoke_all",
+    "revoke(", "revoke_actor", "revoke_all",
 ])
 
-# Release-critical mutating APIs must require both an actor-bound Bearer session
-# and command-level RBAC/PIN confirmation.
+# Release-critical mutating APIs: actor-bound Bearer + session role RBAC.
 require(MAIN / "hg_system_http.cpp", [
     "request_auth::authenticated_actor(request, *access_control_, actor)",
-    'authorize(actor,credential,"system.factory_reset")',
-    "access_control_->authorize(actor,credential,command)",
+    'authorize_session(actor,"system.factory_reset")',
+    "access_control_->authorize_session(actor,command)",
+    'confirm != "ERASE_ALL"',
 ])
 require(MAIN / "hg_network_http.cpp", [
     "request_auth::authenticated_actor(request, *access_, actor)",
-    'access_->authorize(actor, credential, "network.configure")',
+    'access_->authorize_session(actor, "network.configure")',
     "had_persisted_credentials = load_credentials(previous_ssid, previous_password)",
     "persist_rollback_ok = had_persisted_credentials",
     "? save_credentials(previous_ssid, previous_password)",
@@ -103,8 +122,6 @@ require(MAIN / "hg_network_http.cpp", [
 ])
 network_http = (MAIN / "hg_network_http.cpp").read_text(encoding="utf-8")
 connect_call = network_http.find("const auto connect_error = esp_wifi_connect()")
-# setupMode is emitted only by the successful connect response.  Using that
-# semantic token avoids depending on C++ JSON escaping or string construction.
 success_reply = network_http.find("setupMode", connect_call if connect_call >= 0 else 0)
 if connect_call < 0 or success_reply < 0 or success_reply < connect_call:
     errors.append("Wi-Fi connect API must not report success before esp_wifi_connect() has been accepted")
@@ -112,11 +129,29 @@ require(MAIN / "hg_network_http.hpp", ["bool clear_credentials() const;"])
 require(MAIN / "hg_output_http.cpp", [
     "hg_request_auth.hpp",
     "request_auth::authenticated_actor(request, *access_control_, actor)",
-    "access_control_->authorize(actor, credential, command)",
+    "access_control_->authorize_session(actor, command)",
     "physical_->force_safe()",
     "model_->set_output_active(output_id, false, 0)",
     "physical_output_failure",
 ])
+require(MAIN / "hg_cloud_http.cpp", [
+    "request_auth::authenticated_actor(request, *access_control_, actor)",
+    'access_control_->authorize_session(actor, "cloud.configure")',
+])
+require(MAIN / "hg_service_http.cpp", [
+    "request_auth::authenticated_actor(request, *self->access_control_, actor)",
+    'self->access_control_->authorize_session(actor, "system.service.invalidate")',
+])
+
+# Active protected endpoint code must not use the old per-request PIN API.
+for filename, legacy_call in (
+    ("hg_network_http.cpp", 'access_->authorize(actor, credential, "network.configure")'),
+    ("hg_cloud_http.cpp", 'access_control_->authorize(actor, credential, "cloud.configure")'),
+    ("hg_service_http.cpp", 'self->access_control_->authorize(actor, credential, "system.service.invalidate")'),
+):
+    source = (MAIN / filename).read_text(encoding="utf-8")
+    if legacy_call in source:
+        errors.append(f"{filename} still contains active legacy per-request PIN authorization")
 
 system_http = (MAIN / "hg_system_http.cpp").read_text(encoding="utf-8")
 if "stage_factory_reset_request()" not in system_http:
@@ -149,6 +184,7 @@ if early_start < 0 or early_end < 0 or "RgbDiagnostic::set_white(board::kOnboard
 require(WEB / "access-session.js", [
     "hg-auth-locked", "/api/v1/access/state", "/api/v1/access/login",
     "sessionToken", "Bearer ${session.token}", "syncActorFields",
+    "bearerMutationRoutes", "payload.actor = session.actor", "delete payload.credential",
     "hgSetupWifiScan", "hgSetupWifiConnect", "/api/v1/network/connect",
 ])
 web_session = (WEB / "access-session.js").read_text(encoding="utf-8")
@@ -158,6 +194,17 @@ if "session={actor:String(body.actor||actor),credential" in web_session:
     errors.append("web access session object must not store the login credential")
 if 'credential="";session={' not in web_session:
     errors.append("web login credential must be cleared before establishing the long-lived session object")
+if "delete payload.credential" not in web_session:
+    errors.append("protected Web mutations must strip legacy credential before transmission")
+
+require(WEB / "factory-reset.js", [
+    "HomeGuardAuth", 'role?.() === "admin"', "ERASE_ALL",
+    "actor: window.HomeGuardAuth.actor()",
+])
+factory_reset_js = (WEB / "factory-reset.js").read_text(encoding="utf-8")
+if "credential: credential.value" in factory_reset_js:
+    errors.append("factory reset Web request must not transmit acting Admin PIN")
+
 require(WEB / "app.css", [".shell{visibility:hidden", "body:has(#hgAuthGate[hidden]) .shell{visibility:visible}"])
 
 if errors:
@@ -166,3 +213,6 @@ if errors:
     sys.exit(1)
 
 print("Access boundary security audit PASS")
+print(" - login is the only acting-user PIN verification step")
+print(" - protected mutations require actor-bound Bearer + role RBAC")
+print(" - legacy Web credential is stripped before transmission")
