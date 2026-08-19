@@ -4,22 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - "firmware/**"
-      - "android/**"
-      - "web/**"
-      - "tools/**"
-      - "tests/**"
-      - ".github/workflows/homeguard-build.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "firmware/**"
-      - "android/**"
-      - "web/**"
-      - "tools/**"
-      - "tests/**"
-      - ".github/workflows/homeguard-build.yml"
 
 permissions:
   contents: read
