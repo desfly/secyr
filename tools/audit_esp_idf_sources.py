@@ -58,11 +58,6 @@ for source in sorted(MAIN.glob("*.cpp")) + sorted(MAIN.glob("*.hpp")):
     if re.search(r"\bGPIO_NUM_(?:19|20|35|36|37|43|44|45|46|48)\b", text):
         warnings.append(f"{source.name}: reserved GPIO referenced")
 
-# AccessControl carries users plus a 64-entry audit trail and is too large to
-# copy as an automatic local in ESP-IDF's httpd task. Build-1090 demonstrated
-# that such a rollback snapshot can overflow the 8 KiB HTTP stack before the
-# handler reaches even its early validation returns. Rollback snapshots must
-# therefore live outside the task stack (for example behind a smart pointer).
 access_http = (MAIN / "hg_access_http.cpp").read_text(encoding="utf-8")
 large_access_stack_copy = re.compile(
     r"\b(?:const\s+)?(?:auto|(?:homeguard::)?AccessControl)\s+\w+\s*=\s*\*access_\s*;"
@@ -72,11 +67,6 @@ if large_access_stack_copy.search(access_http):
         "hg_access_http.cpp: AccessControl rollback snapshot must not be copied into the httpd task stack"
     )
 
-# Build-1218 exposed the same class of bug during boot: AccessStoreCodec::decode
-# constructed a full temporary AccessControl on ESP-IDF's main task stack while
-# AccessNvsStore::load also held the persisted image. Forbid full automatic
-# AccessControl temporaries in the NVS codec; decode scratch must stay limited
-# to the compact persisted records.
 access_store = (CORE / "access_store.cpp").read_text(encoding="utf-8")
 full_access_local = re.compile(r"\bAccessControl\s+[A-Za-z_]\w*\s*(?:;|\{)")
 if full_access_local.search(access_store):
@@ -84,9 +74,6 @@ if full_access_local.search(access_store):
         "access_store.cpp: full AccessControl temporary must not be placed on the NVS decode task stack"
     )
 
-# Factory reset erases several namespaces one after another. A later erase can
-# fail after an earlier one is already committed, so both physical-RST and Web
-# paths must reboot rather than continue with RAM that disagrees with NVS.
 reset_sequence = (MAIN / "hg_reset_sequence.cpp").read_text(encoding="utf-8")
 if "Factory Reset was partial; rebooting into recovery-safe boot path" not in reset_sequence:
     errors.append(
@@ -111,9 +98,6 @@ if not re.search(
         "hg_system_http.cpp: partial Web factory reset must report rebooting and schedule recovery reboot"
     )
 
-# The browser must distinguish a rejected reset from a destructive reset that
-# partially completed and is rebooting for recovery. Otherwise the UI tells the
-# operator "rejected" while the controller has already erased state.
 factory_reset_js = (WEB / "factory-reset.js").read_text(encoding="utf-8")
 if "body.rebooting === true" not in factory_reset_js:
     errors.append(
@@ -124,9 +108,6 @@ if "Скидання виконано частково" not in factory_reset_js:
         "factory-reset.js: partial reset must be reported distinctly from a rejected request"
     )
 
-# Network reconfiguration is another persistence boundary. HTTP request bodies
-# can arrive in short reads and a failed NVS commit must not leave the live STA
-# config different from the credentials that will be restored after reboot.
 network_http = (MAIN / "hg_network_http.cpp").read_text(encoding="utf-8")
 if "while (offset < body.size())" not in network_http or "body.data() + offset" not in network_http:
     errors.append(
@@ -145,15 +126,12 @@ if not re.search(
         "hg_network_http.cpp: Wi-Fi persistence rollback guard is missing"
     )
 
-# Cloud configuration has the same two boundaries: a request can arrive in
-# multiple TCP reads, and a config that cannot start must not remain persisted
-# as the next-boot configuration after the API reports failure.
 cloud_http = (MAIN / "hg_cloud_http.cpp").read_text(encoding="utf-8")
 if "read_request_body(request, 1024U, body)" not in cloud_http or "while (offset < body.size())" not in cloud_http:
     errors.append(
         "hg_cloud_http.cpp: Cloud config handler must read the complete declared HTTP body"
     )
-if '"rolledBack\\\":true' not in cloud_http and 'rolledBack' not in cloud_http:
+if "rolledBack" not in cloud_http:
     errors.append(
         "hg_cloud_http.cpp: MQTT start failure must expose successful rollback"
     )
@@ -165,6 +143,34 @@ if "restore_runtime_error = cloud_->start(" not in cloud_http:
     errors.append(
         "hg_cloud_http.cpp: failed MQTT runtime start must restore the previous live config"
     )
+
+# Physical control paths must tolerate TCP short reads and minimize credential
+# lifetime. They are more sensitive than ordinary configuration endpoints.
+output_http = (MAIN / "hg_output_http.cpp").read_text(encoding="utf-8")
+if "read_request_body(request, 384U, body)" not in output_http or "while (offset < body.size())" not in output_http:
+    errors.append("hg_output_http.cpp: output command must read the complete HTTP body")
+if "std::isspace" not in output_http or "value_offset" not in output_http:
+    errors.append("hg_output_http.cpp: output JSON scalar parser must accept legal whitespace")
+if "credential.clear();" not in output_http:
+    errors.append("hg_output_http.cpp: output credential must be scrubbed immediately after authorization")
+
+telemetry_http = (MAIN / "hg_telemetry_session_http.cpp").read_text(encoding="utf-8")
+if "scrub(credential);" not in telemetry_http or "bool escaped = false" not in telemetry_http:
+    errors.append("hg_telemetry_session_http.cpp: telemetry auth must use escaped JSON parsing and scrub credentials")
+
+service_http = (MAIN / "hg_service_http.cpp").read_text(encoding="utf-8")
+if "scrub(credential);" not in service_http or "bool escaped = false" not in service_http:
+    errors.append("hg_service_http.cpp: service auth must use escaped JSON parsing and scrub credentials")
+
+# Remote diagnostics must not expose the old unauthenticated three-second RGB
+# test. It blocked the single HTTP control task and was reachable by any LAN
+# client. Internal RgbDiagnostic remains available for controlled reset paths.
+infrastructure_http = (MAIN / "hg_infrastructure_http.cpp").read_text(encoding="utf-8")
+registered_part = infrastructure_http.split("esp_err_t InfrastructureHttp::rgb_test_post", 1)[0]
+if "/api/v1/diagnostics/rgb-test" in registered_part:
+    errors.append("hg_infrastructure_http.cpp: unauthenticated remote RGB diagnostic route must remain disabled")
+if "remote_rgb_test_disabled" not in infrastructure_http:
+    errors.append("hg_infrastructure_http.cpp: disabled RGB handler must remain fail-closed")
 
 for warning in warnings:
     print(f"WARNING: {warning}")
