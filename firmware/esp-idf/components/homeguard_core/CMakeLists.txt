@@ -22,8 +22,6 @@ set(HG_CORE_SRCS
     "../../../src/maintenance.cpp"
     "../../../src/power_monitor.cpp"
     "../../../src/command.cpp"
-    "../../../src/local_api.cpp"
-    "../../../src/controller.cpp"
     "../../../src/boot_self_test.cpp"
     "../../../src/alarm_acknowledgement.cpp"
     "../../../src/alarm_ack_command.cpp"
