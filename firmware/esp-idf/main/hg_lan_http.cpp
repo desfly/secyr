@@ -1,5 +1,6 @@
 #include "hg_lan_http.hpp"
 
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/etharp.h"
@@ -13,6 +14,9 @@
 
 namespace homeguard::idf {
 namespace {
+
+constexpr std::int64_t kActiveScanCooldownUs = 3'000'000;
+std::int64_t g_last_active_scan_us = -kActiveScanCooldownUs;
 
 LanHttp* self_from(httpd_req_t* request)
 {
@@ -34,14 +38,20 @@ std::string mac_to_string(const eth_addr& mac)
     return text;
 }
 
-void stimulate_arp_cache()
+bool stimulate_arp_cache()
 {
-    if (netif_default == nullptr) return;
+    if (netif_default == nullptr) return false;
     const auto local = ip4_addr_get_u32(netif_ip4_addr(netif_default));
-    if (local == 0) return;
+    if (local == 0) return false;
+
+    const auto now_us = esp_timer_get_time();
+    if (now_us - g_last_active_scan_us < kActiveScanCooldownUs) return false;
+    // Reserve the cooldown before the expensive work so back-to-back requests
+    // cannot all enter the synchronous /24 stimulus path.
+    g_last_active_scan_us = now_us;
 
     const int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock < 0) return;
+    if (sock < 0) return false;
 
     const std::uint32_t base = local & PP_HTONL(0xFFFFFF00UL);
     const char payload = 0;
@@ -57,6 +67,7 @@ void stimulate_arp_cache()
     }
     close(sock);
     vTaskDelay(pdMS_TO_TICKS(250));
+    return true;
 }
 
 esp_err_t send_json(httpd_req_t* request, const std::string& body)
@@ -100,12 +111,14 @@ std::string LanHttp::devices_json(bool active_scan) const
         return "{\"ok\":true,\"state\":\"offline\",\"devices\":[]}";
     }
 
-    if (active_scan) stimulate_arp_cache();
+    const bool scan_performed = active_scan && stimulate_arp_cache();
 
     const auto local = ip4_addr_get_u32(netif_ip4_addr(netif_default));
     const std::uint32_t base = local & PP_HTONL(0xFFFFFF00UL);
     std::string out = std::string{"{\"ok\":true,\"state\":\"connected\",\"activeScan\":"} +
-                      (active_scan ? "true" : "false") + ",\"devices\":[";
+                      (scan_performed ? "true" : "false") +
+                      ",\"scanThrottled\":" + (active_scan && !scan_performed ? "true" : "false") +
+                      ",\"devices\":[";
     bool first = true;
     for (std::uint32_t host = 1; host < 255; ++host) {
         ip4_addr_t target{};
