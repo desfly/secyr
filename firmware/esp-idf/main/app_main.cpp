@@ -197,7 +197,7 @@ esp_err_t start_http_server()
     error = g_cloud_http.register_handlers(g_http_server, &g_cloud_link, &g_cloud_store, &g_access_control);
     if (error != ESP_OK) return rollback_http(error, "cloud routes");
 
-    error = g_http_api.register_handlers(g_http_server, &g_hardware);
+    error = g_http_api.register_handlers(g_http_server, &g_hardware, &g_access_control);
     if (error != ESP_OK) return rollback_http(error, "hardware routes");
 
     error = g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus, &g_access_control);
@@ -217,7 +217,7 @@ esp_err_t start_http_server()
     error = g_service_http.register_handlers(g_http_server, &g_commissioning_store, &g_hardware_verification, &g_commissioning_state, &g_boot_readiness, &g_system_bus);
     if (error != ESP_OK) return rollback_http(error, "service routes");
 
-    error = g_build_http.register_handlers(g_http_server);
+    error = g_build_http.register_handlers(g_http_server, &g_access_control);
     if (error != ESP_OK) return rollback_http(error, "build routes");
     return ESP_OK;
 }
@@ -257,7 +257,7 @@ void start_device_discovery()
     std::string suffix = device_id;
     const auto dash = suffix.find_last_of('-');
     if (dash != std::string::npos && dash + 1U < suffix.size()) suffix.erase(0, dash + 1U);
-    std::transform(suffix.begin(), suffix.end(), suffix.begin(), [](unsigned char c) {
+    std::transform(suffix.begin(), suffix.end(), [](unsigned char c) {
         return static_cast<char>(std::tolower(c));
     });
     const std::string hostname = "homeguard-" + suffix;
