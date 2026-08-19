@@ -13,10 +13,13 @@ def require(path: Path, snippets: list[str]) -> None:
         if snippet not in text:
             errors.append(f"{path.relative_to(ROOT)} missing security contract: {snippet}")
 
+# Inspect semantic tokens rather than the source spelling of escaped JSON quotes.
+# C++ JSON literals use \\" in source, so matching quoted JSON strings directly
+# made this gate fail when formatting changed despite identical runtime behavior.
 require(MAIN / "hg_access_http.cpp", [
-    '"/api/v1/access/state"', '"setup_required"', '"login_required"',
-    'http_session::issue()', '\"sessionToken\"',
-    '"/api/v1/access/logout"', 'http_session::revoke(authorization)',
+    '"/api/v1/access/state"', "access_runtime::setup_required", "setup_required", "login_required",
+    "http_session::issue()", "sessionToken",
+    '"/api/v1/access/logout"', "http_session::revoke(authorization)",
 ])
 
 require(MAIN / "hg_access_runtime.hpp", ["g_bootstrap_allowed", "setup_required", "lock_bootstrap"])
@@ -56,7 +59,7 @@ require(MAIN / "hg_network_http.cpp", [
     "access_runtime::setup_required", "request_auth::",
 ])
 
-require(MAIN / "hg_request_auth.hpp", ["hg_http_session.hpp", "http_session::authorized", 'WWW-Authenticate'])
+require(MAIN / "hg_request_auth.hpp", ["hg_http_session.hpp", "http_session::authorized", "WWW-Authenticate"])
 require(MAIN / "hg_http_session.hpp", ["kLifetimeUs", "BearerTokenVerifier", "revoke(", "revoke_all"])
 
 system_http = (MAIN / "hg_system_http.cpp").read_text(encoding="utf-8")
