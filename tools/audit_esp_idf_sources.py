@@ -3,44 +3,22 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-MAIN = ROOT / "firmware" / "esp-idf" / "main"
+ESP = ROOT / "firmware" / "esp-idf"
+MAIN = ESP / "main"
 CORE = ROOT / "firmware" / "src"
 WEB = ROOT / "web"
+COMPONENTS = ESP / "components"
 
 errors = []
 warnings = []
 
 rules = [
-    (
-        re.compile(r"\bESP_RETURN_ON_ERROR\b"),
-        '#include "esp_check.h"',
-        "ESP_RETURN_ON_ERROR requires esp_check.h",
-    ),
-    (
-        re.compile(r"\bpdMS_TO_TICKS\b"),
-        '#include "freertos/FreeRTOS.h"',
-        "pdMS_TO_TICKS requires FreeRTOS.h",
-    ),
-    (
-        re.compile(r"\bxTaskCreate\b|\bvTaskDelay\b"),
-        '#include "freertos/task.h"',
-        "FreeRTOS task API requires task.h",
-    ),
-    (
-        re.compile(r"\besp_rom_delay_us\b"),
-        '#include "esp_rom_sys.h"',
-        "esp_rom_delay_us requires esp_rom_sys.h",
-    ),
-    (
-        re.compile(r"\bstd::uint(?:8|16|32|64)_t\b"),
-        "#include <cstdint>",
-        "fixed-width integer type requires cstdint",
-    ),
-    (
-        re.compile(r"\bstd::size_t\b"),
-        "#include <cstddef>",
-        "std::size_t requires cstddef",
-    ),
+    (re.compile(r"\bESP_RETURN_ON_ERROR\b"), '#include "esp_check.h"', "ESP_RETURN_ON_ERROR requires esp_check.h"),
+    (re.compile(r"\bpdMS_TO_TICKS\b"), '#include "freertos/FreeRTOS.h"', "pdMS_TO_TICKS requires FreeRTOS.h"),
+    (re.compile(r"\bxTaskCreate\b|\bvTaskDelay\b"), '#include "freertos/task.h"', "FreeRTOS task API requires task.h"),
+    (re.compile(r"\besp_rom_delay_us\b"), '#include "esp_rom_sys.h"', "esp_rom_delay_us requires esp_rom_sys.h"),
+    (re.compile(r"\bstd::uint(?:8|16|32|64)_t\b"), "#include <cstdint>", "fixed-width integer type requires cstdint"),
+    (re.compile(r"\bstd::size_t\b"), "#include <cstddef>", "std::size_t requires cstddef"),
 ]
 
 for source in sorted(MAIN.glob("*.cpp")) + sorted(MAIN.glob("*.hpp")):
@@ -48,24 +26,17 @@ for source in sorted(MAIN.glob("*.cpp")) + sorted(MAIN.glob("*.hpp")):
     for pattern, include, message in rules:
         if pattern.search(text) and include not in text:
             errors.append(f"{source.name}: {message}")
-
     if "ESP_ERROR_CHECK(" in text and source.suffix == ".hpp":
         warnings.append(f"{source.name}: ESP_ERROR_CHECK found in header")
-
     if "new " in text or "malloc(" in text:
         warnings.append(f"{source.name}: dynamic allocation should be reviewed")
-
     if re.search(r"\bGPIO_NUM_(?:19|20|35|36|37|43|44|45|46|48)\b", text):
         warnings.append(f"{source.name}: reserved GPIO referenced")
 
 access_http = (MAIN / "hg_access_http.cpp").read_text(encoding="utf-8")
-large_access_stack_copy = re.compile(
-    r"\b(?:const\s+)?(?:auto|(?:homeguard::)?AccessControl)\s+\w+\s*=\s*\*access_\s*;"
-)
+large_access_stack_copy = re.compile(r"\b(?:const\s+)?(?:auto|(?:homeguard::)?AccessControl)\s+\w+\s*=\s*\*access_\s*;")
 if large_access_stack_copy.search(access_http):
-    errors.append(
-        "hg_access_http.cpp: AccessControl rollback snapshot must not be copied into the httpd task stack"
-    )
+    errors.append("hg_access_http.cpp: AccessControl rollback snapshot must not be copied into the httpd task stack")
 if "bool escaped = false" not in access_http or "scrub(credential);" not in access_http:
     errors.append("hg_access_http.cpp: Access auth must use escaped JSON parsing and scrub credentials")
 if 'allowed("network.configure")' not in access_http or 'allowed("system.network.configure")' in access_http:
@@ -74,33 +45,17 @@ if 'allowed("network.configure")' not in access_http or 'allowed("system.network
 access_store = (CORE / "access_store.cpp").read_text(encoding="utf-8")
 full_access_local = re.compile(r"\bAccessControl\s+[A-Za-z_]\w*\s*(?:;|\{)")
 if full_access_local.search(access_store):
-    errors.append(
-        "access_store.cpp: full AccessControl temporary must not be placed on the NVS decode task stack"
-    )
+    errors.append("access_store.cpp: full AccessControl temporary must not be placed on the NVS decode task stack")
 
 reset_sequence = (MAIN / "hg_reset_sequence.cpp").read_text(encoding="utf-8")
 if "Factory Reset was partial; rebooting into recovery-safe boot path" not in reset_sequence:
-    errors.append(
-        "hg_reset_sequence.cpp: partial triple-RST factory reset must force a recovery reboot"
-    )
-if not re.search(
-    r"if\s*\(!report\.ok\(\)\)\s*\{.*?esp_restart\(\);.*?return\s+true\s*;",
-    reset_sequence,
-    re.S,
-):
-    errors.append(
-        "hg_reset_sequence.cpp: failed destructive reset path can return without esp_restart"
-    )
+    errors.append("hg_reset_sequence.cpp: partial triple-RST factory reset must force a recovery reboot")
+if not re.search(r"if\s*\(!report\.ok\(\)\)\s*\{.*?esp_restart\(\);.*?return\s+true\s*;", reset_sequence, re.S):
+    errors.append("hg_reset_sequence.cpp: failed destructive reset path can return without esp_restart")
 
 system_http = (MAIN / "hg_system_http.cpp").read_text(encoding="utf-8")
-if not re.search(
-    r"if\s*\(!report\.ok\(\)\)\s*\{.*?rebooting.*?xTaskCreate\s*\(\s*&delayed_factory_reboot",
-    system_http,
-    re.S,
-):
-    errors.append(
-        "hg_system_http.cpp: partial Web factory reset must report rebooting and schedule recovery reboot"
-    )
+if not re.search(r"if\s*\(!report\.ok\(\)\)\s*\{.*?rebooting.*?xTaskCreate\s*\(\s*&delayed_factory_reboot", system_http, re.S):
+    errors.append("hg_system_http.cpp: partial Web factory reset must report rebooting and schedule recovery reboot")
 if "bool escaped = false" not in system_http or "scrub(body);" not in system_http or "scrub(credential);" not in system_http:
     errors.append("hg_system_http.cpp: System auth must use escaped JSON parsing and scrub raw credential-bearing bodies")
 registered_system_routes = system_http.split("esp_err_t SystemHttp::send_json", 1)[0]
@@ -109,49 +64,27 @@ if '"/ws/system"' in registered_system_routes:
 
 factory_reset_js = (WEB / "factory-reset.js").read_text(encoding="utf-8")
 if "body.rebooting === true" not in factory_reset_js:
-    errors.append(
-        "factory-reset.js: partial destructive reset recovery response is not handled"
-    )
+    errors.append("factory-reset.js: partial destructive reset recovery response is not handled")
 if "Скидання виконано частково" not in factory_reset_js:
-    errors.append(
-        "factory-reset.js: partial reset must be reported distinctly from a rejected request"
-    )
+    errors.append("factory-reset.js: partial reset must be reported distinctly from a rejected request")
 
 network_http = (MAIN / "hg_network_http.cpp").read_text(encoding="utf-8")
 if "while (offset < body.size())" not in network_http or "body.data() + offset" not in network_http:
-    errors.append(
-        "hg_network_http.cpp: Wi-Fi connect handler must read the complete declared HTTP body"
-    )
+    errors.append("hg_network_http.cpp: Wi-Fi connect handler must read the complete declared HTTP body")
 if "wifi_persist_failed" not in network_http or "have_previous_sta" not in network_http:
-    errors.append(
-        "hg_network_http.cpp: failed Wi-Fi NVS commit must restore the previous live STA config"
-    )
-if not re.search(
-    r"if\s*\(!save_credentials\(ssid, password\)\)\s*\{.*?esp_wifi_set_config\(WIFI_IF_STA,\s*&previous_sta\)",
-    network_http,
-    re.S,
-):
-    errors.append(
-        "hg_network_http.cpp: Wi-Fi persistence rollback guard is missing"
-    )
+    errors.append("hg_network_http.cpp: failed Wi-Fi NVS commit must restore the previous live STA config")
+if not re.search(r"if\s*\(!save_credentials\(ssid, password\)\)\s*\{.*?esp_wifi_set_config\(WIFI_IF_STA,\s*&previous_sta\)", network_http, re.S):
+    errors.append("hg_network_http.cpp: Wi-Fi persistence rollback guard is missing")
 
 cloud_http = (MAIN / "hg_cloud_http.cpp").read_text(encoding="utf-8")
 if "read_request_body(request, 1024U, body)" not in cloud_http or "while (offset < body.size())" not in cloud_http:
-    errors.append(
-        "hg_cloud_http.cpp: Cloud config handler must read the complete declared HTTP body"
-    )
+    errors.append("hg_cloud_http.cpp: Cloud config handler must read the complete declared HTTP body")
 if "rolledBack" not in cloud_http:
-    errors.append(
-        "hg_cloud_http.cpp: MQTT start failure must expose successful rollback"
-    )
+    errors.append("hg_cloud_http.cpp: MQTT start failure must expose successful rollback")
 if "had_previous ? store_->save(previous) : store_->clear()" not in cloud_http:
-    errors.append(
-        "hg_cloud_http.cpp: failed MQTT runtime start must restore the previous persisted config"
-    )
+    errors.append("hg_cloud_http.cpp: failed MQTT runtime start must restore the previous persisted config")
 if "restore_runtime_error = cloud_->start(" not in cloud_http:
-    errors.append(
-        "hg_cloud_http.cpp: failed MQTT runtime start must restore the previous live config"
-    )
+    errors.append("hg_cloud_http.cpp: failed MQTT runtime start must restore the previous live config")
 
 output_http = (MAIN / "hg_output_http.cpp").read_text(encoding="utf-8")
 if "read_request_body(request, 384U, body)" not in output_http or "while (offset < body.size())" not in output_http:
@@ -164,6 +97,8 @@ if "credential.clear();" not in output_http:
 telemetry_http = (MAIN / "hg_telemetry_session_http.cpp").read_text(encoding="utf-8")
 if "scrub(credential);" not in telemetry_http or "bool escaped = false" not in telemetry_http:
     errors.append("hg_telemetry_session_http.cpp: telemetry auth must use escaped JSON parsing and scrub credentials")
+if "scrub(body);" not in telemetry_http or "scrub(token);" not in telemetry_http:
+    errors.append("hg_telemetry_session_http.cpp: telemetry login body and issued session token must be scrubbed after use")
 
 service_http = (MAIN / "hg_service_http.cpp").read_text(encoding="utf-8")
 if "scrub(credential);" not in service_http or "bool escaped = false" not in service_http:
@@ -175,6 +110,27 @@ if "/api/v1/diagnostics/rgb-test" in registered_part:
     errors.append("hg_infrastructure_http.cpp: unauthenticated remote RGB diagnostic route must remain disabled")
 if "remote_rgb_test_disabled" not in infrastructure_http:
     errors.append("hg_infrastructure_http.cpp: disabled RGB handler must remain fail-closed")
+
+app_main = (MAIN / "app_main.cpp").read_text(encoding="utf-8")
+for required in ("rollback_http", "g_system_http.detach_transport()", "httpd_stop(g_http_server)", "g_http_server = nullptr"):
+    if required not in app_main:
+        errors.append(f"app_main.cpp: partial HTTP registration rollback missing required step: {required}")
+if "return g_build_http.register_handlers(g_http_server);" in app_main:
+    errors.append("app_main.cpp: final build route must also participate in HTTP rollback")
+
+stale_commissioning_http = MAIN / "hg_commissioning_http.hpp"
+if stale_commissioning_http.exists():
+    errors.append("hg_commissioning_http.hpp: stale unimplemented commissioning HTTP API must remain removed")
+
+ws_component = COMPONENTS / "websocket_telemetry"
+ws_cpp = (ws_component / "websocket_telemetry.cpp").read_text(encoding="utf-8")
+ws_hpp = (ws_component / "include/websocket_telemetry.hpp").read_text(encoding="utf-8")
+if "kSessionTokenLifetimeUs" not in ws_cpp or "esp_timer_get_time()" not in ws_cpp:
+    errors.append("websocket_telemetry: session handshake tickets must have a bounded lifetime")
+if not re.search(r"if\s*\(session\.authorized\(authorization\)\)\s*\{.*?session\.clear\(\);.*?return true;", ws_cpp, re.S):
+    errors.append("websocket_telemetry: session handshake ticket must be single-use")
+if "session_token_issued_us_" not in ws_hpp:
+    errors.append("websocket_telemetry.hpp: session ticket issue timestamps are missing")
 
 for warning in warnings:
     print(f"WARNING: {warning}")
