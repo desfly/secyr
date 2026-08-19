@@ -332,6 +332,15 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
     }
 
+    std::string authorization;
+    if (!read_authorization(request, authorization) ||
+        !http_session::authorized_for_actor(authorization, *access_, actor)) {
+        scrub(authorization); scrub(credential); scrub(body);
+        httpd_resp_set_status(request, "401 Unauthorized");
+        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_session\"}");
+    }
+    scrub(authorization);
+
     const auto now_ms = access_now_ms();
     const auto decision = access_->authorize(actor, credential, "access.manage", now_ms);
     scrub(credential);
