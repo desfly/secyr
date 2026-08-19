@@ -50,10 +50,7 @@ bool parse_json_string(const std::string& body, const char* key, std::string& va
             escaped = false;
             continue;
         }
-        if (ch == '\\') {
-            escaped = true;
-            continue;
-        }
+        if (ch == '\\') { escaped = true; continue; }
         if (ch == '"') return true;
         value.push_back(ch);
     }
@@ -89,9 +86,7 @@ std::string json_escape(std::string_view value) {
             case '\n': out += "\\n"; break;
             case '\r': out += "\\r"; break;
             case '\t': out += "\\t"; break;
-            default:
-                if (static_cast<unsigned char>(ch) >= 0x20U) out.push_back(ch);
-                break;
+            default: if (static_cast<unsigned char>(ch) >= 0x20U) out.push_back(ch); break;
         }
     }
     return out;
@@ -121,6 +116,17 @@ bool read_body(httpd_req_t* request, std::size_t limit, std::string& body) {
         if (received <= 0) return false;
         offset += static_cast<std::size_t>(received);
     }
+    return true;
+}
+
+bool read_authorization(httpd_req_t* request, std::string& authorization) {
+    authorization.clear();
+    if (request == nullptr) return false;
+    const auto length = httpd_req_get_hdr_value_len(request, "Authorization");
+    if (length == 0U || length > 128U) return false;
+    std::array<char, 129> buffer{};
+    if (httpd_req_get_hdr_value_str(request, "Authorization", buffer.data(), buffer.size()) != ESP_OK) return false;
+    authorization.assign(buffer.data(), length);
     return true;
 }
 
@@ -158,6 +164,7 @@ esp_err_t AccessHttp::register_handlers(httpd_handle_t server,
         {.uri = "/api/v1/access/state", .method = HTTP_GET, .handler = &AccessHttp::state_get, .user_ctx = this},
         {.uri = "/api/v1/access/users", .method = HTTP_POST, .handler = &AccessHttp::users_post, .user_ctx = this},
         {.uri = "/api/v1/access/login", .method = HTTP_POST, .handler = &AccessHttp::login_post, .user_ctx = this},
+        {.uri = "/api/v1/access/logout", .method = HTTP_POST, .handler = &AccessHttp::logout_post, .user_ctx = this},
     };
     for (const auto& route : routes) {
         const auto error = httpd_register_uri_handler(server, &route);
@@ -181,11 +188,27 @@ esp_err_t AccessHttp::login_post(httpd_req_t* request) {
     return self == nullptr ? ESP_FAIL : self->handle_login(request);
 }
 
+esp_err_t AccessHttp::logout_post(httpd_req_t* request) {
+    auto* self = self_from(request);
+    return self == nullptr ? ESP_FAIL : self->handle_logout(request);
+}
+
 esp_err_t AccessHttp::handle_state(httpd_req_t* request) {
     if (access_ == nullptr) return ESP_FAIL;
     return send_json(request, access_runtime::setup_required(*access_)
         ? "{\"ok\":true,\"state\":\"setup_required\"}"
         : "{\"ok\":true,\"state\":\"login_required\"}");
+}
+
+esp_err_t AccessHttp::handle_logout(httpd_req_t* request) {
+    std::string authorization;
+    if (!read_authorization(request, authorization) || !http_session::revoke(authorization)) {
+        scrub(authorization);
+        httpd_resp_set_status(request, "401 Unauthorized");
+        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_session\"}");
+    }
+    scrub(authorization);
+    return send_json(request, "{\"ok\":true,\"state\":\"login_required\"}");
 }
 
 esp_err_t AccessHttp::handle_login(httpd_req_t* request) {
@@ -205,8 +228,7 @@ esp_err_t AccessHttp::handle_login(httpd_req_t* request) {
     std::string credential;
     if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential) ||
         actor.empty() || actor.size() > 23U || !valid_pin(credential)) {
-        scrub(credential);
-        scrub(body);
+        scrub(credential); scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
     }
@@ -234,8 +256,7 @@ esp_err_t AccessHttp::handle_login(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"session_unavailable\"}");
     }
 
-    const std::string response =
-        std::string{"{\"ok\":true,\"actor\":\""} + json_escape(user->id.data()) +
+    const std::string response = std::string{"{\"ok\":true,\"actor\":\""} + json_escape(user->id.data()) +
         "\",\"name\":\"" + json_escape(user->name.data()) +
         "\",\"role\":\"" + to_string(user->role) +
         "\",\"sessionToken\":\"" + session_token +
@@ -270,14 +291,11 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
             return send_json(request, "{\"ok\":false,\"reason\":\"bootstrap_unavailable\"}");
         }
 
-        std::string id;
-        std::string name;
-        std::string pin;
+        std::string id, name, pin;
         if (!parse_json_string(body, "id", id) || !parse_json_string(body, "name", name) ||
             !parse_json_string(body, "pin", pin) || id.empty() || id.size() > 23U ||
             name.empty() || name.size() > 31U || !valid_pin(pin)) {
-            scrub(pin);
-            scrub(body);
+            scrub(pin); scrub(body);
             httpd_resp_set_status(request, "400 Bad Request");
             return send_json(request, "{\"ok\":false,\"reason\":\"invalid_bootstrap_admin\"}");
         }
@@ -287,8 +305,7 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         std::array<std::uint8_t, 16> salt{};
         esp_fill_random(salt.data(), salt.size());
         const bool user_set = access_->set_user(id, name, AccessRole::Admin, pin, salt, true);
-        scrub(pin);
-        scrub(body);
+        scrub(pin); scrub(body);
         if (!user_set) {
             bootstrap_allowed_ = true;
             access_runtime::set_bootstrap_allowed(true);
@@ -308,11 +325,9 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":true,\"state\":\"login_required\",\"role\":\"admin\"}");
     }
 
-    std::string actor;
-    std::string credential;
+    std::string actor, credential;
     if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
-        scrub(credential);
-        scrub(body);
+        scrub(credential); scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
     }
@@ -355,15 +370,11 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"unknown_action\"}");
     }
 
-    std::string id;
-    std::string name;
-    std::string role_text;
-    std::string pin;
+    std::string id, name, role_text, pin;
     bool enabled = true;
     if (!parse_json_string(body, "id", id) || !parse_json_string(body, "name", name) ||
         !parse_json_string(body, "role", role_text) || !parse_json_string(body, "pin", pin)) {
-        scrub(pin);
-        scrub(body);
+        scrub(pin); scrub(body);
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"user_fields_required\"}");
     }
@@ -372,23 +383,20 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
     bool role_valid = false;
     const auto role = parse_role(role_text, role_valid);
     if (!role_valid || id.empty() || id.size() > 23U || name.empty() || name.size() > 31U || !valid_pin(pin)) {
-        scrub(pin);
-        scrub(body);
+        scrub(pin); scrub(body);
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_user\"}");
     }
 
     if (!access_->would_preserve_admin_access(id, role, enabled)) {
-        scrub(pin);
-        scrub(body);
+        scrub(pin); scrub(body);
         httpd_resp_set_status(request, "409 Conflict");
         return send_json(request, "{\"ok\":false,\"reason\":\"last_admin_required\"}");
     }
 
     std::unique_ptr<AccessControl> previous_access{new (std::nothrow) AccessControl(*access_)};
     if (!previous_access) {
-        scrub(pin);
-        scrub(body);
+        scrub(pin); scrub(body);
         httpd_resp_set_status(request, "503 Service Unavailable");
         return send_json(request, "{\"ok\":false,\"reason\":\"rollback_snapshot_unavailable\"}");
     }
@@ -396,8 +404,7 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
     std::array<std::uint8_t, 16> salt{};
     esp_fill_random(salt.data(), salt.size());
     const bool user_set = access_->set_user(id, name, role, pin, salt, enabled);
-    scrub(pin);
-    scrub(body);
+    scrub(pin); scrub(body);
     if (!user_set) {
         *access_ = *previous_access;
         httpd_resp_set_status(request, "409 Conflict");
