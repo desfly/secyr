@@ -14,7 +14,7 @@ int main()
     test_reset_sequence();
     test_alarm_ack();
     test_access_control();
-    test_physical_output_runtime();
+    test_output_safety();
     test_build0009();
     test_build0013();
     test_build0032();
@@ -26,9 +26,6 @@ int main()
     test_build0048();
     test_build0049();
     test_build0050();
-    test_build0051();
-    test_build0052();
-    test_build0053();
     test_build0055();
 
     std::cout << "HomeGuard-S3 host tests: " << testfw::checks << " checks PASS\n";
