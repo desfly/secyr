@@ -6,6 +6,7 @@ namespace hg {
 enum class SystemMode : uint8_t { Disarmed, ArmedHome, ArmedAway, Alarm, Maintenance };
 enum class Severity : uint8_t { Info, Warning, Alarm, Fault };
 enum class ZoneState : uint8_t { Normal, Open, Tamper, Disabled };
+enum class PressureState : uint8_t { Disabled, Normal, Low, High, SensorFault };
 enum class HealthState : uint8_t { Unknown, Ok, Degraded, Failed };
 enum class Transport : uint8_t { None, Ethernet, WifiSta, EmergencyAp };
 
