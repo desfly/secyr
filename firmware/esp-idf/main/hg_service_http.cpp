@@ -1,69 +1,13 @@
 #include "hg_service_http.hpp"
+#include "hg_http_util.hpp"
 #include "homeguard/service_readiness.hpp"
 
-#include <algorithm>
-#include <cctype>
-#include <cstddef>
 #include <string>
 
 namespace homeguard::idf {
 namespace {
 ServiceHttp* self_from(httpd_req_t* request) {
     return static_cast<ServiceHttp*>(request->user_ctx);
-}
-
-std::size_t value_offset(const std::string& body, const char* key) {
-    const std::string marker = std::string{"\""} + key + "\"";
-    auto pos = body.find(marker);
-    if (pos == std::string::npos) return std::string::npos;
-    pos = body.find(':', pos + marker.size());
-    if (pos == std::string::npos) return std::string::npos;
-    ++pos;
-    while (pos < body.size() && std::isspace(static_cast<unsigned char>(body[pos]))) ++pos;
-    return pos;
-}
-
-bool parse_json_string(const std::string& body, const char* key, std::string& value) {
-    auto pos = value_offset(body, key);
-    if (pos == std::string::npos || pos >= body.size() || body[pos] != '"') return false;
-    ++pos;
-    value.clear();
-    bool escaped = false;
-    for (; pos < body.size(); ++pos) {
-        const char ch = body[pos];
-        if (escaped) {
-            if (ch == '"' || ch == '\\' || ch == '/') value.push_back(ch);
-            else if (ch == 'n') value.push_back('\n');
-            else if (ch == 'r') value.push_back('\r');
-            else if (ch == 't') value.push_back('\t');
-            else return false;
-            escaped = false;
-        } else if (ch == '\\') {
-            escaped = true;
-        } else if (ch == '"') {
-            return true;
-        } else {
-            value.push_back(ch);
-        }
-    }
-    return false;
-}
-
-bool read_body(httpd_req_t* request, std::size_t limit, std::string& body) {
-    if (request == nullptr || request->content_len == 0 || request->content_len > limit) return false;
-    body.assign(request->content_len, '\0');
-    std::size_t offset = 0;
-    while (offset < body.size()) {
-        const auto received = httpd_req_recv(request, body.data() + offset, body.size() - offset);
-        if (received <= 0) return false;
-        offset += static_cast<std::size_t>(received);
-    }
-    return true;
-}
-
-void scrub(std::string& secret) {
-    std::fill(secret.begin(), secret.end(), '\0');
-    secret.clear();
 }
 }
 
@@ -117,24 +61,25 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
     }
 
     std::string body;
-    if (!read_body(request, 384U, body)) {
-        scrub(body);
+    if (!http_util::read_body(request, 384U, body)) {
+        http_util::scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
     }
 
     std::string actor;
     std::string credential;
-    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
-        scrub(credential);
-        scrub(body);
+    if (!http_util::parse_json_string(body, "actor", actor) ||
+        !http_util::parse_json_string(body, "credential", credential)) {
+        http_util::scrub(credential);
+        http_util::scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
     }
 
-    scrub(body);
+    http_util::scrub(body);
     const auto decision = self->access_control_->authorize(actor, credential, "system.service.invalidate");
-    scrub(credential);
+    http_util::scrub(credential);
     if (decision != homeguard::AuditDecision::Allowed) {
         httpd_resp_set_status(request, "403 Forbidden");
         return self->send_json(request, std::string{"{\"ok\":false,\"reason\":\""} +
