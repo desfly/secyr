@@ -262,6 +262,24 @@ AuditDecision AccessControl::authenticate(
     return decision;
 }
 
+AuditDecision AccessControl::authorize_session(
+    std::string_view actor,
+    std::string_view command) {
+    const auto* user = find_user(actor);
+    if (user == nullptr || !user->enabled) {
+        append_audit(actor, command, AuditDecision::DeniedUnknownUser);
+        return AuditDecision::DeniedUnknownUser;
+    }
+    if (!role_allows(user->role, command)) {
+        append_audit(actor, command, AuditDecision::DeniedRole);
+        return AuditDecision::DeniedRole;
+    }
+    append_audit(actor, command, AuditDecision::Allowed);
+    return AuditDecision::Allowed;
+}
+
+// LEGACY v1: per-request PIN re-authentication. Kept temporarily for rollback
+// and non-session callers; new HTTP request handlers use authorize_session().
 AuditDecision AccessControl::authorize_unthrottled(
     std::string_view actor,
     std::string_view pin,
