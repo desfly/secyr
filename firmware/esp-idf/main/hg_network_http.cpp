@@ -248,6 +248,11 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
             httpd_resp_set_status(request, "401 Unauthorized");
             return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"admin_credential_required\"}");
         }
+        if (!request_auth::authenticated_actor(request, *access_, actor)) {
+            std::fill(credential.begin(), credential.end(), '\0');
+            std::fill(body.begin(), body.end(), '\0');
+            return request_auth::send_login_required(request);
+        }
 
         const auto decision = access_->authorize(actor, credential, "network.configure");
         std::fill(credential.begin(), credential.end(), '\0');
