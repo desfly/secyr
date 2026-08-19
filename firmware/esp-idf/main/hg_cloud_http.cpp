@@ -59,6 +59,25 @@ bool parse_json_bool(const std::string& body, const char* key, bool& value)
     return false;
 }
 
+bool read_request_body(httpd_req_t* request, std::size_t limit, std::string& body)
+{
+    if (request == nullptr || request->content_len == 0 || request->content_len > limit) return false;
+    body.assign(request->content_len, '\0');
+    std::size_t offset = 0U;
+    while (offset < body.size()) {
+        const auto received = httpd_req_recv(request, body.data() + offset, body.size() - offset);
+        if (received <= 0) return false;
+        offset += static_cast<std::size_t>(received);
+    }
+    return true;
+}
+
+void scrub_cloud_password(CloudConfig& config)
+{
+    std::fill(config.password.begin(), config.password.end(), '\0');
+    config.password.clear();
+}
+
 esp_err_t send_json(httpd_req_t* request, const std::string& body)
 {
     httpd_resp_set_type(request, "application/json");
@@ -116,17 +135,11 @@ esp_err_t CloudHttp::config_post(httpd_req_t* request)
 
 esp_err_t CloudHttp::handle_config(httpd_req_t* request)
 {
-    if (request->content_len == 0 || request->content_len > 1024) {
+    std::string body;
+    if (!read_request_body(request, 1024U, body)) {
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_body\"}");
     }
-    std::string body(request->content_len, '\0');
-    const auto received = httpd_req_recv(request, body.data(), body.size());
-    if (received <= 0) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return send_json(request, "{\"ok\":false,\"reason\":\"read_failed\"}");
-    }
-    body.resize(static_cast<std::size_t>(received));
 
     std::string actor, credential;
     if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
@@ -147,14 +160,24 @@ esp_err_t CloudHttp::handle_config(httpd_req_t* request)
     (void)parse_json_string(body, "password", config.password);
     if (config.enabled && (config.broker_uri.empty() || config.broker_uri.size() > 256 ||
                            config.username.size() > 128 || config.password.size() > 128)) {
-        std::fill(config.password.begin(), config.password.end(), '\0');
+        scrub_cloud_password(config);
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_cloud_config\"}");
     }
 
+    CloudConfig previous{};
+    const auto previous_error = store_->load(previous);
+    const bool had_previous = previous_error == ESP_OK;
+    if (previous_error != ESP_OK && previous_error != ESP_ERR_NVS_NOT_FOUND) {
+        scrub_cloud_password(config);
+        httpd_resp_set_status(request, "500 Internal Server Error");
+        return send_json(request, "{\"ok\":false,\"reason\":\"previous_config_unreadable\"}");
+    }
+
     const auto save_error = store_->save(config);
     if (save_error != ESP_OK) {
-        std::fill(config.password.begin(), config.password.end(), '\0');
+        scrub_cloud_password(config);
+        scrub_cloud_password(previous);
         httpd_resp_set_status(request, "500 Internal Server Error");
         return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
     }
@@ -164,11 +187,27 @@ esp_err_t CloudHttp::handle_config(httpd_req_t* request)
     if (config.enabled) {
         start_error = cloud_->start(config.broker_uri.c_str(), config.username.c_str(), config.password.c_str());
     }
-    std::fill(config.password.begin(), config.password.end(), '\0');
+
     if (start_error != ESP_OK) {
+        // The request is not successful unless both persistent and live state
+        // agree. Restore the exact previous NVS state and runtime connection.
+        const auto rollback_error = had_previous ? store_->save(previous) : store_->clear();
+        esp_err_t restore_runtime_error = ESP_OK;
+        if (rollback_error == ESP_OK && had_previous && previous.enabled) {
+            restore_runtime_error = cloud_->start(
+                previous.broker_uri.c_str(), previous.username.c_str(), previous.password.c_str());
+        }
+        scrub_cloud_password(config);
+        scrub_cloud_password(previous);
         httpd_resp_set_status(request, "503 Service Unavailable");
-        return send_json(request, "{\"ok\":false,\"reason\":\"mqtt_start_failed\"}");
+        if (rollback_error != ESP_OK || restore_runtime_error != ESP_OK) {
+            return send_json(request, "{\"ok\":false,\"reason\":\"mqtt_start_failed_rollback_failed\"}");
+        }
+        return send_json(request, "{\"ok\":false,\"reason\":\"mqtt_start_failed\",\"rolledBack\":true}");
     }
+
+    scrub_cloud_password(config);
+    scrub_cloud_password(previous);
     return send_json(request, config.enabled ? "{\"ok\":true,\"state\":\"connecting\"}" : "{\"ok\":true,\"state\":\"disabled\"}");
 }
 
