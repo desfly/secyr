@@ -13,6 +13,9 @@ add_library(homeguard_core
     src/hardware_profile.cpp
     src/hardware_capabilities.cpp
     src/hardware_test.cpp
+    src/hardware_runtime.cpp
+    src/hardware_api.cpp
+    src/hardware_calibration.cpp
     src/commissioning.cpp
     src/commissioning_state.cpp
     src/hardware_verification.cpp
@@ -20,6 +23,8 @@ add_library(homeguard_core
     src/service_readiness.cpp
     src/discovery.cpp
     src/event_log.cpp
+    src/infrastructure_status.cpp
+    src/modbus_request.cpp
     src/system_model.cpp
     src/system_api.cpp
     src/output_interlock.cpp
@@ -42,6 +47,7 @@ add_executable(homeguard_tests
     ../tests/test_access_permissions.cpp
     ../tests/test_output_safety.cpp
     ../tests/test_readiness.cpp
+    ../tests/test_runtime_support.cpp
     ../tests/test_build0009.cpp
     ../tests/test_build0032.cpp
     ../tests/test_build0038.cpp
