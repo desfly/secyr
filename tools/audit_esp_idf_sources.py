@@ -5,6 +5,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "firmware" / "esp-idf" / "main"
 CORE = ROOT / "firmware" / "src"
+WEB = ROOT / "web"
 
 errors = []
 warnings = []
@@ -108,6 +109,19 @@ if not re.search(
 ):
     errors.append(
         "hg_system_http.cpp: partial Web factory reset must report rebooting and schedule recovery reboot"
+    )
+
+# The browser must distinguish a rejected reset from a destructive reset that
+# partially completed and is rebooting for recovery. Otherwise the UI tells the
+# operator "rejected" while the controller has already erased state.
+factory_reset_js = (WEB / "factory-reset.js").read_text(encoding="utf-8")
+if "body.rebooting === true" not in factory_reset_js:
+    errors.append(
+        "factory-reset.js: partial destructive reset recovery response is not handled"
+    )
+if "Скидання виконано частково" not in factory_reset_js:
+    errors.append(
+        "factory-reset.js: partial reset must be reported distinctly from a rejected request"
     )
 
 for warning in warnings:
