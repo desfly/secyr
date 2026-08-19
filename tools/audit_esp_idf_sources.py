@@ -83,6 +83,33 @@ if full_access_local.search(access_store):
         "access_store.cpp: full AccessControl temporary must not be placed on the NVS decode task stack"
     )
 
+# Factory reset erases several namespaces one after another. A later erase can
+# fail after an earlier one is already committed, so both physical-RST and Web
+# paths must reboot rather than continue with RAM that disagrees with NVS.
+reset_sequence = (MAIN / "hg_reset_sequence.cpp").read_text(encoding="utf-8")
+if "Factory Reset was partial; rebooting into recovery-safe boot path" not in reset_sequence:
+    errors.append(
+        "hg_reset_sequence.cpp: partial triple-RST factory reset must force a recovery reboot"
+    )
+if not re.search(
+    r"if\s*\(!report\.ok\(\)\)\s*\{.*?esp_restart\(\);.*?return\s+true\s*;",
+    reset_sequence,
+    re.S,
+):
+    errors.append(
+        "hg_reset_sequence.cpp: failed destructive reset path can return without esp_restart"
+    )
+
+system_http = (MAIN / "hg_system_http.cpp").read_text(encoding="utf-8")
+if not re.search(
+    r"if\s*\(!report\.ok\(\)\)\s*\{.*?rebooting.*?xTaskCreate\s*\(\s*&delayed_factory_reboot",
+    system_http,
+    re.S,
+):
+    errors.append(
+        "hg_system_http.cpp: partial Web factory reset must report rebooting and schedule recovery reboot"
+    )
+
 for warning in warnings:
     print(f"WARNING: {warning}")
 
