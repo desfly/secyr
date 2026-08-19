@@ -68,32 +68,30 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
     std::string body;
     if (!http_util::read_body(request, 384U, body)) {
         http_util::scrub(body);
-        httpd_resp_set_status(request, "401 Unauthorized");
-        return self->send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
+        httpd_resp_set_status(request, "400 Bad Request");
+        return self->send_json(request, "{\"ok\":false,\"reason\":\"invalid_body\"}");
     }
 
     std::string actor;
-    std::string credential;
-    if (!http_util::parse_json_string(body, "actor", actor) ||
-        !http_util::parse_json_string(body, "credential", credential)) {
-        http_util::scrub(credential);
+    if (!http_util::parse_json_string(body, "actor", actor) || actor.empty()) {
         http_util::scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
-        return self->send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
+        return self->send_json(request, "{\"ok\":false,\"reason\":\"session_actor_required\"}");
     }
 
     http_util::scrub(body);
     if (!request_auth::authenticated_actor(request, *self->access_control_, actor)) {
-        http_util::scrub(credential);
         return request_auth::send_login_required(request);
     }
-    const auto decision = self->access_control_->authorize(actor, credential, "system.service.invalidate");
-    http_util::scrub(credential);
+    const auto decision = self->access_control_->authorize_session(actor, "system.service.invalidate");
     if (decision != homeguard::AuditDecision::Allowed) {
         httpd_resp_set_status(request, "403 Forbidden");
         return self->send_json(request, std::string{"{\"ok\":false,\"reason\":\""} +
             homeguard::to_string(decision) + "\"}");
     }
+
+    /* LEGACY v1 disabled: service invalidate previously parsed credential and
+       re-checked the Admin PIN on every request. */
 
     const auto error = self->store_->erase_all();
     if (error != ESP_OK) {
