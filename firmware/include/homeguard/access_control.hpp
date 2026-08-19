@@ -70,6 +70,16 @@ public:
         std::string_view actor,
         std::string_view pin,
         std::uint64_t now_ms);
+
+    // Session model (v2): PIN is checked once by authenticate() at login.
+    // Protected requests then authorize the already-authenticated Bearer
+    // session by actor + role and still append the normal audit record.
+    [[nodiscard]] AuditDecision authorize_session(
+        std::string_view actor,
+        std::string_view command);
+
+    // LEGACY v1 step-up model retained temporarily for rollback compatibility.
+    // New HTTP code must not require a PIN on every protected request.
     [[nodiscard]] AuditDecision authorize(
         std::string_view actor,
         std::string_view pin,
