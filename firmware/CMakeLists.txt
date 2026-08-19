@@ -28,8 +28,6 @@ add_library(homeguard_core
     src/physical_output_runtime.cpp
     src/access_control.cpp
     src/access_store.cpp
-    src/zone.cpp
-    src/pressure.cpp
     src/health_monitor.cpp
     src/telemetry.cpp
 )
@@ -37,8 +35,6 @@ target_include_directories(homeguard_core PUBLIC include)
 
 add_executable(homeguard_tests
     ../tests/test_main.cpp
-    ../tests/test_zone.cpp
-    ../tests/test_pressure.cpp
     ../tests/test_reliability.cpp
     ../tests/test_connectivity.cpp
     ../tests/test_provisioning.cpp
