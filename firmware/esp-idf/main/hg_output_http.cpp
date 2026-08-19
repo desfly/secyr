@@ -1,4 +1,5 @@
 #include "hg_output_http.hpp"
+#include "hg_request_auth.hpp"
 #include "homeguard/output_command.hpp"
 
 #include <algorithm>
@@ -150,6 +151,10 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         httpd_resp_set_status(request, "503 Service Unavailable");
         httpd_resp_set_type(request, "application/json");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"access_unavailable\"}", -1);
+    }
+    if (!request_auth::authenticated_actor(request, *access_control_, actor)) {
+        scrub(credential);
+        return request_auth::send_login_required(request);
     }
 
     const auto* output = model_->output(output_id);
