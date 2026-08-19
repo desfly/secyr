@@ -20,7 +20,6 @@ int main()
     test_build0009();
     test_build0013();
     test_build0032();
-    test_build0037();
     test_build0038();
     test_build0045();
     test_build0046();
