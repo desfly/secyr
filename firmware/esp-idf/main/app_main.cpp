@@ -16,6 +16,7 @@
 #include "hg_telemetry_session_http.hpp"
 #include "hg_access_nvs.hpp"
 #include "hg_access_http.hpp"
+#include "hg_access_runtime.hpp"
 #include "hg_access_time.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "hg_reset_sequence.hpp"
@@ -77,20 +78,22 @@ bool g_access_bootstrap_allowed = false;
 
 esp_err_t initialize_nvs()
 {
-    auto error = nvs_flash_init();
-    if (error == ESP_ERR_NVS_NO_FREE_PAGES || error == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        error = nvs_flash_init();
-    }
-    return error;
+    // Security invariant: never erase NVS implicitly during ordinary boot.
+    // Automatic nvs_flash_erase() could delete the access database and reopen
+    // passwordless bootstrap without a physical Factory Reset. Any NVS init
+    // failure therefore fails closed and is surfaced by ESP_ERROR_CHECK.
+    return nvs_flash_init();
 }
 
 void restore_access_control()
 {
     g_access_bootstrap_allowed = false;
+    homeguard::idf::access_runtime::set_bootstrap_allowed(false);
+
     const auto error = g_access_store.load(g_access_control);
     if (error == ESP_ERR_NVS_NOT_FOUND) {
         g_access_bootstrap_allowed = true;
+        homeguard::idf::access_runtime::set_bootstrap_allowed(true);
         ESP_LOGW(kTag, "No persisted access database; factory first-Admin bootstrap enabled");
         return;
     }
@@ -176,9 +179,7 @@ esp_err_t start_http_server()
         g_system_http.detach_transport();
         if (g_http_server != nullptr) {
             const auto stop_error = httpd_stop(g_http_server);
-            if (stop_error != ESP_OK) {
-                ESP_LOGE(kTag, "Partial HTTP server stop failed: %s", esp_err_to_name(stop_error));
-            }
+            if (stop_error != ESP_OK) ESP_LOGE(kTag, "Partial HTTP server stop failed: %s", esp_err_to_name(stop_error));
             g_http_server = nullptr;
         }
         return error;
@@ -187,7 +188,6 @@ esp_err_t start_http_server()
     auto error = g_web_http.register_handlers(g_http_server);
     if (error != ESP_OK) return rollback_http(error, "web routes");
 
-    g_network_http.set_access_control(&g_access_control);
     error = g_network_http.register_handlers(g_http_server);
     if (error != ESP_OK) return rollback_http(error, "network routes");
 
@@ -257,9 +257,7 @@ void start_device_discovery()
     std::string suffix = device_id;
     const auto dash = suffix.find_last_of('-');
     if (dash != std::string::npos && dash + 1U < suffix.size()) suffix.erase(0, dash + 1U);
-    std::transform(suffix.begin(), suffix.end(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
+    std::transform(suffix.begin(), suffix.end(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     const std::string hostname = "homeguard-" + suffix;
 
     if (!g_device_discovery.begin(device_id, hostname, kLocalApiPort, false)) {
@@ -276,11 +274,8 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(initialize_nvs());
 
     const auto reset_error = homeguard::idf::start_service_button_factory_reset();
-    if (reset_error != ESP_OK) {
-        ESP_LOGE(kTag, "Service-button Factory Reset unavailable: %s", esp_err_to_name(reset_error));
-    } else {
-        ESP_LOGI(kTag, "Service-button Factory Reset gesture ready");
-    }
+    if (reset_error != ESP_OK) ESP_LOGE(kTag, "Service-button Factory Reset unavailable: %s", esp_err_to_name(reset_error));
+    else ESP_LOGI(kTag, "Service-button Factory Reset gesture ready");
 
     g_access_control.set_auth_clock(&homeguard::idf::access_now_ms);
     restore_access_control();
@@ -288,16 +283,14 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+    g_network_http.set_access_control(&g_access_control);
     const auto network_error = g_network_http.begin();
     if (network_error != ESP_OK) ESP_LOGE(kTag, "Wi-Fi network runtime failed: %s", esp_err_to_name(network_error));
     else ESP_LOGI(kTag, "Wi-Fi network runtime ready");
 
     const auto cloud_identity_error = g_cloud_link.prepare_identity();
-    if (cloud_identity_error != ESP_OK) {
-        ESP_LOGE(kTag, "Cloud identity preparation failed: %s", esp_err_to_name(cloud_identity_error));
-    } else {
-        ESP_LOGI(kTag, "Cloud identity ready: %s", g_cloud_link.device_id());
-    }
+    if (cloud_identity_error != ESP_OK) ESP_LOGE(kTag, "Cloud identity preparation failed: %s", esp_err_to_name(cloud_identity_error));
+    else ESP_LOGI(kTag, "Cloud identity ready: %s", g_cloud_link.device_id());
 
     initialize_system_model();
     g_cloud_link.set_command_runtime(&g_system_model, &g_system_bus, &g_access_control);
