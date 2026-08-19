@@ -33,6 +33,10 @@ inline constexpr gpio_num_t kSdSck = GPIO_NUM_40;
 inline constexpr gpio_num_t kSdMosi = GPIO_NUM_41;
 inline constexpr gpio_num_t kSdMiso = GPIO_NUM_42;
 
+// Internal onboard WS2812 status/reset indicator. GPIO48 is reserved from
+// external expansion specifically because it belongs to the board itself.
+inline constexpr int kOnboardRgb = 48;
+
 inline constexpr bool is_reserved_gpio(int gpio) noexcept
 {
     switch (gpio) {
