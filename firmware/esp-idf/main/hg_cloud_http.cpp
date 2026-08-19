@@ -151,6 +151,11 @@ esp_err_t CloudHttp::handle_config(httpd_req_t* request)
         httpd_resp_set_status(request, "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"admin_credential_required\"}");
     }
+    if (!request_auth::authenticated_actor(request, *access_control_, actor)) {
+        std::fill(credential.begin(), credential.end(), '\0');
+        std::fill(body.begin(), body.end(), '\0');
+        return request_auth::send_login_required(request);
+    }
     const auto decision = access_control_->authorize(actor, credential, "cloud.configure");
     std::fill(credential.begin(), credential.end(), '\0');
     if (decision != homeguard::AuditDecision::Allowed) {
