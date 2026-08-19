@@ -5,6 +5,7 @@ void test_provisioning();
 void test_reset_sequence();
 void test_access_control();
 void test_access_permissions();
+void test_access_runtime();
 void test_output_safety();
 void test_readiness();
 void test_runtime_support();
