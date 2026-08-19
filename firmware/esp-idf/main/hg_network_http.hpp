@@ -12,6 +12,7 @@ class NetworkHttp {
 public:
     esp_err_t begin();
     void set_access_control(AccessControl* access) { access_ = access; }
+    [[nodiscard]] AccessControl* access_control() const noexcept { return access_; }
     esp_err_t register_handlers(httpd_handle_t server);
 
 private:
