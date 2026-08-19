@@ -5,8 +5,6 @@ set(HG_CORE_SRCS
     "../../../src/provisioning_qr.cpp"
     "../../../src/hardware_profile.cpp"
     "../../../src/hardware_capabilities.cpp"
-    "../../../src/service_button.cpp"
-    "../../../src/startup_flow.cpp"
     "../../../src/device_identity.cpp"
     "../../../src/discovery.cpp"
     "../../../src/event_log.cpp"
