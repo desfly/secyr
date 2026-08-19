@@ -1,11 +1,8 @@
 #include "hg_infrastructure_http.hpp"
 #include "hg_hardware_bootstrap.hpp"
-#include "hg_rgb_diagnostic.hpp"
 #include "homeguard/hardware_runtime.hpp"
 
 #include <cstddef>
-#include <cstdio>
-#include <cstdlib>
 
 namespace homeguard::idf {
 
@@ -17,26 +14,18 @@ esp_err_t InfrastructureHttp::register_handlers(
         return ESP_ERR_INVALID_ARG;
     }
 
-    const httpd_uri_t routes[] = {
-        {
-            .uri = "/api/v1/hardware/status",
-            .method = HTTP_GET,
-            .handler = &InfrastructureHttp::status_get,
-            .user_ctx = hardware,
-        },
-        {
-            .uri = "/api/v1/diagnostics/rgb-test",
-            .method = HTTP_POST,
-            .handler = &InfrastructureHttp::rgb_test_post,
-            .user_ctx = hardware,
-        },
+    // Hardware status is read-only. The former POST /api/v1/diagnostics/rgb-test
+    // route deliberately is not registered: it was unauthenticated and executed
+    // a 3-second blocking LED diagnostic inside the HTTP server task, allowing
+    // any LAN client to repeatedly stall the control/UI server. RGB diagnostics
+    // remain available internally for controlled boot/reset paths.
+    const httpd_uri_t status_route{
+        .uri = "/api/v1/hardware/status",
+        .method = HTTP_GET,
+        .handler = &InfrastructureHttp::status_get,
+        .user_ctx = hardware,
     };
-
-    for (const auto& route : routes) {
-        const auto error = httpd_register_uri_handler(server, &route);
-        if (error != ESP_OK) return error;
-    }
-    return ESP_OK;
+    return httpd_register_uri_handler(server, &status_route);
 }
 
 esp_err_t InfrastructureHttp::status_get(
@@ -68,49 +57,17 @@ esp_err_t InfrastructureHttp::status_get(
 
 esp_err_t InfrastructureHttp::rgb_test_post(httpd_req_t* request)
 {
+    // Kept only to preserve the class ABI/source shape for now. This handler is
+    // intentionally unreachable because register_handlers() does not register
+    // a remote RGB-test URI. Never re-expose it without authenticated,
+    // non-blocking diagnostics authorization and a regression gate.
     if (request == nullptr) return ESP_ERR_INVALID_ARG;
-
-    char query[64]{};
-    char gpio_text[8]{};
-    if (httpd_req_get_url_query_str(request, query, sizeof(query)) != ESP_OK ||
-        httpd_query_key_value(query, "gpio", gpio_text, sizeof(gpio_text)) != ESP_OK) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return httpd_resp_send(
-            request,
-            "{\"ok\":false,\"reason\":\"gpio_required\",\"allowed\":[38,48]}",
-            HTTPD_RESP_USE_STRLEN);
-    }
-
-    const int gpio = std::atoi(gpio_text);
-    if (gpio != 38 && gpio != 48) {
-        httpd_resp_set_status(request, "400 Bad Request");
-        return httpd_resp_send(
-            request,
-            "{\"ok\":false,\"reason\":\"unsupported_gpio\",\"allowed\":[38,48]}",
-            HTTPD_RESP_USE_STRLEN);
-    }
-
-    const auto error = RgbDiagnostic::test_white(gpio, 3000U);
-    if (error != ESP_OK) {
-        httpd_resp_set_status(request, "500 Internal Server Error");
-        return httpd_resp_send(
-            request,
-            "{\"ok\":false,\"reason\":\"rgb_driver_failed\"}",
-            HTTPD_RESP_USE_STRLEN);
-    }
-
-    char response[80]{};
-    const auto written = std::snprintf(
-        response,
-        sizeof(response),
-        "{\"ok\":true,\"gpio\":%d,\"color\":\"white\",\"durationMs\":3000}",
-        gpio);
-    if (written <= 0 || static_cast<std::size_t>(written) >= sizeof(response)) {
-        return ESP_FAIL;
-    }
-
+    httpd_resp_set_status(request, "404 Not Found");
     httpd_resp_set_type(request, "application/json");
-    return httpd_resp_send(request, response, written);
+    return httpd_resp_send(
+        request,
+        "{\"ok\":false,\"reason\":\"remote_rgb_test_disabled\"}",
+        HTTPD_RESP_USE_STRLEN);
 }
 
 }  // namespace homeguard::idf
