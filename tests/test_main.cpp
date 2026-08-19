@@ -13,6 +13,7 @@ int main()
     test_access_permissions();
     test_output_safety();
     test_readiness();
+    test_runtime_support();
     test_build0009();
     test_build0032();
     test_build0038();
