@@ -130,7 +130,6 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
     bool active{};
     bool alarm_active{};
     std::string actor;
-    std::string credential;
     if (!parse_uint(body, "outputId", output_id) || !parse_bool(body, "active", active)) {
         scrub(body);
         httpd_resp_set_status(request, "400 Bad Request");
@@ -138,22 +137,19 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
     }
     (void)parse_bool(body, "alarmActive", alarm_active);
 
-    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
-        scrub(credential);
+    if (!parse_json_string(body, "actor", actor) || actor.empty()) {
         scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
         httpd_resp_set_type(request, "application/json");
-        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"credential_required\"}", -1);
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"session_actor_required\"}", -1);
     }
     scrub(body);
     if (access_control_ == nullptr) {
-        scrub(credential);
         httpd_resp_set_status(request, "503 Service Unavailable");
         httpd_resp_set_type(request, "application/json");
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"access_unavailable\"}", -1);
     }
     if (!request_auth::authenticated_actor(request, *access_control_, actor)) {
-        scrub(credential);
         return request_auth::send_login_required(request);
     }
 
@@ -161,8 +157,7 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
     const std::string command = output != nullptr && output->type == hg::ModelOutputType::Valve
         ? (active ? "valve.open" : "valve.close")
         : "output.control";
-    const auto decision = access_control_->authorize(actor, credential, command);
-    scrub(credential);
+    const auto decision = access_control_->authorize_session(actor, command);
     if (decision != homeguard::AuditDecision::Allowed) {
         httpd_resp_set_status(request, "403 Forbidden");
         httpd_resp_set_type(request, "application/json");
@@ -170,6 +165,10 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
             homeguard::to_string(decision) + "\"}";
         return httpd_resp_send(request, response.c_str(), static_cast<ssize_t>(response.size()));
     }
+
+    /* LEGACY v1 disabled here: credential used to be parsed from the body and
+       access_control_->authorize(actor, credential, command) re-checked PIN
+       for every output click. Bearer login is now the only PIN check. */
 
     const auto result = hg::apply_output_command(
         *model_, *readiness_, {output_id, active, alarm_active, 0});
