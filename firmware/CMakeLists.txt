@@ -41,8 +41,6 @@ add_library(homeguard_core
     src/maintenance.cpp
     src/power_monitor.cpp
     src/command.cpp
-    src/local_api.cpp
-    src/controller.cpp
     src/boot_self_test.cpp
     src/alarm_acknowledgement.cpp
     src/alarm_ack_command.cpp
@@ -57,7 +55,6 @@ add_executable(homeguard_tests
     ../tests/test_zone.cpp
     ../tests/test_pressure.cpp
     ../tests/test_reliability.cpp
-    ../tests/test_controller.cpp
     ../tests/test_connectivity.cpp
     ../tests/test_provisioning.cpp
     ../tests/test_reset_sequence.cpp
@@ -67,7 +64,6 @@ add_executable(homeguard_tests
     ../tests/test_output_safety.cpp
     ../tests/test_readiness.cpp
     ../tests/test_build0009.cpp
-    ../tests/test_build0013.cpp
     ../tests/test_build0032.cpp
     ../tests/test_build0038.cpp
     ../tests/test_build0045.cpp
