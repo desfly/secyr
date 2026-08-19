@@ -53,6 +53,8 @@ jobs:
         run: python tools/audit_gpio_safety.py
       - name: Access boundary security audit
         run: python tools/check_access_boundary.py
+      - name: Factory reset coverage audit
+        run: python tools/check_factory_reset_coverage.py
       - name: Firmware partition budget
         run: python tools/check_firmware_budget.py
       - name: Host unit tests
