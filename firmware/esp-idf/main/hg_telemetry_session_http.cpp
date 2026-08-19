@@ -114,10 +114,12 @@ esp_err_t TelemetrySessionHttp::handle_login(httpd_req_t* request) {
     if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential) ||
         actor.empty() || actor.size() > 23U || !valid_pin(credential)) {
         scrub(credential);
+        scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
     }
 
+    scrub(body);
     const auto decision = access_->authenticate(actor, credential, access_now_ms());
     scrub(credential);
     if (decision != AuditDecision::Allowed) {
@@ -131,13 +133,17 @@ esp_err_t TelemetrySessionHttp::handle_login(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
     }
 
-    const auto token = telemetry_->issue_session_token();
+    std::string token = telemetry_->issue_session_token();
     if (token.size() < 32U) {
+        scrub(token);
         httpd_resp_set_status(request, "503 Service Unavailable");
         return send_json(request, "{\"ok\":false,\"reason\":\"telemetry_unavailable\"}");
     }
 
-    return send_json(request, std::string{"{\"ok\":true,\"telemetryToken\":\""} + token + "\"}");
+    const std::string response = std::string{"{\"ok\":true,\"telemetryToken\":\""} + token + "\"}";
+    const auto result = send_json(request, response);
+    scrub(token);
+    return result;
 }
 
 }  // namespace homeguard::idf
