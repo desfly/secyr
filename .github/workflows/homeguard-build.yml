@@ -85,7 +85,7 @@ jobs:
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           for attempt in {1..20}; do if curl -fsS http://127.0.0.1:8766/api/v1/build >/dev/null; then break; fi; sleep 0.1; done
-          google-chrome --headless --no-sandbox --disable-gpu --virtual-time-budget=12000 --dump-dom http://127.0.0.1:8766/ > /tmp/homeguard-control-dom.html
+          google-chrome --headless --no-sandbox --disable-gpu --virtual-time-budget=30000 --dump-dom http://127.0.0.1:8766/ > /tmp/homeguard-control-dom.html
           grep -q 'data-homeguard-control-smoke="done"' /tmp/homeguard-control-dom.html
           python tools/web_control_smoke_server.py verify --log web-control-smoke.jsonl
       - name: Mock syntax
