@@ -2,6 +2,7 @@
 
 #include "driver/rmt_encoder.h"
 #include "driver/rmt_tx.h"
+#include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -16,6 +17,7 @@ constexpr std::uint32_t kT0hTicks = 3U;
 constexpr std::uint32_t kT0lTicks = 9U;
 constexpr std::uint32_t kT1hTicks = 9U;
 constexpr std::uint32_t kT1lTicks = 3U;
+constexpr std::uint32_t kWs2812ResetUs = 80U;
 
 esp_err_t transmit_rgb(int gpio, const std::array<std::uint8_t, 3>& grb) {
     rmt_channel_handle_t channel = nullptr;
@@ -48,8 +50,13 @@ esp_err_t transmit_rgb(int gpio, const std::array<std::uint8_t, 3>& grb) {
     if (error == ESP_OK) {
         rmt_transmit_config_t tx_config{};
         tx_config.loop_count = 0;
+        // WS2812 latches a frame only after a continuous LOW reset interval.
+        // Keep the RMT output LOW at end-of-transaction and hold it longer than
+        // the 50 us reset interval used by Espressif's reference LED encoder.
+        tx_config.eot_level = 0;
         error = rmt_transmit(channel, encoder, grb.data(), grb.size(), &tx_config);
         if (error == ESP_OK) error = rmt_tx_wait_all_done(channel, pdMS_TO_TICKS(100));
+        if (error == ESP_OK) esp_rom_delay_us(kWs2812ResetUs);
     }
 
     if (channel != nullptr) {
