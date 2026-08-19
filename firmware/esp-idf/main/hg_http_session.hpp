@@ -55,6 +55,21 @@ inline bool authorized(std::string_view authorization) {
     return false;
 }
 
+inline bool revoke(std::string_view authorization) {
+    if (!authorization.starts_with("Bearer ")) return false;
+    std::scoped_lock lock(g_mutex);
+    for (std::size_t i = 0; i < g_tokens.size(); ++i) {
+        auto& token = g_tokens[i];
+        if (!token.configured()) continue;
+        if (token.authorized(authorization)) {
+            token.clear();
+            g_issued_us[i] = 0;
+            return true;
+        }
+    }
+    return false;
+}
+
 inline void revoke_all() {
     std::scoped_lock lock(g_mutex);
     for (auto& token : g_tokens) token.clear();
