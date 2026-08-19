@@ -42,6 +42,7 @@ network = text(MAIN / "hg_network_http.cpp")
 system_http = text(MAIN / "hg_system_http.cpp")
 output_http = text(MAIN / "hg_output_http.cpp")
 access_http = text(MAIN / "hg_access_http.cpp")
+access_runtime = text(MAIN / "hg_access_runtime.hpp")
 app_main = text(MAIN / "app_main.cpp")
 build_info = text(MAIN / "hg_build_info.cpp")
 access_core = text(CORE / "access_control.cpp")
@@ -156,16 +157,21 @@ require("if (role == AccessRole::Guest) return false" in access_core,
         "Guest is not fail-closed for control commands")
 
 # First-Admin bootstrap must break the fresh-device deadlock without becoming
-# an unauthenticated account-reset path after storage corruption.
+# an unauthenticated account-reset path after storage corruption. The current
+# implementation centralizes the one-time gate in hg_access_runtime.hpp, so the
+# contract follows that authoritative helper instead of depending on old local
+# condition spelling inside AccessHttp.
 for needle in ("accessBootstrap", 'action: "bootstrap"', "bootstrapAccessAdmin"):
     require(needle in js, f"first-Admin Web UI bootstrap missing: {needle}")
 require('action == "bootstrap"' in access_http, "firmware first-Admin bootstrap action missing")
 require("bootstrap_allowed_" in access_http,
         "AccessHttp does not keep an explicit one-time bootstrap gate")
-require("if (!bootstrap_allowed_)" in access_http,
-        "bootstrap endpoint is not protected by the factory-fresh gate")
-require("access_->user_count() != 0U" in access_http,
-        "bootstrap is not locked out after the first user exists")
+require("access_runtime::setup_required(*access_)" in access_http,
+        "bootstrap endpoint does not use the centralized factory-fresh gate")
+require("bootstrap_allowed() && access.user_count() == 0U" in access_runtime,
+        "centralized bootstrap gate must require both physical/factory allowance and zero users")
+require("access_runtime::lock_bootstrap()" in access_http,
+        "bootstrap path does not irrevocably close the runtime gate before account creation")
 require("AccessRole::Admin" in access_http,
         "bootstrap does not force the first account to Admin")
 require("access_->clear_users()" in access_http,
