@@ -3,6 +3,7 @@
 #include "hg_board_hw678.hpp"
 #include "hg_factory_reset.hpp"
 #include "hg_rgb_diagnostic.hpp"
+#include "homeguard/reset_sequence.hpp"
 
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -45,7 +46,6 @@ void perform_factory_reset() {
                  report.commissioning);
 
         // RED is reserved exclusively for a successful complete factory reset.
-        // On any partial erase, keep the LED off and reboot into recovery-safe boot.
         (void)RgbDiagnostic::off(kResetRgbGpio);
         esp_restart();
         return;
@@ -93,10 +93,12 @@ void service_button_reset_task(void*) {
             stable_pressed = raw_pressed;
 
             if (stable_pressed) {
-                if (confirmed_holds != 0U &&
-                    (now - last_confirmed_release_at) > kSequenceTimeoutTicks) {
+                const bool timed_out = confirmed_holds != 0U &&
+                    (now - last_confirmed_release_at) > kSequenceTimeoutTicks;
+                const auto retained = hg::expire_reset_gesture(confirmed_holds, timed_out);
+                if (retained != confirmed_holds) {
                     ESP_LOGI(kTag, "Factory-reset gesture timed out; sequence cleared");
-                    confirmed_holds = 0U;
+                    confirmed_holds = retained;
                 }
 
                 press_started_at = now;
@@ -105,17 +107,21 @@ void service_button_reset_task(void*) {
             } else {
                 if (hold_confirmed) {
                     (void)RgbDiagnostic::off(kResetRgbGpio);
-                    ++confirmed_holds;
+                    const auto step = hg::advance_confirmed_hold(
+                        confirmed_holds,
+                        true,
+                        kRequiredHolds);
+                    confirmed_holds = step.count;
                     last_confirmed_release_at = now;
 
                     ESP_LOGW(kTag,
                              "Factory-reset hold confirmed: %u/%u",
-                             static_cast<unsigned>(confirmed_holds),
+                             static_cast<unsigned>(
+                                 step.trigger_factory_reset ? kRequiredHolds : confirmed_holds),
                              static_cast<unsigned>(kRequiredHolds));
 
-                    if (confirmed_holds >= kRequiredHolds) {
+                    if (step.trigger_factory_reset) {
                         perform_factory_reset();
-                        confirmed_holds = 0U;
                     }
                 } else {
                     ESP_LOGI(kTag, "Short service-button press ignored");
@@ -133,10 +139,13 @@ void service_button_reset_task(void*) {
             ESP_LOGW(kTag, "Hold threshold reached; WHITE means release now");
         }
 
-        if (!stable_pressed && confirmed_holds != 0U &&
-            (now - last_confirmed_release_at) > kSequenceTimeoutTicks) {
-            ESP_LOGI(kTag, "Factory-reset gesture timed out; sequence cleared");
-            confirmed_holds = 0U;
+        if (!stable_pressed && confirmed_holds != 0U) {
+            const bool timed_out = (now - last_confirmed_release_at) > kSequenceTimeoutTicks;
+            const auto retained = hg::expire_reset_gesture(confirmed_holds, timed_out);
+            if (retained != confirmed_holds) {
+                ESP_LOGI(kTag, "Factory-reset gesture timed out; sequence cleared");
+                confirmed_holds = retained;
+            }
         }
 
         vTaskDelay(kPollTicks);
