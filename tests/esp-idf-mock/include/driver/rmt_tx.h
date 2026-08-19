@@ -14,7 +14,10 @@ struct rmt_tx_channel_config_t {
     std::size_t mem_block_symbols{};
     std::size_t trans_queue_depth{};
 };
-struct rmt_transmit_config_t { int loop_count{}; };
+struct rmt_transmit_config_t {
+    int loop_count{};
+    int eot_level{};
+};
 inline esp_err_t rmt_new_tx_channel(const rmt_tx_channel_config_t*, rmt_channel_handle_t* out){ if(out) *out=reinterpret_cast<void*>(1); return ESP_OK; }
 inline esp_err_t rmt_enable(rmt_channel_handle_t){ return ESP_OK; }
 inline esp_err_t rmt_disable(rmt_channel_handle_t){ return ESP_OK; }
