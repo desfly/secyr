@@ -50,9 +50,6 @@ esp_err_t transmit_rgb(int gpio, const std::array<std::uint8_t, 3>& grb) {
     if (error == ESP_OK) {
         rmt_transmit_config_t tx_config{};
         tx_config.loop_count = 0;
-        // WS2812 latches a frame only after a continuous LOW reset interval.
-        // Keep the RMT output LOW at end-of-transaction and hold it longer than
-        // the 50 us reset interval used by Espressif's reference LED encoder.
         tx_config.eot_level = 0;
         error = rmt_transmit(channel, encoder, grb.data(), grb.size(), &tx_config);
         if (error == ESP_OK) error = rmt_tx_wait_all_done(channel, pdMS_TO_TICKS(100));
@@ -76,21 +73,32 @@ bool RgbDiagnostic::supported_gpio(int gpio) {
     return gpio == 38 || gpio == 48;
 }
 
+esp_err_t RgbDiagnostic::set_red(int gpio) {
+    if (!supported_gpio(gpio)) return ESP_ERR_INVALID_ARG;
+
+    // WS2812 wire order is GRB, therefore red is G=0, R=255, B=0.
+    const std::array<std::uint8_t, 3> red{{0x00U, 0xffU, 0x00U}};
+    return transmit_rgb(gpio, red);
+}
+
+esp_err_t RgbDiagnostic::off(int gpio) {
+    if (!supported_gpio(gpio)) return ESP_ERR_INVALID_ARG;
+    const std::array<std::uint8_t, 3> off{{0x00U, 0x00U, 0x00U}};
+    return transmit_rgb(gpio, off);
+}
+
 esp_err_t RgbDiagnostic::test_white(int gpio, unsigned duration_ms) {
     if (!supported_gpio(gpio) || duration_ms == 0U || duration_ms > 5000U) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    // GRB byte order for the onboard addressable RGB LED. White is 255/255/255,
-    // so channel ordering does not affect this identification test.
     const std::array<std::uint8_t, 3> white{{0xffU, 0xffU, 0xffU}};
-    const std::array<std::uint8_t, 3> off{{0x00U, 0x00U, 0x00U}};
 
     auto error = transmit_rgb(gpio, white);
     if (error != ESP_OK) return error;
 
     vTaskDelay(pdMS_TO_TICKS(duration_ms));
-    return transmit_rgb(gpio, off);
+    return off(gpio);
 }
 
 }  // namespace homeguard::idf
