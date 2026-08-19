@@ -325,35 +325,32 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":true,\"state\":\"login_required\",\"role\":\"admin\"}");
     }
 
-    std::string actor, credential;
-    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
-        scrub(credential); scrub(body);
+    std::string actor;
+    if (!parse_json_string(body, "actor", actor) || actor.empty() || actor.size() > 23U) {
+        scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
-        return send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
+        return send_json(request, "{\"ok\":false,\"reason\":\"session_actor_required\"}");
     }
 
     std::string authorization;
     if (!read_authorization(request, authorization) ||
         !http_session::authorized_for_actor(authorization, *access_, actor)) {
-        scrub(authorization); scrub(credential); scrub(body);
+        scrub(authorization); scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_session\"}");
     }
     scrub(authorization);
 
-    const auto now_ms = access_now_ms();
-    const auto decision = access_->authorize(actor, credential, "access.manage", now_ms);
-    scrub(credential);
-    if (decision == AuditDecision::DeniedRateLimited) {
-        scrub(body);
-        return send_rate_limited(request, *access_, actor, now_ms);
-    }
+    const auto decision = access_->authorize_session(actor, "access.manage");
     if (decision != AuditDecision::Allowed) {
         scrub(body);
         httpd_resp_set_status(request, "403 Forbidden");
-        const char* reason = decision == AuditDecision::DeniedRole ? "forbidden_role" : "invalid_credentials";
-        return send_json(request, std::string{"{\"ok\":false,\"reason\":\""} + reason + "\"}");
+        return send_json(request, "{\"ok\":false,\"reason\":\"forbidden_role\"}");
     }
+
+    /* LEGACY v1 disabled: every list/set request used to parse credential and
+       call access_->authorize(actor, credential, "access.manage", now_ms).
+       Bearer login is now the only PIN verification step. */
 
     if (action == "list") {
         scrub(body);
@@ -427,8 +424,12 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
     }
 
-    http_session::revoke_all();
-    return send_json(request, "{\"ok\":true,\"enabledAdmins\":" + std::to_string(access_->enabled_admin_count()) + "}");
+    // Invalidate only sessions belonging to the account that changed. The
+    // acting Admin session remains valid when managing somebody else.
+    http_session::revoke_actor(id);
+    const bool actor_session_invalidated = id == actor;
+    return send_json(request, "{\"ok\":true,\"enabledAdmins\":" + std::to_string(access_->enabled_admin_count()) +
+        ",\"actorSessionInvalidated\":" + (actor_session_invalidated ? "true" : "false") + "}");
 }
 
 }  // namespace homeguard::idf
