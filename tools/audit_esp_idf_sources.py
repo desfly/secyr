@@ -26,6 +26,11 @@ rules = [
         "FreeRTOS task API requires task.h",
     ),
     (
+        re.compile(r"\besp_rom_delay_us\b"),
+        '#include "esp_rom_sys.h"',
+        "esp_rom_delay_us requires esp_rom_sys.h",
+    ),
+    (
         re.compile(r"\bstd::uint(?:8|16|32|64)_t\b"),
         "#include <cstdint>",
         "fixed-width integer type requires cstdint",
