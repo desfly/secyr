@@ -41,6 +41,8 @@ jobs:
         run: python tools/check_access_boundary.py
       - name: Service invalidation security audit
         run: python tools/check_service_invalidate_boundary.py
+      - name: Cloud configuration security audit
+        run: python tools/check_cloud_config_boundary.py
       - name: Factory reset coverage audit
         run: python tools/check_factory_reset_coverage.py
       - name: Firmware partition budget
