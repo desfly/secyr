@@ -57,10 +57,18 @@
       const text = await response.text();
       let body = {};
       try { body = text ? JSON.parse(text) : {}; } catch (_) { body = {}; }
-      if (!response.ok || body.ok === false) throw new Error(body.reason || `${response.status} ${response.statusText}`);
 
       credential.value = "";
       confirmation.value = "";
+
+      if (body.rebooting === true && (!response.ok || body.ok === false)) {
+        result.textContent = "Скидання виконано частково. HomeGuard перезавантажується для безпечного відновлення; після запуску перевірте стан і повторіть повне скидання за потреби.";
+        if (typeof showToast === "function") showToast("Factory Reset частковий · HomeGuard відновлюється");
+        return;
+      }
+
+      if (!response.ok || body.ok === false) throw new Error(body.reason || `${response.status} ${response.statusText}`);
+
       result.textContent = "Скидання виконано. HomeGuard перезавантажується; поточне з’єднання буде втрачено.";
       if (typeof showToast === "function") showToast("Factory Reset виконано · HomeGuard перезавантажується");
     } catch (error) {
