@@ -51,6 +51,8 @@ jobs:
         run: python tools/audit_component_dependencies.py
       - name: GPIO safety audit
         run: python tools/audit_gpio_safety.py
+      - name: Access boundary security audit
+        run: python tools/check_access_boundary.py
       - name: Firmware partition budget
         run: python tools/check_firmware_budget.py
       - name: Host unit tests
