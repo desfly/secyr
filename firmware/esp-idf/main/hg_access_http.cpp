@@ -3,7 +3,9 @@
 
 #include "esp_random.h"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -18,28 +20,46 @@ AccessHttp* self_from(httpd_req_t* request) {
     return static_cast<AccessHttp*>(request->user_ctx);
 }
 
-bool parse_json_string(const std::string& body, const char* key, std::string& value) {
+std::size_t value_offset(const std::string& body, const char* key) {
     const std::string marker = std::string{"\""} + key + "\"";
     auto pos = body.find(marker);
-    if (pos == std::string::npos) return false;
+    if (pos == std::string::npos) return std::string::npos;
     pos = body.find(':', pos + marker.size());
-    if (pos == std::string::npos) return false;
-    pos = body.find('"', pos + 1U);
-    if (pos == std::string::npos) return false;
-    const auto end = body.find('"', pos + 1U);
-    if (end == std::string::npos) return false;
-    value.assign(body, pos + 1U, end - pos - 1U);
-    return true;
+    if (pos == std::string::npos) return std::string::npos;
+    ++pos;
+    while (pos < body.size() && std::isspace(static_cast<unsigned char>(body[pos]))) ++pos;
+    return pos;
+}
+
+bool parse_json_string(const std::string& body, const char* key, std::string& value) {
+    auto pos = value_offset(body, key);
+    if (pos == std::string::npos || pos >= body.size() || body[pos] != '"') return false;
+    ++pos;
+    value.clear();
+    bool escaped = false;
+    for (; pos < body.size(); ++pos) {
+        const char ch = body[pos];
+        if (escaped) {
+            if (ch == '"' || ch == '\\' || ch == '/') value.push_back(ch);
+            else if (ch == 'n') value.push_back('\n');
+            else if (ch == 'r') value.push_back('\r');
+            else if (ch == 't') value.push_back('\t');
+            else return false;
+            escaped = false;
+        } else if (ch == '\\') {
+            escaped = true;
+        } else if (ch == '"') {
+            return true;
+        } else {
+            value.push_back(ch);
+        }
+    }
+    return false;
 }
 
 bool parse_bool(const std::string& body, const char* key, bool& value) {
-    const std::string marker = std::string{"\""} + key + "\"";
-    auto pos = body.find(marker);
+    const auto pos = value_offset(body, key);
     if (pos == std::string::npos) return false;
-    pos = body.find(':', pos + marker.size());
-    if (pos == std::string::npos) return false;
-    ++pos;
-    while (pos < body.size() && (body[pos] == ' ' || body[pos] == '\t' || body[pos] == '\r' || body[pos] == '\n')) ++pos;
     if (body.compare(pos, 4, "true") == 0) { value = true; return true; }
     if (body.compare(pos, 5, "false") == 0) { value = false; return true; }
     return false;
@@ -51,6 +71,11 @@ bool valid_pin(std::string_view pin) {
         if (ch < '0' || ch > '9') return false;
     }
     return true;
+}
+
+void scrub(std::string& secret) {
+    std::fill(secret.begin(), secret.end(), '\0');
+    secret.clear();
 }
 
 std::string json_escape(std::string_view value) {
@@ -104,7 +129,7 @@ std::string capabilities_json(const AccessControl& access, AccessRole role) {
            ",\"disarm\":" + allowed("security.disarm") +
            ",\"panic\":" + allowed("security.panic") +
            ",\"valves\":" + allowed("valve.open") +
-           ",\"networkConfigure\":" + allowed("system.network.configure") +
+           ",\"networkConfigure\":" + allowed("network.configure") +
            ",\"accessManage\":" + allowed("access.manage") +
            ",\"serviceInvalidate\":" + allowed("system.service.invalidate") + "}";
 }
@@ -158,12 +183,14 @@ esp_err_t AccessHttp::handle_login(httpd_req_t* request) {
     std::string credential;
     if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential) ||
         actor.empty() || actor.size() > 23U || !valid_pin(credential)) {
+        scrub(credential);
         httpd_resp_set_status(request, "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_credentials\"}");
     }
 
     const auto now_ms = access_now_ms();
     const auto decision = access_->authenticate(actor, credential, now_ms);
+    scrub(credential);
     if (decision == AuditDecision::DeniedRateLimited) {
         return send_rate_limited(request, *access_, actor, now_ms);
     }
@@ -215,6 +242,7 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         if (!parse_json_string(body, "id", id) || !parse_json_string(body, "name", name) ||
             !parse_json_string(body, "pin", pin) || id.empty() || id.size() > 23U ||
             name.empty() || name.size() > 31U || !valid_pin(pin)) {
+            scrub(pin);
             httpd_resp_set_status(request, "400 Bad Request");
             return send_json(request, "{\"ok\":false,\"reason\":\"invalid_bootstrap_admin\"}");
         }
@@ -222,7 +250,9 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
         bootstrap_allowed_ = false;
         std::array<std::uint8_t, 16> salt{};
         esp_fill_random(salt.data(), salt.size());
-        if (!access_->set_user(id, name, AccessRole::Admin, pin, salt, true)) {
+        const bool user_set = access_->set_user(id, name, AccessRole::Admin, pin, salt, true);
+        scrub(pin);
+        if (!user_set) {
             bootstrap_allowed_ = true;
             httpd_resp_set_status(request, "409 Conflict");
             return send_json(request, "{\"ok\":false,\"reason\":\"bootstrap_failed\"}");
@@ -241,12 +271,14 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
     std::string actor;
     std::string credential;
     if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
+        scrub(credential);
         httpd_resp_set_status(request, "401 Unauthorized");
         return send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
     }
 
     const auto now_ms = access_now_ms();
     const auto decision = access_->authorize(actor, credential, "access.manage", now_ms);
+    scrub(credential);
     if (decision == AuditDecision::DeniedRateLimited) {
         return send_rate_limited(request, *access_, actor, now_ms);
     }
@@ -283,6 +315,7 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
     bool enabled = true;
     if (!parse_json_string(body, "id", id) || !parse_json_string(body, "name", name) ||
         !parse_json_string(body, "role", role_text) || !parse_json_string(body, "pin", pin)) {
+        scrub(pin);
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"user_fields_required\"}");
     }
@@ -291,11 +324,13 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
     bool role_valid = false;
     const auto role = parse_role(role_text, role_valid);
     if (!role_valid || id.empty() || id.size() > 23U || name.empty() || name.size() > 31U || !valid_pin(pin)) {
+        scrub(pin);
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_user\"}");
     }
 
     if (!access_->would_preserve_admin_access(id, role, enabled)) {
+        scrub(pin);
         httpd_resp_set_status(request, "409 Conflict");
         return send_json(request, "{\"ok\":false,\"reason\":\"last_admin_required\"}");
     }
@@ -303,13 +338,16 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
     std::unique_ptr<AccessControl> previous_access{
         new (std::nothrow) AccessControl(*access_)};
     if (!previous_access) {
+        scrub(pin);
         httpd_resp_set_status(request, "503 Service Unavailable");
         return send_json(request, "{\"ok\":false,\"reason\":\"rollback_snapshot_unavailable\"}");
     }
 
     std::array<std::uint8_t, 16> salt{};
     esp_fill_random(salt.data(), salt.size());
-    if (!access_->set_user(id, name, role, pin, salt, enabled)) {
+    const bool user_set = access_->set_user(id, name, role, pin, salt, enabled);
+    scrub(pin);
+    if (!user_set) {
         *access_ = *previous_access;
         httpd_resp_set_status(request, "409 Conflict");
         return send_json(request, "{\"ok\":false,\"reason\":\"user_capacity_or_validation\"}");
