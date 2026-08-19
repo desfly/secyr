@@ -44,7 +44,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++ ninja-build
       - name: Project preflight
-        run: python tools/preflight_build0022.py
+        run: python tools/preflight_firmware.py
       - name: ESP-IDF source audit
         run: python tools/audit_esp_idf_sources.py
       - name: Component dependency audit
