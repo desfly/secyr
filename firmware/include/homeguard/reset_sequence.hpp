@@ -4,29 +4,31 @@
 
 namespace hg {
 
-struct ResetSequenceStep {
+struct ResetGestureStep {
     std::uint8_t count{0};
     bool trigger_factory_reset{false};
 };
 
-// The HomeGuard-S3 board reports the physical RST/EN button as POWERON.
-// Both EXT and POWERON therefore count as physical-reset candidates. The
-// runtime persistence layer decides whether consecutive candidates belong to
-// one short reset sequence; software/watchdog/panic resets must not count.
-constexpr bool physical_reset_candidate(
-    bool external_rst,
-    bool poweron_rst) noexcept {
-    return external_rst || poweron_rst;
+// A gesture step is counted only after the hold threshold has been reached
+// and the button is subsequently released. Short presses never advance it.
+constexpr ResetGestureStep advance_confirmed_hold(
+    std::uint8_t previous_count,
+    bool hold_confirmed,
+    std::uint8_t required_holds = 3U) noexcept {
+    if (!hold_confirmed || required_holds == 0U) {
+        return {previous_count, false};
+    }
+
+    const auto next = static_cast<std::uint8_t>(
+        previous_count == 0xffU ? 0xffU : previous_count + 1U);
+    if (next >= required_holds) return {0U, true};
+    return {next, false};
 }
 
-constexpr ResetSequenceStep advance_reset_sequence(
+constexpr std::uint8_t expire_reset_gesture(
     std::uint8_t previous_count,
-    bool physical_rst,
-    std::uint8_t required_presses = 3U) noexcept {
-    if (!physical_rst || required_presses == 0U) return {};
-    const auto next = static_cast<std::uint8_t>(previous_count == 0xffU ? 0xffU : previous_count + 1U);
-    if (next >= required_presses) return {0U, true};
-    return {next, false};
+    bool timed_out) noexcept {
+    return timed_out ? 0U : previous_count;
 }
 
 }  // namespace hg
