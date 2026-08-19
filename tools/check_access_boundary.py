@@ -13,17 +13,12 @@ def require(path: Path, snippets: list[str]) -> None:
         if snippet not in text:
             errors.append(f"{path.relative_to(ROOT)} missing security contract: {snippet}")
 
-# Public access lifecycle must expose only the minimal setup/login decision and
-# successful login must issue an opaque HTTP session token.
 require(MAIN / "hg_access_http.cpp", [
-    '"/api/v1/access/state"',
-    '"setup_required"',
-    '"login_required"',
-    'http_session::issue()',
-    '\"sessionToken\"',
+    '"/api/v1/access/state"', '"setup_required"', '"login_required"',
+    'http_session::issue()', '\"sessionToken\"',
+    '"/api/v1/access/logout"', 'http_session::revoke(authorization)',
 ])
 
-# Factory setup is persistent until the first Admin is successfully created.
 require(MAIN / "hg_access_runtime.hpp", ["g_bootstrap_allowed", "setup_required", "lock_bootstrap"])
 access_http = (MAIN / "hg_access_http.cpp").read_text(encoding="utf-8")
 if "bootstrap_allowed_ = false" not in access_http:
@@ -31,37 +26,45 @@ if "bootstrap_allowed_ = false" not in access_http:
 if "bootstrap_allowed_ = true" not in access_http:
     errors.append("hg_access_http.cpp must restore bootstrap when first-Admin creation/persistence fails")
 
-# NVS failure must never silently erase the access database during ordinary boot.
 app_main = (MAIN / "app_main.cpp").read_text(encoding="utf-8")
 if "nvs_flash_erase()" in app_main:
     errors.append("app_main.cpp must not implicitly erase NVS during ordinary boot")
-require(MAIN / "app_main.cpp", ["access_runtime::set_bootstrap_allowed(false)", "access_runtime::set_bootstrap_allowed(true)"])
+require(MAIN / "app_main.cpp", [
+    "access_runtime::set_bootstrap_allowed(false)",
+    "access_runtime::set_bootstrap_allowed(true)",
+    "enter_nvs_recovery_mode(nvs_error)",
+])
 
-# Protected read APIs must invoke the shared request authentication gate.
+require(MAIN / "hg_nvs_recovery.cpp", [
+    "kRequiredHolds = 3U",
+    "set_white(board::kOnboardRgb)",
+    "nvs_flash_erase()",
+    "set_red(board::kOnboardRgb)",
+])
+recovery = (MAIN / "hg_nvs_recovery.cpp").read_text(encoding="utf-8")
+if "esp_netif_init" in recovery or "httpd_" in recovery or "esp_wifi" in recovery:
+    errors.append("NVS recovery must remain isolated from network/HTTP")
+
 for filename in (
     "hg_system_http.cpp", "hg_cloud_http.cpp", "hg_lan_http.cpp",
     "hg_infrastructure_http.cpp", "hg_build_http.cpp", "hg_service_http.cpp",
 ):
     require(MAIN / filename, ["hg_request_auth.hpp", "request_auth::"])
 
-# Network is passwordless only while setup_required.
 require(MAIN / "hg_network_http.cpp", [
     "hg_access_runtime.hpp", "hg_request_auth.hpp",
     "access_runtime::setup_required", "request_auth::",
 ])
 
-# Shared gate must accept expiring bearer sessions.
 require(MAIN / "hg_request_auth.hpp", ["hg_http_session.hpp", "http_session::authorized", 'WWW-Authenticate'])
-require(MAIN / "hg_http_session.hpp", ["kLifetimeUs", "BearerTokenVerifier", "revoke_all"])
+require(MAIN / "hg_http_session.hpp", ["kLifetimeUs", "BearerTokenVerifier", "revoke(", "revoke_all"])
 
-# Full factory reset from HTTP must stage work for early boot.
 system_http = (MAIN / "hg_system_http.cpp").read_text(encoding="utf-8")
 if "stage_factory_reset_request()" not in system_http:
     errors.append("hg_system_http.cpp must stage factory reset for early boot")
 if "FactoryResetManager{}.erase_mutable_state()" in system_http:
     errors.append("hg_system_http.cpp must not erase mutable state in live HTTP runtime")
 
-# Physical reset acknowledgement and retry semantics are safety-significant.
 reset = (MAIN / "hg_reset_sequence.cpp").read_text(encoding="utf-8")
 for snippet in (
     "set_white(board::kOnboardRgb)", "stage_factory_reset_request()",
@@ -70,11 +73,9 @@ for snippet in (
 ):
     if snippet not in reset:
         errors.append(f"hg_reset_sequence.cpp missing reset contract: {snippet}")
-# Pending must be consumed after the destructive erase, never before it.
 if reset.find("set_pending_reset(false)") < reset.find("FactoryResetManager{}.erase_mutable_state()"):
     errors.append("hg_reset_sequence.cpp must keep factory-reset pending until erase succeeds")
 
-# Locked web UI + first-run Wi-Fi provisioning must be present.
 require(WEB / "access-session.js", [
     "hg-auth-locked", "/api/v1/access/state", "/api/v1/access/login",
     "sessionToken", "Bearer ${session.token}",
