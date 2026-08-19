@@ -73,6 +73,12 @@ bool RgbDiagnostic::supported_gpio(int gpio) {
     return gpio == 38 || gpio == 48;
 }
 
+esp_err_t RgbDiagnostic::set_white(int gpio) {
+    if (!supported_gpio(gpio)) return ESP_ERR_INVALID_ARG;
+    const std::array<std::uint8_t, 3> white{{0xffU, 0xffU, 0xffU}};
+    return transmit_rgb(gpio, white);
+}
+
 esp_err_t RgbDiagnostic::set_red(int gpio) {
     if (!supported_gpio(gpio)) return ESP_ERR_INVALID_ARG;
 
@@ -92,9 +98,7 @@ esp_err_t RgbDiagnostic::test_white(int gpio, unsigned duration_ms) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    const std::array<std::uint8_t, 3> white{{0xffU, 0xffU, 0xffU}};
-
-    auto error = transmit_rgb(gpio, white);
+    auto error = set_white(gpio);
     if (error != ESP_OK) return error;
 
     vTaskDelay(pdMS_TO_TICKS(duration_ms));
