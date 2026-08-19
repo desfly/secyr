@@ -32,6 +32,7 @@ add_library(homeguard_core
     src/physical_output_runtime.cpp
     src/access_control.cpp
     src/access_store.cpp
+    src/access_lifecycle.cpp
     src/health_monitor.cpp
     src/telemetry.cpp
 )
