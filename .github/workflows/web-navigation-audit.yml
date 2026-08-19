@@ -7,12 +7,14 @@ on:
     paths:
       - "web/**"
       - "tools/check_web_navigation_runtime.py"
+      - "tools/check_web_navigation_state_contract.py"
       - ".github/workflows/web-navigation-audit.yml"
   pull_request:
     branches: [main]
     paths:
       - "web/**"
       - "tools/check_web_navigation_runtime.py"
+      - "tools/check_web_navigation_state_contract.py"
       - ".github/workflows/web-navigation-audit.yml"
 
 permissions:
@@ -37,5 +39,7 @@ jobs:
         run: node --check web/app.js && node --check web/access-session.js && node --check web/factory-reset.js
       - name: Static Web UI contract
         run: python tools/check_web_ui_contract.py
+      - name: Navigation state ownership contract
+        run: python tools/check_web_navigation_state_contract.py
       - name: Browser navigation runtime audit
         run: python tools/check_web_navigation_runtime.py --web web --port 8771

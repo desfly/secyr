@@ -71,6 +71,9 @@ function renderOutputs(data) {
     return `<div class="${item.active ? "" : "muted"}"><b>⇆</b><span>${isValve ? "Клапан" : "Вих."} ${id}</span><small>${item.active ? "Увімк." : "Вимк."}</small>${controls}</div>`;
   }).join("") : "<div><span>Очікування реальних даних контролера…</span></div>";
   target.querySelectorAll("[data-output-id]").forEach(button => { button.onclick = () => sendOutputCommand(button); });
+  if (window.HomeGuardAuth?.role?.() === "guest") {
+    target.querySelectorAll("[data-output-id]").forEach(button => { button.disabled = true; });
+  }
 }
 
 function renderNetwork(status) {
@@ -212,6 +215,7 @@ async function sendSecurityCommand(button) {
   const { actor, credential } = operatorCredentials();
   if (!command || !validOperator(actor, credential)) return;
   const buttons = [...document.querySelectorAll("[data-command]")];
+  const disabledBefore = buttons.map(item => item.disabled);
   buttons.forEach(item => { item.disabled = true; });
   try {
     await api("/api/v1/system/security-command", { method: "POST", body: JSON.stringify({ command, actor, credential }) });
@@ -221,7 +225,7 @@ async function sendSecurityCommand(button) {
     showToast(`Помилка команди: ${error.message}`);
   } finally {
     document.querySelector("#operatorPin").value = "";
-    buttons.forEach(item => { item.disabled = false; });
+    buttons.forEach((item, index) => { item.disabled = disabledBefore[index]; });
   }
 }
 
