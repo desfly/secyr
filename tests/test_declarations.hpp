@@ -7,6 +7,7 @@ void test_access_control();
 void test_access_permissions();
 void test_output_safety();
 void test_readiness();
+void test_runtime_support();
 void test_build0009();
 void test_build0032();
 void test_build0038();
