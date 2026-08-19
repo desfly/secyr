@@ -62,6 +62,18 @@ require(MAIN / "hg_network_http.cpp", [
 require(MAIN / "hg_request_auth.hpp", ["hg_http_session.hpp", "http_session::authorized", "WWW-Authenticate"])
 require(MAIN / "hg_http_session.hpp", ["kLifetimeUs", "BearerTokenVerifier", "revoke(", "revoke_all"])
 
+# Release-critical mutating APIs must still pass through command-level RBAC.
+require(MAIN / "hg_system_http.cpp", [
+    'authorize(actor,credential,"system.factory_reset")',
+    "access_control_->authorize(actor,credential,command)",
+])
+require(MAIN / "hg_network_http.cpp", [
+    'access_->authorize(actor, credential, "network.configure")',
+])
+require(MAIN / "hg_output_http.cpp", [
+    "access_control_->authorize(actor, credential, command)",
+])
+
 system_http = (MAIN / "hg_system_http.cpp").read_text(encoding="utf-8")
 if "stage_factory_reset_request()" not in system_http:
     errors.append("hg_system_http.cpp must stage factory reset for early boot")
@@ -70,14 +82,18 @@ if "FactoryResetManager{}.erase_mutable_state()" in system_http:
 
 reset = (MAIN / "hg_reset_sequence.cpp").read_text(encoding="utf-8")
 for snippet in (
-    "set_white(board::kOnboardRgb)", "stage_factory_reset_request()",
-    "set_red(board::kOnboardRgb)", "kRequiredHolds = 3U",
+    "set_red(board::kOnboardRgb)", "stage_factory_reset_request()",
+    "set_white(board::kOnboardRgb)", "kRequiredHolds = 3U",
+    "kHoldTicks = pdMS_TO_TICKS(1500)", "kSuccessWhiteTicks = pdMS_TO_TICKS(5000)",
     "FactoryResetManager{}.erase_mutable_state()", "set_pending_reset(false)",
+    "RED means release now", "WHITE RGB confirmation for 5 seconds",
 ):
     if snippet not in reset:
         errors.append(f"hg_reset_sequence.cpp missing reset contract: {snippet}")
 if reset.find("set_pending_reset(false)") < reset.find("FactoryResetManager{}.erase_mutable_state()"):
     errors.append("hg_reset_sequence.cpp must keep factory-reset pending until erase succeeds")
+if reset.find("RgbDiagnostic::set_red(board::kOnboardRgb)") > reset.find("RgbDiagnostic::set_white(board::kOnboardRgb)"):
+    errors.append("hg_reset_sequence.cpp RGB contract must be RED hold confirmation before WHITE reset-success confirmation")
 
 require(WEB / "access-session.js", [
     "hg-auth-locked", "/api/v1/access/state", "/api/v1/access/login",
