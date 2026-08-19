@@ -30,6 +30,12 @@ require("setInterval(()=>refreshLan(false),10000)" in html, "LAN automatic monit
 require("refreshLan(true)" in html, "LAN active scan button path missing")
 require("etharp_find_addr" in lan_cpp, "LAN backend does not read ARP cache")
 require("stimulate_arp_cache" in lan_cpp and "sendto" in lan_cpp, "LAN active scan does not stimulate ARP discovery")
+require("kActiveScanCooldownUs" in lan_cpp and "g_last_active_scan_us" in lan_cpp,
+        "LAN active scan lacks cooldown protection")
+require("scanThrottled" in lan_cpp,
+        "LAN API does not expose whether an active scan was throttled")
+require("now_us - g_last_active_scan_us < kActiveScanCooldownUs" in lan_cpp,
+        "LAN active scan cooldown is not enforced before /24 stimulus")
 require("MAC" in html and "IP" in html, "LAN UI does not expose IP/MAC")
 require("hg_lan_http.cpp" in cmake, "LAN backend not compiled into ESP-IDF main component")
 require('#include "hg_lan_http.hpp"' in app_main, "LanHttp header not wired into app_main")
@@ -44,6 +50,6 @@ if errors:
 
 print("LAN UI/API contract PASS")
 print(" - passive ARP monitor: present")
-print(" - active /24 ARP scan: present")
+print(" - active /24 ARP scan: present + cooldown protected")
 print(" - Web UI IP/MAC list + scan button: present")
 print(" - firmware registration + build wiring: present")
