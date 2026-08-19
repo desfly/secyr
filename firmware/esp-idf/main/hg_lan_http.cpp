@@ -1,4 +1,5 @@
 #include "hg_lan_http.hpp"
+#include "hg_request_auth.hpp"
 
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -46,8 +47,6 @@ bool stimulate_arp_cache()
 
     const auto now_us = esp_timer_get_time();
     if (now_us - g_last_active_scan_us < kActiveScanCooldownUs) return false;
-    // Reserve the cooldown before the expensive work so back-to-back requests
-    // cannot all enter the synchronous /24 stimulus path.
     g_last_active_scan_us = now_us;
 
     const int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -79,9 +78,10 @@ esp_err_t send_json(httpd_req_t* request, const std::string& body)
 
 }  // namespace
 
-esp_err_t LanHttp::register_handlers(httpd_handle_t server)
+esp_err_t LanHttp::register_handlers(httpd_handle_t server, homeguard::AccessControl* access_control)
 {
-    if (server == nullptr) return ESP_ERR_INVALID_ARG;
+    if (server == nullptr || access_control == nullptr) return ESP_ERR_INVALID_ARG;
+    access_control_ = access_control;
     const httpd_uri_t routes[] = {
         {.uri="/api/v1/lan/devices", .method=HTTP_GET, .handler=&LanHttp::devices_get, .user_ctx=this},
         {.uri="/api/v1/lan/scan", .method=HTTP_GET, .handler=&LanHttp::scan_get, .user_ctx=this},
@@ -93,16 +93,25 @@ esp_err_t LanHttp::register_handlers(httpd_handle_t server)
     return ESP_OK;
 }
 
+bool LanHttp::authenticated_request(httpd_req_t* request) const
+{
+    return access_control_ != nullptr && request_auth::authenticated(request, *access_control_);
+}
+
 esp_err_t LanHttp::devices_get(httpd_req_t* request)
 {
     auto* self = self_from(request);
-    return self == nullptr ? ESP_FAIL : send_json(request, self->devices_json(false));
+    if (self == nullptr) return ESP_FAIL;
+    if (!self->authenticated_request(request)) return request_auth::send_login_required(request);
+    return send_json(request, self->devices_json(false));
 }
 
 esp_err_t LanHttp::scan_get(httpd_req_t* request)
 {
     auto* self = self_from(request);
-    return self == nullptr ? ESP_FAIL : send_json(request, self->devices_json(true));
+    if (self == nullptr) return ESP_FAIL;
+    if (!self->authenticated_request(request)) return request_auth::send_login_required(request);
+    return send_json(request, self->devices_json(true));
 }
 
 std::string LanHttp::devices_json(bool active_scan) const
