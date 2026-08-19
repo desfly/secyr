@@ -14,8 +14,10 @@ import kotlinx.coroutines.withTimeout
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.ProvisioningForm
 import ua.homeguard.s3.model.ProvisioningPhase
+import ua.homeguard.s3.model.ProvisioningQrData
 import ua.homeguard.s3.model.ProvisioningUiState
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
+import ua.homeguard.s3.provisioning.DirectNetworkProvisioner
 import ua.homeguard.s3.provisioning.PinnedProvisioningApi
 import ua.homeguard.s3.provisioning.ProvisioningHandoff
 import ua.homeguard.s3.provisioning.ProvisioningQrParser
@@ -53,79 +55,12 @@ class ProvisioningCoordinator(
     }
 
     fun provision(form: ProvisioningForm) {
-        val qr = mutableState.value.qr ?: return
         scope.launch {
             runCatching {
                 require(form.wifiSsid.isNotBlank()) { "Вкажіть домашню Wi-Fi мережу" }
                 require(form.wifiPassword.length in 8..64) { "Перевірте пароль домашньої Wi-Fi мережі" }
-                val localApiToken = randomToken()
-                val handoff = ProvisioningHandoff(qr.deviceId, 60_000L)
-
-                mutableState.value = mutableState.value.copy(
-                    phase = ProvisioningPhase.CONNECTING_SETUP_AP,
-                    message = "Підключення до ${qr.setupSsid}",
-                    error = ""
-                )
-                connector.connect(qr.setupSsid, qr.setupPassword).use {
-                    val api = PinnedProvisioningApi(qr)
-                    mutableState.value = mutableState.value.copy(
-                        phase = ProvisioningPhase.AUTHORIZING,
-                        message = "Перевірка одноразового коду"
-                    )
-                    api.authorize()
-                    mutableState.value = mutableState.value.copy(
-                        phase = ProvisioningPhase.APPLYING,
-                        message = "Передавання налаштувань через HTTPS"
-                    )
-                    api.apply(form, localApiToken)
-                    settings.update(
-                        AppSettings(
-                            deviceId = qr.deviceId,
-                            apiToken = localApiToken,
-                            autoReconnect = true,
-                            remoteAccessEnabled = form.cloudEndpoint.isNotBlank(),
-                            cloudBaseUrl = "",
-                            lastKnownLocalUrl = "",
-                            localCertificateSha256 = qr.certificateSha256
-                        )
-                    )
-                }
-
-                handoff.applyAccepted(System.currentTimeMillis())
-                mutableState.value = mutableState.value.copy(
-                    phase = ProvisioningPhase.WAITING_FOR_RESTART,
-                    message = "Контролер перезапускається у режимі домашньої Wi-Fi мережі"
-                )
-                delay(1_500L)
-                handoff.beginDiscovery(System.currentTimeMillis())
-                mutableState.value = mutableState.value.copy(
-                    phase = ProvisioningPhase.DISCOVERING_LOCAL,
-                    message = "Пошук ${qr.deviceId} через mDNS та UDP"
-                )
-
-                val device = runCatching { awaitLocalDevice(qr.deviceId, 60_000L) }.getOrNull()
-                if (device != null) {
-                    val accepted = handoff.observe(
-                        device.deviceId,
-                        device.secure,
-                        device.pairingRequired,
-                        device.baseUrl,
-                        System.currentTimeMillis()
-                    )
-                    require(accepted.accepted) { "Знайдений пристрій не пройшов перевірку handoff" }
-                    settings.remember(device)
-                    mutableState.value = mutableState.value.copy(
-                        phase = ProvisioningPhase.COMPLETE,
-                        message = "HomeGuard-S3 підключено до домашньої мережі",
-                        localUrl = device.baseUrl
-                    )
-                } else {
-                    handoff.tick(System.currentTimeMillis() + 60_001L)
-                    mutableState.value = mutableState.value.copy(
-                        phase = ProvisioningPhase.COMPLETE,
-                        message = "Пристрій прив’язано, але локально ще не знайдено; пошук продовжиться автоматично"
-                    )
-                }
+                val qr = mutableState.value.qr
+                if (qr != null) provisionWithQr(qr, form) else provisionDirect(form)
             }.onFailure {
                 mutableState.value = mutableState.value.copy(
                     phase = ProvisioningPhase.ERROR,
@@ -133,6 +68,111 @@ class ProvisioningCoordinator(
                     error = it.message.orEmpty()
                 )
             }
+        }
+    }
+
+    private suspend fun provisionDirect(form: ProvisioningForm) {
+        mutableState.value = mutableState.value.copy(
+            phase = ProvisioningPhase.AUTHORIZING,
+            message = "Перевірка доступу HomeGuard за ${form.setupAddress}",
+            error = ""
+        )
+        mutableState.value = mutableState.value.copy(
+            phase = ProvisioningPhase.APPLYING,
+            message = "Передавання Wi-Fi налаштувань у HomeGuard"
+        )
+        DirectNetworkProvisioner.connect(
+            rawAddress = form.setupAddress,
+            actor = form.actor,
+            credential = form.credential,
+            ssid = form.wifiSsid,
+            password = form.wifiPassword,
+        )
+
+        mutableState.value = mutableState.value.copy(
+            phase = ProvisioningPhase.WAITING_FOR_RESTART,
+            message = "HomeGuard прийняв Wi-Fi налаштування та переходить у домашню мережу"
+        )
+        delay(1_500L)
+        mutableState.value = mutableState.value.copy(
+            phase = ProvisioningPhase.DISCOVERING_LOCAL,
+            message = "Пошук HomeGuard у домашній мережі"
+        )
+        discovery.rescan()
+        mutableState.value = mutableState.value.copy(
+            phase = ProvisioningPhase.COMPLETE,
+            message = "Wi-Fi налаштування передано; локальний пошук запущено"
+        )
+    }
+
+    private suspend fun provisionWithQr(qr: ProvisioningQrData, form: ProvisioningForm) {
+        val localApiToken = randomToken()
+        val handoff = ProvisioningHandoff(qr.deviceId, 60_000L)
+
+        mutableState.value = mutableState.value.copy(
+            phase = ProvisioningPhase.CONNECTING_SETUP_AP,
+            message = "Підключення до ${qr.setupSsid}",
+            error = ""
+        )
+        connector.connect(qr.setupSsid, qr.setupPassword).use {
+            val api = PinnedProvisioningApi(qr)
+            mutableState.value = mutableState.value.copy(
+                phase = ProvisioningPhase.AUTHORIZING,
+                message = "Перевірка одноразового коду"
+            )
+            api.authorize()
+            mutableState.value = mutableState.value.copy(
+                phase = ProvisioningPhase.APPLYING,
+                message = "Передавання налаштувань через HTTPS"
+            )
+            api.apply(form, localApiToken)
+            settings.update(
+                AppSettings(
+                    deviceId = qr.deviceId,
+                    apiToken = localApiToken,
+                    autoReconnect = true,
+                    remoteAccessEnabled = form.cloudEndpoint.isNotBlank(),
+                    cloudBaseUrl = "",
+                    lastKnownLocalUrl = "",
+                    localCertificateSha256 = qr.certificateSha256
+                )
+            )
+        }
+
+        handoff.applyAccepted(System.currentTimeMillis())
+        mutableState.value = mutableState.value.copy(
+            phase = ProvisioningPhase.WAITING_FOR_RESTART,
+            message = "Контролер перезапускається у режимі домашньої Wi-Fi мережі"
+        )
+        delay(1_500L)
+        handoff.beginDiscovery(System.currentTimeMillis())
+        mutableState.value = mutableState.value.copy(
+            phase = ProvisioningPhase.DISCOVERING_LOCAL,
+            message = "Пошук ${qr.deviceId} через mDNS та UDP"
+        )
+
+        val device = runCatching { awaitLocalDevice(qr.deviceId, 60_000L) }.getOrNull()
+        if (device != null) {
+            val accepted = handoff.observe(
+                device.deviceId,
+                device.secure,
+                device.pairingRequired,
+                device.baseUrl,
+                System.currentTimeMillis()
+            )
+            require(accepted.accepted) { "Знайдений пристрій не пройшов перевірку handoff" }
+            settings.remember(device)
+            mutableState.value = mutableState.value.copy(
+                phase = ProvisioningPhase.COMPLETE,
+                message = "HomeGuard-S3 підключено до домашньої мережі",
+                localUrl = device.baseUrl
+            )
+        } else {
+            handoff.tick(System.currentTimeMillis() + 60_001L)
+            mutableState.value = mutableState.value.copy(
+                phase = ProvisioningPhase.COMPLETE,
+                message = "Пристрій прив’язано, але локально ще не знайдено; пошук продовжиться автоматично"
+            )
         }
     }
 

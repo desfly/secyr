@@ -227,7 +227,7 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"admin_credential_required\"}");
     }
 
-    const auto decision = access_->authorize(actor, credential, "network.configure");
+    const auto decision = access_->authorize(actor, credential, "system.network.configure");
     std::fill(credential.begin(), credential.end(), '\0');
     if (decision != AuditDecision::Allowed) {
         httpd_resp_set_status(request, "403 Forbidden");

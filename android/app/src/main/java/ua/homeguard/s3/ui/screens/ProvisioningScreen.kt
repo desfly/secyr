@@ -117,6 +117,7 @@ fun ProvisioningScreen(
     var manualAddress by remember { mutableStateOf("192.168.4.1") }
     var manualAddressTouched by remember { mutableStateOf(false) }
     var wifiPasswordVisible by remember { mutableStateOf(false) }
+    var credentialVisible by remember { mutableStateOf(false) }
     var cloudTokenVisible by remember { mutableStateOf(false) }
     var wifiScanBusy by remember { mutableStateOf(false) }
     var wifiScanError by remember { mutableStateOf("") }
@@ -129,6 +130,11 @@ fun ProvisioningScreen(
         ProvisioningPhase.DISCOVERING_LOCAL,
     )
     val manualAddressValid = normalizeLocalAddress(manualAddress) != null
+    val directAuthValid = form.actor.isNotBlank() && form.credential.length in 4..12 && form.credential.all(Char::isDigit)
+    val canProvision = form.wifiSsid.isNotBlank() &&
+        form.wifiPassword.length in 8..64 &&
+        !busy &&
+        (state.qr != null || (manualAddressValid && directAuthValid))
 
     LaunchedEffect(devices) {
         if (!manualAddressTouched && devices.isNotEmpty()) {
@@ -166,16 +172,38 @@ fun ProvisioningScreen(
             Text("← Назад")
         }
         Text("Підключити HomeGuard до Wi-Fi")
-        Text("1. Ідентифікуйте новий контролер через QR. 2. Виберіть домашню Wi-Fi мережу зі скану HomeGuard або введіть SSID вручну. 3. Передайте налаштування і дочекайтеся появи HomeGuard у LAN.")
+        Text("Виберіть HomeGuard через локальний пошук/IP або QR, виберіть домашню Wi-Fi мережу та передайте налаштування.")
 
         HorizontalDivider()
-        Text("Крок 1 — вибрати новий HomeGuard")
+        Text("Крок 1 — вибрати HomeGuard")
         OutlinedButton(onClick = onScanQr, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
             Text("Сканувати QR HomeGuard")
         }
         state.qr?.let {
             Text("Пристрій: ${it.deviceId}")
             Text("Setup AP: ${it.setupSsid}")
+        }
+        if (state.qr == null) {
+            Text("Без QR використовується пряме підключення до HomeGuard за IP з авторизацією користувача.")
+            OutlinedTextField(
+                value = form.actor,
+                onValueChange = { form = form.copy(actor = it.take(23)) },
+                label = { Text("Користувач HomeGuard") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = form.credential,
+                onValueChange = { value -> form = form.copy(credential = value.filter(Char::isDigit).take(12)) },
+                label = { Text("PIN HomeGuard") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                visualTransformation = if (credentialVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { credentialVisible = !credentialVisible }) { Text("👁") }
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            )
         }
 
         HorizontalDivider()
@@ -237,8 +265,8 @@ fun ProvisioningScreen(
             modifier = Modifier.fillMaxWidth(),
         )
         Button(
-            onClick = { onProvision(form) },
-            enabled = state.qr != null && form.wifiSsid.isNotBlank() && form.wifiPassword.length in 8..64 && !busy,
+            onClick = { onProvision(form.copy(setupAddress = manualAddress)) },
+            enabled = canProvision,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Підключити HomeGuard до Wi-Fi")
