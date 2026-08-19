@@ -37,8 +37,11 @@ access_http = (MAIN / "hg_access_http.cpp").read_text(encoding="utf-8")
 large_access_stack_copy = re.compile(r"\b(?:const\s+)?(?:auto|(?:homeguard::)?AccessControl)\s+\w+\s*=\s*\*access_\s*;")
 if large_access_stack_copy.search(access_http):
     errors.append("hg_access_http.cpp: AccessControl rollback snapshot must not be copied into the httpd task stack")
-if "bool escaped = false" not in access_http or "scrub(credential);" not in access_http:
-    errors.append("hg_access_http.cpp: login auth must use escaped JSON parsing and scrub the login credential")
+if '#include "hg_http_util.hpp"' not in access_http or \
+        'http_util::read_body(request, 384U, body)' not in access_http or \
+        'http_util::parse_json_string(body, "credential", credential)' not in access_http or \
+        'http_util::scrub(credential);' not in access_http:
+    errors.append("hg_access_http.cpp: login auth must use shared escaped JSON parsing and scrub the login credential")
 if 'allowed("network.configure")' not in access_http or 'allowed("system.network.configure")' in access_http:
     errors.append("hg_access_http.cpp: networkConfigure capability must match network.configure authorization action")
 if 'access_->authorize_session(actor, "access.manage")' not in access_http:
