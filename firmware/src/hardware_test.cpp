@@ -57,8 +57,8 @@ HardwareReadinessReport HardwareTestPolicy::readiness(
     }};
 }
 
-Outputs HardwareTestPolicy::output_for(HardwareTestTarget target) noexcept {
-    Outputs outputs{};
+HardwareTestOutputs HardwareTestPolicy::output_for(HardwareTestTarget target) noexcept {
+    HardwareTestOutputs outputs{};
     switch (target) {
         case HardwareTestTarget::Siren: outputs.siren = true; break;
         case HardwareTestTarget::Valve1: outputs.valve1 = true; break;
