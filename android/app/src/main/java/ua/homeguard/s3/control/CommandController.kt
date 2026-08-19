@@ -16,40 +16,36 @@ class CommandController(
     private val settings: SettingsStore,
 ) {
     private val requestIds = AtomicLong(System.currentTimeMillis())
+    @Volatile private var localHttpSessionToken: String = ""
 
     suspend fun login(actor: String, credential: String): AccessSession {
         val target = endpoint.value
-        require(target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank()) {
-            "controller offline"
-        }
+        require(target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank()) { "controller offline" }
+
+        // Never reuse a bearer session across a fresh login attempt/device.
+        localHttpSessionToken = ""
         val api = createApi(target)
         val session = api.login(actor, credential)
         if (target.path != ControlPath.CLOUD) {
+            localHttpSessionToken = session.sessionToken
             val telemetryToken = api.telemetrySession(actor, credential)
             settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
         }
         return session
     }
 
+    fun logout() {
+        localHttpSessionToken = ""
+    }
+
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
         val target = endpoint.value
         val appSettings = settings.settings.value
-        if (target.path == ControlPath.OFFLINE || target.apiBaseUrl.isBlank()) {
-            return CommandReply(accepted = false, code = "offline")
-        }
-
-        if (target.path == ControlPath.CLOUD && appSettings.apiToken.isBlank()) {
-            return CommandReply(accepted = false, code = "offline")
-        }
-        if (target.path != ControlPath.CLOUD && appSettings.apiToken.isBlank() &&
-            (actor.isBlank() || credential.isBlank())) {
-            return CommandReply(accepted = false, code = "authorization_required")
-        }
+        if (target.path == ControlPath.OFFLINE || target.apiBaseUrl.isBlank()) return CommandReply(accepted = false, code = "offline")
+        if (target.path == ControlPath.CLOUD && appSettings.apiToken.isBlank()) return CommandReply(accepted = false, code = "offline")
+        if (target.path != ControlPath.CLOUD && actor.isBlank()) return CommandReply(accepted = false, code = "authorization_required")
 
         val api = createApi(target)
-        // The active local HTTP runtime authenticates every command with actor + PIN
-        // and does not expose the obsolete /api/challenge endpoint. Keep challenge
-        // flow only for the legacy/cloud command transport.
         val challenge = if (target.path == ControlPath.CLOUD && requiresChallenge(type)) api.challenge(type) else null
         val command = DeviceCommand(
             requestId = requestIds.incrementAndGet(),
@@ -67,7 +63,7 @@ class CommandController(
         val pin = if (target.path == ControlPath.CLOUD) "" else target.certificateSha256
         return HttpDeviceApi(
             baseUrl = target.apiBaseUrl,
-            tokenProvider = { settings.settings.value.apiToken },
+            tokenProvider = { if (localRuntime) localHttpSessionToken else settings.settings.value.apiToken },
             certificatePin = pin,
             runtimeV1 = localRuntime,
         )
