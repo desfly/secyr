@@ -12,9 +12,10 @@
     <h3>Скидання до заводських налаштувань</h3>
     <p style="margin:4px 0 12px">Стираються користувачі, Wi-Fi, Cloud/MQTT, налаштування контролера та provisioning. Апаратна ідентичність контролера зберігається.</p>
     <p style="margin:4px 0 14px"><strong>Після скидання HomeGuard перезавантажиться і зникне з поточної мережі.</strong></p>
-    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-bottom:10px">
-      <label>Admin ID<input id="factoryResetActor" type="text" maxlength="23" autocomplete="username" placeholder="ID адміністратора" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #d7deea;border-radius:8px"></label>
-      <label>Admin PIN<input id="factoryResetCredential" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password" placeholder="4–12 цифр" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #d7deea;border-radius:8px"></label>
+    <!-- LEGACY v1 auth fields: retained temporarily for rollback, not used by v2. -->
+    <div class="hg-legacy-auth-field" hidden>
+      <label>Admin ID<input id="factoryResetActor" type="text" maxlength="23" autocomplete="username"></label>
+      <label>Admin PIN<input id="factoryResetCredential" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password"></label>
     </div>
     <label>Для підтвердження введіть <strong>ERASE_ALL</strong>
       <input id="factoryResetConfirm" type="text" maxlength="9" autocomplete="off" placeholder="ERASE_ALL" style="display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #d7deea;border-radius:8px">
@@ -31,13 +32,14 @@
   const button = panel.querySelector("#factoryResetButton");
   const result = panel.querySelector("#factoryResetResult");
 
+  const isAdminSession = () => window.HomeGuardAuth?.authenticated?.() === true && window.HomeGuardAuth?.role?.() === "admin";
   const valid = () => {
-    button.disabled = !actor.value.trim() || !/^\d{4,12}$/.test(credential.value) || confirmation.value.trim() !== "ERASE_ALL";
+    button.disabled = !isAdminSession() || confirmation.value.trim() !== "ERASE_ALL";
   };
-  [actor, credential, confirmation].forEach(field => field.addEventListener("input", valid));
+  confirmation.addEventListener("input", valid);
 
   button.addEventListener("click", async () => {
-    if (button.disabled) return;
+    if (button.disabled || !isAdminSession()) return;
     const finalConfirm = window.confirm("ОСТАТОЧНЕ ПІДТВЕРДЖЕННЯ: стерти користувачів, Wi-Fi, Cloud і всі користувацькі налаштування HomeGuard та перезавантажити контролер?");
     if (!finalConfirm) return;
 
@@ -49,8 +51,7 @@
         cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          actor: actor.value.trim(),
-          credential: credential.value,
+          actor: window.HomeGuardAuth.actor(),
           confirm: "ERASE_ALL"
         })
       });
@@ -80,5 +81,11 @@
     }
   });
 
+  // Session gate initializes after app.js; re-check once it is available and
+  // whenever the user interacts with the confirmation field.
+  const timer = setInterval(() => {
+    valid();
+    if (window.HomeGuardAuth) clearInterval(timer);
+  }, 100);
   valid();
 })();
