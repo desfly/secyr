@@ -278,27 +278,49 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
 
     wifi_config_t previous_sta{};
     const bool have_previous_sta = esp_wifi_get_config(WIFI_IF_STA, &previous_sta) == ESP_OK;
+    std::string previous_ssid;
+    std::string previous_password;
+    const bool had_persisted_credentials = load_credentials(previous_ssid, previous_password);
+
     if (esp_wifi_set_config(WIFI_IF_STA, &sta) != ESP_OK) {
         std::fill(password.begin(), password.end(), '\0');
+        std::fill(previous_password.begin(), previous_password.end(), '\0');
         httpd_resp_set_status(request, "503 Service Unavailable");
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_connect_failed\"}");
     }
     if (!save_credentials(ssid, password)) {
         if (have_previous_sta) (void)esp_wifi_set_config(WIFI_IF_STA, &previous_sta);
         std::fill(password.begin(), password.end(), '\0');
+        std::fill(previous_password.begin(), previous_password.end(), '\0');
         httpd_resp_set_status(request, "503 Service Unavailable");
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_persist_failed\"}");
     }
-    std::fill(password.begin(), password.end(), '\0');
-
-    const auto response_error = send_json(request,
-        std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) +
-        "\",\"setupMode\":" + (setup_mode ? "true" : "false") + "}");
-    if (response_error != ESP_OK) return response_error;
 
     vTaskDelay(kStaHandoverDelay);
     (void)esp_wifi_disconnect();
-    return esp_wifi_connect();
+    const auto connect_error = esp_wifi_connect();
+    if (connect_error != ESP_OK) {
+        if (have_previous_sta) (void)esp_wifi_set_config(WIFI_IF_STA, &previous_sta);
+        const bool persist_rollback_ok = had_persisted_credentials
+            ? save_credentials(previous_ssid, previous_password)
+            : clear_credentials();
+        if (have_previous_sta) {
+            (void)esp_wifi_disconnect();
+            (void)esp_wifi_connect();
+        }
+        std::fill(password.begin(), password.end(), '\0');
+        std::fill(previous_password.begin(), previous_password.end(), '\0');
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return send_json(request, persist_rollback_ok
+            ? "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_connect_failed\",\"rolledBack\":true}"
+            : "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_connect_failed_rollback_failed\"}");
+    }
+
+    std::fill(password.begin(), password.end(), '\0');
+    std::fill(previous_password.begin(), previous_password.end(), '\0');
+    return send_json(request,
+        std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) +
+        "\",\"setupMode\":" + (setup_mode ? "true" : "false") + "}");
 }
 
 bool NetworkHttp::apply_sta(const std::string& ssid, const std::string& password, bool persist)
@@ -358,6 +380,17 @@ bool NetworkHttp::save_credentials(const std::string& ssid, const std::string& p
     const auto commit_error = set_error == ESP_OK ? nvs_commit(handle) : set_error;
     nvs_close(handle);
     return set_error == ESP_OK && commit_error == ESP_OK;
+}
+
+bool NetworkHttp::clear_credentials() const
+{
+    nvs_handle_t handle{};
+    if (nvs_open(kNvsNamespace, NVS_READWRITE, &handle) != ESP_OK) return false;
+    auto erase_error = nvs_erase_key(handle, kNvsKey);
+    if (erase_error == ESP_ERR_NVS_NOT_FOUND) erase_error = ESP_OK;
+    const auto commit_error = erase_error == ESP_OK ? nvs_commit(handle) : erase_error;
+    nvs_close(handle);
+    return erase_error == ESP_OK && commit_error == ESP_OK;
 }
 
 std::string NetworkHttp::status_json() const
