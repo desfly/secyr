@@ -124,7 +124,7 @@ void service_button_reset_task(void*) {
                         perform_factory_reset();
                     }
                 } else {
-                    ESP_LOGI(kTag, "Short service-button press ignored");
+                    ESP_LOGI(kTag, "Short/unconfirmed service-button press ignored");
                 }
                 hold_confirmed = false;
             }
@@ -133,10 +133,14 @@ void service_button_reset_task(void*) {
         if (stable_pressed && !hold_confirmed && (now - press_started_at) >= kHoldTicks) {
             const auto rgb_error = RgbDiagnostic::set_white(kResetRgbGpio);
             if (rgb_error != ESP_OK) {
-                ESP_LOGE(kTag, "Cannot show WHITE hold confirmation: %s", esp_err_to_name(rgb_error));
+                // WHITE is the user's positive acknowledgement that the hold is
+                // accepted. If feedback cannot be shown, fail safe: do not count
+                // this hold and require a later visible confirmation instead.
+                ESP_LOGE(kTag, "Cannot show WHITE hold confirmation; hold not armed: %s", esp_err_to_name(rgb_error));
+            } else {
+                hold_confirmed = true;
+                ESP_LOGW(kTag, "Hold threshold reached; WHITE means release now");
             }
-            hold_confirmed = true;
-            ESP_LOGW(kTag, "Hold threshold reached; WHITE means release now");
         }
 
         if (!stable_pressed && confirmed_holds != 0U) {
