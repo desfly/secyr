@@ -97,7 +97,6 @@ jobs:
             mock-syntax-report.json
             mock-link-report.json
             firmware-budget.json
-            release-readiness-build0025.json
             web-control-smoke.jsonl
           if-no-files-found: warn
 
