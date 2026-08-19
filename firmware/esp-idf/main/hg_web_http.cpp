@@ -262,7 +262,16 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
 
 esp_err_t WebHttp::access_session_js_get(httpd_req_t* request)
 {
-    return send_asset(request, "application/javascript; charset=utf-8", access_session_js_start, access_session_js_end);
+    // index.html already loads access-session.js on every Web UI boot. Append
+    // the factory-reset module to that same response so the System-page reset
+    // control cannot silently become dead code if the HTML script list drifts.
+    return send_text_with_suffix(
+        request,
+        "application/javascript; charset=utf-8",
+        access_session_js_start,
+        access_session_js_end,
+        reinterpret_cast<const char*>(factory_reset_js_start),
+        text_asset_size(factory_reset_js_start, factory_reset_js_end));
 }
 
 esp_err_t WebHttp::factory_reset_js_get(httpd_req_t* request)
