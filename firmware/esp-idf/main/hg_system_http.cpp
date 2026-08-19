@@ -128,7 +128,6 @@ esp_err_t SystemHttp::register_handlers(
         {.uri="/api/v1/system/events", .method=HTTP_GET, .handler=&SystemHttp::events_get, .user_ctx=this},
         {.uri="/api/v1/system/security-command", .method=HTTP_POST, .handler=&SystemHttp::security_command_post, .user_ctx=this},
         {.uri="/api/v1/system/factory-reset", .method=HTTP_POST, .handler=&SystemHttp::factory_reset_post, .user_ctx=this},
-        {.uri="/ws/system", .method=HTTP_GET, .handler=&SystemHttp::websocket, .user_ctx=this, .is_websocket=true},
     };
     for (const auto& route : routes) {
         const auto error = httpd_register_uri_handler(server_, &route);
