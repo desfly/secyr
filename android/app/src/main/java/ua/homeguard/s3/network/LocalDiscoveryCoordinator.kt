@@ -25,13 +25,8 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         .stateIn(scope, SharingStarted.Eagerly, false)
 
     val devices: StateFlow<List<DiscoveredDevice>> = combine(nsd.devices, udp.devices, http.devices) { mdns, udpFallback, httpFallback ->
-        (mdns + udpFallback + httpFallback)
-            // Cemented rule: one physical ESP controller is one UI device.
-            // Discovery transports may report different IDs, schemes or ports for the
-            // same controller, therefore URL is not a safe identity. The controller's
-            // LAN host is the primary identity; deviceId is only a fallback.
-            .groupBy(::physicalControllerKey)
-            .mapNotNull { (_, candidates) ->
+        mergePhysicalControllers(mdns + udpFallback + httpFallback)
+            .mapNotNull { candidates ->
                 candidates.maxWithOrNull(
                     compareBy<DiscoveredDevice> { it.seenAtMs }
                         .thenBy {
@@ -64,9 +59,56 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         Unit
     }
 
-    private fun physicalControllerKey(device: DiscoveredDevice): String {
-        val host = device.host.trim().trim('[', ']').lowercase()
-        if (host.isNotBlank()) return "host:$host"
-        return "id:${device.deviceId.trim().lowercase()}"
+    /**
+     * Cemented rule: one physical ESP controller is one UI device.
+     *
+     * A stable controller ID survives DHCP address changes, while the LAN host
+     * bridges discovery paths that only have a temporary setup ID. Identity is
+     * therefore an equivalence relation: candidates belong together when they
+     * share a non-temporary deviceId OR the same concrete host. The connected-
+     * component expansion below also handles a bridge such as stable-ID@old-IP,
+     * stable-ID@new-IP and setup-ID@new-IP without producing two cards.
+     */
+    private fun mergePhysicalControllers(devices: List<DiscoveredDevice>): List<List<DiscoveredDevice>> {
+        val remaining = devices.toMutableList()
+        val groups = mutableListOf<List<DiscoveredDevice>>()
+
+        while (remaining.isNotEmpty()) {
+            val group = mutableListOf(remaining.removeAt(remaining.lastIndex))
+            var expanded: Boolean
+            do {
+                expanded = false
+                val iterator = remaining.iterator()
+                while (iterator.hasNext()) {
+                    val candidate = iterator.next()
+                    if (group.any { samePhysicalController(it, candidate) }) {
+                        group += candidate
+                        iterator.remove()
+                        expanded = true
+                    }
+                }
+            } while (expanded)
+            groups += group
+        }
+        return groups
+    }
+
+    private fun samePhysicalController(a: DiscoveredDevice, b: DiscoveredDevice): Boolean {
+        val aHost = normalizedHost(a)
+        val bHost = normalizedHost(b)
+        if (aHost.isNotBlank() && aHost == bHost) return true
+
+        val aId = stableDeviceId(a)
+        val bId = stableDeviceId(b)
+        return aId != null && aId == bId
+    }
+
+    private fun normalizedHost(device: DiscoveredDevice): String =
+        device.host.trim().trim('[', ']').substringBefore('%').trimEnd('.').lowercase()
+
+    private fun stableDeviceId(device: DiscoveredDevice): String? {
+        val id = device.deviceId.trim().lowercase()
+        if (id.isBlank() || id.startsWith("setup-")) return null
+        return id
     }
 }
