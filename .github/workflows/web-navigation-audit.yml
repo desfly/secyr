@@ -1,0 +1,41 @@
+name: Web Navigation Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "tools/check_web_navigation_runtime.py"
+      - ".github/workflows/web-navigation-audit.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "tools/check_web_navigation_runtime.py"
+      - ".github/workflows/web-navigation-audit.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-navigation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  navigation-runtime:
+    name: Single-active navigation regression
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: JavaScript syntax
+        run: node --check web/app.js && node --check web/access-session.js && node --check web/factory-reset.js
+      - name: Static Web UI contract
+        run: python tools/check_web_ui_contract.py
+      - name: Browser navigation runtime audit
+        run: python tools/check_web_navigation_runtime.py --web web --port 8771
