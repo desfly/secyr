@@ -191,7 +191,7 @@ esp_err_t start_http_server()
     error = g_network_http.register_handlers(g_http_server);
     if (error != ESP_OK) return rollback_http(error, "network routes");
 
-    error = g_lan_http.register_handlers(g_http_server);
+    error = g_lan_http.register_handlers(g_http_server, &g_access_control);
     if (error != ESP_OK) return rollback_http(error, "LAN discovery routes");
 
     error = g_cloud_http.register_handlers(g_http_server, &g_cloud_link, &g_cloud_store, &g_access_control);
