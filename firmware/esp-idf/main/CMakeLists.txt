@@ -43,6 +43,7 @@ idf_component_register(
         "hg_commissioning_nvs.cpp"
         "hg_factory_reset.cpp"
         "hg_reset_sequence.cpp"
+        "hg_nvs_recovery.cpp"
         "../../src/system_model.cpp"
         "../../src/system_api.cpp"
         "../../src/output_interlock.cpp"
