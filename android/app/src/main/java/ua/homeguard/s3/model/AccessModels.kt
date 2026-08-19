@@ -28,6 +28,7 @@ data class AccessSession(
     val name: String,
     val role: AccessRole,
     val capabilities: AccessCapabilities,
+    val sessionToken: String = "",
 ) {
     fun allows(command: CommandType): Boolean = when (role) {
         AccessRole.ADMIN -> true
