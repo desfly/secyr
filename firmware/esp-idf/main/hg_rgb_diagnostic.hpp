@@ -6,7 +6,10 @@ namespace homeguard::idf {
 
 class RgbDiagnostic {
 public:
-    // Test only the two ESP32-S3 DevKitC-1 RGB candidates documented by Espressif.
+    // Direct feedback controls for the onboard addressable RGB LED.
+    static esp_err_t set_red(int gpio);
+    static esp_err_t off(int gpio);
+
     // Sends white to the addressable RGB LED, holds it for duration_ms, then turns it off.
     static esp_err_t test_white(int gpio, unsigned duration_ms = 3000U);
 
