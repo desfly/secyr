@@ -13,9 +13,7 @@ def require(path: Path, snippets: list[str]) -> None:
         if snippet not in text:
             errors.append(f"{path.relative_to(ROOT)} missing security contract: {snippet}")
 
-# Inspect semantic tokens rather than the source spelling of escaped JSON quotes.
-# C++ JSON literals use \\" in source, so matching quoted JSON strings directly
-# made this gate fail when formatting changed despite identical runtime behavior.
+# Inspect semantic tokens rather than brittle escaped JSON spellings where possible.
 require(MAIN / "hg_access_http.cpp", [
     '"/api/v1/access/state"', "access_runtime::setup_required", "setup_required", "login_required",
     "http_session::issue(user->id.data(), user->role)", "sessionToken",
@@ -101,11 +99,12 @@ require(MAIN / "hg_network_http.cpp", [
     "? save_credentials(previous_ssid, previous_password)",
     ": clear_credentials()",
     "wifi_connect_failed_rollback_failed",
-    '"rolledBack\\\":true}',
+    "rolledBack",
 ])
 network_http = (MAIN / "hg_network_http.cpp").read_text(encoding="utf-8")
 connect_call = network_http.find("const auto connect_error = esp_wifi_connect()")
-success_reply = network_http.find('"ok\\\":true,\\\"state\\\":\\\"connecting"')
+# Match the C++ source spelling, not a multiply-escaped representation of it.
+success_reply = network_http.find(r'{\"ok\":true,\"state\":\"connecting')
 if connect_call < 0 or success_reply < 0 or success_reply < connect_call:
     errors.append("Wi-Fi connect API must not report success before esp_wifi_connect() has been accepted")
 require(MAIN / "hg_network_http.hpp", ["bool clear_credentials() const;"])
