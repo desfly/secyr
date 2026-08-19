@@ -212,6 +212,7 @@ async function sendSecurityCommand(button) {
   const { actor, credential } = operatorCredentials();
   if (!command || !validOperator(actor, credential)) return;
   const buttons = [...document.querySelectorAll("[data-command]")];
+  const previousDisabled = new Map(buttons.map(item => [item, item.disabled]));
   buttons.forEach(item => { item.disabled = true; });
   try {
     await api("/api/v1/system/security-command", { method: "POST", body: JSON.stringify({ command, actor, credential }) });
@@ -221,7 +222,7 @@ async function sendSecurityCommand(button) {
     showToast(`Помилка команди: ${error.message}`);
   } finally {
     document.querySelector("#operatorPin").value = "";
-    buttons.forEach(item => { item.disabled = false; });
+    buttons.forEach(item => { item.disabled = previousDisabled.get(item) === true; });
   }
 }
 
