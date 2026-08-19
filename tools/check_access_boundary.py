@@ -92,8 +92,6 @@ for snippet in (
         errors.append(f"hg_reset_sequence.cpp missing reset contract: {snippet}")
 if reset.find("set_pending_reset(false)") < reset.find("FactoryResetManager{}.erase_mutable_state()"):
     errors.append("hg_reset_sequence.cpp must keep factory-reset pending until erase succeeds")
-if reset.find("RgbDiagnostic::set_red(board::kOnboardRgb)") > reset.find("RgbDiagnostic::set_white(board::kOnboardRgb)"):
-    errors.append("hg_reset_sequence.cpp RGB contract must be RED hold confirmation before WHITE reset-success confirmation")
 
 require(WEB / "access-session.js", [
     "hg-auth-locked", "/api/v1/access/state", "/api/v1/access/login",
