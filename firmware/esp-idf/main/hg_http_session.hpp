@@ -54,7 +54,8 @@ inline std::string issue(std::string_view actor, homeguard::AccessRole role) {
     return raw;
 }
 
-inline bool authorized(std::string_view authorization, homeguard::AccessControl& access) {
+inline bool authorized_impl(std::string_view authorization, homeguard::AccessControl& access,
+                            std::string_view expected_actor) {
     if (!authorization.starts_with("Bearer ")) return false;
     const auto now = esp_timer_get_time();
     std::scoped_lock lock(g_mutex);
@@ -68,14 +69,25 @@ inline bool authorized(std::string_view authorization, homeguard::AccessControl&
         }
         if (!token.authorized(authorization)) continue;
 
-        const auto* user = access.find_user(g_actors[i].data());
+        const std::string_view session_actor{g_actors[i].data()};
+        const auto* user = access.find_user(session_actor);
         if (user == nullptr || !user->enabled || user->role != g_roles[i]) {
             clear_slot(i);
             return false;
         }
+        if (!expected_actor.empty() && session_actor != expected_actor) return false;
         return true;
     }
     return false;
+}
+
+inline bool authorized(std::string_view authorization, homeguard::AccessControl& access) {
+    return authorized_impl(authorization, access, {});
+}
+
+inline bool authorized_for_actor(std::string_view authorization, homeguard::AccessControl& access,
+                                 std::string_view actor) {
+    return !actor.empty() && authorized_impl(authorization, access, actor);
 }
 
 inline bool revoke(std::string_view authorization) {
