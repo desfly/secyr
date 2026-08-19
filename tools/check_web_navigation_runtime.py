@@ -15,7 +15,6 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 import threading
 import time
 from html.parser import HTMLParser
@@ -155,6 +154,15 @@ def sequence_probe_html(index_html: str) -> str:
     if (active.length !== 1 || active[0] !== route) failures.push(`${{phase}}:${{route}} active=${{JSON.stringify(active)}}`);
     const group = document.querySelector('.nav-group-label');
     if (!group || group.matches('a') || group.classList.contains('active')) failures.push(`${{phase}}:${{route}} settings-group-active`);
+
+    const network = document.getElementById('networkPage');
+    const system = document.getElementById('system');
+    const dashboard = [...document.querySelectorAll('.status-grid,.two-col')];
+    const isNetwork = route === '#networkPage';
+    const isSystem = route === '#system';
+    if (!network || network.hidden === isNetwork) failures.push(`${{phase}}:${{route}} network-visibility`);
+    if (!system || system.hidden === isSystem) failures.push(`${{phase}}:${{route}} system-visibility`);
+    if (dashboard.some(node => node.hidden !== (isNetwork || isSystem))) failures.push(`${{phase}}:${{route}} dashboard-visibility`);
   }};
 
   await wait(80);
@@ -277,6 +285,7 @@ def main() -> int:
     print(f" - browser-rendered cold-load hash routes checked: {len(EXPECTED_ROUTES)}")
     print(" - click + hashchange transitions checked in one live document")
     print(" - rapid hash burst and same-hash click are race-safe")
+    print(" - route visibility stays coherent during live transitions")
     print(" - focus cannot mutate the single active navigation owner")
     print(" - unique hrefs + target visibility verified at runtime")
     print(" - unknown hash cannot create a double-active state")
