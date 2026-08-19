@@ -33,14 +33,9 @@ add_library(homeguard_core
     src/access_store.cpp
     src/zone.cpp
     src/pressure.cpp
-    src/challenge.cpp
-    src/idempotency.cpp
     src/health_monitor.cpp
-    src/network_failover.cpp
     src/telemetry.cpp
-    src/maintenance.cpp
     src/power_monitor.cpp
-    src/command.cpp
     src/boot_self_test.cpp
     src/alarm_acknowledgement.cpp
     src/alarm_ack_command.cpp
