@@ -3,6 +3,7 @@ void test_zone(); void test_pressure(); void test_reliability(); void test_contr
 void test_connectivity();
 void test_provisioning();
 void test_reset_sequence();
+void test_controller_config_backup();
 void test_build0009();
 void test_build0013();
 void test_build0032();

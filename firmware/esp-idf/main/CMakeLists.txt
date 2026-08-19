@@ -67,6 +67,7 @@ idf_component_register(
         "../../src/hardware_api.cpp"
         "../../src/infrastructure_status.cpp"
         "../../src/modbus_request.cpp"
+        "../../src/controller_config_backup.cpp"
     INCLUDE_DIRS
         "."
         "../../include"
