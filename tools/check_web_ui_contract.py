@@ -34,6 +34,8 @@ def text(path: Path) -> str:
 html = text(WEB / "index.html")
 css = text(WEB / "app.css")
 js = text(WEB / "app.js")
+access_js = text(WEB / "access-session.js")
+factory_reset_js = text(WEB / "factory-reset.js")
 cmake = text(MAIN / "CMakeLists.txt")
 web_http = text(MAIN / "hg_web_http.cpp")
 network = text(MAIN / "hg_network_http.cpp")
@@ -44,9 +46,15 @@ app_main = text(MAIN / "app_main.cpp")
 build_info = text(MAIN / "hg_build_info.cpp")
 access_core = text(CORE / "access_control.cpp")
 
-for asset in ("web/index.html", "web/app.css", "web/app.js", "web/bruce.jpg"):
+for asset in (
+    "web/index.html", "web/app.css", "web/app.js", "web/access-session.js",
+    "web/factory-reset.js", "web/bruce.jpg",
+):
     require(asset in cmake, f"CMake does not embed/copy {asset}")
-for route in ('"/"', '"/index.html"', '"/app.css"', '"/app.js"', '"/bruce.jpg"'):
+for route in (
+    '"/"', '"/index.html"', '"/app.css"', '"/app.js"',
+    '"/access-session.js"', '"/factory-reset.js"', '"/bruce.jpg"',
+):
     require(route in web_http, f"WebHttp route missing: {route}")
 for header in ("Cache-Control", "no-store", "Pragma", "Expires"):
     require(header in web_http, f"WebHttp cache prevention missing: {header}")
@@ -95,8 +103,11 @@ require(len(re.findall(r'class=["\'][^"\']*\bactive\b[^"\']*["\']', nav_html)) =
         "HTML must boot with exactly one active navigation item")
 require('class="active" href="#overview"' in nav_html,
         "overview must be the single initial active navigation item")
-require(js.count('classList.toggle("active"') == 1,
-        "active navigation class must have one authoritative JS assignment site")
+all_web_js = js + "\n" + access_js
+require(all_web_js.count('classList.toggle("active"') == 1,
+        "active navigation class must have one authoritative JS assignment site across all loaded scripts")
+require("enforceSingleActive" not in access_js,
+        "obsolete second navigation active-state controller returned in access-session.js")
 require('link.getAttribute("href") === hash' in js,
         "routeFromHash must select active navigation by exact hash equality")
 require("hashchange" in js and "routeFromHash" in js,
@@ -187,6 +198,23 @@ require("ip" in network, "Wi-Fi status backend does not expose IP")
 require("save_credentials" in network and "load_credentials" in network,
         "Wi-Fi reconnect persistence missing")
 
+# Factory reset must be reachable in the actually served UI, not merely checked
+# into /web or embedded as an unused asset.
+require('/api/v1/system/factory-reset' in factory_reset_js,
+        "factory-reset.js does not call the firmware factory-reset endpoint")
+require('ERASE_ALL' in factory_reset_js,
+        "factory-reset.js lost explicit destructive-action confirmation")
+require('"/api/v1/system/factory-reset"' in system_http,
+        "firmware factory-reset endpoint missing")
+require(re.search(r'authorize\s*\(actor,\s*credential,\s*"system\.factory_reset"\)', system_http) is not None,
+        "factory reset is not protected by system.factory_reset authorization")
+require("factory_reset_js_start" in web_http and "factory_reset_js_end" in web_http,
+        "factory-reset embedded linker symbols missing")
+require("factory_reset_js_get" in web_http,
+        "factory-reset HTTP asset handler missing")
+require("text_asset_size(factory_reset_js_start, factory_reset_js_end)" in web_http,
+        "factory-reset module is embedded but not wired into the Web UI boot path")
+
 require((WEB / "bruce.jpg").is_file(), "Bruce JPEG asset missing")
 require((WEB / "bruce.jpg").stat().st_size > 1024 if (WEB / "bruce.jpg").exists() else False,
         "Bruce JPEG asset is unexpectedly small")
@@ -195,11 +223,19 @@ require('<img id="bruceArt"' in html, "Bruce portrait image element missing")
 require('/bruce.jpg?v=' in html, "Bruce portrait cache-busted URL missing")
 require('<svg id="bruceArt"' not in html, "old drawn Bruce SVG placeholder still present")
 require(".bruce img{" in html, "Bruce portrait sizing rule missing")
+require("data:image/webp;base64" not in css,
+        "stale embedded Bruce fallback returned in app.css")
 require("EMBED_FILES" in cmake and '"web/bruce.jpg"' in cmake,
         "Bruce JPEG is not embedded as a binary ESP-IDF asset")
 require('"image/jpeg"' in web_http, "Bruce route does not use image/jpeg")
 require("bruce_jpg_start" in web_http and "bruce_jpg_end" in web_http,
         "Bruce embedded linker symbols missing")
+require(".bruce img{object-fit:contain!important;object-position:center center!important}" in web_http,
+        "firmware mobile CSS must preserve the complete Bruce portrait")
+require(".bruce img{object-fit:cover!important" not in web_http,
+        "firmware mobile CSS regressed to cropping Bruce with object-fit:cover")
+require(".sidebar nav{display:none!important" in web_http and ".sidebar.mobile-nav-open nav{display:flex!important}" in web_http,
+        "firmware mobile navigation must remain collapsed until explicitly opened")
 
 require("Build-0039" not in app_main, "stale Build-0039 runtime label remains in app_main.cpp")
 require("HG_CI_BUILD_NUMBER" in build_info, "build endpoint is not using CI build number")
@@ -220,6 +256,7 @@ print(" - live valve buttons -> authorized firmware route: present")
 print(" - first Admin bootstrap: factory-fresh NVS only; corruption stays fail-closed")
 print(" - Wi-Fi configuration: Admin-authorized; status/scan + RSSI/IP/persistence present")
 print(" - roles: Admin full; User arm/disarm + valves; Guest control denied")
-print(" - Bruce: approved JPEG embedded and served as a firmware asset")
+print(" - factory reset: authorized endpoint + live served UI module present")
+print(" - Bruce: single approved JPEG; mobile contain/no-crop contract enforced")
 print(" - embedded assets + anti-cache headers: present")
 print(" - runtime build number sourced from GitHub Actions run number")
