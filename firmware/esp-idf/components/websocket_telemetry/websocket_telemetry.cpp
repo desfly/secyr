@@ -2,12 +2,16 @@
 #include "esp_https_server.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include <array>
 #include <new>
 #include <string>
 #include <utility>
 
-namespace { constexpr char tag[] = "hg_ws"; }
+namespace {
+constexpr char tag[] = "hg_ws";
+constexpr std::int64_t kSessionTokenLifetimeUs = 60'000'000;
+}
 
 struct WebsocketTelemetry::BroadcastWork {
     WebsocketTelemetry* owner{};
@@ -46,6 +50,7 @@ std::string WebsocketTelemetry::issue_session_token() {
     {
         std::scoped_lock lock(mutex_);
         session_tokens_[next_session_token_].reset(raw);
+        session_token_issued_us_[next_session_token_] = esp_timer_get_time();
         next_session_token_ = (next_session_token_ + 1U) % session_tokens_.size();
     }
     return raw;
@@ -56,11 +61,12 @@ void WebsocketTelemetry::stop() {
     clients_.fill(-1);
     token_.clear();
     for (auto& session : session_tokens_) session.clear();
+    session_token_issued_us_.fill(0);
     next_session_token_ = 0U;
     server_ = nullptr;
 }
 
-bool WebsocketTelemetry::authorize(httpd_req_t* request) const {
+bool WebsocketTelemetry::authorize(httpd_req_t* request) {
     const size_t length = httpd_req_get_hdr_value_len(request, "Authorization");
     if (length == 0U || length > 320U) return false;
     std::array<char, 321> value{};
@@ -68,8 +74,24 @@ bool WebsocketTelemetry::authorize(httpd_req_t* request) const {
     const std::string_view authorization(value.data(), length);
     std::scoped_lock lock(mutex_);
     if (token_.authorized(authorization)) return true;
-    for (const auto& session : session_tokens_) {
-        if (session.configured() && session.authorized(authorization)) return true;
+
+    const auto now_us = esp_timer_get_time();
+    for (std::size_t i = 0; i < session_tokens_.size(); ++i) {
+        auto& session = session_tokens_[i];
+        if (!session.configured()) continue;
+        const auto issued_us = session_token_issued_us_[i];
+        if (issued_us <= 0 || now_us - issued_us > kSessionTokenLifetimeUs) {
+            session.clear();
+            session_token_issued_us_[i] = 0;
+            continue;
+        }
+        if (session.authorized(authorization)) {
+            // Session tokens are handshake tickets, not reusable bearer tokens.
+            // Consume after the first successful WebSocket upgrade.
+            session.clear();
+            session_token_issued_us_[i] = 0;
+            return true;
+        }
     }
     return false;
 }
