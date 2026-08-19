@@ -66,7 +66,8 @@ require(MAIN / "hg_network_http.cpp", [
 ])
 
 require(MAIN / "hg_request_auth.hpp", [
-    "hg_http_session.hpp", "http_session::authorized(authorization, access)", "WWW-Authenticate",
+    "hg_http_session.hpp", "http_session::authorized(authorization, access)",
+    "authenticated_actor", "http_session::authorized_for_actor", "WWW-Authenticate",
 ])
 request_auth = (MAIN / "hg_request_auth.hpp").read_text(encoding="utf-8")
 if "read_legacy_authorization" in request_auth or 'prefix{"HomeGuard "}' in request_auth:
@@ -78,16 +79,20 @@ require(MAIN / "hg_http_session.hpp", [
     "kLifetimeUs", "BearerTokenVerifier", "g_actors", "g_roles",
     "issue(std::string_view actor, homeguard::AccessRole role)",
     "authorized(std::string_view authorization, homeguard::AccessControl& access)",
-    "access.find_user(g_actors[i].data())", "user->role != g_roles[i]",
+    "authorized_for_actor", "authorized_impl", "session_actor != expected_actor",
+    "access.find_user(session_actor)", "user->role != g_roles[i]",
     "revoke(", "revoke_all",
 ])
 
-# Release-critical mutating APIs must still pass through command-level RBAC.
+# Release-critical mutating APIs must require both an actor-bound Bearer session
+# and command-level RBAC/PIN confirmation.
 require(MAIN / "hg_system_http.cpp", [
+    "request_auth::authenticated_actor(request, *access_control_, actor)",
     'authorize(actor,credential,"system.factory_reset")',
     "access_control_->authorize(actor,credential,command)",
 ])
 require(MAIN / "hg_network_http.cpp", [
+    "request_auth::authenticated_actor(request, *access_, actor)",
     'access_->authorize(actor, credential, "network.configure")',
     "had_persisted_credentials = load_credentials(previous_ssid, previous_password)",
     "persist_rollback_ok = had_persisted_credentials",
@@ -103,6 +108,8 @@ if connect_call < 0 or success_reply < 0 or success_reply < connect_call:
     errors.append("Wi-Fi connect API must not report success before esp_wifi_connect() has been accepted")
 require(MAIN / "hg_network_http.hpp", ["bool clear_credentials() const;"])
 require(MAIN / "hg_output_http.cpp", [
+    "hg_request_auth.hpp",
+    "request_auth::authenticated_actor(request, *access_control_, actor)",
     "access_control_->authorize(actor, credential, command)",
     "physical_->force_safe()",
     "model_->set_output_active(output_id, false, 0)",
@@ -128,9 +135,6 @@ for snippet in (
 if reset.find("set_pending_reset(false)") < reset.find("FactoryResetManager{}.erase_mutable_state()"):
     errors.append("hg_reset_sequence.cpp must keep factory-reset pending until erase succeeds")
 
-# RED belongs to the live button-hold phase; WHITE belongs to the later early-boot
-# success phase after mutable state is erased. Do not compare their first lexical
-# positions in the file: helper functions may be ordered independently.
 service_start = reset.find("void service_button_reset_task")
 service_end = reset.find("\n}\n\n}  // namespace", service_start)
 early_start = reset.find("void perform_early_boot_factory_reset")
