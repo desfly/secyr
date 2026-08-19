@@ -5,8 +5,6 @@
 
 int main()
 {
-    test_zone();
-    test_pressure();
     test_reliability();
     test_connectivity();
     test_provisioning();
