@@ -6,7 +6,7 @@
 ## Поточний стан
 
 - вихідний код firmware;
-- ESP-IDF 5.4.2 workflow;
+- ESP-IDF 5.4.4 workflow;
 - вебпанель;
 - Android-проєкт;
 - драйвери ADS1115, MCP23017, INA226, DS3231, W5500, microSD,
