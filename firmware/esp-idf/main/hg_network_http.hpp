@@ -27,6 +27,7 @@ private:
     bool apply_sta(const std::string& ssid, const std::string& password, bool persist);
     bool load_credentials(std::string& ssid, std::string& password) const;
     bool save_credentials(const std::string& ssid, const std::string& password) const;
+    bool clear_credentials() const;
     std::string status_json() const;
     std::string scan_json() const;
 
