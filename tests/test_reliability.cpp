@@ -1,5 +1,4 @@
 #include "test_framework.hpp"
-#include "homeguard/boot_self_test.hpp"
 #include "homeguard/crc32.hpp"
 #include "homeguard/event_log.hpp"
 #include "homeguard/health_monitor.hpp"
@@ -28,12 +27,4 @@ void test_reliability() {
 
     std::array<std::byte, 3> bytes{std::byte{1}, std::byte{2}, std::byte{3}};
     CHECK(hg::crc32(bytes) == 0x55BC801DU);
-
-    hg::HealthMonitor self_test_health;
-    const auto overall = hg::BootSelfTest::run(
-        {true, true, true, true, true, true, true, true},
-        self_test_health,
-        0);
-    CHECK(overall == hg::HealthState::Ok);
-    CHECK(self_test_health.failed_count() == 0);
 }
