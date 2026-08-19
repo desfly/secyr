@@ -118,6 +118,7 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
 
     std::string body;
     if (!read_body(request, 384U, body)) {
+        scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
     }
@@ -126,10 +127,12 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
     std::string credential;
     if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
         scrub(credential);
+        scrub(body);
         httpd_resp_set_status(request, "401 Unauthorized");
         return self->send_json(request, "{\"ok\":false,\"reason\":\"credential_required\"}");
     }
 
+    scrub(body);
     const auto decision = self->access_control_->authorize(actor, credential, "system.service.invalidate");
     scrub(credential);
     if (decision != homeguard::AuditDecision::Allowed) {
