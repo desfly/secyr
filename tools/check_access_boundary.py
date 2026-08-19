@@ -20,6 +20,10 @@ require(MAIN / "hg_access_http.cpp", [
     '"/api/v1/access/state"', "access_runtime::setup_required", "setup_required", "login_required",
     "http_session::issue(user->id.data(), user->role)", "sessionToken",
     '"/api/v1/access/logout"', "http_session::revoke(authorization)",
+    "std::unique_ptr<AccessControl> previous_access",
+    "*access_ = *previous_access",
+    "const auto persist = store_->save(*access_)",
+    "http_session::revoke_all()",
 ])
 
 require(MAIN / "hg_access_runtime.hpp", ["g_bootstrap_allowed", "setup_required", "lock_bootstrap"])
@@ -28,6 +32,8 @@ if "bootstrap_allowed_ = false" not in access_http:
     errors.append("hg_access_http.cpp must explicitly close bootstrap only in first-Admin flow")
 if "bootstrap_allowed_ = true" not in access_http:
     errors.append("hg_access_http.cpp must restore bootstrap when first-Admin creation/persistence fails")
+if access_http.find("http_session::revoke_all()") < access_http.find("const auto persist = store_->save(*access_)"):
+    errors.append("user mutation must revoke sessions only after persistence succeeds")
 
 app_main = (MAIN / "app_main.cpp").read_text(encoding="utf-8")
 if "nvs_flash_erase()" in app_main:
@@ -98,6 +104,9 @@ if connect_call < 0 or success_reply < 0 or success_reply < connect_call:
 require(MAIN / "hg_network_http.hpp", ["bool clear_credentials() const;"])
 require(MAIN / "hg_output_http.cpp", [
     "access_control_->authorize(actor, credential, command)",
+    "physical_->force_safe()",
+    "model_->set_output_active(output_id, false, 0)",
+    "physical_output_failure",
 ])
 
 system_http = (MAIN / "hg_system_http.cpp").read_text(encoding="utf-8")
