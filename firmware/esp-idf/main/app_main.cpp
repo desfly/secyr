@@ -250,7 +250,7 @@ void start_device_discovery()
     std::string suffix = device_id;
     const auto dash = suffix.find_last_of('-');
     if (dash != std::string::npos && dash + 1U < suffix.size()) suffix.erase(0, dash + 1U);
-    std::transform(suffix.begin(), suffix.end(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::transform(suffix.begin(), suffix.end(), suffix.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     const std::string hostname = "homeguard-" + suffix;
 
     if (!g_device_discovery.begin(device_id, hostname, kLocalApiPort, false)) {
