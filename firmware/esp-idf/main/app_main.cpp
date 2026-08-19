@@ -274,7 +274,13 @@ void start_device_discovery()
 extern "C" void app_main()
 {
     ESP_ERROR_CHECK(initialize_nvs());
-    if (homeguard::idf::handle_triple_rst_factory_reset()) return;
+
+    const auto reset_error = homeguard::idf::start_service_button_factory_reset();
+    if (reset_error != ESP_OK) {
+        ESP_LOGE(kTag, "Service-button Factory Reset unavailable: %s", esp_err_to_name(reset_error));
+    } else {
+        ESP_LOGI(kTag, "Service-button Factory Reset gesture ready");
+    }
 
     g_access_control.set_auth_clock(&homeguard::idf::access_now_ms);
     restore_access_control();
