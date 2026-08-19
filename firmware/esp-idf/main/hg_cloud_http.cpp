@@ -145,24 +145,25 @@ esp_err_t CloudHttp::handle_config(httpd_req_t* request)
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_body\"}");
     }
 
-    std::string actor, credential;
-    if (!parse_json_string(body, "actor", actor) || !parse_json_string(body, "credential", credential)) {
+    std::string actor;
+    if (!parse_json_string(body, "actor", actor) || actor.empty()) {
         std::fill(body.begin(), body.end(), '\0');
         httpd_resp_set_status(request, "401 Unauthorized");
-        return send_json(request, "{\"ok\":false,\"reason\":\"admin_credential_required\"}");
+        return send_json(request, "{\"ok\":false,\"reason\":\"session_actor_required\"}");
     }
     if (!request_auth::authenticated_actor(request, *access_control_, actor)) {
-        std::fill(credential.begin(), credential.end(), '\0');
         std::fill(body.begin(), body.end(), '\0');
         return request_auth::send_login_required(request);
     }
-    const auto decision = access_control_->authorize(actor, credential, "cloud.configure");
-    std::fill(credential.begin(), credential.end(), '\0');
+    const auto decision = access_control_->authorize_session(actor, "cloud.configure");
     if (decision != homeguard::AuditDecision::Allowed) {
         std::fill(body.begin(), body.end(), '\0');
         httpd_resp_set_status(request, "403 Forbidden");
         return send_json(request, "{\"ok\":false,\"reason\":\"forbidden\"}");
     }
+
+    /* LEGACY v1 disabled: cloud config used to parse credential and re-check
+       Admin PIN on every Apply/Disable request. */
 
     CloudConfig config{};
     if (!parse_json_bool(body, "enabled", config.enabled)) config.enabled = true;
