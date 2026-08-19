@@ -83,6 +83,10 @@ esp_err_t ServiceHttp::invalidate_post(httpd_req_t* request) {
     }
 
     http_util::scrub(body);
+    if (!request_auth::authenticated_actor(request, *self->access_control_, actor)) {
+        http_util::scrub(credential);
+        return request_auth::send_login_required(request);
+    }
     const auto decision = self->access_control_->authorize(actor, credential, "system.service.invalidate");
     http_util::scrub(credential);
     if (decision != homeguard::AuditDecision::Allowed) {
