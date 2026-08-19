@@ -1,74 +1,78 @@
 "use strict";
 
 (() => {
+  const originalFetch = window.fetch.bind(window);
   let session = null;
-  let mutationQueued = false;
+  let gateMode = "loading";
 
-  const roleLabel = role => ({ admin: "Admin", user: "User", guest: "Guest" })[role] || role || "—";
-  const setText = (element, value) => {
-    if (element && element.textContent !== value) element.textContent = value;
+  const style = document.createElement("style");
+  style.textContent = `
+    html.hg-auth-locked,html.hg-auth-locked body{margin:0;min-height:100%;background:#07131f;overflow:hidden}
+    html.hg-auth-locked .shell{visibility:hidden!important;pointer-events:none!important}
+    #hgAuthGate{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;background:#07131f;overflow:auto}
+    #hgAuthGate[hidden]{display:none!important}
+    #hgAuthGate .hg-auth-stage{position:relative;width:100%;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box;overflow:hidden}
+    #hgAuthGate .hg-auth-bruce{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;opacity:.98;filter:none}
+    #hgAuthGate .hg-auth-shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(3,12,20,.25),rgba(3,12,20,.58))}
+    #hgAuthGate .hg-auth-card{position:relative;width:min(390px,calc(100vw - 32px));padding:22px;border:1px solid rgba(255,255,255,.28);border-radius:16px;background:rgba(7,19,31,.90);box-shadow:0 18px 60px rgba(0,0,0,.42);color:#fff;backdrop-filter:blur(8px)}
+    #hgAuthGate h2{margin:0 0 6px;font-size:24px}#hgAuthGate p{margin:0 0 16px;color:#c8d4df;line-height:1.4}
+    #hgAuthGate label{display:block;margin:10px 0;font-weight:700}#hgAuthGate input{display:block;width:100%;margin-top:6px;padding:12px 13px;border:1px solid rgba(255,255,255,.28);border-radius:9px;background:#10243a;color:#fff;box-sizing:border-box;font:inherit}
+    #hgAuthGate button{width:100%;margin-top:12px;padding:12px 14px;border:0;border-radius:9px;background:#fff;color:#10243a;font:inherit;font-weight:800;cursor:pointer}
+    #hgAuthGate button:disabled{opacity:.55;cursor:default}#hgAuthMessage{min-height:20px;margin-top:12px;color:#ffd2d2;font-size:14px}
+    #hgSessionLogout{position:fixed;right:14px;bottom:14px;z-index:2000;padding:9px 12px;border-radius:9px;border:1px solid #d7deea;background:#fff;font:inherit;font-weight:700}
+  `;
+  document.head.appendChild(style);
+  document.documentElement.classList.add("hg-auth-locked");
+
+  const gate = document.createElement("div");
+  gate.id = "hgAuthGate";
+  gate.innerHTML = `
+    <div class="hg-auth-stage">
+      <img class="hg-auth-bruce" src="/bruce.jpg?v=twofist-20260818" alt="" aria-hidden="true">
+      <div class="hg-auth-shade"></div>
+      <section class="hg-auth-card" aria-live="polite">
+        <h2 id="hgAuthTitle">HomeGuard-S3</h2>
+        <p id="hgAuthHint">Перевірка стану доступу…</p>
+        <form id="hgAuthForm"></form>
+        <div id="hgAuthMessage"></div>
+      </section>
+    </div>`;
+  document.body.appendChild(gate);
+
+  const form = gate.querySelector("#hgAuthForm");
+  const title = gate.querySelector("#hgAuthTitle");
+  const hint = gate.querySelector("#hgAuthHint");
+  const message = gate.querySelector("#hgAuthMessage");
+
+  function apiBody(response) {
+    return response.text().then(text => {
+      try { return text ? JSON.parse(text) : {}; } catch (_) { return {}; }
+    });
+  }
+
+  function authHeader() {
+    return session ? `HomeGuard ${session.actor}:${session.credential}` : "";
+  }
+
+  window.fetch = function(input, init = {}) {
+    if (!session) return originalFetch(input, init);
+    const url = typeof input === "string" ? input : String(input?.url || "");
+    if (!url.startsWith("/api/v1/") || url === "/api/v1/access/login" || url === "/api/v1/access/state") {
+      return originalFetch(input, init);
+    }
+    const headers = new Headers(init.headers || (typeof input !== "string" ? input.headers : undefined) || {});
+    if (!headers.has("Authorization")) headers.set("Authorization", authHeader());
+    return originalFetch(input, { ...init, headers });
   };
 
-  async function loginApi(actor, credential) {
-    const response = await fetch("/api/v1/access/login", {
-      method: "POST",
-      cache: "no-store",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actor, credential })
-    });
-    const text = await response.text();
-    let body = {};
-    try { body = text ? JSON.parse(text) : {}; } catch (_) { body = {}; }
-    if (!response.ok || body.ok === false) throw new Error(body.reason || `${response.status} ${response.statusText}`);
-    return body;
-  }
-
-  function ensureSessionUi() {
-    if (document.querySelector("#accessSessionBar")) return;
-    const operatorId = document.querySelector("#operatorId");
-    const quickPanel = operatorId?.closest("article.panel");
-    const heading = quickPanel?.querySelector("h3");
-    if (!quickPanel || !heading) return;
-
-    const bar = document.createElement("div");
-    bar.id = "accessSessionBar";
-    bar.style.cssText = "display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 12px;padding:10px 12px;border:1px solid #d7deea;border-radius:9px";
-    bar.innerHTML = `
-      <strong id="accessSessionState">Не авторизовано</strong>
-      <span id="accessSessionRole" style="margin-right:auto">Увійдіть для керування</span>
-      <button id="accessLogin" type="button">Увійти</button>
-      <button id="accessLogout" type="button" hidden>Вийти</button>`;
-    heading.insertAdjacentElement("afterend", bar);
-
-    document.querySelector("#accessLogin").addEventListener("click", login);
-    document.querySelector("#accessLogout").addEventListener("click", logout);
-    document.querySelector("#operatorPin")?.addEventListener("keydown", event => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        login();
-      }
-    });
-  }
-
-  function commandAllowed(command) {
-    if (!session) return false;
-    const caps = session.capabilities || {};
-    if (session.role === "admin") return true;
-    if (command === "security.arm_home") return caps.armHome === true;
-    if (command === "security.arm_away") return caps.armAway === true;
-    if (command === "security.disarm") return caps.disarm === true;
-    if (command === "security.panic") return caps.panic === true;
-    return false;
-  }
-
-  function syncCredentialFields() {
+  function syncLegacyCredentials() {
     if (!session) return;
-    const pairs = [
+    [
       ["#operatorId", "#operatorPin"],
       ["#networkActor", "#networkCredential"],
-      ["#accessActor", "#accessCredential"]
-    ];
-    pairs.forEach(([actorSelector, pinSelector]) => {
+      ["#accessActor", "#accessCredential"],
+      ["#cloudActor", "#cloudCredential"]
+    ].forEach(([actorSelector, pinSelector]) => {
       const actor = document.querySelector(actorSelector);
       const pin = document.querySelector(pinSelector);
       if (actor) actor.value = session.actor;
@@ -76,196 +80,187 @@
     });
   }
 
-  function applyRoleUi() {
-    ensureSessionUi();
-    const caps = session?.capabilities || {};
-    const loggedIn = Boolean(session);
-    const isAdmin = session?.role === "admin";
-
-    const state = document.querySelector("#accessSessionState");
-    const role = document.querySelector("#accessSessionRole");
-    const loginButton = document.querySelector("#accessLogin");
-    const logoutButton = document.querySelector("#accessLogout");
-    const operatorId = document.querySelector("#operatorId");
-    const operatorPin = document.querySelector("#operatorPin");
-
-    setText(state, loggedIn ? (session.name || session.actor) : "Не авторизовано");
-    setText(role, loggedIn ? `Роль: ${roleLabel(session.role)}` : "Увійдіть для керування");
-    if (loginButton) loginButton.hidden = loggedIn;
-    if (logoutButton) logoutButton.hidden = !loggedIn;
-    if (operatorId) operatorId.readOnly = loggedIn;
-    if (operatorPin) operatorPin.readOnly = loggedIn;
-
-    document.querySelectorAll("[data-command]").forEach(button => {
-      const allowed = commandAllowed(button.dataset.command || "");
-      button.disabled = !allowed;
-      button.title = allowed ? "" : (loggedIn ? "Недоступно для цієї ролі" : "Спочатку увійдіть");
-    });
-
-    document.querySelectorAll("[data-output-id]").forEach(button => {
-      if (!loggedIn || caps.valves !== true) {
-        button.disabled = true;
-        button.title = loggedIn ? "Керування клапанами недоступне для цієї ролі" : "Спочатку увійдіть";
-      }
-    });
-
-    const wifiConnect = document.querySelector("#wifiConnect");
-    if (wifiConnect) {
-      wifiConnect.disabled = !loggedIn || caps.networkConfigure !== true;
-      wifiConnect.title = wifiConnect.disabled ? "Зміна Wi-Fi доступна тільки Admin" : "";
-    }
-
-    ["#accessLoad", "#accessSave"].forEach(selector => {
-      const button = document.querySelector(selector);
-      if (button) {
-        button.disabled = !loggedIn || caps.accessManage !== true;
-        button.title = button.disabled ? "Керування користувачами доступне тільки Admin" : "";
-      }
-    });
-
-    const networkAuth = document.querySelector("#networkAuth");
-    if (networkAuth) networkAuth.hidden = loggedIn && isAdmin;
-
-    const adminActor = document.querySelector("#accessActor")?.closest("label");
-    const adminPin = document.querySelector("#accessCredential")?.closest("label");
-    if (adminActor) adminActor.hidden = loggedIn && isAdmin;
-    if (adminPin) adminPin.hidden = loggedIn && isAdmin;
+  function commandAllowed(command) {
+    if (!session) return false;
+    if (session.role === "admin") return true;
+    const caps = session.capabilities || {};
+    if (command === "security.arm_home") return caps.armHome === true;
+    if (command === "security.arm_away") return caps.armAway === true;
+    if (command === "security.disarm") return caps.disarm === true;
+    if (command === "security.panic") return caps.panic === true;
+    return false;
   }
 
-  async function login() {
-    ensureSessionUi();
-    const actor = document.querySelector("#operatorId")?.value.trim() || "";
-    const credential = document.querySelector("#operatorPin")?.value.trim() || "";
-    if (!actor || !/^\d{4,12}$/.test(credential)) {
-      if (typeof showToast === "function") showToast("Введіть ID користувача та PIN 4–12 цифр");
+  function applyRoleUi() {
+    if (!session) return;
+    const caps = session.capabilities || {};
+    document.querySelectorAll("[data-command]").forEach(button => { button.disabled = !commandAllowed(button.dataset.command || ""); });
+    document.querySelectorAll("[data-output-id]").forEach(button => { button.disabled = caps.valves !== true; });
+    const wifiConnect = document.querySelector("#wifiConnect");
+    if (wifiConnect) wifiConnect.disabled = caps.networkConfigure !== true;
+    ["#accessLoad", "#accessSave"].forEach(selector => {
+      const button = document.querySelector(selector);
+      if (button) button.disabled = caps.accessManage !== true;
+    });
+  }
+
+  function showLogin(prefill = "") {
+    gateMode = "login_required";
+    title.textContent = "Вхід";
+    hint.textContent = "Введіть ім’я користувача / ID та пароль PIN.";
+    message.textContent = "";
+    form.innerHTML = `
+      <label>Користувач<input id="hgLoginActor" type="text" maxlength="23" autocomplete="username" value="${prefill.replace(/[&<>\"]/g, "")}"></label>
+      <label>Пароль / PIN<input id="hgLoginPin" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password"></label>
+      <button type="submit">Увійти</button>`;
+    form.querySelector("input")?.focus();
+  }
+
+  function showSetup() {
+    gateMode = "setup_required";
+    title.textContent = "Первинне налаштування";
+    hint.textContent = "Контролер чистий. Спочатку створіть першого адміністратора. Після цього безпарольний доступ буде закритий.";
+    message.textContent = "";
+    form.innerHTML = `
+      <label>ID адміністратора<input id="hgSetupId" type="text" maxlength="23" autocomplete="username"></label>
+      <label>Ім’я<input id="hgSetupName" type="text" maxlength="31" autocomplete="name"></label>
+      <label>Пароль / PIN<input id="hgSetupPin" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="new-password"></label>
+      <button type="submit">Створити Admin</button>`;
+    form.querySelector("input")?.focus();
+  }
+
+  async function loadAccessState() {
+    try {
+      const response = await originalFetch("/api/v1/access/state", { cache: "no-store" });
+      const body = await apiBody(response);
+      if (!response.ok || body.ok === false) throw new Error(body.reason || String(response.status));
+      if (body.state === "setup_required") showSetup();
+      else showLogin();
+    } catch (error) {
+      title.textContent = "HomeGuard-S3";
+      hint.textContent = "Стан доступу недоступний.";
+      message.textContent = `Помилка: ${error.message}`;
+      form.innerHTML = `<button type="button" id="hgRetryAuth">Повторити</button>`;
+      form.querySelector("button").onclick = loadAccessState;
+    }
+  }
+
+  async function submitSetup() {
+    const id = form.querySelector("#hgSetupId")?.value.trim() || "";
+    const name = form.querySelector("#hgSetupName")?.value.trim() || "";
+    const pin = form.querySelector("#hgSetupPin")?.value.trim() || "";
+    if (!id || !name || !/^\d{4,12}$/.test(pin)) {
+      message.textContent = "Введіть ID, ім’я та PIN 4–12 цифр.";
       return;
     }
-
-    const button = document.querySelector("#accessLogin");
-    if (button) button.disabled = true;
+    const button = form.querySelector("button");
+    button.disabled = true;
+    message.textContent = "Створення адміністратора…";
     try {
-      const result = await loginApi(actor, credential);
+      const response = await originalFetch("/api/v1/access/users", {
+        method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bootstrap", id, name, pin })
+      });
+      const body = await apiBody(response);
+      if (!response.ok || body.ok === false) throw new Error(body.reason || String(response.status));
+      showLogin(id);
+      message.textContent = "Admin створений. Безпарольний bootstrap закрито. Увійдіть новим паролем.";
+    } catch (error) {
+      message.textContent = `Не вдалося створити Admin: ${error.message}`;
+      button.disabled = false;
+    }
+  }
+
+  async function submitLogin() {
+    const actor = form.querySelector("#hgLoginActor")?.value.trim() || "";
+    const credential = form.querySelector("#hgLoginPin")?.value.trim() || "";
+    if (!actor || !/^\d{4,12}$/.test(credential)) {
+      message.textContent = "Введіть користувача та PIN 4–12 цифр.";
+      return;
+    }
+    const button = form.querySelector("button");
+    button.disabled = true;
+    message.textContent = "Перевірка…";
+    try {
+      const response = await originalFetch("/api/v1/access/login", {
+        method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actor, credential })
+      });
+      const body = await apiBody(response);
+      if (!response.ok || body.ok === false) throw new Error(body.reason || String(response.status));
       session = {
-        actor: String(result.actor || actor),
-        credential,
-        name: String(result.name || actor),
-        role: String(result.role || "guest"),
-        capabilities: result.capabilities || {}
+        actor: String(body.actor || actor), credential,
+        name: String(body.name || actor), role: String(body.role || "guest"),
+        capabilities: body.capabilities || {}
       };
-      document.querySelector("#operatorPin").value = "";
+      document.documentElement.classList.remove("hg-auth-locked");
+      gate.hidden = true;
+      syncLegacyCredentials();
       applyRoleUi();
       if (typeof refresh === "function") await refresh();
-      applyRoleUi();
-      if (typeof showToast === "function") showToast(`Вхід виконано · ${roleLabel(session.role)}`);
+      ensureLogoutButton();
     } catch (error) {
       session = null;
-      document.querySelector("#operatorPin").value = "";
-      applyRoleUi();
-      if (typeof showToast === "function") showToast(`Вхід відхилено: ${error.message}`);
-    } finally {
-      if (button) button.disabled = false;
+      message.textContent = error.message === "setup_required" ? "Спочатку виконайте первинне налаштування." : `Вхід відхилено: ${error.message}`;
+      if (error.message === "setup_required") showSetup();
+      else button.disabled = false;
     }
   }
 
   function logout() {
     session = null;
-    ["#operatorId", "#operatorPin", "#networkActor", "#networkCredential", "#accessActor", "#accessCredential"].forEach(selector => {
+    ["#operatorId", "#operatorPin", "#networkActor", "#networkCredential", "#accessActor", "#accessCredential", "#cloudActor", "#cloudCredential"].forEach(selector => {
       const field = document.querySelector(selector);
       if (field) field.value = "";
     });
-    applyRoleUi();
-    if (typeof showToast === "function") showToast("Сеанс завершено");
+    document.querySelector("#hgSessionLogout")?.remove();
+    gate.hidden = false;
+    document.documentElement.classList.add("hg-auth-locked");
+    showLogin();
   }
 
-  function protectedActionAllowed(control) {
-    if (!session || !control) return false;
-    const caps = session.capabilities || {};
-    if (control.matches("[data-command]")) return commandAllowed(control.dataset.command || "");
-    if (control.matches("[data-output-id]")) return caps.valves === true;
-    if (control.matches("#wifiConnect")) return caps.networkConfigure === true;
-    if (control.matches("#accessLoad,#accessSave")) return caps.accessManage === true;
-    return false;
+  function ensureLogoutButton() {
+    if (document.querySelector("#hgSessionLogout")) return;
+    const button = document.createElement("button");
+    button.id = "hgSessionLogout";
+    button.type = "button";
+    button.textContent = "Вийти";
+    button.onclick = logout;
+    document.body.appendChild(button);
   }
 
-  // Backend authorization is still authoritative. The capture boundary also
-  // blocks stale/transient UI states (for example app.js re-enabling buttons
-  // in finally blocks) so a forbidden command cannot even be dispatched by
-  // the browser between role-refresh cycles.
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    if (gateMode === "setup_required") submitSetup();
+    else submitLogin();
+  });
+
   document.addEventListener("click", event => {
-    const protectedControl = event.target.closest?.("[data-command],[data-output-id],#wifiConnect,#accessLoad,#accessSave");
-    if (!protectedControl) return;
-    if (!protectedActionAllowed(protectedControl)) {
+    if (!session) return;
+    const control = event.target.closest?.("[data-command],[data-output-id],#wifiConnect,#accessLoad,#accessSave,#cloudApply,#cloudDisable");
+    if (!control) return;
+    const caps = session.capabilities || {};
+    let allowed = true;
+    if (control.matches("[data-command]")) allowed = commandAllowed(control.dataset.command || "");
+    else if (control.matches("[data-output-id]")) allowed = caps.valves === true;
+    else if (control.matches("#wifiConnect")) allowed = caps.networkConfigure === true;
+    else if (control.matches("#accessLoad,#accessSave")) allowed = caps.accessManage === true;
+    else if (control.matches("#cloudApply,#cloudDisable")) allowed = session.role === "admin";
+    if (!allowed) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      applyRoleUi();
-      if (typeof showToast === "function") {
-        showToast(session ? "Команда недоступна для цієї ролі" : "Спочатку увійдіть");
-      }
+      if (typeof showToast === "function") showToast("Команда недоступна для цієї ролі");
       return;
     }
-    syncCredentialFields();
+    syncLegacyCredentials();
   }, true);
 
-  const observer = new MutationObserver(() => {
-    if (mutationQueued) return;
-    mutationQueued = true;
-    queueMicrotask(() => {
-      mutationQueued = false;
-      applyRoleUi();
-    });
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
-
-  ensureSessionUi();
-  applyRoleUi();
-  setInterval(applyRoleUi, 1000);
-})();
-
-// Phone layout: Bruce stays fully visible and the navigation is collapsed by
-// default. The menu button is placed after Bruce, so opening/closing navigation
-// never overlays the artwork or the page content.
-(() => {
-  const sidebar = document.querySelector(".sidebar");
-  const bruce = sidebar?.querySelector(".bruce");
-  const nav = sidebar?.querySelector("nav");
-  if (!sidebar || !bruce || !nav || document.querySelector("#mobileNavToggle")) return;
-
-  const style = document.createElement("style");
-  style.textContent = `
-    #mobileNavToggle{display:none}
-    @media(max-width:720px){
-      .sidebar{position:relative!important;height:auto!important;overflow:visible!important}
-      .sidebar .bruce{height:180px!important;overflow:visible!important;margin-bottom:8px!important}
-      .sidebar .bruce img{width:100%!important;height:100%!important;object-fit:contain!important;object-position:center center!important}
-      .sidebar nav{display:none!important}
-      .sidebar.mobile-nav-open nav{display:flex!important}
-      #mobileNavToggle{display:block;width:calc(100% - 24px);margin:0 12px 10px;padding:11px 14px;border:1px solid rgba(255,255,255,.28);border-radius:8px;background:#173551;color:#fff;font:inherit;font-weight:700;text-align:left}
-    }`;
-  document.head.appendChild(style);
-
-  const toggle = document.createElement("button");
-  toggle.id = "mobileNavToggle";
-  toggle.type = "button";
-  toggle.textContent = "☰ Меню";
-  toggle.setAttribute("aria-expanded", "false");
-  toggle.setAttribute("aria-controls", "homeguardNav");
-  nav.id = nav.id || "homeguardNav";
-  bruce.insertAdjacentElement("afterend", toggle);
-
-  const closeMenu = () => {
-    sidebar.classList.remove("mobile-nav-open");
-    toggle.setAttribute("aria-expanded", "false");
-    toggle.textContent = "☰ Меню";
+  window.HomeGuardAuth = {
+    authenticated: () => Boolean(session),
+    actor: () => session?.actor || "",
+    role: () => session?.role || "",
+    logout
   };
 
-  toggle.addEventListener("click", () => {
-    const open = sidebar.classList.toggle("mobile-nav-open");
-    toggle.setAttribute("aria-expanded", String(open));
-    toggle.textContent = open ? "✕ Закрити меню" : "☰ Меню";
-  });
-  nav.querySelectorAll("a").forEach(link => link.addEventListener("click", closeMenu));
-  window.addEventListener("resize", () => {
-    if (window.innerWidth > 720) closeMenu();
-  });
-  closeMenu();
+  loadAccessState();
 })();
