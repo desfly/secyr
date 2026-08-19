@@ -43,6 +43,10 @@ class HttpDeviceApi(
             else -> AccessRole.GUEST
         }
         val raw = json.optJSONObject("capabilities") ?: JSONObject()
+        val sessionToken = json.optString("sessionToken", "")
+        if (runtimeV1 && !sessionToken.matches(Regex("^[0-9a-f]{64}$"))) {
+            throw IOException("HTTP session token missing")
+        }
         return AccessSession(
             actor = json.optString("actor", normalizedActor),
             name = json.optString("name", normalizedActor),
@@ -58,6 +62,7 @@ class HttpDeviceApi(
                 accessManage = raw.optBoolean("accessManage", false),
                 serviceInvalidate = raw.optBoolean("serviceInvalidate", false),
             ),
+            sessionToken = sessionToken,
         )
     }
 
@@ -72,11 +77,7 @@ class HttpDeviceApi(
         return execute(
             RuntimeApiContract.NETWORK_CONNECT_PATH,
             "POST",
-            JSONObject()
-                .put("ssid", ssid)
-                .put("password", password)
-                .put("actor", normalizedActor)
-                .put("credential", credential),
+            JSONObject().put("ssid", ssid).put("password", password).put("actor", normalizedActor).put("credential", credential),
         )
     }
 
@@ -86,16 +87,11 @@ class HttpDeviceApi(
             "POST",
             JSONObject().put("actor", actor.trim()).put("credential", credential),
         )
-        if (!json.optBoolean("ok", false)) {
-            throw IOException("Telemetry login rejected: ${json.optString("reason", "unknown")}")
-        }
-        return json.optString("telemetryToken", "").also {
-            if (it.length < 32) throw IOException("Telemetry session token missing")
-        }
+        if (!json.optBoolean("ok", false)) throw IOException("Telemetry login rejected: ${json.optString("reason", "unknown")}")
+        return json.optString("telemetryToken", "").also { if (it.length < 32) throw IOException("Telemetry session token missing") }
     }
 
-    override suspend fun command(command: DeviceCommand): CommandReply =
-        if (runtimeV1) runtimeCommand(command) else legacyCommand(command)
+    override suspend fun command(command: DeviceCommand): CommandReply = if (runtimeV1) runtimeCommand(command) else legacyCommand(command)
 
     private suspend fun legacyCommand(command: DeviceCommand): CommandReply {
         val body = JSONObject()
@@ -108,20 +104,13 @@ class HttpDeviceApi(
                 if (command.credential.isNotBlank()) put("credential", command.credential)
             }
         val json = execute(LegacyApiContract.COMMAND_PATH, "POST", body)
-        return CommandReply(
-            accepted = json.optBoolean("accepted", false),
-            duplicate = json.optBoolean("duplicate", false),
-            code = json.optString("code", "unknown"),
-        )
+        return CommandReply(json.optBoolean("accepted", false), json.optBoolean("duplicate", false), json.optString("code", "unknown"))
     }
 
     private suspend fun runtimeCommand(command: DeviceCommand): CommandReply {
         val actor = command.actor.trim()
         val credential = command.credential
-        if (actor.isBlank() || credential.isBlank()) {
-            return CommandReply(false, code = "authorization_required")
-        }
-
+        if (actor.isBlank() || credential.isBlank()) return CommandReply(false, code = "authorization_required")
         return when (command.type) {
             CommandType.ARM_HOME -> runtimeSecurityCommand("security.arm_home", actor, credential)
             CommandType.ARM_AWAY -> runtimeSecurityCommand("security.arm_away", actor, credential)
@@ -133,19 +122,9 @@ class HttpDeviceApi(
     }
 
     private suspend fun runtimeSecurityCommand(command: String, actor: String, credential: String): CommandReply {
-        val json = execute(
-            RuntimeApiContract.SECURITY_COMMAND_PATH,
-            "POST",
-            JSONObject()
-                .put("command", command)
-                .put("actor", actor)
-                .put("credential", credential),
-        )
+        val json = execute(RuntimeApiContract.SECURITY_COMMAND_PATH, "POST", JSONObject().put("command", command).put("actor", actor).put("credential", credential))
         val accepted = json.optBoolean("ok", false)
-        return CommandReply(
-            accepted = accepted,
-            code = if (accepted) "accepted" else json.optString("reason", "rejected"),
-        )
+        return CommandReply(accepted = accepted, code = if (accepted) "accepted" else json.optString("reason", "rejected"))
     }
 
     private suspend fun runtimeValveCommand(active: Boolean, actor: String, credential: String): CommandReply {
@@ -153,32 +132,18 @@ class HttpDeviceApi(
             val json = execute(
                 RuntimeApiContract.OUTPUT_COMMAND_PATH,
                 "POST",
-                JSONObject()
-                    .put("outputId", outputId)
-                    .put("active", active)
-                    .put("alarmActive", false)
-                    .put("actor", actor)
-                    .put("credential", credential),
+                JSONObject().put("outputId", outputId).put("active", active).put("alarmActive", false).put("actor", actor).put("credential", credential),
             )
-            if (!json.optBoolean("ok", false)) {
-                return CommandReply(false, code = json.optString("reason", json.optString("status", "rejected")))
-            }
+            if (!json.optBoolean("ok", false)) return CommandReply(false, code = json.optString("reason", json.optString("status", "rejected")))
         }
         return CommandReply(true, code = "accepted")
     }
 
-    override suspend fun diagnostics(): Diagnostics =
-        JsonParsers.diagnostics(execute(LegacyApiContract.HEALTH_PATH))
-
-    override suspend fun snapshot(): SystemSnapshot =
-        JsonParsers.snapshot(execute(LegacyApiContract.STATUS_PATH))
+    override suspend fun diagnostics(): Diagnostics = JsonParsers.diagnostics(execute(LegacyApiContract.HEALTH_PATH))
+    override suspend fun snapshot(): SystemSnapshot = JsonParsers.snapshot(execute(LegacyApiContract.STATUS_PATH))
 
     suspend fun challenge(type: CommandType): Long {
-        val json = execute(
-            LegacyApiContract.CHALLENGE_PATH,
-            "POST",
-            JSONObject().put("command", type.name.lowercase()),
-        )
+        val json = execute(LegacyApiContract.CHALLENGE_PATH, "POST", JSONObject().put("command", type.name.lowercase()))
         return json.getLong("challenge")
     }
 
@@ -203,13 +168,8 @@ class HttpDeviceApi(
     private suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation ->
         continuation.invokeOnCancellation { cancel() }
         enqueue(object : Callback {
-            override fun onFailure(call: Call, error: IOException) {
-                if (continuation.isActive) continuation.resumeWithException(error)
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                continuation.resume(response)
-            }
+            override fun onFailure(call: Call, error: IOException) { if (continuation.isActive) continuation.resumeWithException(error) }
+            override fun onResponse(call: Call, response: Response) { continuation.resume(response) }
         })
     }
 }
