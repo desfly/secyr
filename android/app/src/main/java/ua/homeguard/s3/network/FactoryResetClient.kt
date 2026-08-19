@@ -20,26 +20,27 @@ enum class FactoryResetResult {
 
 class FactoryResetClient(
     baseUrl: String,
+    private val sessionToken: String,
     certificatePin: String = "",
 ) {
     private val root = baseUrl.trimEnd('/')
     private val client = PinnedTlsClientFactory.create(certificatePin)
 
-    suspend fun reset(actor: String, credential: String): FactoryResetResult {
+    suspend fun reset(actor: String): FactoryResetResult {
         val normalizedActor = actor.trim()
         require(normalizedActor.isNotBlank()) { "Admin ID is required" }
-        require(credential.length in 4..12 && credential.all(Char::isDigit)) { "PIN must contain 4-12 digits" }
+        require(sessionToken.matches(Regex("^[0-9a-f]{64}$"))) { "Admin Bearer session is required" }
         require(root.isNotBlank()) { "Local controller endpoint is unavailable" }
 
         val body = JSONObject()
             .put("actor", normalizedActor)
-            .put("credential", credential)
             .put("confirm", "ERASE_ALL")
 
         val request = Request.Builder()
             .url(root + RuntimeApiContract.FACTORY_RESET_PATH)
             .header("Accept", "application/json")
             .header("Cache-Control", "no-store")
+            .header("Authorization", "Bearer $sessionToken")
             .post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
 
@@ -64,6 +65,10 @@ class FactoryResetClient(
             }
         }
     }
+
+    /* LEGACY v1 actor+PIN reset path intentionally removed from active use.
+       The old model remains documented in history until the v2 rollout is
+       proven; runtime reset now authenticates only with the login Bearer. */
 
     private suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation ->
         continuation.invokeOnCancellation { cancel() }
