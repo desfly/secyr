@@ -10,6 +10,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs.h"
 
 #include <cstdint>
 
@@ -17,6 +18,9 @@ namespace homeguard::idf {
 namespace {
 
 constexpr const char* kTag = "hg_rst_sequence";
+constexpr const char* kControlNamespace = "hg_rstctl";
+constexpr const char* kPendingKey = "pending";
+constexpr std::uint8_t kPendingValue = 1U;
 constexpr std::uint8_t kRequiredHolds = 3U;
 constexpr int kResetRgbGpio = 48;
 constexpr TickType_t kHoldTicks = pdMS_TO_TICKS(1500);
@@ -30,10 +34,50 @@ bool service_button_pressed() {
     return gpio_get_level(board::kServiceButton) == 0;
 }
 
-void perform_factory_reset() {
-    (void)RgbDiagnostic::off(kResetRgbGpio);
+esp_err_t set_pending_reset(bool pending) {
+    nvs_handle_t handle{};
+    auto error = nvs_open(kControlNamespace, NVS_READWRITE, &handle);
+    if (error != ESP_OK) return error;
 
-    ESP_LOGW(kTag, "Three confirmed service-button holds complete; erasing mutable state");
+    if (pending) {
+        error = nvs_set_u8(handle, kPendingKey, kPendingValue);
+    } else {
+        error = nvs_erase_key(handle, kPendingKey);
+        if (error == ESP_ERR_NVS_NOT_FOUND) error = ESP_OK;
+    }
+
+    if (error == ESP_OK) error = nvs_commit(handle);
+    nvs_close(handle);
+    return error;
+}
+
+esp_err_t read_pending_reset(bool& pending) {
+    pending = false;
+    nvs_handle_t handle{};
+    const auto open_error = nvs_open(kControlNamespace, NVS_READONLY, &handle);
+    if (open_error == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (open_error != ESP_OK) return open_error;
+
+    std::uint8_t value = 0U;
+    auto error = nvs_get_u8(handle, kPendingKey, &value);
+    nvs_close(handle);
+    if (error == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (error != ESP_OK) return error;
+    pending = value == kPendingValue;
+    return ESP_OK;
+}
+
+void perform_early_boot_factory_reset() {
+    // Consume the request before destructive work to avoid a permanent boot
+    // loop if flash/NVS later reports a non-recoverable partial failure.
+    const auto clear_error = set_pending_reset(false);
+    if (clear_error != ESP_OK) {
+        ESP_LOGE(kTag, "Cannot consume pending Factory Reset request: %s", esp_err_to_name(clear_error));
+        esp_restart();
+        return;
+    }
+
+    ESP_LOGW(kTag, "Pending Factory Reset accepted during early boot; erasing mutable state");
     const auto report = FactoryResetManager{}.erase_mutable_state();
     if (!report.ok()) {
         ESP_LOGE(kTag,
@@ -44,8 +88,6 @@ void perform_factory_reset() {
                  report.controller_config,
                  report.provisioning,
                  report.commissioning);
-
-        // RED is reserved exclusively for a successful complete factory reset.
         (void)RgbDiagnostic::off(kResetRgbGpio);
         esp_restart();
         return;
@@ -61,6 +103,19 @@ void perform_factory_reset() {
     }
 
     ESP_LOGW(kTag, "Factory Reset confirmed; rebooting clean");
+    esp_restart();
+}
+
+void stage_factory_reset() {
+    (void)RgbDiagnostic::off(kResetRgbGpio);
+
+    const auto error = set_pending_reset(true);
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag, "Cannot stage Factory Reset request; no destructive reset performed: %s", esp_err_to_name(error));
+        return;
+    }
+
+    ESP_LOGW(kTag, "Three confirmed holds complete; Factory Reset staged for safe early boot");
     esp_restart();
 }
 
@@ -121,7 +176,7 @@ void service_button_reset_task(void*) {
                              static_cast<unsigned>(kRequiredHolds));
 
                     if (step.trigger_factory_reset) {
-                        perform_factory_reset();
+                        stage_factory_reset();
                     }
                 } else {
                     ESP_LOGI(kTag, "Short/unconfirmed service-button press ignored");
@@ -133,9 +188,8 @@ void service_button_reset_task(void*) {
         if (stable_pressed && !hold_confirmed && (now - press_started_at) >= kHoldTicks) {
             const auto rgb_error = RgbDiagnostic::set_white(kResetRgbGpio);
             if (rgb_error != ESP_OK) {
-                // WHITE is the user's positive acknowledgement that the hold is
-                // accepted. If feedback cannot be shown, fail safe: do not count
-                // this hold and require a later visible confirmation instead.
+                // WHITE is the positive acknowledgement that the hold is accepted.
+                // If feedback cannot be shown, fail safe and do not count it.
                 ESP_LOGE(kTag, "Cannot show WHITE hold confirmation; hold not armed: %s", esp_err_to_name(rgb_error));
             } else {
                 hold_confirmed = true;
@@ -157,6 +211,19 @@ void service_button_reset_task(void*) {
 }
 
 }  // namespace
+
+bool handle_pending_factory_reset() {
+    bool pending = false;
+    const auto error = read_pending_reset(pending);
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag, "Cannot read pending Factory Reset request: %s", esp_err_to_name(error));
+        return false;
+    }
+    if (!pending) return false;
+
+    perform_early_boot_factory_reset();
+    return true;
+}
 
 esp_err_t start_service_button_factory_reset() {
     gpio_config_t config{};
