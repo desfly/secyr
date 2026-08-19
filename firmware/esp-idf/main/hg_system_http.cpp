@@ -98,6 +98,12 @@ void delayed_factory_reboot(void*) {
     esp_restart();
 }
 
+void schedule_factory_reboot() {
+    if (xTaskCreate(&delayed_factory_reboot, "hg_factory_reset", 2048, nullptr, 5, nullptr) != pdPASS) {
+        esp_restart();
+    }
+}
+
 const char* arm_state_name(hg::PartitionArmState state) {
     switch (state) {
         case hg::PartitionArmState::Stay: return "stay";
@@ -168,17 +174,17 @@ esp_err_t SystemHttp::handle_factory_reset(httpd_req_t* request) {
     const auto decision=access_control_->authorize(actor,credential,"system.factory_reset");
     scrub(credential);
     if (decision != homeguard::AuditDecision::Allowed) { httpd_resp_set_status(request,"403 Forbidden"); const std::string response=std::string{"{\"ok\":false,\"reason\":\""}+homeguard::to_string(decision)+"\"}"; return send_json(request,response.c_str(),response.size()); }
+
     const auto report=FactoryResetManager{}.erase_mutable_state();
+    if (report.access == ESP_OK) access_control_->clear_users();
+    schedule_factory_reboot();
+
     if (!report.ok()) {
         httpd_resp_set_status(request,"500 Internal Server Error");
         const std::string response=std::string{"{\"ok\":false,\"reason\":\"erase_failed\",\"access\":"}+std::to_string(report.access)+",\"wifi\":"+std::to_string(report.wifi)+",\"cloud\":"+std::to_string(report.cloud)+",\"controllerConfig\":"+std::to_string(report.controller_config)+",\"provisioning\":"+std::to_string(report.provisioning)+",\"commissioning\":"+std::to_string(report.commissioning)+",\"rebooting\":true}";
-        const auto reboot_task=xTaskCreate(&delayed_factory_reboot,"hg_factory_reset",2048,nullptr,5,nullptr);
-        if (reboot_task != pdPASS) { esp_restart(); return ESP_FAIL; }
         return send_json(request,response.c_str(),response.size());
     }
-    access_control_->clear_users();
-    const auto reboot_task=xTaskCreate(&delayed_factory_reboot,"hg_factory_reset",2048,nullptr,5,nullptr);
-    if (reboot_task != pdPASS) { esp_restart(); return ESP_FAIL; }
+
     static constexpr char response[]="{\"ok\":true,\"state\":\"factory_reset_complete\",\"rebooting\":true}";
     return send_json(request,response,sizeof(response)-1U);
 }
