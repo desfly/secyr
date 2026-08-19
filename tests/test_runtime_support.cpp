@@ -5,6 +5,7 @@
 #include "homeguard/hardware_runtime.hpp"
 #include "homeguard/infrastructure_status.hpp"
 #include "homeguard/modbus_request.hpp"
+#include "homeguard/telemetry.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -66,4 +67,24 @@ void test_runtime_support()
     const auto crc = homeguard::modbus_crc16_portable(request.data(), 6);
     CHECK(request[6] == static_cast<std::uint8_t>(crc & 0xFF));
     CHECK(request[7] == static_cast<std::uint8_t>(crc >> 8));
+
+    hg::TelemetryFrame telemetry{};
+    telemetry.sequence = 42;
+    telemetry.uptime_ms = 123456;
+    telemetry.transport = hg::Transport::WifiSta;
+    telemetry.health = hg::HealthState::Ok;
+    telemetry.temperature_count = 1;
+    telemetry.temperatures_c[0] = 23.5F;
+    telemetry.temperature_valid[0] = true;
+    telemetry.battery_voltage_v = 12.4F;
+    telemetry.battery_valid = true;
+    telemetry.crc = 0x12345678U;
+
+    const auto telemetry_payload = hg::telemetry_json(telemetry);
+    CHECK(telemetry_payload.find("\"sequence\":42") != std::string::npos);
+    CHECK(telemetry_payload.find("\"transport\":\"wifi_sta\"") != std::string::npos);
+    CHECK(telemetry_payload.find("\"health\":\"ok\"") != std::string::npos);
+    CHECK(telemetry_payload.find("\"temperature_count\":1") != std::string::npos);
+    CHECK(telemetry_payload.find("\"battery_valid\":true") != std::string::npos);
+    CHECK(telemetry_payload.find("\"crc\":305419896") != std::string::npos);
 }
