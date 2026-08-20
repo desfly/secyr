@@ -97,17 +97,25 @@ async function refreshNetwork() {
   }
 }
 
+let refreshBusy = false;
 async function refresh() {
-  const requests = await Promise.allSettled([
-    api("/api/v1/system/zones"), api("/api/v1/system/partitions"), api("/api/v1/system/outputs"),
-    api("/api/v1/system/events"), api("/api/v1/build"), api("/api/v1/network/status")
-  ]);
-  if (requests[0].status === "fulfilled") renderZones(requests[0].value);
-  if (requests[1].status === "fulfilled") renderPartitions(requests[1].value);
-  if (requests[2].status === "fulfilled") renderOutputs(requests[2].value);
-  if (requests[3].status === "fulfilled") renderEvents(requests[3].value);
-  if (requests[4].status === "fulfilled") document.querySelector("#buildInfo").textContent = JSON.stringify(requests[4].value, null, 2);
-  if (requests[5].status === "fulfilled") renderNetwork(requests[5].value);
+  if (refreshBusy) return;
+  refreshBusy = true;
+  try {
+    const requests = [
+      ["/api/v1/system/zones", renderZones],
+      ["/api/v1/system/partitions", renderPartitions],
+      ["/api/v1/system/outputs", renderOutputs],
+      ["/api/v1/system/events", renderEvents],
+      ["/api/v1/build", value => { document.querySelector("#buildInfo").textContent = JSON.stringify(value, null, 2); }],
+      ["/api/v1/network/status", renderNetwork]
+    ];
+    for (const [path, render] of requests) {
+      try { render(await api(path)); } catch (_) {}
+    }
+  } finally {
+    refreshBusy = false;
+  }
 }
 
 async function scanWifi() {
@@ -210,7 +218,7 @@ async function sendOutputCommand(button) {
 async function sendSecurityCommand(button) {
   const command = button.dataset.command;
   const { actor, credential } = operatorCredentials();
-  if (!command || !validOperator(actor, credential)) return;
+  if (!command || !validPin(credential)) return;
   const buttons = [...document.querySelectorAll("[data-command]")];
   const previousDisabled = new Map(buttons.map(item => [item, item.disabled]));
   buttons.forEach(item => { item.disabled = true; });
@@ -401,8 +409,9 @@ function bootUi() {
   bindNavigation();
   bindCommandButtons();
   routeFromHash();
-  refresh();
-  setInterval(refresh, 5000);
+  setInterval(() => {
+    if (window.HomeGuardAuth?.authenticated?.()) refresh();
+  }, 5000);
   document.documentElement.dataset.homeguardUi = "ready";
 }
 
