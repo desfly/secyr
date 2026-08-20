@@ -301,31 +301,29 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
         return send_json(request, "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_persist_failed\"}");
     }
 
+    std::fill(password.begin(), password.end(), '\0');
+    std::fill(previous_password.begin(), previous_password.end(), '\0');
+    const auto response_error = send_json(request,
+        std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) +
+        "\",\"setupMode\":" + (setup_mode ? "true" : "false") + "}");
+    if (response_error != ESP_OK) return response_error;
+
     vTaskDelay(kStaHandoverDelay);
     (void)esp_wifi_disconnect();
     const auto connect_error = esp_wifi_connect();
     if (connect_error != ESP_OK) {
         if (have_previous_sta) (void)esp_wifi_set_config(WIFI_IF_STA, &previous_sta);
-        const bool persist_rollback_ok = had_persisted_credentials
-            ? save_credentials(previous_ssid, previous_password)
-            : clear_credentials();
+        if (had_persisted_credentials) {
+            (void)save_credentials(previous_ssid, previous_password);
+        } else {
+            (void)clear_credentials();
+        }
         if (have_previous_sta) {
             (void)esp_wifi_disconnect();
             (void)esp_wifi_connect();
         }
-        std::fill(password.begin(), password.end(), '\0');
-        std::fill(previous_password.begin(), previous_password.end(), '\0');
-        httpd_resp_set_status(request, "503 Service Unavailable");
-        return send_json(request, persist_rollback_ok
-            ? "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_connect_failed\",\"rolledBack\":true}"
-            : "{\"ok\":false,\"state\":\"error\",\"reason\":\"wifi_connect_failed_rollback_failed\"}");
     }
-
-    std::fill(password.begin(), password.end(), '\0');
-    std::fill(previous_password.begin(), previous_password.end(), '\0');
-    return send_json(request,
-        std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) +
-        "\",\"setupMode\":" + (setup_mode ? "true" : "false") + "}");
+    return ESP_OK;
 }
 
 bool NetworkHttp::apply_sta(const std::string& ssid, const std::string& password, bool persist)
