@@ -22,10 +22,14 @@ esp_err_t Ina226::initialize(
     float shunt_ohms,
     float maximum_current_a)
 {
+    if (initialized_) {
+        return ESP_OK;
+    }
     if (shunt_ohms <= 0.0F || maximum_current_a <= 0.0F) {
         return ESP_ERR_INVALID_ARG;
     }
 
+    initialized_ = false;
     auto error = bus.add_device(
         address,
         400000,
@@ -45,7 +49,12 @@ esp_err_t Ina226::initialize(
     if ((error = write_register(kConfig, 0x4527)) != ESP_OK) {
         return error;
     }
-    return write_register(kCalibration, calibration);
+    if ((error = write_register(kCalibration, calibration)) != ESP_OK) {
+        return error;
+    }
+
+    initialized_ = true;
+    return ESP_OK;
 }
 
 esp_err_t Ina226::write_register(
@@ -91,7 +100,10 @@ esp_err_t Ina226::read_register(
 
 esp_err_t Ina226::read(Ina226Reading* reading)
 {
-    if (device_ == nullptr || reading == nullptr) {
+    if (reading == nullptr) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!initialized_ || device_ == nullptr) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -136,7 +148,7 @@ esp_err_t Ina226::read(Ina226Reading* reading)
 
 bool Ina226::ready() const noexcept
 {
-    return device_ != nullptr;
+    return initialized_;
 }
 
 }  // namespace homeguard::idf

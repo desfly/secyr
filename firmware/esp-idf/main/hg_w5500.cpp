@@ -44,6 +44,16 @@ esp_err_t W5500::initialize()
         return error;
     }
 
+    // The ESP-IDF W5500 MAC registers an interrupt handler while the Ethernet
+    // driver is installed. Hosted tests did not expose that the global GPIO ISR
+    // service had never been installed, but real hardware does. Treat an
+    // already-installed service as success so this remains safe when another
+    // peripheral owns the global service first.
+    error = gpio_install_isr_service(0);
+    if (error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
+        return error;
+    }
+
     spi_device_interface_config_t spi_config{
         .command_bits = 16,
         .address_bits = 8,
