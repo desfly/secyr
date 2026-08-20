@@ -302,27 +302,29 @@ esp_err_t NetworkHttp::handle_connect(httpd_req_t* request)
     }
 
     std::fill(password.begin(), password.end(), '\0');
-    std::fill(previous_password.begin(), previous_password.end(), '\0');
     const auto response_error = send_json(request,
-        std::string{"{\"ok\":true,\"state\":\"connecting\",\"ssid\":\""} + json_escape(ssid) +
+        std::string{"{\"ok\":true,\"state\":\"handover_pending\",\"ssid\":\""} + json_escape(ssid) +
         "\",\"setupMode\":" + (setup_mode ? "true" : "false") + "}");
-    if (response_error != ESP_OK) return response_error;
+    if (response_error != ESP_OK) {
+        std::fill(previous_password.begin(), previous_password.end(), '\0');
+        return response_error;
+    }
 
     vTaskDelay(kStaHandoverDelay);
     (void)esp_wifi_disconnect();
     const auto connect_error = esp_wifi_connect();
     if (connect_error != ESP_OK) {
         if (have_previous_sta) (void)esp_wifi_set_config(WIFI_IF_STA, &previous_sta);
-        if (had_persisted_credentials) {
-            (void)save_credentials(previous_ssid, previous_password);
-        } else {
-            (void)clear_credentials();
-        }
+        const bool persist_rollback_ok = had_persisted_credentials
+            ? save_credentials(previous_ssid, previous_password)
+            : clear_credentials();
+        (void)persist_rollback_ok;
         if (have_previous_sta) {
             (void)esp_wifi_disconnect();
             (void)esp_wifi_connect();
         }
     }
+    std::fill(previous_password.begin(), previous_password.end(), '\0');
     return ESP_OK;
 }
 
