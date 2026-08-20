@@ -60,6 +60,16 @@ for item in required_sdk:
     if item not in sdk:
         errors.append(f"sdkconfig missing: {item}")
 
+socket_match = re.search(r"^CONFIG_LWIP_MAX_SOCKETS=(\d+)$", sdk, flags=re.MULTILINE)
+if not socket_match:
+    errors.append("sdkconfig missing explicit CONFIG_LWIP_MAX_SOCKETS")
+elif int(socket_match.group(1)) < 16:
+    errors.append("CONFIG_LWIP_MAX_SOCKETS must be at least 16 for HTTPD + browser + discovery/MQTT")
+
+app_main_text = (MAIN / "app_main.cpp").read_text(encoding="utf-8")
+if "config.lru_purge_enable = true;" not in app_main_text:
+    errors.append("HTTP server must keep LRU socket purge enabled")
+
 version_text = (MAIN / "hg_version.hpp").read_text(encoding="utf-8")
 version_fields = dict(re.findall(r'^#define\s+(HG_[A-Z0-9_]+)\s+"([^"]*)"', version_text, flags=re.MULTILINE))
 for field in ("HG_PROJECT_NAME", "HG_BUILD_NUMBER", "HG_FIRMWARE_VERSION", "HG_ESP_IDF_REQUIRED"):
