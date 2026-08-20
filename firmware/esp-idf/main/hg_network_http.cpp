@@ -433,22 +433,13 @@ std::string NetworkHttp::status_json() const
 
 std::string NetworkHttp::scan_json() const
 {
-    wifi_ap_record_t current_ap{};
-    const bool sta_was_connected = esp_wifi_sta_get_ap_info(&current_ap) == ESP_OK;
-    if (sta_was_connected) {
-        (void)esp_wifi_disconnect();
-        vTaskDelay(pdMS_TO_TICKS(120));
-    }
-
     const auto start_error = esp_wifi_scan_start(nullptr, true);
     if (start_error != ESP_OK) {
-        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_start_failed\",\"networks\":[]}";
     }
 
     std::uint16_t count = 0;
     if (esp_wifi_scan_get_ap_num(&count) != ESP_OK) {
-        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_count_failed\",\"networks\":[]}";
     }
 
@@ -456,7 +447,6 @@ std::string NetworkHttp::scan_json() const
     std::array<wifi_ap_record_t, kMaxScanRecords> records{};
     std::uint16_t returned = count;
     if (returned != 0 && esp_wifi_scan_get_ap_records(&returned, records.data()) != ESP_OK) {
-        if (sta_was_connected) (void)esp_wifi_connect();
         return "{\"ok\":false,\"state\":\"error\",\"reason\":\"scan_records_failed\",\"networks\":[]}";
     }
 
@@ -468,8 +458,6 @@ std::string NetworkHttp::scan_json() const
                std::to_string(static_cast<int>(records[i].rssi)) + "}";
     }
     out += "]}";
-
-    if (sta_was_connected) (void)esp_wifi_connect();
     return out;
 }
 
