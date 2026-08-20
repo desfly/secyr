@@ -93,12 +93,38 @@ if "credential: credential.value" in factory_reset_js:
 network_http = (MAIN / "hg_network_http.cpp").read_text(encoding="utf-8")
 if "while (offset < body.size())" not in network_http or "body.data() + offset" not in network_http:
     errors.append("hg_network_http.cpp: Wi-Fi connect handler must read the complete declared HTTP body")
-if "wifi_persist_failed" not in network_http or "have_previous_sta" not in network_http:
-    errors.append("hg_network_http.cpp: failed Wi-Fi NVS commit must restore the previous live STA config")
-if not re.search(r"if\s*\(!save_credentials\(ssid, password\)\)\s*\{.*?esp_wifi_set_config\(WIFI_IF_STA,\s*&previous_sta\)", network_http, re.S):
-    errors.append("hg_network_http.cpp: Wi-Fi persistence rollback guard is missing")
 if 'access_->authorize_session(actor, "network.configure")' not in network_http:
     errors.append("hg_network_http.cpp: Wi-Fi changes must use Bearer-session role authorization")
+
+# Wi-Fi persistence is transactional: the committed record is immutable during
+# candidate association. A separate candidate record is promoted only after
+# GOT_IP for the candidate SSID, so there is no committed-state rollback step.
+process_start = network_http.find("void NetworkHttp::process_connect")
+process_end = network_http.find("bool NetworkHttp::start_candidate_timeout", process_start)
+process_connect = network_http[process_start:process_end] if process_start >= 0 and process_end > process_start else ""
+for required in (
+    "save_candidate_credentials(context.ssid, context.password)",
+    "httpd_req_async_handler_complete",
+    "esp_wifi_disconnect()",
+    "set_sta_config(context.ssid, context.password)",
+    "esp_wifi_connect()",
+):
+    if required not in network_http:
+        errors.append(f"hg_network_http.cpp: transactional Wi-Fi handover missing {required}")
+if "save_credentials(" in process_connect or "clear_credentials()" in process_connect:
+    errors.append("hg_network_http.cpp: candidate association must not mutate committed credentials")
+
+ip_start = network_http.find("void NetworkHttp::on_ip_event")
+ip_end = network_http.find("bool NetworkHttp::set_sta_config", ip_start)
+ip_handler = network_http[ip_start:ip_end] if ip_start >= 0 and ip_end > ip_start else ""
+match_pos = ip_handler.find("current_ap_matches(candidate_ssid)")
+commit_pos = ip_handler.find("save_credentials(candidate_ssid, candidate_password)")
+if match_pos < 0 or commit_pos < 0 or match_pos > commit_pos:
+    errors.append("hg_network_http.cpp: candidate credentials must commit only after matching-SSID GOT_IP")
+if "restore_active_connection()" not in network_http:
+    errors.append("hg_network_http.cpp: failed candidate association must restore committed live STA config")
+if "esp_wifi_set_storage(WIFI_STORAGE_RAM)" not in network_http:
+    errors.append("hg_network_http.cpp: ESP Wi-Fi config must stay RAM-only so HomeGuard NVS is authoritative")
 
 cloud_http = (MAIN / "hg_cloud_http.cpp").read_text(encoding="utf-8")
 if '#include "hg_http_util.hpp"' not in cloud_http or \
