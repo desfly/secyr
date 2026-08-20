@@ -1,0 +1,40 @@
+name: HomeGuard Wi-Fi Stability
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homeguard-wifi-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wifi-contract:
+    name: Wi-Fi HTTP/socket contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Wi-Fi runtime contract
+        run: python tools/check_wifi_runtime_contract.py
+      - name: Access boundary audit
+        run: python tools/check_access_boundary.py
+      - name: Firmware preflight
+        run: python tools/preflight_firmware.py
+      - name: ESP-IDF mock syntax
+        run: python tools/syntax_check_esp_idf_mock.py
+      - name: ESP-IDF mock link
+        run: python tools/mock_link_esp_idf_main.py
+      - name: Web JavaScript syntax
+        run: node --check web/app.js && node --check web/access-session.js && node --check web/factory-reset.js
