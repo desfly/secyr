@@ -73,9 +73,10 @@ private:
     void schedule_reconnect_retry();
     bool start_candidate_timeout(std::uint32_t generation);
     void cancel_candidate_and_restore_active(const char* reason);
-    bool restore_active_config_only();
     void restore_active_connection();
 
+    bool set_sta_config(const std::string& ssid, const std::string& password);
+    bool current_ap_matches(const std::string& ssid) const;
     bool apply_sta(const std::string& ssid, const std::string& password, bool persist);
     bool load_credentials(std::string& ssid, std::string& password) const;
     bool save_credentials(const std::string& ssid, const std::string& password) const;

@@ -113,25 +113,40 @@ require(MAIN / "hg_system_http.cpp", [
 require(MAIN / "hg_network_http.cpp", [
     "request_auth::authenticated_actor(request, *access_, actor)",
     'access_->authorize_session(actor, "network.configure")',
-    "had_persisted_credentials = load_credentials(previous_ssid, previous_password)",
-    "persist_rollback_ok = had_persisted_credentials",
-    "? save_credentials(previous_ssid, previous_password)",
-    ": clear_credentials()",
+    "save_candidate_credentials(context.ssid, context.password)",
+    "httpd_req_async_handler_begin",
+    "httpd_req_async_handler_complete",
     "handover_pending",
-    "response_error = send_json",
+    "current_ap_matches(candidate_ssid)",
+    "save_credentials(candidate_ssid, candidate_password)",
 ])
 network_http = (MAIN / "hg_network_http.cpp").read_text(encoding="utf-8")
 response_call = network_http.find("const auto response_error = send_json")
-handover_delay = network_http.find("vTaskDelay(kStaHandoverDelay)", response_call if response_call >= 0 else 0)
+complete_call = network_http.find("const auto complete_error = request_guard.complete()", response_call if response_call >= 0 else 0)
+handover_delay = network_http.find("vTaskDelay(kStaHandoverDelay)", complete_call if complete_call >= 0 else 0)
 disconnect_call = network_http.find("esp_wifi_disconnect()", handover_delay if handover_delay >= 0 else 0)
-connect_call = network_http.find("const auto connect_error = esp_wifi_connect()", disconnect_call if disconnect_call >= 0 else 0)
-rollback_call = network_http.find("persist_rollback_ok = had_persisted_credentials", connect_call if connect_call >= 0 else 0)
-rollback_wipe = network_http.find("std::fill(previous_password.begin()", rollback_call if rollback_call >= 0 else 0)
-if response_call < 0 or handover_delay < 0 or disconnect_call < 0 or connect_call < 0 or not (response_call < handover_delay < disconnect_call < connect_call):
-    errors.append("Wi-Fi connect API must finish the HTTP handover-pending response before dropping the active STA transport")
-if rollback_call < 0 or rollback_wipe < 0 or rollback_wipe < rollback_call:
-    errors.append("Wi-Fi connect rollback must retain the previous password until persistence rollback is attempted")
-require(MAIN / "hg_network_http.hpp", ["bool clear_credentials() const;"])
+set_config_call = network_http.find("set_sta_config(context.ssid, context.password)", disconnect_call if disconnect_call >= 0 else 0)
+connect_call = network_http.find("const auto connect_error = esp_wifi_connect()", set_config_call if set_config_call >= 0 else 0)
+if min(response_call, complete_call, handover_delay, disconnect_call, set_config_call, connect_call) < 0 or not (
+    response_call < complete_call < handover_delay < disconnect_call < set_config_call < connect_call
+):
+    errors.append("Wi-Fi connect API must complete HTTP acknowledgement before mutating or dropping STA transport")
+
+process_start = network_http.find("void NetworkHttp::process_connect")
+process_end = network_http.find("bool NetworkHttp::start_candidate_timeout", process_start)
+process_connect = network_http[process_start:process_end] if process_start >= 0 and process_end > process_start else ""
+if "save_credentials(" in process_connect or "clear_credentials()" in process_connect:
+    errors.append("Wi-Fi candidate flow must not mutate committed credentials before verified GOT_IP")
+
+ip_start = network_http.find("void NetworkHttp::on_ip_event")
+ip_end = network_http.find("bool NetworkHttp::set_sta_config", ip_start)
+ip_handler = network_http[ip_start:ip_end] if ip_start >= 0 and ip_end > ip_start else ""
+match_pos = ip_handler.find("current_ap_matches(candidate_ssid)")
+commit_pos = ip_handler.find("save_credentials(candidate_ssid, candidate_password)")
+if match_pos < 0 or commit_pos < 0 or match_pos > commit_pos:
+    errors.append("Wi-Fi candidate must verify the associated SSID before committing credentials")
+
+require(MAIN / "hg_network_http.hpp", ["bool clear_credentials() const;", "bool current_ap_matches(const std::string& ssid) const;"])
 require(MAIN / "hg_output_http.cpp", [
     "hg_request_auth.hpp",
     "request_auth::authenticated_actor(request, *access_control_, actor)",
@@ -221,4 +236,4 @@ if errors:
 print("Access boundary security audit PASS")
 print(" - login is the only acting-user PIN verification step")
 print(" - protected mutations require actor-bound Bearer + role RBAC")
-print(" - legacy Web credential is stripped before transmission")
+print(" - Wi-Fi candidate commit is actor-bound, transactional, and verified by associated SSID")
