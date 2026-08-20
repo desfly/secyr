@@ -60,9 +60,8 @@ HARNESS = r"""
   };
 
   await waitFor('html[data-homeguard-ui="ready"]');
-  await waitFor('[data-output-id="2"][data-output-active="true"]');
 
-  // Factory-fresh setup: PIN is legitimately sent once to create first Admin.
+  // Factory-fresh setup must not pre-load authenticated dashboard telemetry.
   await waitFor('#hgSetupId');
   setValue('#hgSetupId', 'admin-smoke');
   setValue('#hgSetupName', 'Smoke Admin');
@@ -72,6 +71,7 @@ HARNESS = r"""
 
   // Admin: login carries PIN. Everything after login must use Bearer session.
   await login('admin-smoke', '4321');
+  await waitFor('[data-output-id="2"][data-output-active="true"]');
   (await waitEnabled('[data-command="security.panic"]')).click();
   await sleep(450);
 
@@ -444,9 +444,6 @@ def verify(args: argparse.Namespace) -> int:
         if guest_set != {"actor": "admin-smoke", "action": "set", "id": "guest-smoke", "name": "Smoke Guest", "role": "guest", "pin": "6789", "enabled": True}:
             errors.append(f"guest set payload mismatch: {guest_set}")
 
-    # Runtime invariant: every non-bootstrap protected mutation has Bearer and
-    # no acting credential. `pin` on action:set is the new account's PIN and is
-    # intentionally allowed.
     for path in ("/api/v1/system/security-command", "/api/v1/system/output-command", "/api/v1/network/connect", "/api/v1/access/users"):
         for record in protected_records(path):
             body = record.get("body", {})
