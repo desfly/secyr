@@ -117,14 +117,20 @@ require(MAIN / "hg_network_http.cpp", [
     "persist_rollback_ok = had_persisted_credentials",
     "? save_credentials(previous_ssid, previous_password)",
     ": clear_credentials()",
-    "wifi_connect_failed_rollback_failed",
-    "rolledBack",
+    "handover_pending",
+    "response_error = send_json",
 ])
 network_http = (MAIN / "hg_network_http.cpp").read_text(encoding="utf-8")
-connect_call = network_http.find("const auto connect_error = esp_wifi_connect()")
-success_reply = network_http.find("setupMode", connect_call if connect_call >= 0 else 0)
-if connect_call < 0 or success_reply < 0 or success_reply < connect_call:
-    errors.append("Wi-Fi connect API must not report success before esp_wifi_connect() has been accepted")
+response_call = network_http.find("const auto response_error = send_json")
+handover_delay = network_http.find("vTaskDelay(kStaHandoverDelay)", response_call if response_call >= 0 else 0)
+disconnect_call = network_http.find("esp_wifi_disconnect()", handover_delay if handover_delay >= 0 else 0)
+connect_call = network_http.find("const auto connect_error = esp_wifi_connect()", disconnect_call if disconnect_call >= 0 else 0)
+rollback_call = network_http.find("persist_rollback_ok = had_persisted_credentials", connect_call if connect_call >= 0 else 0)
+rollback_wipe = network_http.find("std::fill(previous_password.begin()", rollback_call if rollback_call >= 0 else 0)
+if response_call < 0 or handover_delay < 0 or disconnect_call < 0 or connect_call < 0 or not (response_call < handover_delay < disconnect_call < connect_call):
+    errors.append("Wi-Fi connect API must finish the HTTP handover-pending response before dropping the active STA transport")
+if rollback_call < 0 or rollback_wipe < 0 or rollback_wipe < rollback_call:
+    errors.append("Wi-Fi connect rollback must retain the previous password until persistence rollback is attempted")
 require(MAIN / "hg_network_http.hpp", ["bool clear_credentials() const;"])
 require(MAIN / "hg_output_http.cpp", [
     "hg_request_auth.hpp",
