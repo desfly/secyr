@@ -218,7 +218,7 @@ async function sendOutputCommand(button) {
 async function sendSecurityCommand(button) {
   const command = button.dataset.command;
   const { actor, credential } = operatorCredentials();
-  if (!command || !validPin(credential)) return;
+  if (!command || !validOperator(actor, credential)) return;
   const buttons = [...document.querySelectorAll("[data-command]")];
   const previousDisabled = new Map(buttons.map(item => [item, item.disabled]));
   buttons.forEach(item => { item.disabled = true; });
