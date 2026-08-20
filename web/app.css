@@ -46,3 +46,20 @@
   #hgAuthGate .hg-auth-card:has(.hg-setup-grid){width:58vw!important;max-width:1240px!important;min-width:900px!important}
   #hgAuthGate .hg-auth-bruce{width:47vw!important}
 }
+
+/* Maximum 1080p setup size. Bruce geometry intentionally unchanged. */
+@media (min-width:1500px) and (min-height:850px){
+  #hgAuthGate .hg-auth-stage:has(.hg-setup-grid){padding:24px 28px!important;align-items:center!important}
+  #hgAuthGate .hg-auth-card:has(.hg-setup-grid){width:59vw!important;max-width:1140px!important;min-width:1060px!important;padding:48px!important;border-radius:20px!important}
+  #hgAuthGate .hg-auth-card:has(.hg-setup-grid) h2{font-size:46px!important;line-height:1.08!important;margin-bottom:12px!important}
+  #hgAuthGate .hg-auth-card:has(.hg-setup-grid) h3{font-size:34px!important;line-height:1.12!important;margin-bottom:20px!important}
+  #hgAuthGate .hg-auth-card:has(.hg-setup-grid) p{font-size:23px!important;line-height:1.42!important;margin-bottom:28px!important}
+  #hgAuthGate .hg-auth-card:has(.hg-setup-grid) .hg-setup-grid{gap:34px!important}
+  #hgAuthGate .hg-auth-card:has(.hg-setup-grid) .hg-setup-panel{padding:36px!important;border-radius:16px!important}
+  #hgAuthGate .hg-auth-card:has(.hg-setup-grid) label{font-size:24px!important;line-height:1.22!important;margin:18px 0!important}
+  #hgAuthGate .hg-auth-card:has(.hg-setup-grid) input,#hgAuthGate .hg-auth-card:has(.hg-setup-grid) select{min-height:64px!important;font-size:24px!important;line-height:1.2!important;padding:17px 20px!important;border-radius:12px!important}
+  #hgAuthGate .hg-auth-card:has(.hg-setup-grid) button{min-height:64px!important;font-size:23px!important;line-height:1.16!important;padding:17px 20px!important;border-radius:12px!important}
+  #hgAuthGate .hg-auth-card:has(.hg-setup-grid) .hg-setup-status{font-size:19px!important;line-height:1.35!important;margin-top:14px!important}
+  #hgAuthGate .hg-auth-card:has(.hg-setup-grid) .hg-setup-networks{max-height:330px!important;gap:10px!important}
+  #hgAuthGate .hg-auth-card:has(.hg-setup-grid) .hg-setup-network{min-height:58px!important;font-size:20px!important;padding:14px 16px!important}
+}
