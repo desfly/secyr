@@ -63,3 +63,9 @@
   #hgAuthGate .hg-auth-card:has(.hg-setup-grid) .hg-setup-networks{max-height:330px!important;gap:10px!important}
   #hgAuthGate .hg-auth-card:has(.hg-setup-grid) .hg-setup-network{min-height:58px!important;font-size:20px!important;padding:14px 16px!important}
 }
+
+/* Place first-boot setup flush against the viewport's top-left corner. */
+@media (min-width:1100px){
+  html #hgAuthGate.hg-setup-mode .hg-auth-stage:has(.hg-setup-grid){align-items:flex-start!important;justify-content:flex-start!important;padding:0!important}
+  html #hgAuthGate.hg-setup-mode .hg-auth-card:has(.hg-setup-grid){margin:0!important}
+}
