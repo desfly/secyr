@@ -30,6 +30,21 @@
     #hgAuthGate .hg-setup-network span{color:#b8c6d4;font-weight:500;white-space:nowrap}
     #hgSessionLogout{position:fixed;right:14px;bottom:14px;z-index:2000;padding:9px 12px;border-radius:9px;border:1px solid #d7deea;background:#fff;font:inherit;font-weight:700}
     .hg-legacy-auth-field{display:none!important}
+    @media(min-width:1100px){
+      #hgAuthGate.hg-setup-mode .hg-auth-stage{display:flex!important;align-items:center!important;justify-content:flex-start!important;padding:1.4vw!important;overflow:hidden!important}
+      #hgAuthGate.hg-setup-mode .hg-auth-card{box-sizing:border-box!important;width:52vw!important;max-width:none!important;min-width:0!important;margin:0!important;padding:2vw!important;border-radius:18px!important;background:rgba(7,19,31,.98)!important;backdrop-filter:none!important}
+      #hgAuthGate.hg-setup-mode h2{font-size:2vw!important;line-height:1.08!important;margin-bottom:.55vw!important}
+      #hgAuthGate.hg-setup-mode h3{font-size:1.42vw!important;line-height:1.12!important;margin-bottom:.9vw!important}
+      #hgAuthGate.hg-setup-mode p{font-size:.95vw!important;line-height:1.4!important;margin-bottom:1.15vw!important}
+      #hgAuthGate.hg-setup-mode .hg-setup-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:1.4vw!important}
+      #hgAuthGate.hg-setup-mode .hg-setup-panel{padding:1.5vw!important;border-radius:14px!important}
+      #hgAuthGate.hg-setup-mode label{font-size:1.05vw!important;line-height:1.2!important;margin:.75vw 0!important}
+      #hgAuthGate.hg-setup-mode input,#hgAuthGate.hg-setup-mode select{min-height:3.25vw!important;font-size:1.05vw!important;line-height:1.2!important;padding:.8vw .95vw!important;border-radius:10px!important}
+      #hgAuthGate.hg-setup-mode button{min-height:3.25vw!important;font-size:1.02vw!important;line-height:1.15!important;padding:.8vw .95vw!important;border-radius:10px!important}
+      #hgAuthGate.hg-setup-mode .hg-setup-status{font-size:.9vw!important;line-height:1.35!important;margin-top:.65vw!important}
+      #hgAuthGate.hg-setup-mode .hg-setup-networks{max-height:17vw!important;gap:.45vw!important}
+      #hgAuthGate.hg-setup-mode .hg-setup-network{min-height:3vw!important;font-size:.95vw!important;padding:.65vw .8vw!important}
+    }
     @media(max-width:720px){
       #hgAuthGate .hg-auth-stage{padding:16px}
       #hgAuthGate.hg-setup-mode .hg-auth-card{width:min(430px,calc(100vw - 24px));padding:18px}
