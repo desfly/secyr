@@ -15,13 +15,28 @@
     #hgAuthGate .hg-auth-bruce{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;opacity:.98;filter:none}
     #hgAuthGate .hg-auth-shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(3,12,20,.25),rgba(3,12,20,.58))}
     #hgAuthGate .hg-auth-card{position:relative;width:min(430px,calc(100vw - 32px));padding:22px;border:1px solid rgba(255,255,255,.28);border-radius:16px;background:rgba(7,19,31,.92);box-shadow:0 18px 60px rgba(0,0,0,.42);color:#fff;backdrop-filter:blur(8px)}
-    #hgAuthGate h2{margin:0 0 6px;font-size:24px}#hgAuthGate h3{margin:18px 0 8px;font-size:16px}#hgAuthGate p{margin:0 0 16px;color:#c8d4df;line-height:1.4}
+    #hgAuthGate.hg-setup-mode .hg-auth-card{width:min(900px,calc(100vw - 48px))}
+    #hgAuthGate.hg-setup-mode .hg-auth-stage{overflow:auto}
+    #hgAuthGate h2{margin:0 0 6px;font-size:24px}#hgAuthGate h3{margin:0 0 12px;font-size:18px}#hgAuthGate p{margin:0 0 16px;color:#c8d4df;line-height:1.4}
     #hgAuthGate label{display:block;margin:10px 0;font-weight:700}#hgAuthGate input,#hgAuthGate select{display:block;width:100%;margin-top:6px;padding:12px 13px;border:1px solid rgba(255,255,255,.28);border-radius:9px;background:#10243a;color:#fff;box-sizing:border-box;font:inherit}
     #hgAuthGate button{width:100%;margin-top:12px;padding:12px 14px;border:0;border-radius:9px;background:#fff;color:#10243a;font:inherit;font-weight:800;cursor:pointer}
     #hgAuthGate button.secondary{background:#18324c;color:#fff;border:1px solid rgba(255,255,255,.24)}
     #hgAuthGate button:disabled{opacity:.55;cursor:default}#hgAuthMessage{min-height:20px;margin-top:12px;color:#ffd2d2;font-size:14px}.hg-setup-status{min-height:18px;color:#c8d4df;font-size:13px;margin-top:8px}
+    #hgAuthGate .hg-setup-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}
+    #hgAuthGate .hg-setup-panel{min-width:0;padding:18px;border:1px solid rgba(255,255,255,.16);border-radius:12px;background:rgba(16,36,58,.48)}
+    #hgAuthGate .hg-setup-networks{display:grid;gap:6px;max-height:230px;overflow:auto;margin-top:10px;padding-right:2px}
+    #hgAuthGate .hg-setup-network{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;margin:0;padding:10px 12px;text-align:left;background:#10243a;color:#fff;border:1px solid rgba(255,255,255,.18);border-radius:8px;font-weight:600}
+    #hgAuthGate .hg-setup-network:hover,#hgAuthGate .hg-setup-network:focus-visible,#hgAuthGate .hg-setup-network[aria-selected="true"]{border-color:#6ea8ff;background:#183f68;outline:none}
+    #hgAuthGate .hg-setup-network span{color:#b8c6d4;font-weight:500;white-space:nowrap}
     #hgSessionLogout{position:fixed;right:14px;bottom:14px;z-index:2000;padding:9px 12px;border-radius:9px;border:1px solid #d7deea;background:#fff;font:inherit;font-weight:700}
     .hg-legacy-auth-field{display:none!important}
+    @media(max-width:720px){
+      #hgAuthGate .hg-auth-stage{padding:16px}
+      #hgAuthGate.hg-setup-mode .hg-auth-card{width:min(430px,calc(100vw - 24px));padding:18px}
+      #hgAuthGate .hg-setup-grid{grid-template-columns:1fr;gap:14px}
+      #hgAuthGate .hg-setup-panel{padding:14px}
+      #hgAuthGate .hg-setup-networks{max-height:190px}
+    }
   `;
   document.head.appendChild(style);
   document.documentElement.classList.add("hg-auth-locked");
@@ -136,6 +151,7 @@
   }
 
   function showLogin(prefill = "") {
+    gate.classList.remove("hg-setup-mode");
     gateMode = "login_required"; title.textContent = "Вхід";
     hint.textContent = "Введіть ім’я користувача / ID та пароль PIN."; message.textContent = "";
     form.innerHTML = `<label>Користувач<input id="hgLoginActor" type="text" maxlength="23" autocomplete="username" value="${prefill.replace(/[&<>\"]/g, "")}"></label><label>Пароль / PIN<input id="hgLoginPin" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password"></label><button type="submit">Увійти</button>`;
@@ -143,40 +159,63 @@
   }
 
   function showSetup() {
+    gate.classList.add("hg-setup-mode");
     gateMode = "setup_required"; title.textContent = "Первинне налаштування";
     hint.textContent = "До створення першого Admin цей екран можна відкривати необмежену кількість разів. Налаштуйте Wi‑Fi за потреби, потім створіть адміністратора.";
     message.textContent = "";
     form.innerHTML = `
-      <h3>1. Мережа Wi‑Fi</h3>
-      <button id="hgSetupWifiScan" class="secondary" type="button">Сканувати Wi‑Fi</button>
-      <label>Мережа<select id="hgSetupWifiSsid"><option value="">Оберіть мережу</option></select></label>
-      <label>Пароль Wi‑Fi<input id="hgSetupWifiPassword" type="password" maxlength="64" autocomplete="current-password"></label>
-      <button id="hgSetupWifiConnect" class="secondary" type="button">Підключити Wi‑Fi</button>
-      <div id="hgSetupWifiStatus" class="hg-setup-status">Мережу можна налаштувати зараз або повернутися сюди пізніше до створення Admin.</div>
-      <h3>2. Перший адміністратор</h3>
-      <label>ID адміністратора<input id="hgSetupId" type="text" maxlength="23" autocomplete="username"></label>
-      <label>Ім’я<input id="hgSetupName" type="text" maxlength="31" autocomplete="name"></label>
-      <label>Пароль / PIN<input id="hgSetupPin" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="new-password"></label>
-      <button type="submit">Створити Admin і закрити setup</button>`;
-    form.querySelector("#hgSetupId")?.focus();
+      <div class="hg-setup-grid">
+        <section class="hg-setup-panel">
+          <h3>1. Мережа Wi‑Fi</h3>
+          <button id="hgSetupWifiScan" class="secondary" type="button">Сканувати Wi‑Fi</button>
+          <div id="hgSetupWifiNetworks" class="hg-setup-networks" role="listbox" aria-label="Знайдені Wi-Fi мережі"></div>
+          <label>SSID<input id="hgSetupWifiSsid" type="text" maxlength="32" autocomplete="off" placeholder="Оберіть мережу або введіть SSID"></label>
+          <label>Пароль Wi‑Fi<input id="hgSetupWifiPassword" type="password" maxlength="64" autocomplete="current-password"></label>
+          <button id="hgSetupWifiConnect" class="secondary" type="button">Підключити Wi‑Fi</button>
+          <div id="hgSetupWifiStatus" class="hg-setup-status">Мережу можна налаштувати зараз або повернутися сюди пізніше до створення Admin.</div>
+        </section>
+        <section class="hg-setup-panel">
+          <h3>2. Перший адміністратор</h3>
+          <label>ID адміністратора<input id="hgSetupId" type="text" maxlength="23" autocomplete="username"></label>
+          <label>Ім’я<input id="hgSetupName" type="text" maxlength="31" autocomplete="name"></label>
+          <label>Пароль / PIN<input id="hgSetupPin" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="new-password"></label>
+          <button type="submit">Створити Admin і закрити setup</button>
+        </section>
+      </div>`;
+    form.querySelector("#hgSetupWifiScan")?.focus();
   }
 
   async function setupScanWifi() {
-    const button=form.querySelector("#hgSetupWifiScan"),select=form.querySelector("#hgSetupWifiSsid"),status=form.querySelector("#hgSetupWifiStatus");
-    if(!button||!select||!status)return; button.disabled=true; status.textContent="Сканування…";
+    const button=form.querySelector("#hgSetupWifiScan"),list=form.querySelector("#hgSetupWifiNetworks"),ssidField=form.querySelector("#hgSetupWifiSsid"),status=form.querySelector("#hgSetupWifiStatus");
+    if(!button||!list||!ssidField||!status)return; button.disabled=true; status.textContent="Сканування…"; list.replaceChildren();
     try {
       const response=await originalFetch("/api/v1/network/scan",{cache:"no-store"}); const body=await apiBody(response);
       if(!response.ok||body.ok===false)throw new Error(body.reason||String(response.status));
-      const networks=Array.isArray(body.networks)?body.networks:[]; select.innerHTML='<option value="">Оберіть мережу</option>';
-      networks.forEach(item=>{const option=document.createElement("option");option.value=String(item.ssid||"");option.textContent=`${item.ssid||"(прихована)"} · ${Number(item.rssi)||0} dBm`;select.appendChild(option);});
-      status.textContent=networks.length?`Знайдено мереж: ${networks.length}`:"Мереж не знайдено";
+      const networks=Array.isArray(body.networks)?body.networks:[];
+      networks.forEach(item=>{
+        const ssid=String(item.ssid||"");
+        const row=document.createElement("button"); row.type="button"; row.className="hg-setup-network"; row.setAttribute("role","option"); row.setAttribute("aria-selected","false");
+        const name=document.createElement("strong"); name.textContent=ssid||"(прихована мережа)";
+        const signal=document.createElement("span"); signal.textContent=`${Number(item.rssi)||0} dBm`;
+        row.append(name,signal);
+        row.onclick=()=>{
+          list.querySelectorAll(".hg-setup-network").forEach(candidate=>candidate.setAttribute("aria-selected","false"));
+          row.setAttribute("aria-selected","true");
+          if(ssid){ssidField.value=ssid;form.querySelector("#hgSetupWifiPassword")?.focus();}
+          else{ssidField.value="";ssidField.focus();}
+        };
+        list.appendChild(row);
+      });
+      status.textContent=networks.length?`Знайдено мереж: ${networks.length}. Оберіть мережу зі списку.`:"Мереж не знайдено. SSID можна ввести вручну.";
+      if(networks.length)list.querySelector(".hg-setup-network")?.focus();
+      else ssidField.focus();
     } catch(error){status.textContent=`Помилка сканування: ${error.message}`;} finally {button.disabled=false;}
   }
 
   async function setupConnectWifi() {
-    const button=form.querySelector("#hgSetupWifiConnect"),select=form.querySelector("#hgSetupWifiSsid"),passwordField=form.querySelector("#hgSetupWifiPassword"),status=form.querySelector("#hgSetupWifiStatus");
-    if(!button||!select||!passwordField||!status)return; const ssid=select.value.trim(),password=passwordField.value;
-    if(!ssid){status.textContent="Оберіть Wi‑Fi мережу.";return;} if(password && password.length<8){status.textContent="Пароль Wi‑Fi має містити щонайменше 8 символів.";return;}
+    const button=form.querySelector("#hgSetupWifiConnect"),ssidField=form.querySelector("#hgSetupWifiSsid"),passwordField=form.querySelector("#hgSetupWifiPassword"),status=form.querySelector("#hgSetupWifiStatus");
+    if(!button||!ssidField||!passwordField||!status)return; const ssid=ssidField.value.trim(),password=passwordField.value;
+    if(!ssid){status.textContent="Оберіть Wi‑Fi мережу або введіть SSID.";return;} if(password && password.length<8){status.textContent="Пароль Wi‑Fi має містити щонайменше 8 символів.";return;}
     button.disabled=true; status.textContent="Підключення…";
     try {
       const response=await originalFetch("/api/v1/network/connect",{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({ssid,password})});
