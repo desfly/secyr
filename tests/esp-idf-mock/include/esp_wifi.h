@@ -8,6 +8,7 @@
 using wifi_interface_t = int;
 using wifi_mode_t = int;
 using wifi_auth_mode_t = int;
+using wifi_storage_t = int;
 
 constexpr wifi_interface_t WIFI_IF_STA = 0;
 constexpr wifi_interface_t WIFI_IF_AP = 1;
@@ -16,6 +17,8 @@ constexpr wifi_mode_t WIFI_MODE_AP = 2;
 constexpr wifi_mode_t WIFI_MODE_APSTA = 3;
 constexpr wifi_auth_mode_t WIFI_AUTH_OPEN = 0;
 constexpr wifi_auth_mode_t WIFI_AUTH_WPA2_PSK = 3;
+constexpr wifi_storage_t WIFI_STORAGE_RAM = 0;
+constexpr wifi_storage_t WIFI_STORAGE_FLASH = 1;
 
 struct wifi_pmf_config_t {
     bool capable{};
@@ -59,6 +62,10 @@ struct wifi_ap_record_t {
     wifi_auth_mode_t authmode{WIFI_AUTH_WPA2_PSK};
 };
 
+struct wifi_event_sta_disconnected_t {
+    std::uint8_t reason{};
+};
+
 inline wifi_config_t& mock_wifi_sta_config() {
     static wifi_config_t config{};
     return config;
@@ -66,6 +73,7 @@ inline wifi_config_t& mock_wifi_sta_config() {
 
 inline esp_err_t esp_wifi_init(const wifi_init_config_t*) { return ESP_OK; }
 inline esp_err_t esp_wifi_deinit() { return ESP_OK; }
+inline esp_err_t esp_wifi_set_storage(wifi_storage_t) { return ESP_OK; }
 inline esp_err_t esp_wifi_set_mode(wifi_mode_t) { return ESP_OK; }
 inline esp_err_t esp_wifi_start() { return ESP_OK; }
 inline esp_err_t esp_wifi_stop() { return ESP_OK; }
