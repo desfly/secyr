@@ -1,9 +1,55 @@
 "use strict";
 
+const nativeFetch = window.fetch.bind(window);
+let apiQueueTail = Promise.resolve();
+
+function requestUrl(input) {
+  if (typeof input === "string") return input;
+  return String(input?.url || "");
+}
+
+function isApiRequest(input) {
+  const url = requestUrl(input);
+  return url.startsWith("/api/v1/") || url.includes("/api/v1/");
+}
+
+function apiTimeoutMs(input) {
+  const url = requestUrl(input);
+  if (url.includes("/network/scan")) return 15000;
+  if (url.includes("/network/connect")) return 10000;
+  if (url.includes("/lan/scan")) return 10000;
+  return 6000;
+}
+
+function serializedApiFetch(input, init = {}) {
+  if (!isApiRequest(input)) return nativeFetch(input, init);
+
+  const execute = async () => {
+    if (init.signal) return nativeFetch(input, init);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), apiTimeoutMs(input));
+    try {
+      return await nativeFetch(input, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const result = apiQueueTail.then(execute, execute);
+  apiQueueTail = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+window.fetch = serializedApiFetch;
+
 const toast = document.querySelector("#toast");
 const dashboardSections = [document.querySelector(".status-grid"), document.querySelector(".two-col")].filter(Boolean);
 const networkPage = document.querySelector("#networkPage");
 const systemPage = document.querySelector("#system");
+
+function authenticatedUi() {
+  return window.HomeGuardAuth?.authenticated?.() === true;
+}
 
 function showToast(message) {
   toast.textContent = message;
@@ -85,6 +131,27 @@ function renderNetwork(status) {
   if (ssid !== "—" && !document.querySelector("#wifiSsid").value) document.querySelector("#wifiSsid").value = ssid;
 }
 
+function renderCloudStatus(status) {
+  const state = document.querySelector("#cloudState");
+  const detail = document.querySelector("#cloudDetail");
+  const header = document.querySelector("#cloudHeader");
+  const label = status?.connected ? "Підключено" : (status?.configured ? "Підключення…" : "Не налаштовано");
+  state.textContent = label;
+  detail.textContent = status?.deviceId ? `${status.deviceId} · з'єднань ${status.connectCount || 0}` : "—";
+  header.textContent = `☁   ${status?.connected ? "Онлайн" : label}`;
+  state.classList.toggle("green-text", Boolean(status?.connected));
+  state.classList.toggle("orange-text", !status?.connected);
+}
+
+function renderLan(data) {
+  const state = document.querySelector("#lanState");
+  const list = document.querySelector("#lanDevices");
+  if (!state || !list) return;
+  const devices = Array.isArray(data?.devices) ? data.devices : [];
+  state.textContent = data?.state === "offline" ? "Немає підключення до домашньої мережі" : `Знайдено пристроїв: ${devices.length}${data?.activeScan ? " · активне сканування" : ""}`;
+  list.innerHTML = devices.length ? devices.map(device => `<div class="lan-device"><span><small>IP</small><strong style="display:block">${escapeHtml(device.ip || "—")}</strong></span><span><small>MAC</small><strong style="display:block">${escapeHtml(device.mac || "—")}</strong></span></div>`).join("") : '<div class="lan-device"><span>Пристроїв ще не знайдено</span><small>Натисніть «Сканувати LAN»</small></div>';
+}
+
 async function refreshNetwork() {
   try {
     const status = await api("/api/v1/network/status");
@@ -92,14 +159,41 @@ async function refreshNetwork() {
     return status;
   } catch (error) {
     renderNetwork({ state: "error", ssid: "—", ip: "—" });
-    document.querySelector("#wifiResult").textContent = `Помилка: ${error.message}`;
+    const result = document.querySelector("#wifiResult");
+    if (result) result.textContent = `Помилка: ${error.message}`;
     return null;
+  }
+}
+
+async function refreshCloudStatus() {
+  try {
+    renderCloudStatus(await api("/api/v1/cloud/status"));
+  } catch (_) {
+    const state = document.querySelector("#cloudState");
+    const detail = document.querySelector("#cloudDetail");
+    const header = document.querySelector("#cloudHeader");
+    if (state) state.textContent = "Помилка";
+    if (detail) detail.textContent = "Статус недоступний";
+    if (header) header.textContent = "☁   Офлайн";
+  }
+}
+
+async function refreshLan(active = false) {
+  const button = document.querySelector("#lanScan");
+  if (active && button) { button.disabled = true; button.textContent = "Сканування…"; }
+  try {
+    renderLan(await api(active ? "/api/v1/lan/scan" : "/api/v1/lan/devices"));
+  } catch (error) {
+    const state = document.querySelector("#lanState");
+    if (state) state.textContent = `LAN недоступний: ${error.message}`;
+  } finally {
+    if (button) { button.disabled = false; button.textContent = "Сканувати LAN"; }
   }
 }
 
 let refreshBusy = false;
 async function refresh() {
-  if (refreshBusy) return;
+  if (!authenticatedUi() || refreshBusy) return;
   refreshBusy = true;
   try {
     const requests = [
@@ -111,6 +205,7 @@ async function refresh() {
       ["/api/v1/network/status", renderNetwork]
     ];
     for (const [path, render] of requests) {
+      if (!authenticatedUi()) break;
       try { render(await api(path)); } catch (_) {}
     }
   } finally {
@@ -363,6 +458,38 @@ async function saveAccessUser() {
   }
 }
 
+async function applyCloudConfig(forceDisable = false) {
+  const button = document.querySelector(forceDisable ? "#cloudDisable" : "#cloudApply");
+  const result = document.querySelector("#cloudConfigResult");
+  const actor = document.querySelector("#cloudActor").value.trim();
+  const credential = document.querySelector("#cloudCredential").value.trim();
+  const enabled = forceDisable ? false : document.querySelector("#cloudEnabled").checked;
+  const payload = {
+    actor,
+    credential,
+    enabled,
+    brokerUri: document.querySelector("#cloudBrokerUri").value.trim(),
+    username: document.querySelector("#cloudUsername").value.trim(),
+    password: document.querySelector("#cloudPassword").value
+  };
+  if (!actor || !validPin(credential)) { result.textContent = "Введіть Admin ID та PIN 4–12 цифр"; return; }
+  if (enabled && !payload.brokerUri) { result.textContent = "Вкажіть Broker URI"; return; }
+  button.disabled = true;
+  result.textContent = forceDisable ? "Вимкнення…" : "Застосування…";
+  try {
+    await api("/api/v1/cloud/config", { method: "POST", body: JSON.stringify(payload) });
+    result.textContent = enabled ? "Налаштування збережено, MQTT підключається" : "Cloud/MQTT вимкнено";
+    document.querySelector("#cloudEnabled").checked = enabled;
+    await refreshCloudStatus();
+  } catch (error) {
+    result.textContent = `Помилка: ${error.message}`;
+  } finally {
+    document.querySelector("#cloudCredential").value = "";
+    document.querySelector("#cloudPassword").value = "";
+    button.disabled = false;
+  }
+}
+
 function setView(view, targetId = "overview") {
   const isNetwork = view === "network";
   const isSystem = view === "system";
@@ -372,8 +499,8 @@ function setView(view, targetId = "overview") {
   if (!isNetwork && !isSystem && targetId && targetId !== "overview") {
     requestAnimationFrame(() => document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" }));
   } else { window.scrollTo({ top: 0, behavior: "smooth" }); }
-  if (isNetwork) refreshNetwork();
-  if (isSystem) { ensureAccessPanel(); refresh(); }
+  if (authenticatedUi() && isNetwork) refreshNetwork();
+  if (authenticatedUi() && isSystem) { ensureAccessPanel(); refresh(); }
 }
 
 function routeFromHash() {
@@ -400,19 +527,87 @@ function bindCommandButtons() {
   document.querySelectorAll("[data-command]").forEach(button => { button.onclick = () => sendSecurityCommand(button); });
 }
 
+function tickClock() {
+  const now = new Date();
+  const clock = document.querySelector("#clock");
+  const date = document.querySelector("#date");
+  if (clock) clock.textContent = now.toLocaleTimeString("uk-UA");
+  if (date) date.textContent = now.toLocaleDateString("uk-UA");
+}
+
+const scheduler = {
+  timer: 0,
+  busy: false,
+  nextCore: 0,
+  nextCloud: 0,
+  nextLan: 0
+};
+
+const CORE_POLL_MS = 5000;
+const CLOUD_POLL_MS = 10000;
+const LAN_POLL_MS = 15000;
+
+async function schedulerStep() {
+  tickClock();
+  const now = Date.now();
+  const authenticated = authenticatedUi();
+
+  if (!authenticated) {
+    scheduler.nextCore = 0;
+    scheduler.nextCloud = 0;
+    scheduler.nextLan = 0;
+  } else if (!scheduler.busy) {
+    scheduler.busy = true;
+    try {
+      if (scheduler.nextCore === 0 || now >= scheduler.nextCore) {
+        scheduler.nextCore = Date.now() + CORE_POLL_MS;
+        await refresh();
+      }
+      if (authenticatedUi() && (scheduler.nextCloud === 0 || Date.now() >= scheduler.nextCloud)) {
+        scheduler.nextCloud = Date.now() + CLOUD_POLL_MS;
+        await refreshCloudStatus();
+      }
+      if (authenticatedUi() && (scheduler.nextLan === 0 || Date.now() >= scheduler.nextLan)) {
+        scheduler.nextLan = Date.now() + LAN_POLL_MS;
+        await refreshLan(false);
+      }
+    } finally {
+      scheduler.busy = false;
+    }
+  }
+
+  scheduler.timer = window.setTimeout(schedulerStep, 1000);
+}
+
 function bootUi() {
   ensureNetworkAuthPanel();
   ensureAccessPanel();
   document.querySelector("#wifiScan").onclick = scanWifi;
   document.querySelector("#wifiConnect").onclick = connectWifi;
-  document.querySelector("#refresh").onclick = refresh;
+  document.querySelector("#refresh").onclick = async () => {
+    await refresh();
+    if (authenticatedUi()) {
+      await refreshCloudStatus();
+      await refreshLan(false);
+    }
+  };
+  document.querySelector("#lanScan")?.addEventListener("click", () => refreshLan(true));
+  document.querySelector("#cloudApply")?.addEventListener("click", () => applyCloudConfig(false));
+  document.querySelector("#cloudDisable")?.addEventListener("click", () => applyCloudConfig(true));
   bindNavigation();
   bindCommandButtons();
   routeFromHash();
-  setInterval(() => {
-    if (window.HomeGuardAuth?.authenticated?.()) refresh();
-  }, 5000);
+  tickClock();
+  schedulerStep();
   document.documentElement.dataset.homeguardUi = "ready";
 }
+
+window.HomeGuardUiRuntime = {
+  transport: "serialized-single-flight",
+  refresh,
+  refreshNetwork,
+  refreshCloudStatus,
+  refreshLan
+};
 
 bootUi();

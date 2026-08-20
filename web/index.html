@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#10243a">
   <title>MyFist · HomeGuard-S3</title>
-  <link rel="stylesheet" href="/app.css?v=284">
+  <link rel="stylesheet" href="/app.css?v=285">
   <style>
     .bruce{background:none!important;filter:none!important;opacity:1!important;display:grid;place-items:center;overflow:hidden}
     .bruce img{display:block;width:100%;height:100%;object-fit:contain;object-position:center center}
@@ -128,39 +128,7 @@
 
 <div id="toast" hidden></div>
 <button id="refresh" hidden>Оновити</button>
-<script src="/app.js?v=284"></script>
-<script src="/access-session.js?v=284"></script>
-<script>
-function tick(){const d=new Date();document.getElementById('clock').textContent=d.toLocaleTimeString('uk-UA');document.getElementById('date').textContent=d.toLocaleDateString('uk-UA')}
-function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-async function refreshCloudStatus(){
-  const state=document.getElementById('cloudState'),detail=document.getElementById('cloudDetail'),header=document.getElementById('cloudHeader');
-  try{const r=await fetch('/api/v1/cloud/status',{cache:'no-store'});if(!r.ok)throw new Error(String(r.status));const s=await r.json();const label=s.connected?'Підключено':(s.configured?'Підключення…':'Не налаштовано');state.textContent=label;detail.textContent=s.deviceId?`${s.deviceId} · з'єднань ${s.connectCount||0}`:'—';header.textContent=`☁   ${s.connected?'Онлайн':label}`;state.classList.toggle('green-text',!!s.connected);state.classList.toggle('orange-text',!s.connected)}catch(_){state.textContent='Помилка';detail.textContent='Статус недоступний';header.textContent='☁   Офлайн'}
-}
-async function applyCloudConfig(forceDisable=false){
-  const button=document.getElementById(forceDisable?'cloudDisable':'cloudApply'),result=document.getElementById('cloudConfigResult');
-  const actor=document.getElementById('cloudActor').value.trim(),credential=document.getElementById('cloudCredential').value.trim();
-  const enabled=forceDisable?false:document.getElementById('cloudEnabled').checked;
-  const payload={actor,credential,enabled,brokerUri:document.getElementById('cloudBrokerUri').value.trim(),username:document.getElementById('cloudUsername').value.trim(),password:document.getElementById('cloudPassword').value};
-  if(!actor||!/^[0-9]{4,12}$/.test(credential)){result.textContent='Введіть Admin ID та PIN 4–12 цифр';return}
-  if(enabled&&!payload.brokerUri){result.textContent='Вкажіть Broker URI';return}
-  button.disabled=true;result.textContent=forceDisable?'Вимкнення…':'Застосування…';
-  try{const r=await fetch('/api/v1/cloud/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),cache:'no-store'});const body=await r.json().catch(()=>({}));if(!r.ok)throw new Error(body.reason||String(r.status));result.textContent=enabled?'Налаштування збережено, MQTT підключається':'Cloud/MQTT вимкнено';document.getElementById('cloudEnabled').checked=enabled;await refreshCloudStatus()}catch(e){result.textContent=`Помилка: ${e.message}`}finally{document.getElementById('cloudCredential').value='';document.getElementById('cloudPassword').value='';button.disabled=false}
-}
-function renderLan(data){
-  const state=document.getElementById('lanState'),list=document.getElementById('lanDevices');if(!state||!list)return;
-  const devices=Array.isArray(data?.devices)?data.devices:[];state.textContent=data?.state==='offline'?'Немає підключення до домашньої мережі':`Знайдено пристроїв: ${devices.length}${data?.activeScan?' · активне сканування':''}`;
-  list.innerHTML=devices.length?devices.map(d=>`<div class="lan-device"><span><small>IP</small><strong style="display:block">${esc(d.ip||'—')}</strong></span><span><small>MAC</small><strong style="display:block">${esc(d.mac||'—')}</strong></span></div>`).join(''):'<div class="lan-device"><span>Пристроїв ще не знайдено</span><small>Натисніть «Сканувати LAN»</small></div>';
-}
-async function refreshLan(active=false){
-  const button=document.getElementById('lanScan');if(active&&button){button.disabled=true;button.textContent='Сканування…'}
-  try{const r=await fetch(active?'/api/v1/lan/scan':'/api/v1/lan/devices',{cache:'no-store'});if(!r.ok)throw new Error(String(r.status));renderLan(await r.json())}catch(e){const s=document.getElementById('lanState');if(s)s.textContent=`LAN недоступний: ${e.message}`}finally{if(button){button.disabled=false;button.textContent='Сканувати LAN'}}
-}
-function authenticatedUi(){return window.HomeGuardAuth?.authenticated?.()===true}
-document.getElementById('lanScan')?.addEventListener('click',()=>refreshLan(true));
-document.getElementById('cloudApply')?.addEventListener('click',()=>applyCloudConfig(false));
-document.getElementById('cloudDisable')?.addEventListener('click',()=>applyCloudConfig(true));
-tick();setInterval(tick,1000);setInterval(()=>{if(authenticatedUi())refreshCloudStatus()},5000);setInterval(()=>{if(authenticatedUi())refreshLan(false)},10000);
-</script>
+<script src="/app.js?v=285"></script>
+<script src="/access-session.js?v=285"></script>
 </body>
 </html>
