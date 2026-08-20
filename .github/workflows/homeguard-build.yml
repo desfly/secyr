@@ -18,6 +18,7 @@ jobs:
   host-gates:
     name: Host validation
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -112,7 +113,6 @@ jobs:
 
   esp-idf-build:
     name: ESP-IDF 5.4.4 firmware
-    needs: host-gates
     runs-on: ubuntu-latest
     timeout-minutes: 45
     container:
@@ -125,6 +125,9 @@ jobs:
       - name: Show toolchain versions
         shell: bash
         run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git rev-parse --short HEAD
           source "$IDF_PATH/export.sh"
           idf.py --version
           cmake --version
