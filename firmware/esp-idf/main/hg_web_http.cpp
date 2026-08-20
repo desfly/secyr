@@ -2,10 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <sys/types.h>
 
-// ESP-IDF embed symbols use the copied asset basename.
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[] asm("_binary_index_html_end");
 extern const uint8_t app_css_start[] asm("_binary_app_css_start");
@@ -26,10 +24,16 @@ std::size_t text_asset_size(const uint8_t* start, const uint8_t* end)
 {
     if (start == nullptr || end == nullptr || end < start) return 0;
     std::size_t size = static_cast<std::size_t>(end - start);
-    // EMBED_TXTFILES may append a terminating NUL. Never place injected CSS/JS
-    // after that byte: browsers can treat the remainder as unreachable text.
     while (size > 0 && start[size - 1U] == 0U) --size;
     return size;
+}
+
+void set_no_cache_headers(httpd_req_t* request, const char* content_type)
+{
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    httpd_resp_set_hdr(request, "Pragma", "no-cache");
+    httpd_resp_set_hdr(request, "Expires", "0");
+    httpd_resp_set_type(request, content_type);
 }
 
 esp_err_t send_text_with_suffix(httpd_req_t* request,
@@ -40,16 +44,20 @@ esp_err_t send_text_with_suffix(httpd_req_t* request,
                                 std::size_t suffix_size)
 {
     if (request == nullptr || start == nullptr || end == nullptr || end < start) return ESP_ERR_INVALID_ARG;
+    set_no_cache_headers(request, content_type);
 
     const auto base_size = text_asset_size(start, end);
-    std::string body(reinterpret_cast<const char*>(start), base_size);
-    if (suffix != nullptr && suffix_size > 0) body.append(suffix, suffix_size);
+    auto error = httpd_resp_send_chunk(
+        request,
+        reinterpret_cast<const char*>(start),
+        static_cast<ssize_t>(base_size));
+    if (error != ESP_OK) return error;
 
-    httpd_resp_set_hdr(request, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-    httpd_resp_set_hdr(request, "Pragma", "no-cache");
-    httpd_resp_set_hdr(request, "Expires", "0");
-    httpd_resp_set_type(request, content_type);
-    return httpd_resp_send(request, body.data(), static_cast<ssize_t>(body.size()));
+    if (suffix != nullptr && suffix_size > 0) {
+        error = httpd_resp_send_chunk(request, suffix, static_cast<ssize_t>(suffix_size));
+        if (error != ESP_OK) return error;
+    }
+    return httpd_resp_send_chunk(request, nullptr, 0);
 }
 
 }  // namespace
@@ -57,7 +65,6 @@ esp_err_t send_text_with_suffix(httpd_req_t* request,
 esp_err_t WebHttp::register_handlers(httpd_handle_t server)
 {
     if (server == nullptr) return ESP_ERR_INVALID_ARG;
-
     const httpd_uri_t routes[] = {
         {.uri="/", .method=HTTP_GET, .handler=&WebHttp::index_get, .user_ctx=this},
         {.uri="/index.html", .method=HTTP_GET, .handler=&WebHttp::index_get, .user_ctx=this},
@@ -67,7 +74,6 @@ esp_err_t WebHttp::register_handlers(httpd_handle_t server)
         {.uri="/factory-reset.js", .method=HTTP_GET, .handler=&WebHttp::factory_reset_js_get, .user_ctx=this},
         {.uri="/bruce.jpg", .method=HTTP_GET, .handler=&WebHttp::bruce_get, .user_ctx=this},
     };
-
     for (const auto& route : routes) {
         const auto error = httpd_register_uri_handler(server, &route);
         if (error != ESP_OK) return error;
@@ -81,17 +87,8 @@ esp_err_t WebHttp::send_asset(httpd_req_t* request,
                               const unsigned char* end)
 {
     if (request == nullptr || start == nullptr || end == nullptr || end < start) return ESP_ERR_INVALID_ARG;
-
-    // HomeGuard is repeatedly reflashed during commissioning. Stable asset
-    // URLs must never let an old browser cache mask a freshly flashed UI.
-    httpd_resp_set_hdr(request, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-    httpd_resp_set_hdr(request, "Pragma", "no-cache");
-    httpd_resp_set_hdr(request, "Expires", "0");
-    httpd_resp_set_type(request, content_type);
-    return httpd_resp_send(
-        request,
-        reinterpret_cast<const char*>(start),
-        static_cast<ssize_t>(end - start));
+    set_no_cache_headers(request, content_type);
+    return httpd_resp_send(request, reinterpret_cast<const char*>(start), static_cast<ssize_t>(end - start));
 }
 
 esp_err_t WebHttp::index_get(httpd_req_t* request)
@@ -101,9 +98,6 @@ esp_err_t WebHttp::index_get(httpd_req_t* request)
 
 esp_err_t WebHttp::css_get(httpd_req_t* request)
 {
-    // Keep the desktop source stylesheet untouched, but force a compact mobile
-    // layout in the firmware-served asset. This also guarantees the fix is in
-    // the flashed binary even when the browser previously cached /app.css.
     static constexpr char kFirmwareCssFix[] = R"CSS(
 
 [hidden]{display:none!important}
@@ -146,8 +140,6 @@ esp_err_t WebHttp::css_get(httpd_req_t* request)
 
 esp_err_t WebHttp::js_get(httpd_req_t* request)
 {
-    // Embedded-browser fixes live in one suffix so the flashed controller does
-    // not depend on user-agent quirks or stale UI assets during commissioning.
     static constexpr char kEmbeddedViewFix[] = R"JS(
 
 ;(() => {
@@ -185,7 +177,6 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
   function ensureWifiPasswordToggle() {
     const password = document.getElementById("wifiPassword");
     if (!password || document.getElementById("wifiPasswordToggle")) return;
-
     const label = password.parentElement;
     if (!label) return;
     label.style.position = "relative";
@@ -213,41 +204,9 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     label.appendChild(toggle);
   }
 
-  function installWifiConnectHandoverFetchGuard() {
-    if (window.__homeguardWifiConnectFetchGuard) return;
-    const nativeFetch = window.fetch.bind(window);
-
-    window.fetch = async (input, init = {}) => {
-      const url = typeof input === "string" ? input : (input && typeof input.url === "string" ? input.url : "");
-      const method = String(init.method || (input && input.method) || "GET").toUpperCase();
-      const isWifiConnect = method === "POST" && (url === "/api/v1/network/connect" || url.endsWith("/api/v1/network/connect"));
-
-      try {
-        return await nativeFetch(input, init);
-      } catch (error) {
-        if (!isWifiConnect) throw error;
-
-        // AP+STA may briefly retune the radio while the controller starts the
-        // new STA association. That can tear down the HTTP socket even though
-        // the command was accepted. Treat only this endpoint as transitional;
-        // app.js will poll /network/status and still report a real timeout if
-        // the controller never connects.
-        const result = document.getElementById("wifiResult");
-        if (result) result.textContent = "Wi-Fi перемикається, перевіряємо підключення…";
-        return new Response(
-          JSON.stringify({ ok: true, state: "connecting", handover: true }),
-          { status: 202, headers: { "Content-Type": "application/json" } }
-        );
-      }
-    };
-
-    window.__homeguardWifiConnectFetchGuard = true;
-  }
-
   window.addEventListener("hashchange", applyEmbeddedView);
   applyEmbeddedView();
   ensureWifiPasswordToggle();
-  installWifiConnectHandoverFetchGuard();
 })();
 )JS";
 
@@ -262,9 +221,6 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
 
 esp_err_t WebHttp::access_session_js_get(httpd_req_t* request)
 {
-    // index.html already loads access-session.js on every Web UI boot. Append
-    // the factory-reset module to that same response so the System-page reset
-    // control cannot silently become dead code if the HTML script list drifts.
     return send_text_with_suffix(
         request,
         "application/javascript; charset=utf-8",

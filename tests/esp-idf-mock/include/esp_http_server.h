@@ -21,6 +21,7 @@ inline esp_err_t httpd_resp_set_status(httpd_req_t*,const char*){return ESP_OK;}
 inline esp_err_t httpd_resp_set_type(httpd_req_t*,const char*){return ESP_OK;}
 inline esp_err_t httpd_resp_set_hdr(httpd_req_t*,const char*,const char*){return ESP_OK;}
 inline esp_err_t httpd_resp_send(httpd_req_t*,const char*,std::ptrdiff_t){return ESP_OK;}
+inline esp_err_t httpd_resp_send_chunk(httpd_req_t*,const char*,std::ptrdiff_t){return ESP_OK;}
 inline esp_err_t httpd_resp_send_err(httpd_req_t*,int,const char*){return ESP_OK;}
 inline int httpd_req_to_sockfd(httpd_req_t*){ return 1; }
 inline esp_err_t httpd_req_async_handler_begin(httpd_req_t* request,httpd_req_t** out){ if(request==nullptr||out==nullptr)return ESP_ERR_INVALID_ARG;*out=request;return ESP_OK; }
