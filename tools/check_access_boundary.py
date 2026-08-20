@@ -149,6 +149,7 @@ require(MAIN / "hg_service_http.cpp", [
     'self->access_control_->authorize_session(actor, "system.service.invalidate")',
 ])
 
+# Active protected endpoint code must not use the old per-request PIN API.
 for filename, legacy_call in (
     ("hg_network_http.cpp", 'access_->authorize(actor, credential, "network.configure")'),
     ("hg_cloud_http.cpp", 'access_control_->authorize(actor, credential, "cloud.configure")'),
