@@ -1,0 +1,27 @@
+name: Setup UI Contract
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: setup-ui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  setup-ui:
+    name: Responsive setup + Wi-Fi list
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup UI contract
+        run: python tools/check_setup_ui_contract.py
+      - name: JavaScript syntax
+        run: node --check web/access-session.js
