@@ -189,7 +189,9 @@ void TelemetryRuntime::run()
         }
 
         Ina226Reading battery{};
-        const bool battery_valid = hardware_->battery_monitor().read(&battery) == ESP_OK;
+        auto& battery_monitor = hardware_->battery_monitor();
+        const bool battery_valid =
+            battery_monitor.ready() && battery_monitor.read(&battery) == ESP_OK;
 
         const auto frame = builder_.build(
             now_ms,
