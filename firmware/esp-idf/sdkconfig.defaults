@@ -34,6 +34,10 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # Provisioning secret writes are blocked in software while NVS encryption is off.
 
 CONFIG_LWIP_LOCAL_HOSTNAME="homeguard-s3"
+# Explicit descriptor budget: HTTPD keeps 3 internal sockets in addition to its
+# client sessions, while mDNS, device discovery, DNS and MQTT also need sockets.
+# ESP-IDF's lwIP default of 10 is too small for a normal browser asset burst.
+CONFIG_LWIP_MAX_SOCKETS=16
 CONFIG_MDNS_MAX_INTERFACES=3
 
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
