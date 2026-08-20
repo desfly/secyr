@@ -25,10 +25,16 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install compiler
+      - name: Verify host compiler
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y g++ ninja-build
+          set -euo pipefail
+          command -v g++
+          command -v cmake
+          command -v ninja
+          g++ --version
+          cmake --version
+          ninja --version
       - name: Project preflight
         run: python tools/preflight_firmware.py
       - name: ESP-IDF source audit
