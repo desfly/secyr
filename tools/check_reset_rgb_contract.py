@@ -19,6 +19,8 @@ for expected in (
     "kFactoryResetSequenceWindowMs = 5000U",
     "kSettingsResetSuccessWhiteMs = 5000U",
     "kFactoryResetSuccessRedMs = 5000U",
+    "reset_firmware_signature(",
+    "firmware_baseline_changed(",
 ):
     if expected not in header:
         errors.append(f"physical RST contract changed: missing {expected}")
@@ -41,8 +43,14 @@ for forbidden in ("RTC_NOINIT_ATTR", "g_rst_boot_marker", "rtc_state_was_valid")
 for required in (
     'kSequenceNamespace = "hg_rstseq"',
     'kBootMarkerKey = "boot_seen"',
+    'kFirmwareSignatureKey = "fw_sig"',
+    "kCurrentFirmwareSignature = hg::reset_firmware_signature(HG_GIT_REVISION)",
     "load_boot_marker(boot_marker_was_valid)",
     "store_boot_marker()",
+    "load_firmware_signature(",
+    "store_firmware_signature(kCurrentFirmwareSignature)",
+    "hg::firmware_baseline_changed(",
+    "Firmware RST baseline refreshed",
     "esp_reset_reason()",
     "ESP_RST_EXT",
     "ESP_RST_POWERON",
@@ -55,9 +63,23 @@ for required in (
     if required not in runtime:
         errors.append(f"persistent physical RST detector incomplete: missing {required}")
 
+# Flash/OTA ends in a hardware reset that can look exactly like physical EN on
+# HW-678. A changed firmware revision must refresh the baseline before any WHITE
+# acknowledgement and must clear abandoned sequence progress.
+handler = runtime.find("bool handle_physical_rst_factory_reset()")
+firmware_check = runtime.find("hg::firmware_baseline_changed(", handler)
+firmware_store = runtime.find("store_firmware_signature(kCurrentFirmwareSignature)", firmware_check)
+firmware_clear = runtime.find("store_sequence_count(0U)", firmware_store)
+firmware_log = runtime.find("Firmware RST baseline refreshed", firmware_store)
+physical_white = runtime.find("RgbDiagnostic::set_white(board::kOnboardRgb)", handler)
+if min(handler, firmware_check, firmware_store, firmware_clear, firmware_log, physical_white) < 0 or not (
+    handler < firmware_check < firmware_store < firmware_clear < firmware_log < physical_white
+):
+    errors.append("new firmware baseline must refresh/clear before any physical-RST WHITE acknowledgement")
+
 # Every accepted step must visibly acknowledge WHITE before its progress is
 # committed. An RGB failure cancels the sequence.
-white = runtime.find("RgbDiagnostic::set_white(board::kOnboardRgb)", runtime.find("handle_physical_rst_factory_reset()"))
+white = physical_white
 white_error = runtime.find("Cannot show WHITE physical-RST acknowledgement", white)
 persist = runtime.find("store_sequence_count(step.count)", white)
 if min(white, white_error, persist) < 0 or not (white < white_error < persist):
@@ -109,3 +131,4 @@ if errors:
     sys.exit(1)
 
 print("Physical RST/RGB 3-step settings + 5-step factory contract PASS")
+print(" - first boot after firmware revision change is baseline-only, no WHITE step")
