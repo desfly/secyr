@@ -4,14 +4,21 @@
 
 namespace hg {
 
-// Approved HomeGuard-S3 physical RST/EN factory-reset contract.
-inline constexpr std::uint8_t kFactoryResetRequiredRstPresses = 3U;
+// Approved HomeGuard-S3 physical RST/EN reset contract.
+//  - 3 rapid accepted RST steps arm a settings-only reset after the inter-step
+//    window expires. Users and immutable factory/hardware identity are kept.
+//  - Continuing to 5 rapid accepted RST steps performs the full user factory
+//    reset, including the access database.
+inline constexpr std::uint8_t kSettingsResetRequiredRstPresses = 3U;
+inline constexpr std::uint8_t kFactoryResetRequiredRstPresses = 5U;
 inline constexpr std::uint32_t kFactoryResetStepWhiteMs = 1500U;
 inline constexpr std::uint32_t kFactoryResetSequenceWindowMs = 5000U;
+inline constexpr std::uint32_t kSettingsResetSuccessWhiteMs = 5000U;
 inline constexpr std::uint32_t kFactoryResetSuccessRedMs = 5000U;
 
 struct ResetSequenceStep {
     std::uint8_t count{0};
+    bool arm_settings_reset{false};
     bool trigger_factory_reset{false};
 };
 
@@ -29,13 +36,17 @@ constexpr bool reset_press_detected(
 constexpr ResetSequenceStep advance_reset_sequence(
     std::uint8_t previous_count,
     bool physical_rst,
-    std::uint8_t required_presses = kFactoryResetRequiredRstPresses) noexcept {
-    if (!physical_rst || required_presses == 0U) return {0U, false};
+    std::uint8_t settings_presses = kSettingsResetRequiredRstPresses,
+    std::uint8_t factory_presses = kFactoryResetRequiredRstPresses) noexcept {
+    if (!physical_rst || settings_presses == 0U || factory_presses <= settings_presses) {
+        return {0U, false, false};
+    }
 
     const auto next = static_cast<std::uint8_t>(
         previous_count == 0xffU ? 0xffU : previous_count + 1U);
-    if (next >= required_presses) return {0U, true};
-    return {next, false};
+
+    if (next >= factory_presses) return {0U, false, true};
+    return {next, next == settings_presses, false};
 }
 
 // Generic confirmed-hold helpers are still shared by the isolated NVS-recovery
