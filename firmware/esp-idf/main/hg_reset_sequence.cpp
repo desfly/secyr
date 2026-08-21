@@ -5,7 +5,7 @@
 #include "hg_rgb_diagnostic.hpp"
 #include "homeguard/reset_sequence.hpp"
 
-#include "driver/gpio.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
@@ -21,15 +21,15 @@ constexpr const char* kTag = "hg_rst_sequence";
 constexpr const char* kControlNamespace = "hg_rstctl";
 constexpr const char* kPendingKey = "pending";
 constexpr std::uint8_t kPendingValue = 1U;
-constexpr std::uint8_t kRequiredHolds = 3U;
-constexpr TickType_t kHoldTicks = pdMS_TO_TICKS(1500);
-constexpr TickType_t kDebounceTicks = pdMS_TO_TICKS(40);
-constexpr TickType_t kPollTicks = pdMS_TO_TICKS(20);
-constexpr TickType_t kSequenceTimeoutTicks = pdMS_TO_TICKS(5000);
-constexpr TickType_t kSuccessRedTicks = pdMS_TO_TICKS(5000);
-constexpr std::uint32_t kResetTaskStackBytes = 4096U;
+constexpr const char* kSequenceNamespace = "hg_rstseq";
+constexpr const char* kSequenceCountKey = "count";
+constexpr std::uint32_t kRtcMarker = 0x48525354U;  // "HRST"
+constexpr TickType_t kWhiteAckTicks = pdMS_TO_TICKS(hg::kFactoryResetWhiteAckMs);
+constexpr TickType_t kSequenceWindowTicks = pdMS_TO_TICKS(hg::kFactoryResetSequenceWindowMs);
+constexpr TickType_t kSuccessRedTicks = pdMS_TO_TICKS(hg::kFactoryResetSuccessRedMs);
+constexpr std::uint32_t kResetWorkerStackBytes = 4096U;
 
-bool service_button_pressed() { return gpio_get_level(board::kServiceButton) == 0; }
+RTC_NOINIT_ATTR std::uint32_t g_rst_boot_marker;
 
 esp_err_t set_pending_reset(bool pending) {
     nvs_handle_t handle{};
@@ -60,10 +60,70 @@ esp_err_t read_pending_reset(bool& pending) {
     return ESP_OK;
 }
 
+esp_err_t load_sequence_count(std::uint8_t& count) {
+    count = 0U;
+    nvs_handle_t handle{};
+    const auto open_error = nvs_open(kSequenceNamespace, NVS_READONLY, &handle);
+    if (open_error == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (open_error != ESP_OK) return open_error;
+    auto error = nvs_get_u8(handle, kSequenceCountKey, &count);
+    nvs_close(handle);
+    if (error == ESP_ERR_NVS_NOT_FOUND) {
+        count = 0U;
+        return ESP_OK;
+    }
+    return error;
+}
+
+esp_err_t store_sequence_count(std::uint8_t count) {
+    nvs_handle_t handle{};
+    auto error = nvs_open(kSequenceNamespace, NVS_READWRITE, &handle);
+    if (error != ESP_OK) return error;
+    if (count == 0U) {
+        error = nvs_erase_key(handle, kSequenceCountKey);
+        if (error == ESP_ERR_NVS_NOT_FOUND) error = ESP_OK;
+    } else {
+        error = nvs_set_u8(handle, kSequenceCountKey, count);
+    }
+    if (error == ESP_OK) error = nvs_commit(handle);
+    nvs_close(handle);
+    return error;
+}
+
+void sequence_feedback_timeout_task(void*) {
+    vTaskDelay(kWhiteAckTicks);
+    (void)RgbDiagnostic::off(board::kOnboardRgb);
+
+    if (kSequenceWindowTicks > kWhiteAckTicks) {
+        vTaskDelay(kSequenceWindowTicks - kWhiteAckTicks);
+    }
+
+    const auto error = store_sequence_count(0U);
+    if (error == ESP_OK) ESP_LOGI(kTag, "Physical RST sequence timed out; counter cleared");
+    else ESP_LOGE(kTag, "Cannot clear physical RST sequence counter: %s", esp_err_to_name(error));
+    vTaskDelete(nullptr);
+}
+
+bool arm_white_ack_and_timeout() {
+    if (xTaskCreate(
+            &sequence_feedback_timeout_task,
+            "hg_rst_window",
+            kResetWorkerStackBytes,
+            nullptr,
+            3,
+            nullptr) == pdPASS) {
+        return true;
+    }
+
+    (void)RgbDiagnostic::off(board::kOnboardRgb);
+    (void)store_sequence_count(0U);
+    ESP_LOGE(kTag, "Cannot arm physical RST timeout worker; sequence cancelled");
+    return false;
+}
+
 void perform_early_boot_factory_reset() {
-    // Keep the pending marker committed while destructive work is in progress.
-    // All erases are idempotent, so a transient failure can safely retry on the
-    // next boot. Consuming the marker before erase would silently lose a reset.
+    // Keep the marker committed while destructive work is in progress. Erases
+    // are idempotent, so a transient failure safely retries on the next boot.
     ESP_LOGW(kTag, "Pending Factory Reset accepted during early boot; erasing mutable state");
     const auto report = FactoryResetManager{}.erase_mutable_state();
     if (!report.ok()) {
@@ -95,83 +155,89 @@ void perform_early_boot_factory_reset() {
     esp_restart();
 }
 
-void stage_factory_reset_and_reboot() {
+bool handle_physical_rst_factory_reset() {
+    const bool rtc_state_was_valid = g_rst_boot_marker == kRtcMarker;
+    g_rst_boot_marker = kRtcMarker;
+
+    const auto reason = esp_reset_reason();
+    const bool reset_press = hg::reset_press_detected(
+        rtc_state_was_valid,
+        reason == ESP_RST_EXT,
+        reason == ESP_RST_POWERON);
+
+    std::uint8_t previous_count = 0U;
+    const auto load_error = load_sequence_count(previous_count);
+    if (load_error != ESP_OK) {
+        ESP_LOGE(kTag, "Cannot load physical RST sequence: %s", esp_err_to_name(load_error));
+        return false;
+    }
+
+    if (!reset_press) {
+        if (previous_count != 0U) {
+            const auto clear_error = store_sequence_count(0U);
+            if (clear_error != ESP_OK) {
+                ESP_LOGE(kTag, "Cannot clear stale physical RST sequence: %s", esp_err_to_name(clear_error));
+            }
+        }
+        ESP_LOGI(kTag, "Reset reason=%d is not a physical RST gesture step", static_cast<int>(reason));
+        return false;
+    }
+
+    const auto step = hg::advance_reset_sequence(
+        previous_count,
+        true,
+        hg::kFactoryResetRequiredRstPresses);
+
+    // Every accepted physical RST step must have visible WHITE acknowledgement.
+    // If WHITE cannot be shown, cancel the sequence rather than counting an
+    // invisible step toward destructive reset.
+    const auto white_error = RgbDiagnostic::set_white(board::kOnboardRgb);
+    if (white_error != ESP_OK) {
+        ESP_LOGE(kTag, "Cannot show WHITE physical-RST acknowledgement; sequence cancelled: %s", esp_err_to_name(white_error));
+        (void)store_sequence_count(0U);
+        return false;
+    }
+
+    if (!step.trigger_factory_reset) {
+        const auto save_error = store_sequence_count(step.count);
+        if (save_error != ESP_OK) {
+            ESP_LOGE(kTag, "Cannot persist physical RST step %u/%u: %s",
+                     static_cast<unsigned>(step.count),
+                     static_cast<unsigned>(hg::kFactoryResetRequiredRstPresses),
+                     esp_err_to_name(save_error));
+            (void)RgbDiagnostic::off(board::kOnboardRgb);
+            (void)store_sequence_count(0U);
+            return false;
+        }
+
+        ESP_LOGW(kTag, "Physical RST accepted: WHITE acknowledgement, step %u/%u",
+                 static_cast<unsigned>(step.count),
+                 static_cast<unsigned>(hg::kFactoryResetRequiredRstPresses));
+        (void)arm_white_ack_and_timeout();
+        return false;
+    }
+
+    // Third accepted physical RST: keep the same WHITE acknowledgement, then
+    // stage destructive work for the next clean early boot.
+    ESP_LOGW(kTag, "Physical RST accepted: WHITE acknowledgement, step 3/3");
+    vTaskDelay(kWhiteAckTicks);
     (void)RgbDiagnostic::off(board::kOnboardRgb);
-    const auto error = stage_factory_reset_request();
-    if (error != ESP_OK) {
-        ESP_LOGE(kTag, "Cannot stage Factory Reset request; no destructive reset performed: %s", esp_err_to_name(error));
-        return;
+
+    const auto clear_error = store_sequence_count(0U);
+    if (clear_error != ESP_OK) {
+        ESP_LOGE(kTag, "Triple physical RST detected but counter cannot be consumed: %s", esp_err_to_name(clear_error));
+        return false;
     }
-    ESP_LOGW(kTag, "Three confirmed holds complete; Factory Reset staged for safe early boot");
+
+    const auto stage_error = stage_factory_reset_request();
+    if (stage_error != ESP_OK) {
+        ESP_LOGE(kTag, "Triple physical RST detected but Factory Reset cannot be staged: %s", esp_err_to_name(stage_error));
+        return false;
+    }
+
+    ESP_LOGW(kTag, "Three physical RST steps confirmed; Factory Reset staged for safe early boot");
     esp_restart();
-}
-
-void service_button_reset_task(void*) {
-    std::uint8_t confirmed_holds = 0U;
-    bool raw_pressed = service_button_pressed();
-    bool stable_pressed = raw_pressed;
-    bool hold_confirmed = false;
-    TickType_t now = xTaskGetTickCount();
-    TickType_t raw_changed_at = now;
-    TickType_t press_started_at = now;
-    TickType_t last_confirmed_release_at = now;
-
-    ESP_LOGI(kTag, "Service-button Factory Reset armed on GPIO%d: hold 1.5 s until WHITE, release, repeat 3x", static_cast<int>(board::kServiceButton));
-
-    for (;;) {
-        now = xTaskGetTickCount();
-        const bool sampled_pressed = service_button_pressed();
-        if (sampled_pressed != raw_pressed) { raw_pressed = sampled_pressed; raw_changed_at = now; }
-
-        if (raw_pressed != stable_pressed && (now - raw_changed_at) >= kDebounceTicks) {
-            stable_pressed = raw_pressed;
-            if (stable_pressed) {
-                const bool timed_out = confirmed_holds != 0U && (now - last_confirmed_release_at) > kSequenceTimeoutTicks;
-                const auto retained = hg::expire_reset_gesture(confirmed_holds, timed_out);
-                if (retained != confirmed_holds) {
-                    ESP_LOGI(kTag, "Factory-reset gesture timed out; sequence cleared");
-                    confirmed_holds = retained;
-                }
-                press_started_at = now;
-                hold_confirmed = false;
-                ESP_LOGI(kTag, "Service button pressed; waiting for hold threshold");
-            } else {
-                if (hold_confirmed) {
-                    (void)RgbDiagnostic::off(board::kOnboardRgb);
-                    const auto step = hg::advance_confirmed_hold(confirmed_holds, true, kRequiredHolds);
-                    confirmed_holds = step.count;
-                    last_confirmed_release_at = now;
-                    ESP_LOGW(kTag, "Factory-reset hold confirmed: %u/%u",
-                             static_cast<unsigned>(step.trigger_factory_reset ? kRequiredHolds : confirmed_holds),
-                             static_cast<unsigned>(kRequiredHolds));
-                    if (step.trigger_factory_reset) stage_factory_reset_and_reboot();
-                } else {
-                    ESP_LOGI(kTag, "Short/unconfirmed service-button press ignored");
-                }
-                hold_confirmed = false;
-            }
-        }
-
-        if (stable_pressed && !hold_confirmed && (now - press_started_at) >= kHoldTicks) {
-            const auto rgb_error = RgbDiagnostic::set_white(board::kOnboardRgb);
-            if (rgb_error != ESP_OK) {
-                ESP_LOGE(kTag, "Cannot show WHITE hold confirmation; hold not armed: %s", esp_err_to_name(rgb_error));
-            } else {
-                hold_confirmed = true;
-                ESP_LOGW(kTag, "Hold threshold reached; WHITE means release now");
-            }
-        }
-
-        if (!stable_pressed && confirmed_holds != 0U) {
-            const bool timed_out = (now - last_confirmed_release_at) > kSequenceTimeoutTicks;
-            const auto retained = hg::expire_reset_gesture(confirmed_holds, timed_out);
-            if (retained != confirmed_holds) {
-                ESP_LOGI(kTag, "Factory-reset gesture timed out; sequence cleared");
-                confirmed_holds = retained;
-            }
-        }
-        vTaskDelay(kPollTicks);
-    }
+    return true;
 }
 
 }  // namespace
@@ -191,20 +257,11 @@ bool handle_pending_factory_reset() {
 esp_err_t stage_factory_reset_request() { return set_pending_reset(true); }
 
 esp_err_t start_service_button_factory_reset() {
-    // app_main invokes this immediately after nvs_flash_init(), before network,
-    // HTTP, cloud, or other mutable-state users. A staged reset is consumed here.
+    // Compatibility entry point kept while app_main is migrated. This no longer
+    // reads GPIO21: it consumes staged resets and restores the physical RST/EN
+    // boot gesture that was previously removed.
     if (handle_pending_factory_reset()) return ESP_OK;
-
-    gpio_config_t config{};
-    config.pin_bit_mask = 1ULL << static_cast<unsigned>(board::kServiceButton);
-    config.mode = GPIO_MODE_INPUT;
-    config.pull_up_en = GPIO_PULLUP_ENABLE;
-    config.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    config.intr_type = GPIO_INTR_DISABLE;
-
-    auto error = gpio_config(&config);
-    if (error != ESP_OK) return error;
-    if (xTaskCreate(&service_button_reset_task, "hg_rst_button", kResetTaskStackBytes, nullptr, 5, nullptr) != pdPASS) return ESP_ERR_NO_MEM;
+    (void)handle_physical_rst_factory_reset();
     return ESP_OK;
 }
 
