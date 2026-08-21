@@ -181,16 +181,20 @@ if "FactoryResetManager{}.erase_mutable_state()" in system_http:
     errors.append("hg_system_http.cpp must not erase mutable state in live HTTP runtime")
 
 # Physical RST/EN is a security boundary because it authorizes destructive reset
-# without a network session. Keep the boot path staged and fail-closed.
+# without a network session. Hardware validation on HW-678 proved that EN/RST is
+# reported as POWERON while RTC_NOINIT does not survive that reset. Keep a
+# persistent NVS baseline and reject the disproved RTC-marker design.
 reset = (MAIN / "hg_reset_sequence.cpp").read_text(encoding="utf-8")
 for snippet in (
     "handle_physical_rst_factory_reset()",
-    "RTC_NOINIT_ATTR",
+    'kSequenceNamespace = "hg_rstseq"',
+    'kBootMarkerKey = "boot_seen"',
+    "load_boot_marker(boot_marker_was_valid)",
+    "store_boot_marker()",
     "esp_reset_reason()",
     "ESP_RST_POWERON",
     "hg::reset_press_detected(",
     "hg::advance_reset_sequence(",
-    'kSequenceNamespace = "hg_rstseq"',
     "RgbDiagnostic::set_white(board::kOnboardRgb)",
     "stage_factory_reset_request()",
     "FactoryResetManager{}.erase_mutable_state()",
@@ -200,6 +204,10 @@ for snippet in (
 ):
     if snippet not in reset:
         errors.append(f"hg_reset_sequence.cpp missing physical RST security contract: {snippet}")
+
+for stale in ("RTC_NOINIT_ATTR", "g_rst_boot_marker", "rtc_state_was_valid"):
+    if stale in reset:
+        errors.append(f"hg_reset_sequence.cpp must not rely on disproved RTC reset retention: {stale}")
 
 if "board::kServiceButton" in reset or "gpio_get_level(" in reset or "service_button_reset_task" in reset:
     errors.append("hg_reset_sequence.cpp must not substitute GPIO21/service-button logic for physical RST/EN")
