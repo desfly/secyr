@@ -7,15 +7,16 @@ namespace hg {
 inline constexpr std::uint8_t kFactoryResetRequiredHolds = 3U;
 inline constexpr std::uint32_t kFactoryResetHoldMs = 1500U;
 inline constexpr std::uint32_t kFactoryResetSequenceTimeoutMs = 5000U;
-inline constexpr std::uint32_t kFactoryResetSuccessWhiteMs = 5000U;
+inline constexpr std::uint32_t kFactoryResetSuccessRedMs = 5000U;
 
 struct ResetGestureStep {
     std::uint8_t count{0};
     bool trigger_factory_reset{false};
 };
 
-// A gesture step is counted only after the hold threshold has been reached
-// and the button is subsequently released. Short presses never advance it.
+// A gesture step is counted only after the hold threshold has been reached,
+// WHITE confirmation has been shown successfully, and the button is released.
+// Short presses never advance it.
 constexpr ResetGestureStep advance_confirmed_hold(
     std::uint8_t previous_count,
     bool hold_confirmed,
