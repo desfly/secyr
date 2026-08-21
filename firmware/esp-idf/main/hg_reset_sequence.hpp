@@ -5,18 +5,18 @@
 namespace homeguard::idf {
 
 // Executes a previously staged factory reset during early boot, before network,
-// HTTP, cloud, and other mutable-state users are started. Returns true only
-// when a pending request took ownership of boot (the function then reboots).
+// HTTP, cloud, and other mutable-state users are started. Successful erase is
+// confirmed by RED for 5 seconds, then the controller reboots.
 bool handle_pending_factory_reset();
 
 // Persistently stages a factory-reset request without erasing live NVS state.
-// Caller may send its final response and then reboot. The next early boot owns
-// the destructive erase and RED 5-second success indication.
+// Caller may send its final response and then reboot; early boot owns erase.
 esp_err_t stage_factory_reset_request();
 
-// Starts the runtime gesture on the dedicated service button:
-// hold until WHITE, release; repeat three times. The third confirmed release
-// stages a reset request and reboots; early boot performs erase -> RED 5 s -> reboot.
-esp_err_t start_service_button_factory_reset();
+// Physical HomeGuard-S3 RST/EN sequence. This board reports its hardware RST
+// button as POWERON; RTC state distinguishes it from a true cold boot. Each
+// accepted step gets WHITE acknowledgement. The third stages Factory Reset;
+// successful erase is confirmed by RED for 5 seconds.
+bool handle_physical_rst_factory_reset();
 
 }  // namespace homeguard::idf
