@@ -22,6 +22,27 @@ struct ResetSequenceStep {
     bool trigger_factory_reset{false};
 };
 
+// Stable compile-time signature for the firmware revision used to suppress the
+// automatic RTS/EN reset that follows flashing or OTA. The first boot of a new
+// firmware revision refreshes the baseline and is never counted as an RST step.
+constexpr std::uint32_t reset_firmware_signature(const char* revision) noexcept {
+    std::uint32_t hash = 2166136261U;
+    if (revision == nullptr) return hash;
+    while (*revision != '\0') {
+        hash ^= static_cast<std::uint8_t>(*revision);
+        hash *= 16777619U;
+        ++revision;
+    }
+    return hash;
+}
+
+constexpr bool firmware_baseline_changed(
+    bool stored_signature_valid,
+    std::uint32_t stored_signature,
+    std::uint32_t current_signature) noexcept {
+    return !stored_signature_valid || stored_signature != current_signature;
+}
+
 // Hardware evidence from HW-678 shows that the physical RST/EN button is
 // reported as POWERON and that RTC_NOINIT does not survive that reset. A small
 // persistent boot marker is therefore used as the baseline: the very first
