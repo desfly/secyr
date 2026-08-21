@@ -22,7 +22,9 @@ constexpr const char* kPendingKey = "pending";
 constexpr const char* kSequenceNamespace = "hg_rstseq";
 constexpr const char* kSequenceCountKey = "count";
 constexpr const char* kBootMarkerKey = "boot_seen";
+constexpr const char* kFirmwareSignatureKey = "fw_sig";
 constexpr std::uint8_t kBootMarkerValue = 0xA5U;
+constexpr std::uint32_t kCurrentFirmwareSignature = hg::reset_firmware_signature(HG_GIT_REVISION);
 constexpr TickType_t kStepWhiteTicks = pdMS_TO_TICKS(hg::kFactoryResetStepWhiteMs);
 constexpr TickType_t kSequenceWindowTicks = pdMS_TO_TICKS(hg::kFactoryResetSequenceWindowMs);
 constexpr TickType_t kSettingsSuccessWhiteTicks = pdMS_TO_TICKS(hg::kSettingsResetSuccessWhiteMs);
@@ -138,6 +140,35 @@ esp_err_t store_boot_marker() {
     auto error = nvs_open(kSequenceNamespace, NVS_READWRITE, &handle);
     if (error != ESP_OK) return error;
     error = nvs_set_u8(handle, kBootMarkerKey, kBootMarkerValue);
+    if (error == ESP_OK) error = nvs_commit(handle);
+    nvs_close(handle);
+    return error;
+}
+
+esp_err_t load_firmware_signature(bool& valid, std::uint32_t& signature) {
+    valid = false;
+    signature = 0U;
+    nvs_handle_t handle{};
+    const auto open_error = nvs_open(kSequenceNamespace, NVS_READONLY, &handle);
+    if (open_error == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (open_error != ESP_OK) return open_error;
+
+    auto error = nvs_get_u32(handle, kFirmwareSignatureKey, &signature);
+    nvs_close(handle);
+    if (error == ESP_ERR_NVS_NOT_FOUND) {
+        signature = 0U;
+        return ESP_OK;
+    }
+    if (error != ESP_OK) return error;
+    valid = true;
+    return ESP_OK;
+}
+
+esp_err_t store_firmware_signature(std::uint32_t signature) {
+    nvs_handle_t handle{};
+    auto error = nvs_open(kSequenceNamespace, NVS_READWRITE, &handle);
+    if (error != ESP_OK) return error;
+    error = nvs_set_u32(handle, kFirmwareSignatureKey, signature);
     if (error == ESP_OK) error = nvs_commit(handle);
     nvs_close(handle);
     return error;
@@ -302,6 +333,51 @@ bool handle_physical_rst_factory_reset() {
     const auto load_marker_error = load_boot_marker(boot_marker_was_valid);
     if (load_marker_error != ESP_OK) {
         ESP_LOGE(kTag, "Cannot load physical RST boot marker: %s", esp_err_to_name(load_marker_error));
+        return false;
+    }
+
+    bool firmware_signature_valid = false;
+    std::uint32_t stored_firmware_signature = 0U;
+    const auto load_signature_error = load_firmware_signature(
+        firmware_signature_valid,
+        stored_firmware_signature);
+    if (load_signature_error != ESP_OK) {
+        ESP_LOGE(kTag, "Cannot load physical RST firmware signature: %s", esp_err_to_name(load_signature_error));
+        return false;
+    }
+
+    // A flash/OTA ends in an EN/RTS reset that HW-678 also reports as POWERON.
+    // If the firmware revision changed, treat this first boot as a new baseline,
+    // clear any abandoned reset sequence, and never emit WHITE for that reboot.
+    if (hg::firmware_baseline_changed(
+            firmware_signature_valid,
+            stored_firmware_signature,
+            kCurrentFirmwareSignature)) {
+        const auto signature_error = store_firmware_signature(kCurrentFirmwareSignature);
+        if (signature_error != ESP_OK) {
+            ESP_LOGE(kTag, "Cannot refresh physical RST firmware baseline: %s", esp_err_to_name(signature_error));
+            return false;
+        }
+
+        if (!boot_marker_was_valid) {
+            const auto marker_error = store_boot_marker();
+            if (marker_error != ESP_OK) {
+                ESP_LOGE(kTag, "Cannot establish physical RST boot marker: %s", esp_err_to_name(marker_error));
+                return false;
+            }
+        }
+
+        if (previous_count != 0U) {
+            const auto clear_error = store_sequence_count(0U);
+            if (clear_error != ESP_OK) {
+                ESP_LOGE(kTag, "Cannot clear RST sequence on firmware baseline refresh: %s", esp_err_to_name(clear_error));
+                return false;
+            }
+        }
+
+        ESP_LOGI(kTag,
+                 "Firmware RST baseline refreshed; reset reason=%d is not counted",
+                 static_cast<int>(reason));
         return false;
     }
 
