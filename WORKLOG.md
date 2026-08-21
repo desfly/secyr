@@ -99,9 +99,9 @@ From workflow run `32506986156`, code head `3de92710b3c97c62ca709abe7c4436cc6eee
 - First boot with fresh NVS establishes the baseline marker and is deliberately **not counted** as a reset gesture.
 - After that baseline exists, a `POWERON` reset can advance the physical RST sequence; `ESP_RST_EXT` remains accepted as well.
 - Accepted step behavior is unchanged: WHITE acknowledgement for 1500 ms, progress stored in NVS, abandoned progress cleared after the 5-second inter-step window.
-- Third accepted step remains: WHITE -> delay -> OFF -> stage Factory Reset -> reboot; successful erase remains RED for 5 seconds -> OFF -> reboot.
+- Historical Build #1821 contract used three accepted steps for full Factory Reset; this was later superseded by the 3-step settings / 5-step factory contract recorded below.
 - Unit test was updated to represent the persistent baseline instead of the disproved RTC-retention assumption.
-- CI contract now explicitly rejects regression to `RTC_NOINIT_ATTR`, `g_rst_boot_marker`, or `rtc_state_was_valid` and requires the NVS `boot_seen` path.
+- CI contract explicitly rejects regression to `RTC_NOINIT_ATTR`, `g_rst_boot_marker`, or `rtc_state_was_valid` and requires the NVS `boot_seen` path.
 - Relevant repair commits in sequence:
   - `0a3269b` — reset helper semantics changed from RTC marker to persistent boot marker;
   - `fa5d232` — runtime switched to NVS `boot_seen` baseline;
@@ -110,18 +110,61 @@ From workflow run `32506986156`, code head `3de92710b3c97c62ca709abe7c4436cc6eee
 
 ### Safety limitation of the hardware-proven model
 - Because both real power-up and EN/RST present as `POWERON`, firmware alone cannot tell them apart on this board.
-- Consequently, after the baseline exists, **three rapid power cycles within the same inter-step timing rules are electrically indistinguishable from three rapid RST presses and can invoke Factory Reset**.
-- A normal single power cycle can at most become step 1 and is automatically cleared after the timeout; destructive reset still requires the full three-step gesture.
+- Consequently, rapid power cycles remain electrically indistinguishable from rapid RST presses under the same sequence rules.
 - Eliminating this ambiguity completely would require a separate hardware-observable button signal or another retained/time source independent of the EN reset.
 
-### Immediate next step
-1. Wait for CI on the new RST fix head to become fully green.
-2. Use the newly generated firmware artifact, not Build #1813.
-3. Flash the ESP32-S3 on COM6 using the established four-image layout.
-4. Keep serial log open at 115200 and press physical RST once.
-5. Expected result: log `Physical RST accepted: WHITE acknowledgement, step 1/3` and visible WHITE for 1500 ms.
-6. Only after step 1 is physically proven, test step 2 and then the complete 3-step Factory Reset sequence.
-7. Continue PC Web UI testing after RST/RGB is physically proven.
+### Build #1821 hardware validation
+- Build #1821 successfully flashed on COM6 without errors; `homeguard_s3.bin` size was 1,803,264 bytes and every image reported `Hash of data verified`.
+- Physical RST/EN sequence was observed as **three WHITE acknowledgements followed by one RED confirmation** under the then-current 3-step full-factory contract.
+- Post-reset serial log showed `Reset reason=3 is not a physical RST gesture step`, proving the software reboot after destructive reset was not miscounted.
+- The post-reset log also showed no persisted access database, no commissioning state, and provisioning AP startup on `192.168.4.1`, confirming the user-owned reset state was actually erased.
+
+### Superseding physical RST contract: 3-step settings / 5-step factory
+- The RST/EN contract was extended after hardware validation so one physical button can expose two reset levels without impossible hold-time detection on EN.
+- **3 rapid accepted RST steps + no continuation for the 5-second inter-step window = Settings Reset.**
+- Settings Reset erases Wi-Fi, cloud, controller config, provisioning and commissioning progress but preserves `hg_access` users and immutable factory/hardware identity.
+- **5 rapid accepted RST steps = full user Factory Reset.**
+- Full Factory Reset erases the same settings state plus `hg_access` users. Immutable factory identity and hardware verification remain preserved by design.
+- Step 3 does not erase immediately; it arms Settings Reset and waits. Step 4 cancels the settings action and extends toward full factory. If step 5 does not arrive, step 4 times out with no reset.
+- Per-step acknowledgement remains WHITE for about 1.5 seconds after release of EN. Successful Settings Reset confirms WHITE for 5 seconds. Successful full Factory Reset confirms RED for 5 seconds.
+- The reason RGB only appears after button release is physical: while EN is held low the ESP32-S3 is in reset and cannot execute RGB code.
+- Build #1832 compiled this 3/5 contract successfully and was flashed without `erase-flash` so access state could be preserved for the settings-reset test.
+
+### Build #1832 post-flash WHITE observation and root cause
+- After flashing Build #1832 with esptool, the user observed a short WHITE indication immediately after the automatic `Hard resetting via RTS pin...` reboot.
+- This exposed another consequence of HW-678 reporting EN-like resets as `POWERON`: once `boot_seen` existed, the automatic post-flash RTS/EN reset could be counted as RST step 1 even though the user had not pressed the physical button.
+- This behavior is undesirable because it preloads the RST sequence and makes firmware updates look like user gestures.
+
+### Firmware-baseline suppression fix
+- Added NVS firmware baseline signature `hg_rstseq/fw_sig` derived from the already compiled `HG_GIT_REVISION`.
+- On the first boot after the firmware revision changes, runtime refreshes `fw_sig`, clears any abandoned RST sequence, establishes `boot_seen` if needed, logs `Firmware RST baseline refreshed; reset reason=... is not counted`, and returns **before any physical-RST WHITE acknowledgement**.
+- This intentionally suppresses the automatic first post-flash/OTA reset for a new firmware revision.
+- It does **not** claim to distinguish a physical EN press from an ordinary power-cycle when the same firmware is already running; hardware still reports both as `POWERON`.
+- Unit tests cover stable/different firmware signatures and the baseline-change predicate.
+- `check_reset_rgb_contract.py` now requires `fw_sig`, firmware-baseline refresh, sequence clear, and ordering before physical WHITE so this regression cannot silently return.
+- Runtime uses an NVS blob for the 32-bit signature and a safe `HG_GIT_REVISION="unknown"` fallback for host mock compilation; real CI/ESP-IDF builds still receive the actual Git revision from CMake.
+- Repair commits include `7784173`, `7d2021f`, `04feeea`, `cc40d1e`, and mock-compatibility fix `88858d3a29ed2e4feba9da60a01a8ad16d58d5c6`.
+
+### Verified green CI for post-flash suppression — Build #1837
+For code head `88858d3a29ed2e4feba9da60a01a8ad16d58d5c6`:
+- Setup UI Contract #68 — SUCCESS.
+- HomeGuard Wi-Fi Stability #40 — SUCCESS.
+- Web Navigation Runtime Audit #72 — SUCCESS.
+- Web UI Preview #463 — SUCCESS.
+- Web Navigation Audit #57 — SUCCESS.
+- HomeGuard-S3 Build run `32514377122`, build #1837 — SUCCESS.
+- Build #1837 Host validation — SUCCESS, including source audit, access boundary, factory reset coverage, unit tests, browser smoke, mock syntax and mock link.
+- Build #1837 Android debug APK — SUCCESS.
+- Build #1837 ESP-IDF 5.4.4 firmware — SUCCESS; firmware build and checksum generation passed.
+- Firmware artifact: `HomeGuard-S3-firmware`, artifact ID `9458305693`, digest `sha256:6f38a3133679c7808e30acf27ebf2169ab243229062c89cae9a9b72b804a7bd1`.
+
+### Immediate hardware test after Build #1837
+1. Use Build #1837 artifact `9458305693`; flash **without `erase-flash`** so the access database can survive the settings-reset test.
+2. Immediately after esptool's `Hard resetting via RTS pin...`, expected RGB is **no short WHITE**. Optional serial confirmation: `Firmware RST baseline refreshed; reset reason=... is not counted`.
+3. Ensure an Admin exists before the reset-level test.
+4. Perform exactly 3 rapid physical RST presses, then stop. Expected: three per-step WHITE acknowledgements, wait out the window, Settings Reset executes, WHITE 5-second success; the Admin must still exist while Wi-Fi/settings are cleared.
+5. Reconfigure mutable state as needed, then perform 5 rapid RST presses. Expected: five per-step WHITE acknowledgements, full Factory Reset, RED 5-second success, and the first-Admin bootstrap screen must return.
+6. Record actual hardware results before declaring the new 3/5 contract fully hardware-validated.
 
 ### Hardware communication decision — valve nodes
 - For the planned distributed motorized water-valve control, do not buy/use the MCP2515 + TJA1050 SPI CAN module merely for this task; it is unnecessary complexity for the current architecture.
