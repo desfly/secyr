@@ -2,54 +2,44 @@
 #include "test_framework.hpp"
 
 void test_reset_sequence() {
-    // Cement the agreed physical RST/RGB contract.
-    CHECK(hg::kFactoryResetRequiredHolds == 3U);
-    CHECK(hg::kFactoryResetHoldMs == 1500U);
-    CHECK(hg::kFactoryResetSequenceTimeoutMs == 5000U);
-    CHECK(hg::kFactoryResetSuccessWhiteMs == 5000U);
+    CHECK(hg::kFactoryResetRequiredRstPresses == 3U);
+    CHECK(hg::kFactoryResetWhiteAckMs == 1500U);
+    CHECK(hg::kFactoryResetSequenceWindowMs == 5000U);
+    CHECK(hg::kFactoryResetSuccessRedMs == 5000U);
 
-    // Short press: ignored, no progress toward destructive reset.
-    auto step = hg::advance_confirmed_hold(0U, false);
-    CHECK(step.count == 0U);
-    CHECK(!step.trigger_factory_reset);
+    // True cold POWERON is not a physical RST gesture step.
+    CHECK(!hg::reset_press_detected(false, false, true));
 
-    // First RED-confirmed hold followed by release: 1/3.
-    step = hg::advance_confirmed_hold(0U, true);
+    // This HomeGuard-S3 board reports the physical RST/EN button as POWERON;
+    // once the RTC marker is valid, that reset must count.
+    CHECK(hg::reset_press_detected(true, false, true));
+    CHECK(hg::reset_press_detected(false, true, false));
+    CHECK(!hg::reset_press_detected(true, false, false));
+
+    auto step = hg::advance_reset_sequence(0U, true);
     CHECK(step.count == 1U);
     CHECK(!step.trigger_factory_reset);
 
-    // Second RED-confirmed hold followed by release: 2/3.
-    step = hg::advance_confirmed_hold(step.count, true);
+    step = hg::advance_reset_sequence(step.count, true);
     CHECK(step.count == 2U);
     CHECK(!step.trigger_factory_reset);
 
-    // Third RED-confirmed hold followed by release: trigger exactly once.
-    step = hg::advance_confirmed_hold(step.count, true);
+    step = hg::advance_reset_sequence(step.count, true);
     CHECK(step.count == 0U);
     CHECK(step.trigger_factory_reset);
 
-    // A short press after one confirmed hold must not advance or clear it.
-    step = hg::advance_confirmed_hold(1U, false);
-    CHECK(step.count == 1U);
-    CHECK(!step.trigger_factory_reset);
-
-    // Timeout between confirmed releases cancels the unfinished sequence.
-    CHECK(hg::expire_reset_gesture(2U, false) == 2U);
-    CHECK(hg::expire_reset_gesture(2U, true) == 0U);
-
-    // Required-hold count remains deterministic when explicitly overridden.
-    step = hg::advance_confirmed_hold(1U, true, 2U);
+    // Non-physical resets cannot make progress toward destructive reset.
+    step = hg::advance_reset_sequence(2U, false);
     CHECK(step.count == 0U);
-    CHECK(step.trigger_factory_reset);
-
-    // A disabled gesture can never trigger destructive work.
-    step = hg::advance_confirmed_hold(2U, true, 0U);
-    CHECK(step.count == 2U);
     CHECK(!step.trigger_factory_reset);
 
-    // Saturated/corrupt counters fail deterministically into a reset trigger
-    // once a confirmed hold arrives, rather than wrapping back to zero silently.
-    step = hg::advance_confirmed_hold(0xffU, true, 3U);
+    // Disabled gesture cannot trigger destructive work.
+    step = hg::advance_reset_sequence(2U, true, 0U);
+    CHECK(step.count == 0U);
+    CHECK(!step.trigger_factory_reset);
+
+    // Saturated/corrupt counters fail deterministically into a single trigger.
+    step = hg::advance_reset_sequence(0xffU, true, 3U);
     CHECK(step.count == 0U);
     CHECK(step.trigger_factory_reset);
 }
