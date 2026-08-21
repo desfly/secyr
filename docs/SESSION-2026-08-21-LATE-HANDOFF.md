@@ -70,31 +70,46 @@ Known CI noise/failure:
 - Do not treat this as evidence of a Web UI functional regression. Fix the temp Chromium profile cleanup separately if/when requested.
 - Do not revert the callback-driven browser navigation probe back to the old multi-Chrome or dump-dom exit strategy.
 
-## Current open UI bug: missing password visibility eye
-The latest user complaint is: **"де глазик в паролі ???????????"**
+## Password visibility eye — implemented after user complaint
+The user explicitly reported the missing eye control in the password field.
 
-Current code fact:
-- `web/access-session.js` currently creates password inputs as plain `<input type="password">` controls.
-- There is no password visibility toggle/eye control in the setup/login markup.
-- The visible omission is especially obvious in the first-boot Wi-Fi password field shown in the latest screenshot.
+Implementation commits:
+- `e6a47bc8aac3b5a7c9be4c661462994999c9253e` — `Add password visibility eye controls`.
+- `0365c87e2832841c19e68d50ba37600e06ea88fc` — `Guard password visibility eye controls`.
 
-Next task for the next session:
-- Add a small eye/show-hide control without changing approved layout sizes or reset/network logic.
-- Apply consistently to the first-boot/login password fields at minimum:
+Implementation details:
+- The fix is UI-only; no reset, Wi-Fi protocol, authentication transport, PIN storage, or firmware control logic was changed.
+- A reusable inline helper in `web/index.html` watches the dynamic auth/setup DOM and attaches one eye control to each target when it appears.
+- Target fields are exactly:
   - `#hgLoginPin`
   - `#hgSetupWifiPassword`
   - `#hgSetupPin`
-- Prefer one reusable helper/toggle behavior rather than three unrelated implementations.
-- Toggle only the input `type` between `password` and `text`; do not persist, log, copy, or transmit the secret differently.
-- Preserve autocomplete/inputmode semantics.
-- Add/extend the UI contract test so these visibility toggles cannot silently disappear again.
-- After coding, build a new firmware and hardware/browser-test the eye controls; do not declare PASS before the user confirms on the real UI.
+- The eye toggles only the HTML input `type` between `password` and `text`.
+- It does not persist, log, copy, or transmit the password differently.
+- Existing `autocomplete`, `inputmode`, min/max length and input IDs are preserved.
+- Duplicate eye attachment is blocked with `data-hg-password-eye`.
+- Control has keyboard support (Enter/Space) and accessible `aria-label`/`aria-pressed` state.
+- Eye CSS is narrowly scoped to `#hgAuthGate`; approved Login/setup dimensions and Bruce layout were not intentionally changed.
+
+Regression guard:
+- `tools/check_setup_ui_contract.py` now requires all three eye targets, the password/text toggle, accessible show/hide labels, the visible eye glyph, MutationObserver wiring, and duplicate-attachment protection.
+- Setup UI Contract #78 on head `0365c87e...` completed **SUCCESS**.
+
+Current CI started from head `0365c87e2832841c19e68d50ba37600e06ea88fc`:
+- Setup UI Contract #78 — SUCCESS.
+- Web UI Preview #473 — running at last check.
+- HomeGuard Wi-Fi Stability #50 — running at last check.
+- Web Navigation Audit #67 — running at last check.
+- Web Navigation Runtime Audit #82 — running at last check.
+- HomeGuard-S3 Build #1847 — running at last check.
+
+Do not declare the eye visual/hardware PASS until the new firmware is built, flashed and the user confirms the eye on the real Login/setup UI.
 
 ## Safety rails for tomorrow
 - Read this file and `WORKLOG.md` first.
 - Do not touch the already verified 3×/5× physical reset contract.
 - Do not reintroduce an inner Wi-Fi list scrollbar.
 - Do not compact or redesign the approved Login window.
-- Do not change Bruce placement/asset while fixing the eye control.
-- Keep the eye fix narrowly scoped to password visibility + its regression guard.
+- Do not change Bruce placement/asset while fixing or testing the eye control.
+- Keep password visibility behavior narrowly scoped to UI visibility only.
 - After each meaningful code/test result, record exact commit/run/artifact/hardware result in Git or PR #72.
