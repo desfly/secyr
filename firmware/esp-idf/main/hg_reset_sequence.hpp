@@ -19,4 +19,12 @@ esp_err_t stage_factory_reset_request();
 // successful erase is confirmed by RED for 5 seconds.
 bool handle_physical_rst_factory_reset();
 
+// Legacy app_main entry point retained only to keep the change isolated. It no
+// longer reads GPIO21 or starts a service-button task; it delegates entirely to
+// the physical RST/EN boot detector above.
+inline esp_err_t start_service_button_factory_reset() {
+    (void)handle_physical_rst_factory_reset();
+    return ESP_OK;
+}
+
 }  // namespace homeguard::idf
