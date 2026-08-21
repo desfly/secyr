@@ -26,7 +26,7 @@ constexpr TickType_t kHoldTicks = pdMS_TO_TICKS(1500);
 constexpr TickType_t kDebounceTicks = pdMS_TO_TICKS(40);
 constexpr TickType_t kPollTicks = pdMS_TO_TICKS(20);
 constexpr TickType_t kSequenceTimeoutTicks = pdMS_TO_TICKS(5000);
-constexpr TickType_t kSuccessWhiteTicks = pdMS_TO_TICKS(5000);
+constexpr TickType_t kSuccessRedTicks = pdMS_TO_TICKS(5000);
 constexpr std::uint32_t kResetTaskStackBytes = 4096U;
 
 bool service_button_pressed() { return gpio_get_level(board::kServiceButton) == 0; }
@@ -83,12 +83,12 @@ void perform_early_boot_factory_reset() {
         return;
     }
 
-    ESP_LOGW(kTag, "Factory Reset complete; WHITE RGB confirmation for 5 seconds");
-    const auto rgb_error = RgbDiagnostic::set_white(board::kOnboardRgb);
+    ESP_LOGW(kTag, "Factory Reset complete; RED RGB confirmation for 5 seconds");
+    const auto rgb_error = RgbDiagnostic::set_red(board::kOnboardRgb);
     if (rgb_error != ESP_OK) {
-        ESP_LOGE(kTag, "Factory-reset WHITE confirmation failed: %s", esp_err_to_name(rgb_error));
+        ESP_LOGE(kTag, "Factory-reset RED confirmation failed: %s", esp_err_to_name(rgb_error));
     } else {
-        vTaskDelay(kSuccessWhiteTicks);
+        vTaskDelay(kSuccessRedTicks);
         (void)RgbDiagnostic::off(board::kOnboardRgb);
     }
     ESP_LOGW(kTag, "Factory Reset confirmed; rebooting clean");
@@ -116,7 +116,7 @@ void service_button_reset_task(void*) {
     TickType_t press_started_at = now;
     TickType_t last_confirmed_release_at = now;
 
-    ESP_LOGI(kTag, "Service-button Factory Reset armed on GPIO%d: hold 1.5 s until RED, release, repeat 3x", static_cast<int>(board::kServiceButton));
+    ESP_LOGI(kTag, "Service-button Factory Reset armed on GPIO%d: hold 1.5 s until WHITE, release, repeat 3x", static_cast<int>(board::kServiceButton));
 
     for (;;) {
         now = xTaskGetTickCount();
@@ -153,12 +153,12 @@ void service_button_reset_task(void*) {
         }
 
         if (stable_pressed && !hold_confirmed && (now - press_started_at) >= kHoldTicks) {
-            const auto rgb_error = RgbDiagnostic::set_red(board::kOnboardRgb);
+            const auto rgb_error = RgbDiagnostic::set_white(board::kOnboardRgb);
             if (rgb_error != ESP_OK) {
-                ESP_LOGE(kTag, "Cannot show RED hold confirmation; hold not armed: %s", esp_err_to_name(rgb_error));
+                ESP_LOGE(kTag, "Cannot show WHITE hold confirmation; hold not armed: %s", esp_err_to_name(rgb_error));
             } else {
                 hold_confirmed = true;
-                ESP_LOGW(kTag, "Hold threshold reached; RED means release now");
+                ESP_LOGW(kTag, "Hold threshold reached; WHITE means release now");
             }
         }
 
