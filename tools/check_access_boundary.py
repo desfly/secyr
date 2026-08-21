@@ -200,7 +200,7 @@ for snippet in (
     "FactoryResetManager{}.erase_settings_state()",
     "stage_factory_reset_request()",
     "FactoryResetManager{}.erase_mutable_state()",
-    "set_pending_reset(PendingReset::None)",
+    "set_pending_reset(false)",
     "RgbDiagnostic::set_red(board::kOnboardRgb)",
     "vTaskDelay(kSettingsSuccessWhiteTicks)",
     "vTaskDelay(kFactorySuccessRedTicks)",
@@ -232,7 +232,7 @@ if min(fifth, stage, restart) < 0 or not (fifth < stage < restart):
     errors.append("fifth physical RST must stage full Factory Reset before reboot")
 
 factory_erase = reset.find("FactoryResetManager{}.erase_mutable_state()")
-consume = reset.find("set_pending_reset(PendingReset::None)", factory_erase)
+consume = reset.find("set_pending_reset(false)", factory_erase)
 red = reset.find("RgbDiagnostic::set_red(board::kOnboardRgb)", consume)
 red_delay = reset.find("vTaskDelay(kFactorySuccessRedTicks)", red)
 if min(factory_erase, consume, red, red_delay) < 0 or not (factory_erase < consume < red < red_delay):
