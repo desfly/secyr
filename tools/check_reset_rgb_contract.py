@@ -31,24 +31,35 @@ for forbidden in (
     if forbidden in runtime:
         errors.append(f"physical RST path regressed to GPIO service button: {forbidden}")
 
-# Physical RST/EN on this board is reported as POWERON. RTC_NOINIT proves that
-# POWERON came after a live boot, so a true cold power-up cannot count as step 1.
-for required in (
+# Hardware validation on HW-678 proved that RST/EN is reported as POWERON and
+# RTC_NOINIT does NOT survive that reset. The detector must therefore use a
+# persistent NVS boot baseline, never the disproved RTC marker approach.
+for forbidden in (
     "RTC_NOINIT_ATTR",
     "g_rst_boot_marker",
+    "rtc_state_was_valid",
+):
+    if forbidden in runtime:
+        errors.append(f"physical RST detector regressed to invalid RTC assumption: {forbidden}")
+
+for required in (
+    'kSequenceNamespace = "hg_rstseq"',
+    'kBootMarkerKey = "boot_seen"',
+    "load_boot_marker(boot_marker_was_valid)",
+    "store_boot_marker()",
     "esp_reset_reason()",
     "ESP_RST_EXT",
     "ESP_RST_POWERON",
     "hg::reset_press_detected(",
-    "rtc_state_was_valid",
+    "boot_marker_was_valid",
+    "Persistent RST boot baseline established",
 ):
     if required not in runtime:
-        errors.append(f"physical RST detector incomplete: missing {required}")
+        errors.append(f"persistent physical RST detector incomplete: missing {required}")
 
 # Progress must persist across the reset itself, but an abandoned sequence must
 # expire. This is what lets the hardware RST/EN button be used safely.
 for required in (
-    'kSequenceNamespace = "hg_rstseq"',
     "load_sequence_count(previous_count)",
     "store_sequence_count(step.count)",
     "step_feedback_and_timeout_task",
