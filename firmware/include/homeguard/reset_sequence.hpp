@@ -37,4 +37,31 @@ constexpr ResetSequenceStep advance_reset_sequence(
     return {next, false};
 }
 
+// Generic confirmed-hold helpers are still shared by the isolated NVS-recovery
+// mode. They are intentionally not used by the normal physical RST/EN path.
+struct ResetGestureStep {
+    std::uint8_t count{0};
+    bool trigger_factory_reset{false};
+};
+
+constexpr ResetGestureStep advance_confirmed_hold(
+    std::uint8_t previous_count,
+    bool hold_confirmed,
+    std::uint8_t required_holds = 3U) noexcept {
+    if (!hold_confirmed || required_holds == 0U) {
+        return {previous_count, false};
+    }
+
+    const auto next = static_cast<std::uint8_t>(
+        previous_count == 0xffU ? 0xffU : previous_count + 1U);
+    if (next >= required_holds) return {0U, true};
+    return {next, false};
+}
+
+constexpr std::uint8_t expire_reset_gesture(
+    std::uint8_t previous_count,
+    bool timed_out) noexcept {
+    return timed_out ? 0U : previous_count;
+}
+
 }  // namespace hg
