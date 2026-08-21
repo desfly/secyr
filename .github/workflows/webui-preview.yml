@@ -1,6 +1,11 @@
 name: Web UI Preview
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/webui-preview.yml"
   push:
     branches: [main]
     paths:
