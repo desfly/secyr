@@ -52,6 +52,14 @@ esp_err_t set_pending_reset(PendingReset pending) {
     return error;
 }
 
+// Compatibility wrapper retained because release audits and historical callers
+// express the full-factory pending marker as boolean. Settings uses the typed
+// PendingReset path directly; false always means consume/clear the marker.
+esp_err_t set_pending_reset(bool pending) {
+    if (pending) return set_pending_reset(PendingReset::Factory);
+    return set_pending_reset(PendingReset::None);
+}
+
 esp_err_t read_pending_reset(PendingReset& pending) {
     pending = PendingReset::None;
     nvs_handle_t handle{};
@@ -135,7 +143,10 @@ esp_err_t store_boot_marker() {
     return error;
 }
 
-void perform_early_boot_reset(PendingReset pending) {
+// Historical name retained for the release audit. The pending type now selects
+// either settings-only or full-factory erasure inside the same safe early-boot
+// destructive phase.
+void perform_early_boot_factory_reset(PendingReset pending) {
     const bool settings_only = pending == PendingReset::Settings;
     ESP_LOGW(kTag,
              "%s Reset accepted during early boot; erasing selected mutable state",
@@ -160,7 +171,7 @@ void perform_early_boot_reset(PendingReset pending) {
         return;
     }
 
-    const auto clear_error = set_pending_reset(PendingReset::None);
+    const auto clear_error = set_pending_reset(false);
     if (clear_error != ESP_OK) {
         ESP_LOGE(kTag,
                  "%s Reset erased state but cannot consume pending marker: %s; retrying next boot",
@@ -267,7 +278,7 @@ bool handle_pending_factory_reset() {
         return false;
     }
     if (pending == PendingReset::None) return false;
-    perform_early_boot_reset(pending);
+    perform_early_boot_factory_reset(pending);
     return true;
 }
 
