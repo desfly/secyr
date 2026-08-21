@@ -166,6 +166,15 @@ For code head `88858d3a29ed2e4feba9da60a01a8ad16d58d5c6`:
 5. Reconfigure mutable state as needed, then perform 5 rapid RST presses. Expected: five per-step WHITE acknowledgements, full Factory Reset, RED 5-second success, and the first-Admin bootstrap screen must return.
 6. Record actual hardware results before declaring the new 3/5 contract fully hardware-validated.
 
+### Build #1837 hardware validation — post-flash baseline and 3-step Settings Reset
+- Build #1837 (`88858d3a29ed2e4feba9da60a01a8ad16d58d5c6`, artifact `9458305693`) was flashed on COM6 without `erase-flash`; `homeguard_s3.bin` size was 1,805,408 bytes and all flashed images reported `Hash of data verified`.
+- Immediately after esptool `Hard resetting via RTS pin...`, the onboard RGB **did not light WHITE**. This is the expected hardware result and confirms the `fw_sig` post-flash baseline suppression works on the real HW-678 board.
+- The user then performed exactly 3 rapid physical RST/EN presses under the new 3/5 contract.
+- Actual result: Wi-Fi credentials/settings were erased and the controller returned to provisioning/network setup state.
+- Crucially, the existing Admin was preserved: the Web UI showed **login for the existing Admin**, not the first-Admin creation/bootstrap screen.
+- Therefore the 3-step Settings Reset is **hardware PASS**: mutable settings are erased while `hg_access` users remain intact.
+- Remaining reset validation: perform the 5-step full Factory Reset and verify five WHITE acknowledgements, RED 5-second success confirmation, and return to the first-Admin creation screen.
+
 ### Hardware communication decision — valve nodes
 - For the planned distributed motorized water-valve control, do not buy/use the MCP2515 + TJA1050 SPI CAN module merely for this task; it is unnecessary complexity for the current architecture.
 - The current preferred direction for the small valve nodes is LIN-style communication: small local driver/node per valve and a master-side interface at ESP32-S3, subject to final electrical design when the actual valve hardware is opened/inspected.
