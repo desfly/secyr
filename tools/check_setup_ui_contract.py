@@ -61,11 +61,20 @@ for required in (
     "width:min(44vw,760px)!important",
     "font-size:32px!important",
     "font-size:17px!important",
-    "grid-template-columns:1fr 1fr!important",
+    "grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important",
     "max-height:240px!important",
-    "overflow:auto!important",
+    "overflow-y:auto!important",
+    "overflow-x:hidden!important",
 ):
     require(required in css, f"desktop setup CSS contract missing: {required}")
+
+# Long SSIDs must shrink inside their grid cell instead of widening the list.
+for required in (
+    ".hg-setup-network{min-width:0!important;overflow:hidden!important}",
+    ".hg-setup-network strong{min-width:0!important;flex:1 1 auto!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}",
+    ".hg-setup-network span{flex:0 0 auto!important}",
+):
+    require(required in css, f"Wi-Fi row overflow guard missing: {required}")
 
 # User-visible state dots are intentionally larger than the old 10px markers.
 require(".side-foot i{display:inline-block;width:12px;height:12px" in css,
@@ -85,5 +94,5 @@ print("Setup UI contract PASS")
 print(" - desktop: compact stable setup card with larger readable controls")
 print(" - Bruce: bounded right-side illustration")
 print(" - mobile/tablet: deterministic responsive collapse")
-print(" - Wi-Fi scan: visible bounded AP rows, no dropdown")
+print(" - Wi-Fi scan: visible bounded AP rows, no horizontal overflow")
 print(" - status dots: enlarged for readability")
