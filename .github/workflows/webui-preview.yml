@@ -31,15 +31,24 @@ jobs:
             if curl -fsS http://127.0.0.1:8765/api/v1/access/state >/dev/null; then break; fi
             sleep 0.2
           done
-          google-chrome --headless --no-sandbox --disable-gpu \
-            --hide-scrollbars --window-size=1600,1200 \
-            --virtual-time-budget=5000 \
-            --screenshot=HomeGuard-S3-WebUI.png \
-            http://127.0.0.1:8765/
-          test -s HomeGuard-S3-WebUI.png
-      - name: Upload Web UI screenshot
+
+          render() {
+            local size="$1"
+            local file="$2"
+            google-chrome --headless --no-sandbox --disable-gpu \
+              --hide-scrollbars --window-size="$size" \
+              --virtual-time-budget=5000 \
+              --screenshot="$file" \
+              http://127.0.0.1:8765/
+            test -s "$file"
+          }
+
+          render 1600,1200 HomeGuard-S3-WebUI-1600x1200.png
+          render 1200,900  HomeGuard-S3-WebUI-1200x900.png
+          render 800,1000  HomeGuard-S3-WebUI-800x1000.png
+      - name: Upload Web UI screenshots
         uses: actions/upload-artifact@v4
         with:
           name: HomeGuard-S3-WebUI-preview
-          path: HomeGuard-S3-WebUI.png
+          path: HomeGuard-S3-WebUI-*.png
           if-no-files-found: error
