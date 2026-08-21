@@ -9,6 +9,15 @@ void test_reset_sequence() {
     CHECK(hg::kSettingsResetSuccessWhiteMs == 5000U);
     CHECK(hg::kFactoryResetSuccessRedMs == 5000U);
 
+    constexpr auto firmware_a = hg::reset_firmware_signature("firmware-a");
+    constexpr auto firmware_a_again = hg::reset_firmware_signature("firmware-a");
+    constexpr auto firmware_b = hg::reset_firmware_signature("firmware-b");
+    CHECK(firmware_a == firmware_a_again);
+    CHECK(firmware_a != firmware_b);
+    CHECK(hg::firmware_baseline_changed(false, 0U, firmware_a));
+    CHECK(!hg::firmware_baseline_changed(true, firmware_a, firmware_a));
+    CHECK(hg::firmware_baseline_changed(true, firmware_a, firmware_b));
+
     // Fresh NVS has no persistent boot marker, therefore the first POWERON is
     // baseline establishment rather than a destructive-reset gesture step.
     CHECK(!hg::reset_press_detected(false, false, true));
