@@ -6,6 +6,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 source = (ROOT / "web" / "access-session.js").read_text(encoding="utf-8")
 css = (ROOT / "web" / "app.css").read_text(encoding="utf-8")
+html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 errors: list[str] = []
 
 
@@ -51,6 +52,24 @@ require('html body #hgAuthGate.hg-setup-mode .hg-auth-stage:has(.hg-setup-grid){
 require('html body #hgAuthGate.hg-setup-mode .hg-auth-card:has(.hg-setup-grid) .hg-setup-networks{max-height:none!important;overflow:visible!important}' in css,
         "Wi-Fi list inner scrolling is not disabled")
 
+# Password visibility must stay available in login and first-boot setup without
+# changing authentication semantics or persisting the secret.
+for password_id in ("hgLoginPin", "hgSetupWifiPassword", "hgSetupPin"):
+    require(password_id in html,
+            f"password visibility eye target missing from UI helper: {password_id}")
+require('const passwordIds = ["hgLoginPin", "hgSetupWifiPassword", "hgSetupPin"]' in html,
+        "approved password eye target set changed")
+require('input.type = reveal ? "text" : "password"' in html,
+        "password eye does not toggle password/text visibility")
+require('aria-label", reveal ? "Сховати пароль" : "Показати пароль"' in html,
+        "password eye accessible show/hide state missing")
+require('eye.textContent = "👁"' in html,
+        "visible eye control missing")
+require('new MutationObserver(wirePasswordEyes)' in html,
+        "dynamic login/setup password fields are not watched for eye attachment")
+require('input.dataset.hgPasswordEye = "1"' in html,
+        "password eye duplicate-attachment guard missing")
+
 if errors:
     print("Setup UI contract FAIL", file=sys.stderr)
     for error in errors:
@@ -61,3 +80,4 @@ print("Setup UI contract PASS")
 print(" - desktop: wide two-column setup")
 print(" - mobile: single-column setup at <=720px")
 print(" - Wi-Fi scan: full visible AP list, no inner scrollbar")
+print(" - password visibility: eye toggles present for login, Wi-Fi and first Admin PIN")
