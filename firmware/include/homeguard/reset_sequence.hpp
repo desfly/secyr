@@ -4,6 +4,11 @@
 
 namespace hg {
 
+inline constexpr std::uint8_t kFactoryResetRequiredHolds = 3U;
+inline constexpr std::uint32_t kFactoryResetHoldMs = 1500U;
+inline constexpr std::uint32_t kFactoryResetSequenceTimeoutMs = 5000U;
+inline constexpr std::uint32_t kFactoryResetSuccessWhiteMs = 5000U;
+
 struct ResetGestureStep {
     std::uint8_t count{0};
     bool trigger_factory_reset{false};
@@ -14,7 +19,7 @@ struct ResetGestureStep {
 constexpr ResetGestureStep advance_confirmed_hold(
     std::uint8_t previous_count,
     bool hold_confirmed,
-    std::uint8_t required_holds = 3U) noexcept {
+    std::uint8_t required_holds = kFactoryResetRequiredHolds) noexcept {
     if (!hold_confirmed || required_holds == 0U) {
         return {previous_count, false};
     }
