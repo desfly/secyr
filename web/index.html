@@ -130,5 +130,61 @@
 <button id="refresh" hidden>Оновити</button>
 <script src="/app.js?v=285"></script>
 <script src="/access-session.js?v=285"></script>
+<script>
+(() => {
+  const passwordIds = ["hgLoginPin", "hgSetupWifiPassword", "hgSetupPin"];
+  const style = document.createElement("style");
+  style.textContent = `
+    #hgAuthGate .hg-password-label{position:relative!important}
+    #hgAuthGate .hg-password-label>input{padding-right:54px!important}
+    #hgAuthGate .hg-password-toggle{position:absolute;right:10px;bottom:8px;width:38px;height:38px;display:grid;place-items:center;border-radius:8px;color:#dce8f5;background:transparent;cursor:pointer;user-select:none;font-size:22px;line-height:1;z-index:3}
+    #hgAuthGate .hg-password-toggle:hover,#hgAuthGate .hg-password-toggle:focus-visible{background:rgba(255,255,255,.10);outline:1px solid rgba(255,255,255,.45)}
+  `;
+  document.head.appendChild(style);
+
+  function togglePassword(input, control) {
+    const reveal = input.type === "password";
+    input.type = reveal ? "text" : "password";
+    control.setAttribute("aria-pressed", reveal ? "true" : "false");
+    control.setAttribute("aria-label", reveal ? "Сховати пароль" : "Показати пароль");
+  }
+
+  function attachPasswordEye(input) {
+    if (!input || input.dataset.hgPasswordEye === "1") return;
+    const label = input.closest("label");
+    if (!label) return;
+    input.dataset.hgPasswordEye = "1";
+    label.classList.add("hg-password-label");
+    const eye = document.createElement("span");
+    eye.className = "hg-password-toggle";
+    eye.setAttribute("role", "button");
+    eye.setAttribute("tabindex", "0");
+    eye.setAttribute("aria-controls", input.id);
+    eye.setAttribute("aria-label", "Показати пароль");
+    eye.setAttribute("aria-pressed", "false");
+    eye.textContent = "👁";
+    eye.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      togglePassword(input, eye);
+      input.focus({preventScroll:true});
+    });
+    eye.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      togglePassword(input, eye);
+      input.focus({preventScroll:true});
+    });
+    label.appendChild(eye);
+  }
+
+  function wirePasswordEyes() {
+    passwordIds.forEach(id => attachPasswordEye(document.getElementById(id)));
+  }
+
+  wirePasswordEyes();
+  new MutationObserver(wirePasswordEyes).observe(document.body, {childList:true, subtree:true});
+})();
+</script>
 </body>
 </html>
