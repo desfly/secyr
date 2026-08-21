@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,3 +39,13 @@ if errors:
     sys.exit(1)
 
 print("Factory reset namespace coverage audit PASS")
+
+# The physical RST/EN + RGB behavior is release-critical and must gate BIN
+# generation together with namespace coverage.
+rst_rgb = subprocess.run(
+    [sys.executable, str(ROOT / "tools" / "check_reset_rgb_contract.py")],
+    cwd=ROOT,
+    check=False,
+)
+if rst_rgb.returncode != 0:
+    sys.exit(rst_rgb.returncode)
