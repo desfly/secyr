@@ -46,3 +46,9 @@
   #hgAuthGate .hg-auth-card:has(.hg-setup-grid){width:58vw!important;max-width:1240px!important;min-width:900px!important}
   #hgAuthGate .hg-auth-bruce{width:47vw!important}
 }
+
+/* First-boot Wi-Fi scan: show every discovered network, no inner scrollbar. */
+@media (min-width:1100px){
+  html body #hgAuthGate.hg-setup-mode .hg-auth-stage:has(.hg-setup-grid){overflow:visible!important}
+  html body #hgAuthGate.hg-setup-mode .hg-auth-card:has(.hg-setup-grid) .hg-setup-networks{max-height:none!important;overflow:visible!important}
+}

@@ -5,6 +5,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 source = (ROOT / "web" / "access-session.js").read_text(encoding="utf-8")
+css = (ROOT / "web" / "app.css").read_text(encoding="utf-8")
 errors: list[str] = []
 
 
@@ -40,6 +41,16 @@ require('<select id="hgSetupWifiSsid"' not in source,
 require('id="hgSetupWifiSsid" type="text"' in source,
         "manual/hidden SSID fallback missing")
 
+# Approved desktop setup shows the complete Wi-Fi scan list. The injected
+# access-session defaults may contain a max-height, but app.css must override
+# it on desktop so there is no inner scrollbar.
+require('First-boot Wi-Fi scan: show every discovered network, no inner scrollbar.' in css,
+        "approved no-inner-scroll Wi-Fi override missing")
+require('html body #hgAuthGate.hg-setup-mode .hg-auth-stage:has(.hg-setup-grid){overflow:visible!important}' in css,
+        "setup stage does not allow full Wi-Fi list height")
+require('html body #hgAuthGate.hg-setup-mode .hg-auth-card:has(.hg-setup-grid) .hg-setup-networks{max-height:none!important;overflow:visible!important}' in css,
+        "Wi-Fi list inner scrolling is not disabled")
+
 if errors:
     print("Setup UI contract FAIL", file=sys.stderr)
     for error in errors:
@@ -49,4 +60,4 @@ if errors:
 print("Setup UI contract PASS")
 print(" - desktop: wide two-column setup")
 print(" - mobile: single-column setup at <=720px")
-print(" - Wi-Fi scan: visible AP rows, no dropdown")
+print(" - Wi-Fi scan: full visible AP list, no inner scrollbar")
