@@ -180,27 +180,50 @@ if "stage_factory_reset_request()" not in system_http:
 if "FactoryResetManager{}.erase_mutable_state()" in system_http:
     errors.append("hg_system_http.cpp must not erase mutable state in live HTTP runtime")
 
+# Physical RST/EN is a security boundary because it authorizes destructive reset
+# without a network session. Keep the boot path staged and fail-closed.
 reset = (MAIN / "hg_reset_sequence.cpp").read_text(encoding="utf-8")
 for snippet in (
-    "set_red(board::kOnboardRgb)", "stage_factory_reset_request()",
-    "set_white(board::kOnboardRgb)", "kRequiredHolds = 3U",
-    "kHoldTicks = pdMS_TO_TICKS(1500)", "kSuccessWhiteTicks = pdMS_TO_TICKS(5000)",
-    "FactoryResetManager{}.erase_mutable_state()", "set_pending_reset(false)",
-    "RED means release now", "WHITE RGB confirmation for 5 seconds",
+    "handle_physical_rst_factory_reset()",
+    "RTC_NOINIT_ATTR",
+    "esp_reset_reason()",
+    "ESP_RST_POWERON",
+    "hg::reset_press_detected(",
+    "hg::advance_reset_sequence(",
+    'kSequenceNamespace = "hg_rstseq"',
+    "RgbDiagnostic::set_white(board::kOnboardRgb)",
+    "stage_factory_reset_request()",
+    "FactoryResetManager{}.erase_mutable_state()",
+    "set_pending_reset(false)",
+    "RgbDiagnostic::set_red(board::kOnboardRgb)",
+    "vTaskDelay(kSuccessRedTicks)",
 ):
     if snippet not in reset:
-        errors.append(f"hg_reset_sequence.cpp missing reset contract: {snippet}")
+        errors.append(f"hg_reset_sequence.cpp missing physical RST security contract: {snippet}")
+
+if "board::kServiceButton" in reset or "gpio_get_level(" in reset or "service_button_reset_task" in reset:
+    errors.append("hg_reset_sequence.cpp must not substitute GPIO21/service-button logic for physical RST/EN")
+
 if reset.find("set_pending_reset(false)") < reset.find("FactoryResetManager{}.erase_mutable_state()"):
     errors.append("hg_reset_sequence.cpp must keep factory-reset pending until erase succeeds")
 
-service_start = reset.find("void service_button_reset_task")
-service_end = reset.find("\n}\n\n}  // namespace", service_start)
-early_start = reset.find("void perform_early_boot_factory_reset")
-early_end = reset.find("\n}\n\nvoid stage_factory_reset_and_reboot", early_start)
-if service_start < 0 or service_end < 0 or "RgbDiagnostic::set_red(board::kOnboardRgb)" not in reset[service_start:service_end]:
-    errors.append("hg_reset_sequence.cpp RED confirmation must remain in service-button hold runtime")
-if early_start < 0 or early_end < 0 or "RgbDiagnostic::set_white(board::kOnboardRgb)" not in reset[early_start:early_end]:
-    errors.append("hg_reset_sequence.cpp WHITE confirmation must remain in successful early-boot reset runtime")
+white = reset.find("RgbDiagnostic::set_white(board::kOnboardRgb)")
+persist = reset.find("store_sequence_count(step.count)", white)
+if white < 0 or persist < 0 or white > persist:
+    errors.append("physical RST sequence must show WHITE acknowledgement before persisting a step")
+
+third = reset.find('Physical RST accepted: WHITE acknowledgement, step 3/3')
+stage = reset.find("stage_factory_reset_request()", third)
+restart = reset.find("esp_restart();", stage)
+if min(third, stage, restart) < 0 or not (third < stage < restart):
+    errors.append("third physical RST must stage Factory Reset before reboot")
+
+erase = reset.find("FactoryResetManager{}.erase_mutable_state()")
+consume = reset.find("set_pending_reset(false)", erase)
+red = reset.find("RgbDiagnostic::set_red(board::kOnboardRgb)", consume)
+red_delay = reset.find("vTaskDelay(kSuccessRedTicks)", red)
+if min(erase, consume, red, red_delay) < 0 or not (erase < consume < red < red_delay):
+    errors.append("successful Factory Reset must erase, consume pending, then confirm RED for 5 seconds")
 
 require(WEB / "access-session.js", [
     "hg-auth-locked", "/api/v1/access/state", "/api/v1/access/login",
@@ -237,3 +260,4 @@ print("Access boundary security audit PASS")
 print(" - login is the only acting-user PIN verification step")
 print(" - protected mutations require actor-bound Bearer + role RBAC")
 print(" - Wi-Fi candidate commit is actor-bound, transactional, and verified by associated SSID")
+print(" - destructive physical reset remains RST/EN-only, staged, and RGB-confirmed")

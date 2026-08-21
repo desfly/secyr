@@ -2,43 +2,44 @@
 #include "test_framework.hpp"
 
 void test_reset_sequence() {
-    auto step = hg::advance_confirmed_hold(0U, false);
-    CHECK(step.count == 0U);
-    CHECK(!step.trigger_factory_reset);
+    CHECK(hg::kFactoryResetRequiredRstPresses == 3U);
+    CHECK(hg::kFactoryResetStepWhiteMs == 1500U);
+    CHECK(hg::kFactoryResetSequenceWindowMs == 5000U);
+    CHECK(hg::kFactoryResetSuccessRedMs == 5000U);
 
-    step = hg::advance_confirmed_hold(0U, true);
+    // True cold POWERON must not count as a user's RST/EN step.
+    CHECK(!hg::reset_press_detected(false, false, true));
+
+    // On this board the hardware RST/EN button is reported as POWERON. Once
+    // the RTC marker proves a previous live boot, that reset is a valid step.
+    CHECK(hg::reset_press_detected(true, false, true));
+    CHECK(hg::reset_press_detected(false, true, false));
+    CHECK(!hg::reset_press_detected(true, false, false));
+
+    auto step = hg::advance_reset_sequence(0U, true);
     CHECK(step.count == 1U);
     CHECK(!step.trigger_factory_reset);
 
-    step = hg::advance_confirmed_hold(step.count, true);
+    step = hg::advance_reset_sequence(step.count, true);
     CHECK(step.count == 2U);
     CHECK(!step.trigger_factory_reset);
 
-    step = hg::advance_confirmed_hold(step.count, true);
+    step = hg::advance_reset_sequence(step.count, true);
     CHECK(step.count == 0U);
     CHECK(step.trigger_factory_reset);
 
-    // A short press after one confirmed hold must not advance or clear it.
-    step = hg::advance_confirmed_hold(1U, false);
-    CHECK(step.count == 1U);
-    CHECK(!step.trigger_factory_reset);
-
-    CHECK(hg::expire_reset_gesture(2U, false) == 2U);
-    CHECK(hg::expire_reset_gesture(2U, true) == 0U);
-
-    // Required-hold count is explicit and remains deterministic.
-    step = hg::advance_confirmed_hold(1U, true, 2U);
+    // A software/watchdog reset cannot advance a physical-RST sequence.
+    step = hg::advance_reset_sequence(2U, false);
     CHECK(step.count == 0U);
-    CHECK(step.trigger_factory_reset);
-
-    // A disabled gesture can never trigger destructive work.
-    step = hg::advance_confirmed_hold(2U, true, 0U);
-    CHECK(step.count == 2U);
     CHECK(!step.trigger_factory_reset);
 
-    // Saturated/corrupt counters fail deterministically into a reset trigger
-    // once a confirmed hold arrives, rather than wrapping back to zero silently.
-    step = hg::advance_confirmed_hold(0xffU, true, 3U);
+    // Disabled sequence can never trigger destructive work.
+    step = hg::advance_reset_sequence(2U, true, 0U);
+    CHECK(step.count == 0U);
+    CHECK(!step.trigger_factory_reset);
+
+    // Saturated/corrupt counters trigger deterministically instead of wrapping.
+    step = hg::advance_reset_sequence(0xffU, true, 3U);
     CHECK(step.count == 0U);
     CHECK(step.trigger_factory_reset);
 }
