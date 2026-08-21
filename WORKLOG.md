@@ -16,7 +16,7 @@ This file is the project continuity log. Read it before changing code or re-solv
 - Reset progress is preserved across RST/EN reboots so the multi-step physical sequence can be recognized.
 - RGB gives visible acknowledgement of accepted reset steps; the final erase/reset path has its own confirmation indication.
 - CI contains a guard so the obsolete GPIO21 reset logic is not accidentally restored.
-- Status: implemented in code; next required validation is physical testing on the ESP32-S3 after flashing the combined firmware.
+- Status: implemented in code; hardware validation is now in progress.
 
 ### Web UI repair
 - Working branch: `fix/setup-ui-clean-20260821`.
@@ -40,7 +40,7 @@ This file is the project continuity log. Read it before changing code or re-solv
 - The browser probe now posts PASS/FAIL back to the local Python test server; Python terminates Chromium explicitly after receiving the callback. This removes dependence on `--dump-dom` process exit while preserving real click/hash transitions, settings-page visibility, focus safety, unknown hashes, burst routing and same-hash clicks.
 - Do not return to multi-Chrome-per-route or dump-dom-exit-driven navigation testing unless there is demonstrated evidence that the callback probe is insufficient.
 
-### Verified green CI for current head 3de9271
+### Verified green CI for current code head 3de9271
 All of the following completed successfully for `3de92710b3c97c62ca709abe7c4436cc6eee143c`:
 - Web Navigation Runtime Audit — run `32506986002`, run #48 — SUCCESS.
 - Web UI Preview — run `32506986079`, run #439 — SUCCESS.
@@ -55,7 +55,7 @@ Build #1813 job results:
 - Android debug APK — SUCCESS; policy tests, debug APK build, installer verification and artifact upload passed.
 
 ### Current artifacts ready for hardware/device test
-From HomeGuard-S3 Build #1813 / workflow run `32506986156`, head `3de92710b3c97c62ca709abe7c4436cc6eee143c`:
+From HomeGuard-S3 Build #1813 / workflow run `32506986156`, code head `3de92710b3c97c62ca709abe7c4436cc6eee143c`:
 
 - Firmware artifact: `HomeGuard-S3-firmware`
   - Artifact ID: `9455702180`
@@ -71,33 +71,36 @@ From HomeGuard-S3 Build #1813 / workflow run `32506986156`, head `3de92710b3c97c
   - Artifact ID: `9455625576`
   - Digest: `sha256:77df9c9b4856645a5c44217673735fb52b32af87278a0020914106bcc7490c18`
 
-The older Build #1811 artifact remains historical evidence only. For the next hardware test, use Build #1813 because it corresponds to the current fully green head.
+The older Build #1811 artifact remains historical evidence only. For hardware validation, use Build #1813.
 
-### What is and is not proven
-PROVEN BY CI:
-- firmware builds successfully;
-- firmware artifact is generated and checksummed;
-- host validation passes;
-- Android debug APK builds and installer verification passes;
-- static Web UI contract passes;
-- browser navigation audit passes;
-- callback-driven browser runtime navigation audit passes;
-- Web UI preview workflow passes;
-- Wi-Fi stability checks pass.
+### Hardware test — Build #1813, 2026-08-21 evening
+- Firmware artifact `9455702180` was extracted to `C:\HomeGuard-S3-firmware (7)`.
+- Flash was fully erased on COM6 using esptool 5.3.1; erase completed successfully.
+- Full image was then written successfully at the established offsets:
+  - `0x0` bootloader;
+  - `0x8000` partition table;
+  - `0xF000` OTA data;
+  - `0x20000` `homeguard_s3.bin`.
+- Every flashed image reported `Hash of data verified`.
+- After boot, the controller successfully exposed provisioning AP `HomeGuard-S3-A711`; the Windows PC connected to it. This proves the firmware boots and the Wi-Fi provisioning path is alive.
+- Normal idle RGB after clean boot was OFF.
+- First physical RST/EN test: one short press was performed. Expected contract was a WHITE acknowledgement for 1500 ms. Actual result: **RGB did not light at all**.
+- Therefore physical RST/RGB hardware validation is **FAILED at step 1** despite green CI.
+- Do not proceed to a second/third RST step until the first-step failure is diagnosed; otherwise state may be ambiguous.
 
-NOT YET PROVEN ON HARDWARE:
-- physical RST/EN multi-step reset behavior on the actual ESP32-S3;
-- RGB indications as seen on the actual board;
-- complete PC Web UI behavior against the newly flashed device;
-- mobile UI/device test remains after desktop validation.
+### Current RST diagnosis from source
+- `hg_reset_sequence.cpp` only calls WHITE after `reset_press_detected(...)` accepts the boot as a physical reset.
+- The current detector accepts `ESP_RST_EXT`, or `ESP_RST_POWERON` only when an `RTC_NOINIT` marker survived the reset.
+- The source explicitly assumes this board's RST/EN button reports `POWERON` and that the RTC marker survives that reset.
+- Current hardware evidence is compatible with either: (a) that retention/reset-reason assumption is wrong on this board/reset path, or (b) WHITE was requested but the RGB write failed. These must be distinguished by boot log or an independent RGB diagnostic before changing product logic.
+- RGB driver is WS2812 via RMT on board GPIO48; previous project testing had already established that the onboard RGB can operate, so do not change the RGB pin blindly.
 
 ### Immediate next step
-1. Use `HomeGuard-S3-firmware` from Build #1813, artifact `9455702180`.
-2. Flash the ESP32-S3 using the established COM6 procedure and the artifact's flash layout/files.
-3. Test RST/RGB physically first and record the exact observed sequence.
-4. Continue the PC Web UI test from the last unfinished point; do not restart already-passed checks without reason.
-5. After desktop Web UI passes, proceed to mobile UI testing.
-6. Record every hardware result here with build/run/SHA before making another code change.
+1. Capture the boot log across one physical RST press and read the `hg_rst_sequence` reset-reason / acknowledgement messages.
+2. If the log shows the reset was not accepted, repair the physical-reset detector based on observed reset reason/retention behavior.
+3. If the log shows `Physical RST accepted` but no light, isolate the RGB/RMT path instead.
+4. Rebuild, obtain a new green firmware artifact, flash it, and repeat step 1 only.
+5. Continue PC Web UI testing only after the RST/RGB contract is physically proven.
 
 ### Hardware communication decision — valve nodes
 - For the planned distributed motorized water-valve control, do not buy/use the MCP2515 + TJA1050 SPI CAN module merely for this task; it is unnecessary complexity for the current architecture.
