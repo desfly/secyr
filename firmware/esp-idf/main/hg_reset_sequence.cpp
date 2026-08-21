@@ -11,6 +11,11 @@
 #include "freertos/task.h"
 #include "nvs.h"
 
+#ifndef HG_GIT_REVISION
+#define HG_GIT_REVISION "unknown"
+#endif
+
+#include <cstddef>
 #include <cstdint>
 
 namespace homeguard::idf {
@@ -153,13 +158,15 @@ esp_err_t load_firmware_signature(bool& valid, std::uint32_t& signature) {
     if (open_error == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
     if (open_error != ESP_OK) return open_error;
 
-    auto error = nvs_get_u32(handle, kFirmwareSignatureKey, &signature);
+    std::size_t size = sizeof(signature);
+    auto error = nvs_get_blob(handle, kFirmwareSignatureKey, &signature, &size);
     nvs_close(handle);
     if (error == ESP_ERR_NVS_NOT_FOUND) {
         signature = 0U;
         return ESP_OK;
     }
     if (error != ESP_OK) return error;
+    if (size != sizeof(signature)) return ESP_ERR_INVALID_SIZE;
     valid = true;
     return ESP_OK;
 }
@@ -168,7 +175,7 @@ esp_err_t store_firmware_signature(std::uint32_t signature) {
     nvs_handle_t handle{};
     auto error = nvs_open(kSequenceNamespace, NVS_READWRITE, &handle);
     if (error != ESP_OK) return error;
-    error = nvs_set_u32(handle, kFirmwareSignatureKey, signature);
+    error = nvs_set_blob(handle, kFirmwareSignatureKey, &signature, sizeof(signature));
     if (error == ESP_OK) error = nvs_commit(handle);
     nvs_close(handle);
     return error;
