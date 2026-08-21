@@ -21,7 +21,6 @@ This file is the project continuity log. Read it before changing code or re-solv
 ### Web UI repair
 - Working branch: `fix/setup-ui-clean-20260821`.
 - PR: #72, `Stabilize first-boot setup layout and enlarge status markers`.
-- Current verified head: `49770d80c2a73a9580156e673e180240ebb980dd`.
 - Base is the RST/RGB-fixed mainline commit `b83157e60311740be9db1e0797642511876b3e39`, so this branch contains both areas of work.
 - Removed the historical stack of conflicting 52/57/58/59vw setup overrides.
 - Replaced it with one deterministic responsive strategy.
@@ -35,34 +34,54 @@ This file is the project continuity log. Read it before changing code or re-solv
 - Important: this was not evidence of a functional hash-route bug. The failure was a CI/runtime-test timeout.
 - Exact symptom: old `tools/check_web_navigation_runtime.py` launched Chrome repeatedly for cold-load routes; the first `#overview` Chrome invocation timed out after 25 seconds.
 - Static `Web UI contract` had already passed in that run.
-- Resolution: navigation runtime audit was simplified to one Chromium document/session probe instead of spawning a fresh browser process for every route. It still checks real click/hash transitions, settings-page visibility, focus safety, unknown hashes, burst routing and same-hash clicks.
-- Do not return to the old multi-Chrome-per-route audit unless there is a demonstrated need.
+- First repair simplified the runtime audit to one Chromium document/session probe instead of spawning a fresh browser process for every route.
+- A later head (`bae564f`) exposed a second runner-dependent failure mode: even the single-document `--dump-dom` process could remain alive after the JavaScript probe had finished. Run `32450230077` failed twice on two different runners with the same 20-second `--dump-dom` timeout while the static Web UI contract passed both times.
+- Final repair commit: `3de92710b3c97c62ca709abe7c4436cc6eee143c` (`Make browser navigation audit callback-driven`).
+- The browser probe now posts PASS/FAIL back to the local Python test server; Python terminates Chromium explicitly after receiving the callback. This removes dependence on `--dump-dom` process exit while preserving real click/hash transitions, settings-page visibility, focus safety, unknown hashes, burst routing and same-hash clicks.
+- Do not return to multi-Chrome-per-route or dump-dom-exit-driven navigation testing unless there is demonstrated evidence that the callback probe is insufficient.
 
-### Verified green CI for head 49770d8
-All of the following completed successfully for `49770d80c2a73a9580156e673e180240ebb980dd`:
-- Setup UI Contract — run `32445179310`, run #42 — SUCCESS.
-- Web UI Preview — run `32445179165`, run #437 — SUCCESS.
-- Web Navigation Audit — run `32445179258`, run #31 — SUCCESS.
-- Web Navigation Runtime Audit — run `32445179244`, run #46 — SUCCESS.
-- HomeGuard Wi-Fi Stability — run `32445179303`, run #14 — SUCCESS.
-- HomeGuard-S3 Build — run `32445179174`, build/run #1811 — SUCCESS.
+### Verified green CI for current head 3de9271
+All of the following completed successfully for `3de92710b3c97c62ca709abe7c4436cc6eee143c`:
+- Web Navigation Runtime Audit — run `32506986002`, run #48 — SUCCESS.
+- Web UI Preview — run `32506986079`, run #439 — SUCCESS.
+- HomeGuard Wi-Fi Stability — run `32506986072`, run #16 — SUCCESS.
+- Web Navigation Audit — run `32506986165`, run #33 — SUCCESS.
+- Setup UI Contract — run `32506986128`, run #44 — SUCCESS.
+- HomeGuard-S3 Build — run `32506986156`, build/run #1813 — SUCCESS.
 
-### Firmware artifact ready for hardware test
-- Workflow run: `32445179174` / HomeGuard-S3 Build #1811.
-- Artifact: `HomeGuard-S3-firmware`.
-- Artifact ID: `9433858527`.
-- Artifact size: 9,934,277 bytes (ZIP archive size reported by GitHub Actions).
-- Artifact digest: `sha256:cd465247dcf1d236f968930914425a2e2e49d4e142fcaba60f2a3a5250dd36a4`.
-- Head branch: `fix/setup-ui-clean-20260821`.
-- Head SHA: `49770d80c2a73a9580156e673e180240ebb980dd`.
-- This is the current combined candidate containing the web UI work on top of the RST/RGB-fixed base.
+Build #1813 job results:
+- ESP-IDF 5.4.4 firmware — SUCCESS; firmware build, checksum generation and upload all passed.
+- Host validation — SUCCESS; project preflight, ESP-IDF/source/dependency/GPIO/security/factory-reset/partition/unit/Web/LAN/Android/cloud/browser/mock checks all passed.
+- Android debug APK — SUCCESS; policy tests, debug APK build, installer verification and artifact upload passed.
+
+### Current artifacts ready for hardware/device test
+From HomeGuard-S3 Build #1813 / workflow run `32506986156`, head `3de92710b3c97c62ca709abe7c4436cc6eee143c`:
+
+- Firmware artifact: `HomeGuard-S3-firmware`
+  - Artifact ID: `9455702180`
+  - ZIP size reported by GitHub: 9,934,270 bytes
+  - Digest: `sha256:3add738422e74a8806837c0ff5a0962fd869127f9bb88fcce604bbd6dbd909c8`
+- ESP-IDF diagnostics: `HomeGuard-S3-ESP-IDF-diagnostics`
+  - Artifact ID: `9455700967`
+  - Digest: `sha256:7899b55347d03e08d241516d1fdf62ba87f34b4c45a58628a4c2b66c2bc3161b`
+- Android artifact: `MyFist-Android`
+  - Artifact ID: `9455635792`
+  - Digest: `sha256:0106f20b3832e1cdeaf1749acc0d8e04630ce149a7094e16ff10e0b757c20434`
+- Host diagnostics: `HomeGuard-S3-host-diagnostics`
+  - Artifact ID: `9455625576`
+  - Digest: `sha256:77df9c9b4856645a5c44217673735fb52b32af87278a0020914106bcc7490c18`
+
+The older Build #1811 artifact remains historical evidence only. For the next hardware test, use Build #1813 because it corresponds to the current fully green head.
 
 ### What is and is not proven
 PROVEN BY CI:
 - firmware builds successfully;
+- firmware artifact is generated and checksummed;
+- host validation passes;
+- Android debug APK builds and installer verification passes;
 - static Web UI contract passes;
 - browser navigation audit passes;
-- browser runtime navigation audit passes;
+- callback-driven browser runtime navigation audit passes;
 - Web UI preview workflow passes;
 - Wi-Fi stability checks pass.
 
@@ -73,9 +92,9 @@ NOT YET PROVEN ON HARDWARE:
 - mobile UI/device test remains after desktop validation.
 
 ### Immediate next step
-1. Use the `HomeGuard-S3-firmware` artifact from Build #1811 / artifact `9433858527`.
+1. Use `HomeGuard-S3-firmware` from Build #1813, artifact `9455702180`.
 2. Flash the ESP32-S3 using the established COM6 procedure and the artifact's flash layout/files.
-3. Test RST/RGB physically first and record exact observed sequence.
+3. Test RST/RGB physically first and record the exact observed sequence.
 4. Continue the PC Web UI test from the last unfinished point; do not restart already-passed checks without reason.
 5. After desktop Web UI passes, proceed to mobile UI testing.
 6. Record every hardware result here with build/run/SHA before making another code change.
