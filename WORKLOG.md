@@ -12,11 +12,11 @@ This file is the project continuity log. Read it before changing code or re-solv
 
 ### Physical RST / RGB reset
 - The old GPIO21-based reset interpretation was removed/replaced by the physical RST/EN reset flow.
-- Mainline checkpoint containing the RST/RGB repair: `b83157e60311740be9db1e0797642511876b3e39`.
+- Mainline checkpoint containing the first RST/RGB repair: `b83157e60311740be9db1e0797642511876b3e39`.
 - Reset progress is preserved across RST/EN reboots so the multi-step physical sequence can be recognized.
 - RGB gives visible acknowledgement of accepted reset steps; the final erase/reset path has its own confirmation indication.
 - CI contains a guard so the obsolete GPIO21 reset logic is not accidentally restored.
-- Status: implemented in code; hardware validation is now in progress.
+- Hardware validation on 2026-08-21 disproved the original RTC-retention assumption; see the confirmed diagnosis/fix below.
 
 ### Web UI repair
 - Working branch: `fix/setup-ui-clean-20260821`.
@@ -40,7 +40,7 @@ This file is the project continuity log. Read it before changing code or re-solv
 - The browser probe now posts PASS/FAIL back to the local Python test server; Python terminates Chromium explicitly after receiving the callback. This removes dependence on `--dump-dom` process exit while preserving real click/hash transitions, settings-page visibility, focus safety, unknown hashes, burst routing and same-hash clicks.
 - Do not return to multi-Chrome-per-route or dump-dom-exit-driven navigation testing unless there is demonstrated evidence that the callback probe is insufficient.
 
-### Verified green CI for current code head 3de9271
+### Verified green CI for Build #1813 baseline
 All of the following completed successfully for `3de92710b3c97c62ca709abe7c4436cc6eee143c`:
 - Web Navigation Runtime Audit — run `32506986002`, run #48 — SUCCESS.
 - Web UI Preview — run `32506986079`, run #439 — SUCCESS.
@@ -54,8 +54,8 @@ Build #1813 job results:
 - Host validation — SUCCESS; project preflight, ESP-IDF/source/dependency/GPIO/security/factory-reset/partition/unit/Web/LAN/Android/cloud/browser/mock checks all passed.
 - Android debug APK — SUCCESS; policy tests, debug APK build, installer verification and artifact upload passed.
 
-### Current artifacts ready for hardware/device test
-From HomeGuard-S3 Build #1813 / workflow run `32506986156`, code head `3de92710b3c97c62ca709abe7c4436cc6eee143c`:
+### Build #1813 artifacts used for hardware test
+From workflow run `32506986156`, code head `3de92710b3c97c62ca709abe7c4436cc6eee143c`:
 
 - Firmware artifact: `HomeGuard-S3-firmware`
   - Artifact ID: `9455702180`
@@ -71,8 +71,6 @@ From HomeGuard-S3 Build #1813 / workflow run `32506986156`, code head `3de92710b
   - Artifact ID: `9455625576`
   - Digest: `sha256:77df9c9b4856645a5c44217673735fb52b32af87278a0020914106bcc7490c18`
 
-The older Build #1811 artifact remains historical evidence only. For hardware validation, use Build #1813.
-
 ### Hardware test — Build #1813, 2026-08-21 evening
 - Firmware artifact `9455702180` was extracted to `C:\HomeGuard-S3-firmware (7)`.
 - Flash was fully erased on COM6 using esptool 5.3.1; erase completed successfully.
@@ -85,22 +83,45 @@ The older Build #1811 artifact remains historical evidence only. For hardware va
 - After boot, the controller successfully exposed provisioning AP `HomeGuard-S3-A711`; the Windows PC connected to it. This proves the firmware boots and the Wi-Fi provisioning path is alive.
 - Normal idle RGB after clean boot was OFF.
 - First physical RST/EN test: one short press was performed. Expected contract was a WHITE acknowledgement for 1500 ms. Actual result: **RGB did not light at all**.
-- Therefore physical RST/RGB hardware validation is **FAILED at step 1** despite green CI.
-- Do not proceed to a second/third RST step until the first-step failure is diagnosed; otherwise state may be ambiguous.
+- Serial log was then captured on COM6 at 115200 and the physical RST was pressed once again for diagnosis.
 
-### Current RST diagnosis from source
-- `hg_reset_sequence.cpp` only calls WHITE after `reset_press_detected(...)` accepts the boot as a physical reset.
-- The current detector accepts `ESP_RST_EXT`, or `ESP_RST_POWERON` only when an `RTC_NOINIT` marker survived the reset.
-- The source explicitly assumes this board's RST/EN button reports `POWERON` and that the RTC marker survives that reset.
-- Current hardware evidence is compatible with either: (a) that retention/reset-reason assumption is wrong on this board/reset path, or (b) WHITE was requested but the RGB write failed. These must be distinguished by boot log or an independent RGB diagnostic before changing product logic.
-- RGB driver is WS2812 via RMT on board GPIO48; previous project testing had already established that the onboard RGB can operate, so do not change the RGB pin blindly.
+### Confirmed RST root cause from COM6 log
+- Initial boot after flashing reported ROM reset reason `rst:0x1 (POWERON)` and application log `Reset reason=1 is not a physical RST gesture step`.
+- After the user physically pressed RST/EN, ROM again reported exactly `rst:0x1 (POWERON)`.
+- On that post-button boot the application again logged `Reset reason=1 is not a physical RST gesture step`.
+- Therefore the WHITE command was never reached. The RGB driver was not the cause of this particular failure.
+- This proves the previous assumption was wrong on the real HW-678 path: `RTC_NOINIT` did not retain the marker across the board's EN reset in the way the detector required.
+- Important: on this hardware the firmware-visible reset reason does not distinguish a true power-on from the physical EN/RST button. Software cannot reconstruct that distinction after reset without an additional hardware signal.
+
+### RST detector repair after hardware evidence
+- Removed dependence on `RTC_NOINIT_ATTR` / `g_rst_boot_marker` from the physical RST detector.
+- Added a persistent NVS baseline marker in namespace `hg_rstseq`, key `boot_seen`.
+- First boot with fresh NVS establishes the baseline marker and is deliberately **not counted** as a reset gesture.
+- After that baseline exists, a `POWERON` reset can advance the physical RST sequence; `ESP_RST_EXT` remains accepted as well.
+- Accepted step behavior is unchanged: WHITE acknowledgement for 1500 ms, progress stored in NVS, abandoned progress cleared after the 5-second inter-step window.
+- Third accepted step remains: WHITE -> delay -> OFF -> stage Factory Reset -> reboot; successful erase remains RED for 5 seconds -> OFF -> reboot.
+- Unit test was updated to represent the persistent baseline instead of the disproved RTC-retention assumption.
+- CI contract now explicitly rejects regression to `RTC_NOINIT_ATTR`, `g_rst_boot_marker`, or `rtc_state_was_valid` and requires the NVS `boot_seen` path.
+- Relevant repair commits in sequence:
+  - `0a3269b` — reset helper semantics changed from RTC marker to persistent boot marker;
+  - `fa5d232` — runtime switched to NVS `boot_seen` baseline;
+  - `3430f43` — unit tests updated;
+  - `180c6d6` — CI reset/RGB contract updated to lock the hardware-proven model.
+
+### Safety limitation of the hardware-proven model
+- Because both real power-up and EN/RST present as `POWERON`, firmware alone cannot tell them apart on this board.
+- Consequently, after the baseline exists, **three rapid power cycles within the same inter-step timing rules are electrically indistinguishable from three rapid RST presses and can invoke Factory Reset**.
+- A normal single power cycle can at most become step 1 and is automatically cleared after the timeout; destructive reset still requires the full three-step gesture.
+- Eliminating this ambiguity completely would require a separate hardware-observable button signal or another retained/time source independent of the EN reset.
 
 ### Immediate next step
-1. Capture the boot log across one physical RST press and read the `hg_rst_sequence` reset-reason / acknowledgement messages.
-2. If the log shows the reset was not accepted, repair the physical-reset detector based on observed reset reason/retention behavior.
-3. If the log shows `Physical RST accepted` but no light, isolate the RGB/RMT path instead.
-4. Rebuild, obtain a new green firmware artifact, flash it, and repeat step 1 only.
-5. Continue PC Web UI testing only after the RST/RGB contract is physically proven.
+1. Wait for CI on the new RST fix head to become fully green.
+2. Use the newly generated firmware artifact, not Build #1813.
+3. Flash the ESP32-S3 on COM6 using the established four-image layout.
+4. Keep serial log open at 115200 and press physical RST once.
+5. Expected result: log `Physical RST accepted: WHITE acknowledgement, step 1/3` and visible WHITE for 1500 ms.
+6. Only after step 1 is physically proven, test step 2 and then the complete 3-step Factory Reset sequence.
+7. Continue PC Web UI testing after RST/RGB is physically proven.
 
 ### Hardware communication decision — valve nodes
 - For the planned distributed motorized water-valve control, do not buy/use the MCP2515 + TJA1050 SPI CAN module merely for this task; it is unnecessary complexity for the current architecture.
