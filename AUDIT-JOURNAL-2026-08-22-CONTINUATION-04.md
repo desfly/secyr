@@ -76,20 +76,36 @@ Conclusion for point 1:
 
 Note: the two final screenshots had slightly different overall screenshot/window heights, but the Web UI geometry itself matched after zoom reset.
 
-Physical three-step RST/EN factory-reset gesture is still a separate hardware validation item and is not marked PASS here.
+## Hardware/runtime validation — point 2 (2026-08-22)
+
+User executed the physical three-step RST/EN reset sequence on the real ESP32-S3 and supplied video `4378.mp4` plus post-reset screenshots.
+
+Observed:
+
+- each of the three short physical RST/EN presses produced a WHITE acknowledgement after reboot;
+- after the third accepted press the device entered the staged destructive-reset path and rebooted automatically;
+- a final approximately five-second RGB indication was visible before the clean reboot;
+- post-reset `192.168.55.253` timed out, confirming the previously stored infrastructure Wi-Fi configuration was erased;
+- the ESP AP `HomeGuard-S3-A711` remained available and `192.168.4.1` showed the clean `Первинне налаштування` first-boot screen again;
+- during the automatic reboot sequence Windows briefly attached to the ESP AP, lost it while the ESP rebooted, and the user then manually reconnected. This is consistent with the expected AP interruption across restart.
+
+Conclusion for point 2:
+
+**PASS for the physical RST/EN gesture and destructive factory-reset function.** The three-step sequence is recognized, reset state is erased, infrastructure Wi-Fi is removed, AP provisioning returns, and first-Admin setup is restored.
+
+One RGB defect remains open: the final approximately five-second success indication appears WHITE in the supplied video, while the contract/source requires RED for five seconds. Do not reopen the reset detection or factory-reset logic for this symptom; isolate the RGB success-color path specifically.
 
 ## Immediate next action
 
-1. Continue real-hardware validation from the physical RST/EN + RGB reset gesture.
-2. Verify three accepted reset steps and the WHITE acknowledgement behavior.
-3. Verify final destructive reset and RED 5-second success indication.
-4. After reset validation, continue the remaining PC Web UI flow and then mobile Web UI.
-5. If any hardware/runtime failure is found, fix it directly and record the exact symptom, commit and retest here.
+1. Isolate and fix the final factory-reset RED indication without changing the now hardware-validated three-step RST/EN logic.
+2. Retest only the final success color on real hardware.
+3. Then continue the remaining PC Web UI flow and mobile Web UI.
+4. Record each material fix, commit SHA and hardware retest result here before moving on.
 
 ## Resume rule for the next session
 
 1. Read this file first.
 2. Read the newest commits after the resume base above before assuming any item is still open.
 3. Check the latest `HomeGuard-S3 Build` status.
-4. Continue from hardware/runtime validation rather than reopening the old 19-Aug auth checklist.
-5. Record every material fix and the reason for it here or in the next continuation file before ending the session.
+4. Treat point 1 Web UI and point 2 physical factory reset as hardware-validated; do not reopen them unless a regression appears.
+5. Continue from the open final RED RGB defect, then PC/mobile Web UI validation.
