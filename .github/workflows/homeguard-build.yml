@@ -65,6 +65,31 @@ jobs:
           ctest --test-dir build-host --output-on-failure
       - name: Web UI contract
         run: python tools/check_web_ui_contract.py
+      - name: Setup UI source contract
+        run: python tools/check_setup_ui_contract.py
+      - name: Setup password-eye runtime smoke — desktop + mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/setup_eye_runtime_smoke.py --web web --port 8771 >/tmp/setup-eye-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:8771/api/v1/access/state >/dev/null; then break; fi
+            sleep 0.1
+          done
+
+          google-chrome --headless --no-sandbox --disable-gpu \
+            --window-size=1920,1080 --virtual-time-budget=7000 \
+            --dump-dom http://127.0.0.1:8771/ > /tmp/setup-eye-desktop.html
+          grep -q 'data-setup-eye-smoke="done"' /tmp/setup-eye-desktop.html
+          grep -q 'data-setup-eye-count="2"' /tmp/setup-eye-desktop.html
+
+          google-chrome --headless --no-sandbox --disable-gpu \
+            --window-size=390,844 --virtual-time-budget=7000 \
+            --dump-dom http://127.0.0.1:8771/ > /tmp/setup-eye-mobile.html
+          grep -q 'data-setup-eye-smoke="done"' /tmp/setup-eye-mobile.html
+          grep -q 'data-setup-eye-count="2"' /tmp/setup-eye-mobile.html
       - name: LAN UI/API contract
         run: python tools/check_lan_ui_contract.py
       - name: Android LAN discovery contract
