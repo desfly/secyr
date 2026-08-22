@@ -5,6 +5,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 source = (ROOT / "web" / "access-session.js").read_text(encoding="utf-8")
+embedded = (ROOT / "firmware" / "esp-idf" / "main" / "hg_web_http.cpp").read_text(encoding="utf-8")
 errors: list[str] = []
 
 
@@ -40,6 +41,18 @@ require('<select id="hgSetupWifiSsid"' not in source,
 require('id="hgSetupWifiSsid" type="text"' in source,
         "manual/hidden SSID fallback missing")
 
+# Hardware validation caught a regression where setup password fields had no
+# visibility control. The embedded suffix must attach compact eye buttons after
+# the dynamic setup form is inserted, without changing setup-card geometry.
+for required in (
+    'attachPasswordToggle("hgSetupWifiPassword", "hgSetupWifiPasswordToggle"',
+    'attachPasswordToggle("hgSetupPin", "hgSetupPinToggle"',
+    'password.style.paddingRight = "52px"',
+    'new MutationObserver(ensurePasswordToggles)',
+    'toggle.textContent = "👁"',
+):
+    require(required in embedded, f"setup password visibility regression: missing {required}")
+
 if errors:
     print("Setup UI contract FAIL", file=sys.stderr)
     for error in errors:
@@ -50,3 +63,4 @@ print("Setup UI contract PASS")
 print(" - desktop: wide two-column setup")
 print(" - mobile: single-column setup at <=720px")
 print(" - Wi-Fi scan: visible AP rows, no dropdown")
+print(" - setup passwords: compact visibility eye controls for Wi-Fi and Admin PIN")
