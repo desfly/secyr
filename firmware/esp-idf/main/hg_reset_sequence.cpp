@@ -13,6 +13,10 @@
 
 #include <cstdint>
 
+#ifndef HG_GIT_REVISION
+#define HG_GIT_REVISION "unknown"
+#endif
+
 namespace homeguard::idf {
 namespace {
 
@@ -23,7 +27,19 @@ constexpr std::uint8_t kPendingValue = 1U;
 constexpr const char* kSequenceNamespace = "hg_rstseq";
 constexpr const char* kSequenceCountKey = "count";
 constexpr const char* kBootMarkerKey = "boot_seen";
+constexpr const char* kFirmwareSignatureKey = "fw_sig";
 constexpr std::uint8_t kBootMarkerValue = 0xA5U;
+
+constexpr std::uint32_t firmware_signature(const char* text) noexcept {
+    std::uint32_t hash = 2166136261U;
+    while (*text != '\0') {
+        hash ^= static_cast<std::uint8_t>(*text++);
+        hash *= 16777619U;
+    }
+    return hash;
+}
+
+constexpr std::uint32_t kFirmwareSignature = firmware_signature(HG_GIT_REVISION);
 constexpr TickType_t kStepWhiteTicks = pdMS_TO_TICKS(hg::kFactoryResetStepWhiteMs);
 constexpr TickType_t kSequenceWindowTicks = pdMS_TO_TICKS(hg::kFactoryResetSequenceWindowMs);
 constexpr TickType_t kSuccessRedTicks = pdMS_TO_TICKS(hg::kFactoryResetSuccessRedMs);
@@ -114,6 +130,32 @@ esp_err_t store_boot_marker() {
     auto error = nvs_open(kSequenceNamespace, NVS_READWRITE, &handle);
     if (error != ESP_OK) return error;
     error = nvs_set_u8(handle, kBootMarkerKey, kBootMarkerValue);
+    if (error == ESP_OK) error = nvs_commit(handle);
+    nvs_close(handle);
+    return error;
+}
+
+esp_err_t load_firmware_signature(bool& matches) {
+    matches = false;
+    nvs_handle_t handle{};
+    const auto open_error = nvs_open(kSequenceNamespace, NVS_READONLY, &handle);
+    if (open_error == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (open_error != ESP_OK) return open_error;
+
+    std::uint32_t value = 0U;
+    auto error = nvs_get_u32(handle, kFirmwareSignatureKey, &value);
+    nvs_close(handle);
+    if (error == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (error != ESP_OK) return error;
+    matches = value == kFirmwareSignature;
+    return ESP_OK;
+}
+
+esp_err_t store_firmware_signature() {
+    nvs_handle_t handle{};
+    auto error = nvs_open(kSequenceNamespace, NVS_READWRITE, &handle);
+    if (error != ESP_OK) return error;
+    error = nvs_set_u32(handle, kFirmwareSignatureKey, kFirmwareSignature);
     if (error == ESP_OK) error = nvs_commit(handle);
     nvs_close(handle);
     return error;
@@ -220,6 +262,35 @@ bool handle_physical_rst_factory_reset() {
     const auto load_count_error = load_sequence_count(previous_count);
     if (load_count_error != ESP_OK) {
         ESP_LOGE(kTag, "Cannot load physical RST sequence: %s", esp_err_to_name(load_count_error));
+        return false;
+    }
+
+    // esptool ends a successful flash with an EN/RTS reset. HW-678 reports
+    // that reset as POWERON, exactly like the physical RST/EN button. Tie the
+    // reset detector baseline to the firmware revision so the first boot of a
+    // newly flashed build can never be counted as step 1/3 or light WHITE.
+    bool firmware_signature_matches = false;
+    const auto load_signature_error = load_firmware_signature(firmware_signature_matches);
+    if (load_signature_error != ESP_OK) {
+        ESP_LOGE(kTag, "Cannot load firmware reset signature: %s", esp_err_to_name(load_signature_error));
+        return false;
+    }
+    if (!firmware_signature_matches) {
+        const auto signature_error = store_firmware_signature();
+        const auto marker_error = store_boot_marker();
+        const auto clear_error = store_sequence_count(0U);
+        if (signature_error != ESP_OK || marker_error != ESP_OK || clear_error != ESP_OK) {
+            ESP_LOGE(kTag,
+                     "Cannot establish firmware-specific RST baseline: signature=%s marker=%s count=%s",
+                     esp_err_to_name(signature_error),
+                     esp_err_to_name(marker_error),
+                     esp_err_to_name(clear_error));
+            return false;
+        }
+        ESP_LOGI(kTag,
+                 "Firmware RST baseline established for %s; reset reason=%d is not counted and WHITE stays off",
+                 HG_GIT_REVISION,
+                 static_cast<int>(reason));
         return false;
     }
 
