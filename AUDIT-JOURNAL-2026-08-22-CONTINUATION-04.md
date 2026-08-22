@@ -37,15 +37,31 @@ Relevant protections already present in the tree:
 
 ## Finding on resume
 
-There is a CI integration gap at this exact recovery point.
+There was a CI integration gap at this exact recovery point.
 
-`tools/check_reset_rgb_contract.py` exists and enforces the physical RST/RGB contract, but `.github/workflows/homeguard-build.yml` does not invoke it in `host-gates`.
+`tools/check_reset_rgb_contract.py` existed and enforced the physical RST/RGB contract, but `.github/workflows/homeguard-build.yml` did not invoke it in `host-gates`.
 
-This means the latest commit message says the contract is gated against regression, but the main HomeGuard build does not currently execute that dedicated gate. Host unit tests cover the pure reset-sequence helper, but they do not replace the source-level contract check that forbids regression to GPIO21/service-button logic and verifies staging/LED ordering.
+This meant the latest reset commit said the contract was gated against regression, but the main HomeGuard build did not actually execute that dedicated gate. Host unit tests covered the pure reset-sequence helper, but they did not replace the source-level contract check that forbids regression to GPIO21/service-button logic and verifies staging/LED ordering.
+
+## Action completed on 2026-08-22
+
+Added a dedicated `Physical RST/RGB reset contract` step to the main `HomeGuard-S3 Build` / `Host validation` job:
+
+`python tools/check_reset_rgb_contract.py`
+
+Implementation commit:
+
+`a84f03a8ef78c9406265802fc2b16a00065b215d` — **ci: enforce physical RST RGB reset contract**
+
+The gate now runs immediately after `Factory reset coverage audit` and before the firmware-budget and host-unit-test stages.
+
+A direct local clone/run from the assistant execution container was not possible because that container had no DNS/network path to GitHub. This is not treated as test success; the authoritative result remains the GitHub Actions run for the current `main` head.
 
 ## Immediate next action
 
-Add `python tools/check_reset_rgb_contract.py` to the main `Host validation` job, adjacent to factory-reset coverage, then verify the resulting GitHub Actions run.
+1. Verify the latest `HomeGuard-S3 Build` run on the current `main` head.
+2. If the RST/RGB gate is green, continue from hardware/runtime validation rather than reopening the old 19-Aug auth checklist.
+3. If the gate fails, inspect the failing job/step and fix it directly, then record the fix here.
 
 ## Resume rule for the next session
 
