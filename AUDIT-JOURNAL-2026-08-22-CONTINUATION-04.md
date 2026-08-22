@@ -57,16 +57,39 @@ The gate now runs immediately after `Factory reset coverage audit` and before th
 
 A direct local clone/run from the assistant execution container was not possible because that container had no DNS/network path to GitHub. This is not treated as test success; the authoritative result remains the GitHub Actions run for the current `main` head.
 
+## Hardware/runtime validation — point 1 (2026-08-22)
+
+User tested the currently flashed ESP32-S3 on real hardware.
+
+Observed:
+
+- on power-up the RGB LED lights WHITE for approximately 2 seconds;
+- first-boot/setup Web UI is reachable through the ESP AP address `192.168.4.1`;
+- the same setup Web UI is also reachable through the infrastructure/STA address `192.168.55.253`;
+- Bruce background/image renders correctly on both paths;
+- the first comparison showed different apparent setup-card/font sizes between the two IPs;
+- after resetting Chrome zoom independently for both origins with `Ctrl+0` and forcing reload with `Ctrl+F5`, the setup-card geometry, fonts, inputs, buttons and Bruce layout matched visually.
+
+Conclusion for point 1:
+
+**PASS** for dual-path Web UI reachability/rendering (`192.168.4.1` + `192.168.55.253`). The apparent size mismatch was browser per-origin zoom state, not different firmware Web UI assets.
+
+Note: the two final screenshots had slightly different overall screenshot/window heights, but the Web UI geometry itself matched after zoom reset.
+
+Physical three-step RST/EN factory-reset gesture is still a separate hardware validation item and is not marked PASS here.
+
 ## Immediate next action
 
-1. Verify the latest `HomeGuard-S3 Build` run on the current `main` head.
-2. If the RST/RGB gate is green, continue from hardware/runtime validation rather than reopening the old 19-Aug auth checklist.
-3. If the gate fails, inspect the failing job/step and fix it directly, then record the fix here.
+1. Continue real-hardware validation from the physical RST/EN + RGB reset gesture.
+2. Verify three accepted reset steps and the WHITE acknowledgement behavior.
+3. Verify final destructive reset and RED 5-second success indication.
+4. After reset validation, continue the remaining PC Web UI flow and then mobile Web UI.
+5. If any hardware/runtime failure is found, fix it directly and record the exact symptom, commit and retest here.
 
 ## Resume rule for the next session
 
 1. Read this file first.
 2. Read the newest commits after the resume base above before assuming any item is still open.
 3. Check the latest `HomeGuard-S3 Build` status.
-4. If the RST/RGB CI gate is green, continue from hardware/runtime validation rather than reopening the old 19-Aug auth checklist.
+4. Continue from hardware/runtime validation rather than reopening the old 19-Aug auth checklist.
 5. Record every material fix and the reason for it here or in the next continuation file before ending the session.
