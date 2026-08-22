@@ -24,6 +24,11 @@ struct FactoryResetReport {
 
 class FactoryResetManager {
 public:
+    // Settings reset preserves access users and immutable factory/hardware
+    // identity while clearing user-owned controller/network/cloud setup.
+    [[nodiscard]] FactoryResetReport erase_settings_state() const;
+
+    // Full user factory reset additionally erases the access database.
     [[nodiscard]] FactoryResetReport erase_mutable_state() const;
 };
 

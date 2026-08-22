@@ -1,29 +1,30 @@
 #!/usr/bin/env python3
-"""Headless-browser regression gate for HomeGuard-S3 navigation.
+"""Single-browser regression gate for HomeGuard-S3 navigation.
 
-Checks both cold loads and in-document transitions. The latter is important for
-this UI because click handlers, hashchange listeners and the firmware-served JS
-suffix all react to the same route change. The invariant is simple: at most one
-sidebar anchor may own the blue ``active`` state, and every known route must end
-with exactly its own anchor active.
+The static contract already validates route names and DOM structure. This check
+therefore keeps Chromium focused on the behavior only: one live document, real
+clicks/hashchange events, visibility changes, focus safety, burst routing, and
+same-hash clicks. The browser reports the result back to the local test server;
+Python then terminates Chromium explicitly instead of waiting for --dump-dom to
+exit, which avoids runner-dependent hangs from long-lived page timers/network.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import re
+import queue
 import shutil
 import subprocess
 import tempfile
 import threading
 import time
-from html.parser import HTMLParser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
+RESULT_PATH = "/__homeguard_navigation_sequence_result"
 EXPECTED_ROUTES = (
     "#overview",
     "#zones-section",
@@ -38,40 +39,35 @@ EXPECTED_ROUTES = (
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
+    result_queue: queue.Queue[dict[str, object]] | None = None
+
     def log_message(self, fmt: str, *args: object) -> None:
         return
 
-
-class NavParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.in_nav = False
-        self.nav_depth = 0
-        self.anchors: list[tuple[str, set[str]]] = []
-        self.hidden_ids: set[str] = set()
-        self.ids: set[str] = set()
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        values = dict(attrs)
-        if tag == "nav":
-            self.in_nav = True
-            self.nav_depth = 1
+    def do_POST(self) -> None:
+        if self.path != RESULT_PATH:
+            self.send_error(404)
             return
-        if self.in_nav and tag == "a":
-            href = values.get("href") or ""
-            classes = set((values.get("class") or "").split())
-            self.anchors.append((href, classes))
-        element_id = values.get("id")
-        if element_id:
-            self.ids.add(element_id)
-            if "hidden" in values:
-                self.hidden_ids.add(element_id)
 
-    def handle_endtag(self, tag: str) -> None:
-        if self.in_nav and tag == "nav":
-            self.nav_depth -= 1
-            if self.nav_depth <= 0:
-                self.in_nav = False
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            self.send_error(400, "invalid probe result")
+            return
+
+        if not isinstance(payload, dict) or self.result_queue is None:
+            self.send_error(503, "probe result queue unavailable")
+            return
+
+        try:
+            self.result_queue.put_nowait(payload)
+        except queue.Full:
+            self.send_error(409, "probe result already received")
+            return
+
+        self.send_response(204)
+        self.end_headers()
 
 
 def find_chrome() -> str:
@@ -88,77 +84,95 @@ def find_chrome() -> str:
     raise RuntimeError("Chrome/Chromium executable not found")
 
 
-def dump_dom(chrome: str, url: str, budget_ms: int = 3500) -> str:
-    command = [
-        chrome,
-        "--headless",
-        "--no-sandbox",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        f"--virtual-time-budget={budget_ms}",
-        "--dump-dom",
-        url,
-    ]
-    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=25)
-    if result.returncode != 0:
-        raise RuntimeError(f"Chromium failed for {url}: {result.stderr[-1200:]}")
-    return result.stdout
-
-
-def parse_dom(dom: str) -> NavParser:
-    parser = NavParser()
-    parser.feed(dom)
-    return parser
-
-
-def assert_route(route: str, parsed: NavParser, errors: list[str]) -> None:
-    routes = [href for href, _ in parsed.anchors if href.startswith("#")]
-    active = [href for href, classes in parsed.anchors if "active" in classes]
-
-    if tuple(routes) != EXPECTED_ROUTES:
-        errors.append(f"{route}: runtime nav routes changed/reordered: {routes}")
-    if len(routes) != len(set(routes)):
-        errors.append(f"{route}: duplicate runtime hrefs: {routes}")
-    if active != [route]:
-        errors.append(f"{route}: expected exactly one active href {route}, got {active}")
-
-    if route == "#networkPage":
-        if "networkPage" in parsed.hidden_ids:
-            errors.append(f"{route}: networkPage remained hidden")
-        if "system" not in parsed.hidden_ids:
-            errors.append(f"{route}: system should be hidden")
-    elif route == "#system":
-        if "system" in parsed.hidden_ids:
-            errors.append(f"{route}: system remained hidden")
-        if "networkPage" not in parsed.hidden_ids:
-            errors.append(f"{route}: networkPage should be hidden")
-    else:
-        if "networkPage" not in parsed.hidden_ids or "system" not in parsed.hidden_ids:
-            errors.append(f"{route}: dashboard route leaked a hidden page")
-
-    target = route[1:]
-    if target not in parsed.ids and target != "overview":
-        errors.append(f"{route}: runtime target id missing: {target}")
+def run_browser_probe(
+    chrome: str,
+    url: str,
+    result_queue: queue.Queue[dict[str, object]],
+    timeout_seconds: float = 20.0,
+) -> dict[str, object]:
+    with tempfile.TemporaryDirectory(prefix="homeguard-nav-chrome-") as profile_dir:
+        command = [
+            chrome,
+            "--headless",
+            "--no-sandbox",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--disable-background-networking",
+            "--disable-component-update",
+            "--disable-default-apps",
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "--no-first-run",
+            f"--user-data-dir={profile_dir}",
+            url,
+        ]
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        try:
+            deadline = time.monotonic() + timeout_seconds
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    raise RuntimeError(
+                        f"Chromium exited with code {process.returncode} before reporting the probe result"
+                    )
+                try:
+                    return result_queue.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+            raise RuntimeError(
+                f"browser probe callback timed out after {timeout_seconds:.0f} seconds"
+            )
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=3)
 
 
 def sequence_probe_html(index_html: str) -> str:
     routes_json = json.dumps(EXPECTED_ROUTES)
+    result_path_json = json.dumps(RESULT_PATH)
     probe = f"""
 <script id="homeguard-nav-sequence-probe">
 (async () => {{
   const routes = {routes_json};
+  const resultPath = {result_path_json};
   const failures = [];
-  const wait = (ms = 45) => new Promise(resolve => setTimeout(resolve, ms));
+  const wait = (ms = 55) => new Promise(resolve => setTimeout(resolve, ms));
   const activeHrefs = () => [...document.querySelectorAll('.sidebar nav a.active')].map(a => a.getAttribute('href'));
+  const hidden = id => {{
+    const el = document.getElementById(id);
+    return !el || el.hidden || getComputedStyle(el).display === 'none';
+  }};
   const check = (route, phase) => {{
     const active = activeHrefs();
     if (active.length !== 1 || active[0] !== route) failures.push(`${{phase}}:${{route}} active=${{JSON.stringify(active)}}`);
+
     const group = document.querySelector('.nav-group-label');
     if (!group || group.matches('a') || group.classList.contains('active')) failures.push(`${{phase}}:${{route}} settings-group-active`);
+
+    if (route === '#networkPage') {{
+      if (hidden('networkPage')) failures.push(`${{phase}}:${{route}} network-hidden`);
+      if (!hidden('system')) failures.push(`${{phase}}:${{route}} system-visible`);
+    }} else if (route === '#system') {{
+      if (hidden('system')) failures.push(`${{phase}}:${{route}} system-hidden`);
+      if (!hidden('networkPage')) failures.push(`${{phase}}:${{route}} network-visible`);
+    }} else {{
+      if (!hidden('networkPage') || !hidden('system')) failures.push(`${{phase}}:${{route}} settings-page-leak`);
+    }}
   }};
 
-  await wait(80);
-  // Real click path: bindNavigation() prevents default and changes location.hash.
+  await wait(100);
+  check(window.location.hash || '#overview', 'cold');
+
+  // Real user path: click each sidebar item in one live document.
   for (const route of routes) {{
     const link = document.querySelector(`.sidebar nav a[href="${{route}}"]`);
     if (!link) {{ failures.push(`click:${{route}} missing-link`); continue; }}
@@ -167,7 +181,7 @@ def sequence_probe_html(index_html: str) -> str:
     check(route, 'click');
   }}
 
-  // Focus must never mutate the authoritative active class.
+  // Focus must never steal the authoritative active state.
   const current = window.location.hash || '#overview';
   for (const link of document.querySelectorAll('.sidebar nav a')) {{
     link.focus();
@@ -175,24 +189,44 @@ def sequence_probe_html(index_html: str) -> str:
     check(current, 'focus');
   }}
 
-  // Burst routing catches stale callbacks / competing hashchange controllers.
+  // Unknown hashes may select no item, but may never create double-active.
+  window.location.hash = '#unknown-route';
+  await wait();
+  const unknownActive = activeHrefs();
+  if (unknownActive.length > 1) failures.push(`unknown active=${{JSON.stringify(unknownActive)}}`);
+
+  // Burst routing catches competing/stale hashchange controllers.
   window.location.hash = '#zones-section';
   window.location.hash = '#ioState';
   window.location.hash = '#networkPage';
   window.location.hash = '#system';
-  await wait(120);
+  await wait(140);
   check('#system', 'burst');
 
-  // Same-hash click takes the explicit routeFromHash() branch in bindNavigation.
+  // Same-hash click exercises the explicit same-route branch.
   const systemLink = document.querySelector('.sidebar nav a[href="#system"]');
-  if (systemLink) {{ systemLink.click(); await wait(); check('#system', 'same-hash-click'); }}
+  if (!systemLink) {{
+    failures.push('same-hash-click:#system missing-link');
+  }} else {{
+    systemLink.click();
+    await wait();
+    check('#system', 'same-hash-click');
+  }}
 
+  const result = failures.length ? 'FAIL' : 'PASS';
   const marker = document.createElement('div');
   marker.id = 'homeguard-nav-sequence-result';
   marker.hidden = true;
-  marker.dataset.result = failures.length ? 'FAIL' : 'PASS';
+  marker.dataset.result = result;
   marker.dataset.failures = failures.join('|');
   document.body.appendChild(marker);
+
+  await fetch(resultPath, {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{result, failures}}),
+    keepalive: true,
+  }});
 }})();
 </script>
 """
@@ -201,27 +235,34 @@ def sequence_probe_html(index_html: str) -> str:
     return index_html.replace("</body>", probe + "\n</body>", 1)
 
 
-def run_sequence_probe(chrome: str, web_root: Path, base: str, errors: list[str]) -> None:
+def run_sequence_probe(
+    chrome: str,
+    web_root: Path,
+    base: str,
+    result_queue: queue.Queue[dict[str, object]],
+) -> list[str]:
     probe_name = "__homeguard_navigation_sequence_probe.html"
     probe_path = web_root / probe_name
+    errors: list[str] = []
     try:
-        probe_path.write_text(sequence_probe_html((web_root / "index.html").read_text(encoding="utf-8")), encoding="utf-8")
-        dom = dump_dom(chrome, base + probe_name + "#overview", budget_ms=6500)
-        marker = re.search(
-            r'id="homeguard-nav-sequence-result"[^>]*data-result="([^"]+)"[^>]*data-failures="([^"]*)"',
-            dom,
-        )
-        if not marker:
-            errors.append("transition probe did not complete in Chromium")
-        elif marker.group(1) != "PASS":
-            errors.append(f"transition probe failed: {marker.group(2)}")
+        index_html = (web_root / "index.html").read_text(encoding="utf-8")
+        probe_path.write_text(sequence_probe_html(index_html), encoding="utf-8")
+        payload = run_browser_probe(chrome, base + probe_name + "#overview", result_queue)
+
+        result = payload.get("result")
+        failures = payload.get("failures")
+        if result not in {"PASS", "FAIL"} or not isinstance(failures, list):
+            errors.append(f"browser transition probe returned malformed result: {payload!r}")
+        elif result != "PASS":
+            errors.extend(str(failure) for failure in failures if failure)
     except Exception as exc:
-        errors.append(f"transition probe browser audit failed: {exc}")
+        errors.append(f"browser audit failed: {exc}")
     finally:
         try:
             probe_path.unlink()
         except FileNotFoundError:
             pass
+    return errors
 
 
 def main() -> int:
@@ -238,32 +279,19 @@ def main() -> int:
             return 1
 
     chrome = find_chrome()
+    result_queue: queue.Queue[dict[str, object]] = queue.Queue(maxsize=1)
+    QuietHandler.result_queue = result_queue
     handler = lambda *a, **kw: QuietHandler(*a, directory=str(web_root), **kw)
     server = ThreadingHTTPServer((args.host, args.port), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.2)
 
-    errors: list[str] = []
     try:
         base = f"http://{args.host}:{args.port}/"
-        for route in EXPECTED_ROUTES:
-            try:
-                assert_route(route, parse_dom(dump_dom(chrome, base + route)), errors)
-            except Exception as exc:
-                errors.append(f"{route}: browser audit failed: {exc}")
-
-        # Unknown hashes may select no item, but can never create a double-active state.
-        try:
-            unknown = parse_dom(dump_dom(chrome, base + "#unknown-route"))
-            unknown_active = [href for href, classes in unknown.anchors if "active" in classes]
-            if len(unknown_active) > 1:
-                errors.append(f"unknown route produced multiple active items: {unknown_active}")
-        except Exception as exc:
-            errors.append(f"unknown route browser audit failed: {exc}")
-
-        run_sequence_probe(chrome, web_root, base, errors)
+        errors = run_sequence_probe(chrome, web_root, base, result_queue)
     finally:
+        QuietHandler.result_queue = None
         server.shutdown()
         server.server_close()
 
@@ -274,12 +302,12 @@ def main() -> int:
         return 1
 
     print("Web navigation runtime audit PASS")
-    print(f" - browser-rendered cold-load hash routes checked: {len(EXPECTED_ROUTES)}")
-    print(" - click + hashchange transitions checked in one live document")
-    print(" - rapid hash burst and same-hash click are race-safe")
+    print(f" - real click/hash routes checked in one browser document: {len(EXPECTED_ROUTES)}")
+    print(" - settings page visibility checked after every route")
     print(" - focus cannot mutate the single active navigation owner")
-    print(" - unique hrefs + target visibility verified at runtime")
     print(" - unknown hash cannot create a double-active state")
+    print(" - rapid hash burst and same-hash click are race-safe")
+    print(" - browser reports completion by local callback; no dump-dom exit dependency")
     return 0
 
 

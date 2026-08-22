@@ -1,10 +1,17 @@
 name: Web UI Preview
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "tools/webui_preview_server.py"
+      - ".github/workflows/webui-preview.yml"
   push:
     branches: [main]
     paths:
       - "web/**"
+      - "tools/webui_preview_server.py"
       - ".github/workflows/webui-preview.yml"
   workflow_dispatch:
 
@@ -13,26 +20,35 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - name: Render real Web UI
+      - name: Render first-boot setup UI
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m http.server 8765 --directory web >/tmp/webui-preview.log 2>&1 &
+          python3 tools/webui_preview_server.py 8765 >/tmp/webui-preview.log 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
           for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:8765/ >/dev/null; then break; fi
+            if curl -fsS http://127.0.0.1:8765/api/v1/access/state >/dev/null; then break; fi
             sleep 0.2
           done
-          google-chrome --headless --no-sandbox --disable-gpu \
-            --hide-scrollbars --window-size=1600,1200 \
-            --virtual-time-budget=4000 \
-            --screenshot=HomeGuard-S3-WebUI.png \
-            http://127.0.0.1:8765/
-          test -s HomeGuard-S3-WebUI.png
-      - name: Upload Web UI screenshot
+
+          render() {
+            local size="$1"
+            local file="$2"
+            google-chrome --headless --no-sandbox --disable-gpu \
+              --hide-scrollbars --window-size="$size" \
+              --virtual-time-budget=5000 \
+              --screenshot="$file" \
+              http://127.0.0.1:8765/
+            test -s "$file"
+          }
+
+          render 1600,1200 HomeGuard-S3-WebUI-1600x1200.png
+          render 1200,900  HomeGuard-S3-WebUI-1200x900.png
+          render 800,1000  HomeGuard-S3-WebUI-800x1000.png
+      - name: Upload Web UI screenshots
         uses: actions/upload-artifact@v4
         with:
           name: HomeGuard-S3-WebUI-preview
-          path: HomeGuard-S3-WebUI.png
+          path: HomeGuard-S3-WebUI-*.png
           if-no-files-found: error

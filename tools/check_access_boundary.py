@@ -181,49 +181,62 @@ if "FactoryResetManager{}.erase_mutable_state()" in system_http:
     errors.append("hg_system_http.cpp must not erase mutable state in live HTTP runtime")
 
 # Physical RST/EN is a security boundary because it authorizes destructive reset
-# without a network session. Keep the boot path staged and fail-closed.
+# without a network session. HW-678 reports EN/RST as POWERON and does not retain
+# RTC_NOINIT, so keep the persistent NVS baseline. Three steps are settings-only;
+# full user factory reset requires five steps.
 reset = (MAIN / "hg_reset_sequence.cpp").read_text(encoding="utf-8")
 for snippet in (
     "handle_physical_rst_factory_reset()",
-    "RTC_NOINIT_ATTR",
+    'kSequenceNamespace = "hg_rstseq"',
+    'kBootMarkerKey = "boot_seen"',
+    "load_boot_marker(boot_marker_was_valid)",
+    "store_boot_marker()",
     "esp_reset_reason()",
     "ESP_RST_POWERON",
     "hg::reset_press_detected(",
     "hg::advance_reset_sequence(",
-    'kSequenceNamespace = "hg_rstseq"',
     "RgbDiagnostic::set_white(board::kOnboardRgb)",
+    "PendingReset::Settings",
+    "FactoryResetManager{}.erase_settings_state()",
     "stage_factory_reset_request()",
     "FactoryResetManager{}.erase_mutable_state()",
     "set_pending_reset(false)",
     "RgbDiagnostic::set_red(board::kOnboardRgb)",
-    "vTaskDelay(kSuccessRedTicks)",
+    "vTaskDelay(kSettingsSuccessWhiteTicks)",
+    "vTaskDelay(kFactorySuccessRedTicks)",
 ):
     if snippet not in reset:
         errors.append(f"hg_reset_sequence.cpp missing physical RST security contract: {snippet}")
 
+for stale in ("RTC_NOINIT_ATTR", "g_rst_boot_marker", "rtc_state_was_valid"):
+    if stale in reset:
+        errors.append(f"hg_reset_sequence.cpp must not rely on disproved RTC reset retention: {stale}")
+
 if "board::kServiceButton" in reset or "gpio_get_level(" in reset or "service_button_reset_task" in reset:
     errors.append("hg_reset_sequence.cpp must not substitute GPIO21/service-button logic for physical RST/EN")
 
-if reset.find("set_pending_reset(false)") < reset.find("FactoryResetManager{}.erase_mutable_state()"):
-    errors.append("hg_reset_sequence.cpp must keep factory-reset pending until erase succeeds")
-
-white = reset.find("RgbDiagnostic::set_white(board::kOnboardRgb)")
+white = reset.find("RgbDiagnostic::set_white(board::kOnboardRgb)", reset.find("handle_physical_rst_factory_reset()"))
 persist = reset.find("store_sequence_count(step.count)", white)
 if white < 0 or persist < 0 or white > persist:
     errors.append("physical RST sequence must show WHITE acknowledgement before persisting a step")
 
-third = reset.find('Physical RST accepted: WHITE acknowledgement, step 3/3')
-stage = reset.find("stage_factory_reset_request()", third)
-restart = reset.find("esp_restart();", stage)
-if min(third, stage, restart) < 0 or not (third < stage < restart):
-    errors.append("third physical RST must stage Factory Reset before reboot")
+if "step 3/5; Settings Reset armed if sequence stops here" not in reset:
+    errors.append("third physical RST must arm delayed settings-only reset")
+if "factory extension timed out after step 4/5; no reset performed" not in reset:
+    errors.append("fourth physical RST without a fifth must time out without destructive reset")
 
-erase = reset.find("FactoryResetManager{}.erase_mutable_state()")
-consume = reset.find("set_pending_reset(false)", erase)
+fifth = reset.find("step 5/5; full Factory Reset selected")
+stage = reset.find("stage_factory_reset_request()", fifth)
+restart = reset.find("esp_restart();", stage)
+if min(fifth, stage, restart) < 0 or not (fifth < stage < restart):
+    errors.append("fifth physical RST must stage full Factory Reset before reboot")
+
+factory_erase = reset.find("FactoryResetManager{}.erase_mutable_state()")
+consume = reset.find("set_pending_reset(false)", factory_erase)
 red = reset.find("RgbDiagnostic::set_red(board::kOnboardRgb)", consume)
-red_delay = reset.find("vTaskDelay(kSuccessRedTicks)", red)
-if min(erase, consume, red, red_delay) < 0 or not (erase < consume < red < red_delay):
-    errors.append("successful Factory Reset must erase, consume pending, then confirm RED for 5 seconds")
+red_delay = reset.find("vTaskDelay(kFactorySuccessRedTicks)", red)
+if min(factory_erase, consume, red, red_delay) < 0 or not (factory_erase < consume < red < red_delay):
+    errors.append("successful full Factory Reset must erase, consume pending, then confirm RED for 5 seconds")
 
 require(WEB / "access-session.js", [
     "hg-auth-locked", "/api/v1/access/state", "/api/v1/access/login",
@@ -260,4 +273,4 @@ print("Access boundary security audit PASS")
 print(" - login is the only acting-user PIN verification step")
 print(" - protected mutations require actor-bound Bearer + role RBAC")
 print(" - Wi-Fi candidate commit is actor-bound, transactional, and verified by associated SSID")
-print(" - destructive physical reset remains RST/EN-only, staged, and RGB-confirmed")
+print(" - physical RST reset is staged: 3-step settings-only, 5-step full factory")

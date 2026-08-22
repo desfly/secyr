@@ -4,37 +4,70 @@
 
 namespace hg {
 
-// Approved HomeGuard-S3 physical RST/EN factory-reset contract.
-inline constexpr std::uint8_t kFactoryResetRequiredRstPresses = 3U;
+// Approved HomeGuard-S3 physical RST/EN reset contract.
+//  - 3 rapid accepted RST steps arm a settings-only reset after the inter-step
+//    window expires. Users and immutable factory/hardware identity are kept.
+//  - Continuing to 5 rapid accepted RST steps performs the full user factory
+//    reset, including the access database.
+inline constexpr std::uint8_t kSettingsResetRequiredRstPresses = 3U;
+inline constexpr std::uint8_t kFactoryResetRequiredRstPresses = 5U;
 inline constexpr std::uint32_t kFactoryResetStepWhiteMs = 1500U;
 inline constexpr std::uint32_t kFactoryResetSequenceWindowMs = 5000U;
+inline constexpr std::uint32_t kSettingsResetSuccessWhiteMs = 5000U;
 inline constexpr std::uint32_t kFactoryResetSuccessRedMs = 5000U;
 
 struct ResetSequenceStep {
     std::uint8_t count{0};
+    bool arm_settings_reset{false};
     bool trigger_factory_reset{false};
 };
 
-// On this board the physical RST/EN button is reported by ESP-IDF as POWERON.
-// RTC_NOINIT state survives that reset but not a true cold power-up, so POWERON
-// counts only when the RTC marker was already valid before this boot.
+// Stable compile-time signature for the firmware revision used to suppress the
+// automatic RTS/EN reset that follows flashing or OTA. The first boot of a new
+// firmware revision refreshes the baseline and is never counted as an RST step.
+constexpr std::uint32_t reset_firmware_signature(const char* revision) noexcept {
+    std::uint32_t hash = 2166136261U;
+    if (revision == nullptr) return hash;
+    while (*revision != '\0') {
+        hash ^= static_cast<std::uint8_t>(*revision);
+        hash *= 16777619U;
+        ++revision;
+    }
+    return hash;
+}
+
+constexpr bool firmware_baseline_changed(
+    bool stored_signature_valid,
+    std::uint32_t stored_signature,
+    std::uint32_t current_signature) noexcept {
+    return !stored_signature_valid || stored_signature != current_signature;
+}
+
+// Hardware evidence from HW-678 shows that the physical RST/EN button is
+// reported as POWERON and that RTC_NOINIT does not survive that reset. A small
+// persistent boot marker is therefore used as the baseline: the very first
+// POWERON without a marker is not a gesture step; later POWERON resets can be.
 constexpr bool reset_press_detected(
-    bool rtc_state_was_valid,
+    bool boot_marker_was_valid,
     bool external_rst,
     bool poweron_rst) noexcept {
-    return external_rst || (poweron_rst && rtc_state_was_valid);
+    return external_rst || (poweron_rst && boot_marker_was_valid);
 }
 
 constexpr ResetSequenceStep advance_reset_sequence(
     std::uint8_t previous_count,
     bool physical_rst,
-    std::uint8_t required_presses = kFactoryResetRequiredRstPresses) noexcept {
-    if (!physical_rst || required_presses == 0U) return {0U, false};
+    std::uint8_t settings_presses = kSettingsResetRequiredRstPresses,
+    std::uint8_t factory_presses = kFactoryResetRequiredRstPresses) noexcept {
+    if (!physical_rst || settings_presses == 0U || factory_presses <= settings_presses) {
+        return {0U, false, false};
+    }
 
     const auto next = static_cast<std::uint8_t>(
         previous_count == 0xffU ? 0xffU : previous_count + 1U);
-    if (next >= required_presses) return {0U, true};
-    return {next, false};
+
+    if (next >= factory_presses) return {0U, false, true};
+    return {next, next == settings_presses, false};
 }
 
 // Generic confirmed-hold helpers are still shared by the isolated NVS-recovery

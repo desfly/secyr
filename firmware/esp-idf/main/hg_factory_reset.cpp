@@ -21,17 +21,11 @@ esp_err_t erase_namespace(const char* name) {
     return error;
 }
 
-}  // namespace
-
-FactoryResetReport FactoryResetManager::erase_mutable_state() const {
+FactoryResetReport erase_settings_namespaces() {
     FactoryResetReport report{};
 
-    report.access = erase_namespace("hg_access");
-
-    // Destructive factory reset is intentionally executed during early boot,
-    // before NetworkHttp initializes the Wi-Fi driver. HomeGuard credentials in
-    // hg_wifi are authoritative; esp_wifi_restore() remains best-effort because
-    // calling it before esp_wifi_init() may legitimately report invalid state.
+    // HomeGuard credentials in hg_wifi are authoritative. The reset runs
+    // during early boot before Wi-Fi init; esp_wifi_restore() is best-effort.
     report.wifi = erase_namespace("hg_wifi");
     if (report.wifi == ESP_OK) {
         (void)esp_wifi_restore();
@@ -41,10 +35,22 @@ FactoryResetReport FactoryResetManager::erase_mutable_state() const {
     report.controller_config = erase_namespace("hg-config");
     report.provisioning = erase_namespace("hg-provision");
 
-    // Preserve immutable hardware verification and factory identity; erase only
+    // Preserve immutable hardware verification/factory identity; erase only
     // user-owned commissioning progress.
     report.commissioning = CommissioningNvsStore{}.erase_commissioning_state();
+    return report;
+}
 
+}  // namespace
+
+FactoryResetReport FactoryResetManager::erase_settings_state() const {
+    // access remains ESP_OK and hg_access is deliberately untouched.
+    return erase_settings_namespaces();
+}
+
+FactoryResetReport FactoryResetManager::erase_mutable_state() const {
+    auto report = erase_settings_namespaces();
+    report.access = erase_namespace("hg_access");
     return report;
 }
 

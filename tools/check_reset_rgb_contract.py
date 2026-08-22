@@ -11,19 +11,22 @@ header = HEADER.read_text(encoding="utf-8")
 rgb_driver = RGB_DRIVER.read_text(encoding="utf-8")
 errors = []
 
-# Approved HomeGuard-S3 reset contract: physical RST/EN only, three accepted
-# steps, WHITE acknowledgement for each step, successful Factory Reset -> RED
-# for five seconds -> OFF -> reboot.
+# Approved HomeGuard-S3 physical RST/EN contract:
+# 3 accepted steps + no continuation -> settings reset, users preserved, WHITE
+# 5 accepted steps -> full user factory reset, RED.
 for expected in (
-    "kFactoryResetRequiredRstPresses = 3U",
+    "kSettingsResetRequiredRstPresses = 3U",
+    "kFactoryResetRequiredRstPresses = 5U",
     "kFactoryResetStepWhiteMs = 1500U",
     "kFactoryResetSequenceWindowMs = 5000U",
+    "kSettingsResetSuccessWhiteMs = 5000U",
     "kFactoryResetSuccessRedMs = 5000U",
+    "reset_firmware_signature(",
+    "firmware_baseline_changed(",
 ):
     if expected not in header:
         errors.append(f"physical RST contract changed: missing {expected}")
 
-# GPIO21/service-button substitution is specifically forbidden in this path.
 for forbidden in (
     "board::kServiceButton",
     "service_button_pressed",
@@ -33,66 +36,96 @@ for forbidden in (
     if forbidden in runtime:
         errors.append(f"physical RST path regressed to GPIO service button: {forbidden}")
 
-# Physical RST/EN on this board is reported as POWERON. RTC_NOINIT proves that
-# POWERON came after a live boot, so a true cold power-up cannot count as step 1.
+# Hardware validation proved HW-678 RST/EN is POWERON and RTC_NOINIT does not
+# survive it. Keep the persistent NVS baseline and reject the old RTC approach.
+for forbidden in ("RTC_NOINIT_ATTR", "g_rst_boot_marker", "rtc_state_was_valid"):
+    if forbidden in runtime:
+        errors.append(f"physical RST detector regressed to invalid RTC assumption: {forbidden}")
+
 for required in (
-    "RTC_NOINIT_ATTR",
-    "g_rst_boot_marker",
+    'kSequenceNamespace = "hg_rstseq"',
+    'kBootMarkerKey = "boot_seen"',
+    'kFirmwareSignatureKey = "fw_sig"',
+    "kCurrentFirmwareSignature = hg::reset_firmware_signature(HG_GIT_REVISION)",
+    "load_boot_marker(boot_marker_was_valid)",
+    "store_boot_marker()",
+    "load_firmware_signature(",
+    "store_firmware_signature(kCurrentFirmwareSignature)",
+    "hg::firmware_baseline_changed(",
+    "Firmware RST baseline refreshed",
     "esp_reset_reason()",
     "ESP_RST_EXT",
     "ESP_RST_POWERON",
     "hg::reset_press_detected(",
-    "rtc_state_was_valid",
-):
-    if required not in runtime:
-        errors.append(f"physical RST detector incomplete: missing {required}")
-
-# Progress must persist across the reset itself, but an abandoned sequence must
-# expire. This is what lets the hardware RST/EN button be used safely.
-for required in (
-    'kSequenceNamespace = "hg_rstseq"',
+    "Persistent RST boot baseline established",
     "load_sequence_count(previous_count)",
     "store_sequence_count(step.count)",
     "step_feedback_and_timeout_task",
-    "store_sequence_count(0U)",
 ):
     if required not in runtime:
-        errors.append(f"physical RST sequence persistence/timeout missing: {required}")
+        errors.append(f"persistent physical RST detector incomplete: missing {required}")
 
-# WHITE must be successfully shown before a non-final step is persisted. If the
-# RGB driver fails, the sequence is cancelled instead of silently counting it.
-white = runtime.find("RgbDiagnostic::set_white(board::kOnboardRgb)")
+# Flash/OTA ends in a hardware reset that can look exactly like physical EN on
+# HW-678. A changed firmware revision must refresh the baseline before any WHITE
+# acknowledgement and must clear abandoned sequence progress.
+handler = runtime.find("bool handle_physical_rst_factory_reset()")
+firmware_check = runtime.find("hg::firmware_baseline_changed(", handler)
+firmware_store = runtime.find("store_firmware_signature(kCurrentFirmwareSignature)", firmware_check)
+firmware_clear = runtime.find("store_sequence_count(0U)", firmware_store)
+firmware_log = runtime.find("Firmware RST baseline refreshed", firmware_store)
+physical_white = runtime.find("RgbDiagnostic::set_white(board::kOnboardRgb)", handler)
+if min(handler, firmware_check, firmware_store, firmware_clear, firmware_log, physical_white) < 0 or not (
+    handler < firmware_check < firmware_store < firmware_clear < firmware_log < physical_white
+):
+    errors.append("new firmware baseline must refresh/clear before any physical-RST WHITE acknowledgement")
+
+# Every accepted step must visibly acknowledge WHITE before its progress is
+# committed. An RGB failure cancels the sequence.
+white = physical_white
 white_error = runtime.find("Cannot show WHITE physical-RST acknowledgement", white)
 persist = runtime.find("store_sequence_count(step.count)", white)
-if min(white, white_error, persist) < 0:
-    errors.append("WHITE RST-step acknowledgement path is incomplete")
-elif not (white < white_error < persist):
-    errors.append("physical RST step may persist only after WHITE acknowledgement succeeds")
+if min(white, white_error, persist) < 0 or not (white < white_error < persist):
+    errors.append("physical RST step must show WHITE successfully before persistence")
 
-# The third accepted step must also acknowledge WHITE, then stage destructive
-# work for the next safe early boot rather than erasing live runtime state.
-third = runtime.find('Physical RST accepted: WHITE acknowledgement, step 3/3')
-third_delay = runtime.find("vTaskDelay(kStepWhiteTicks);", third)
-third_off = runtime.find("RgbDiagnostic::off(board::kOnboardRgb)", third_delay)
-stage = runtime.find("stage_factory_reset_request()", third_off)
-third_restart = runtime.find("esp_restart();", stage)
-if min(third, third_delay, third_off, stage, third_restart) < 0:
-    errors.append("third physical RST staging path is incomplete")
-elif not (third < third_delay < third_off < stage < third_restart):
-    errors.append("third RST must be WHITE -> delay -> OFF -> stage Factory Reset -> reboot")
+# Step 3 is not destructive immediately. It is persisted, then the timeout
+# worker may stage Settings reset only if no step 4 arrives within the window.
+third_log = runtime.find("step 3/5; Settings Reset armed if sequence stops here")
+settings_timeout = runtime.find("count == hg::kSettingsResetRequiredRstPresses")
+settings_stage = runtime.find("set_pending_reset(PendingReset::Settings)", settings_timeout)
+settings_restart = runtime.find("esp_restart();", settings_stage)
+if min(third_log, settings_timeout, settings_stage, settings_restart) < 0:
+    errors.append("three-step delayed Settings Reset path is incomplete")
 
-# A successful complete erase is confirmed locally by RED for exactly the
-# contract duration. RED is never used as the per-step acknowledgement.
-erase = runtime.find("FactoryResetManager{}.erase_mutable_state()")
-consume_pending = runtime.find("set_pending_reset(false)", erase)
-red = runtime.find("RgbDiagnostic::set_red(board::kOnboardRgb)", consume_pending)
-red_delay = runtime.find("vTaskDelay(kSuccessRedTicks);", red)
-red_off = runtime.find("RgbDiagnostic::off(board::kOnboardRgb)", red_delay)
-red_restart = runtime.find("esp_restart();", red_off)
-if min(erase, consume_pending, red, red_delay, red_off, red_restart) < 0:
-    errors.append("RED successful-reset confirmation path is incomplete")
-elif not (erase < consume_pending < red < red_delay < red_off < red_restart):
-    errors.append("successful Factory Reset must be erase -> consume pending -> RED -> 5 s -> OFF -> reboot")
+# Step 4 must be non-destructive and time out to no reset if step 5 never comes.
+if "factory extension timed out after step 4/5; no reset performed" not in runtime:
+    errors.append("step 4 must time out safely without reset")
+
+# Step 5 must select and stage full Factory Reset after WHITE acknowledgement.
+fifth = runtime.find("step 5/5; full Factory Reset selected")
+fifth_delay = runtime.find("vTaskDelay(kStepWhiteTicks);", fifth)
+fifth_off = runtime.find("RgbDiagnostic::off(board::kOnboardRgb)", fifth_delay)
+stage_factory = runtime.find("stage_factory_reset_request()", fifth_off)
+fifth_restart = runtime.find("esp_restart();", stage_factory)
+if min(fifth, fifth_delay, fifth_off, stage_factory, fifth_restart) < 0 or not (
+    fifth < fifth_delay < fifth_off < stage_factory < fifth_restart
+):
+    errors.append("fifth RST must be WHITE -> OFF -> stage full Factory Reset -> reboot")
+
+# Settings reset success is WHITE for 5 seconds.
+settings_erase = runtime.find("FactoryResetManager{}.erase_settings_state()")
+settings_complete = runtime.find("Settings Reset complete; WHITE RGB confirmation for 5 seconds", settings_erase)
+settings_white = runtime.find("RgbDiagnostic::set_white(board::kOnboardRgb)", settings_complete)
+settings_delay = runtime.find("vTaskDelay(kSettingsSuccessWhiteTicks);", settings_white)
+if min(settings_erase, settings_complete, settings_white, settings_delay) < 0:
+    errors.append("successful Settings Reset WHITE confirmation path is incomplete")
+
+# Full factory success is RED for 5 seconds.
+factory_erase = runtime.find("FactoryResetManager{}.erase_mutable_state()")
+factory_complete = runtime.find("Factory Reset complete; RED RGB confirmation for 5 seconds", factory_erase)
+factory_red = runtime.find("RgbDiagnostic::set_red(board::kOnboardRgb)", factory_complete)
+factory_delay = runtime.find("vTaskDelay(kFactorySuccessRedTicks);", factory_red)
+if min(factory_erase, factory_complete, factory_red, factory_delay) < 0:
+    errors.append("successful full Factory Reset RED confirmation path is incomplete")
 
 # Hardware evidence is authoritative for this board: Build-1813 with 3/9 and
 # 9/3 ticks produced visible WHITE reset feedback; Build-1855 changed to 4/8
@@ -124,4 +157,5 @@ if errors:
         print(f"ERROR: {error}")
     sys.exit(1)
 
-print("Physical RST/RGB factory-reset contract PASS")
+print("Physical RST/RGB 3-step settings + 5-step factory contract PASS")
+print(" - first boot after firmware revision change is baseline-only, no WHITE step")
