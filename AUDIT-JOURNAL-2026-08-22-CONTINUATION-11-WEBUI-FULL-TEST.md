@@ -36,4 +36,23 @@ Test the real controller/browser path, not only CI mocks.
 
 For every stage record PASS/FAIL from real browser screenshots/video and controller behavior. Do not infer success from CI alone. When a defect is found, freeze the test at that point, identify the exact UI/API contract failure, make one minimal change, rebuild, verify artifact SHA, then resume from the recorded checkpoint.
 
-Status: STARTED. First checkpoint pending: first-boot/setup page at browser zoom 100%.
+## Checkpoint 1 — first-boot setup page on real controller
+
+Evidence: user screenshot from Chrome at `http://192.168.4.1`, desktop viewport, 2026-08-22.
+
+Observed PASS:
+- `Первинне налаштування` gate renders on the controller AP.
+- Bruce artwork renders on the right and is not clipped by the setup card.
+- Two-column setup card is fully visible with no overlap between network and first-Admin panels.
+- Main heading, explanatory text, labels, fields and action buttons are readable and proportionally consistent.
+- No horizontal clipping is visible; the full setup card fits inside the viewport.
+- Wi-Fi and first-Admin controls are present.
+
+Observed FAIL / regression:
+- Password visibility eye controls are absent from BOTH `Пароль Wi-Fi` and `Пароль / PIN` fields on the setup page.
+- Current `web/access-session.js` `showSetup()` markup contains plain `type="password"` inputs for `#hgSetupWifiPassword` and `#hgSetupPin` with no visibility-toggle button/wrapper, matching the hardware screenshot.
+- This must be treated as a real Web UI regression, not a browser rendering issue.
+
+Checkpoint status: LAYOUT PASS, PASSWORD-VISIBILITY CONTROL FAIL.
+
+Per evidence discipline, freeze the full test here until this setup-page regression is fixed and rebuilt. After the eye controls are restored, resume at Wi-Fi scan/AP rendering on the same checkpoint.
