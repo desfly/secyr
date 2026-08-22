@@ -21,6 +21,11 @@
     #hgAuthGate label{display:block;margin:10px 0;font-weight:700}#hgAuthGate input,#hgAuthGate select{display:block;width:100%;margin-top:6px;padding:12px 13px;border:1px solid rgba(255,255,255,.28);border-radius:9px;background:#10243a;color:#fff;box-sizing:border-box;font:inherit}
     #hgAuthGate button{width:100%;margin-top:12px;padding:12px 14px;border:0;border-radius:9px;background:#fff;color:#10243a;font:inherit;font-weight:800;cursor:pointer}
     #hgAuthGate button.secondary{background:#18324c;color:#fff;border:1px solid rgba(255,255,255,.24)}
+    #hgAuthGate .hg-password-label{position:relative}
+    #hgAuthGate .hg-password-label input{padding-right:52px!important}
+    #hgAuthGate button.hg-password-eye{position:absolute!important;right:8px!important;bottom:7px!important;width:36px!important;height:36px!important;min-height:36px!important;margin:0!important;padding:0!important;border:0!important;border-radius:6px!important;background:transparent!important;color:#fff!important;display:grid!important;place-items:center!important;line-height:1!important;z-index:5!important}
+    #hgAuthGate button.hg-password-eye:hover,#hgAuthGate button.hg-password-eye:focus-visible{background:rgba(255,255,255,.10)!important;outline:2px solid rgba(255,255,255,.55);outline-offset:1px}
+    #hgAuthGate button.hg-password-eye svg{display:block;width:22px;height:22px;pointer-events:none}
     #hgAuthGate button:disabled{opacity:.55;cursor:default}#hgAuthMessage{min-height:20px;margin-top:12px;color:#ffd2d2;font-size:14px}.hg-setup-status{min-height:18px;color:#c8d4df;font-size:13px;margin-top:8px}
     #hgAuthGate .hg-setup-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}
     #hgAuthGate .hg-setup-panel{min-width:0;padding:18px;border:1px solid rgba(255,255,255,.16);border-radius:12px;background:rgba(16,36,58,.48)}
@@ -40,7 +45,9 @@
       #hgAuthGate.hg-setup-mode .hg-setup-panel{padding:1.5vw!important;border-radius:14px!important}
       #hgAuthGate.hg-setup-mode label{font-size:1.05vw!important;line-height:1.2!important;margin:.75vw 0!important}
       #hgAuthGate.hg-setup-mode input,#hgAuthGate.hg-setup-mode select{min-height:3.25vw!important;font-size:1.05vw!important;line-height:1.2!important;padding:.8vw .95vw!important;border-radius:10px!important}
+      #hgAuthGate.hg-setup-mode .hg-password-label input{padding-right:52px!important}
       #hgAuthGate.hg-setup-mode button{min-height:3.25vw!important;font-size:1.02vw!important;line-height:1.15!important;padding:.8vw .95vw!important;border-radius:10px!important}
+      #hgAuthGate.hg-setup-mode button.hg-password-eye{width:36px!important;height:36px!important;min-height:36px!important;margin:0!important;padding:0!important;border-radius:6px!important}
       #hgAuthGate.hg-setup-mode .hg-setup-status{font-size:.9vw!important;line-height:1.35!important;margin-top:.65vw!important}
       #hgAuthGate.hg-setup-mode .hg-setup-networks{max-height:17vw!important;gap:.45vw!important}
       #hgAuthGate.hg-setup-mode .hg-setup-network{min-height:3vw!important;font-size:.95vw!important;padding:.65vw .8vw!important}
@@ -165,11 +172,39 @@
     primeLegacyHandlers();
   }
 
+  function attachPasswordEye(inputId, showLabel) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const label = input.closest("label");
+    if (!label || label.querySelector(".hg-password-eye")) return;
+
+    label.classList.add("hg-password-label");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "hg-password-eye";
+    button.setAttribute("aria-label", showLabel);
+    button.setAttribute("aria-pressed", "false");
+    button.title = showLabel;
+    button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+    button.addEventListener("click", () => {
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      button.setAttribute("aria-pressed", show ? "true" : "false");
+      button.setAttribute("aria-label", show ? "Сховати пароль" : showLabel);
+      button.title = show ? "Сховати пароль" : showLabel;
+      input.focus();
+      const end = input.value.length;
+      if (typeof input.setSelectionRange === "function") input.setSelectionRange(end, end);
+    });
+    label.appendChild(button);
+  }
+
   function showLogin(prefill = "") {
     gate.classList.remove("hg-setup-mode");
     gateMode = "login_required"; title.textContent = "Вхід";
     hint.textContent = "Введіть ім’я користувача / ID та пароль PIN."; message.textContent = "";
     form.innerHTML = `<label>Користувач<input id="hgLoginActor" type="text" maxlength="23" autocomplete="username" value="${prefill.replace(/[&<>\"]/g, "")}"></label><label>Пароль / PIN<input id="hgLoginPin" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password"></label><button type="submit">Увійти</button>`;
+    attachPasswordEye("hgLoginPin", "Показати пароль / PIN");
     form.querySelector("input")?.focus();
   }
 
@@ -197,6 +232,8 @@
           <button type="submit">Створити Admin і закрити setup</button>
         </section>
       </div>`;
+    attachPasswordEye("hgSetupWifiPassword", "Показати пароль Wi-Fi");
+    attachPasswordEye("hgSetupPin", "Показати пароль / PIN");
     form.querySelector("#hgSetupWifiScan")?.focus();
   }
 
