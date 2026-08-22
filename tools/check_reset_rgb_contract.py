@@ -57,6 +57,28 @@ for required in (
     if required not in runtime:
         errors.append(f"persistent physical RST detector incomplete: missing {required}")
 
+# A newly flashed build ends with an esptool EN/RTS reset, which HW-678 also
+# reports as POWERON. That first boot must establish a firmware-specific NVS
+# baseline and return before any WHITE acknowledgement can be emitted.
+for required in (
+    'kFirmwareSignatureKey = "fw_sig"',
+    "firmware_signature(HG_GIT_REVISION)",
+    "load_firmware_signature(firmware_signature_matches)",
+    "store_firmware_signature()",
+    "if (!firmware_signature_matches)",
+    "WHITE stays off",
+):
+    if required not in runtime:
+        errors.append(f"firmware-flash RST baseline incomplete: missing {required}")
+
+signature_guard = runtime.find("if (!firmware_signature_matches)")
+signature_return = runtime.find("return false;", signature_guard)
+white = runtime.find("RgbDiagnostic::set_white(board::kOnboardRgb)")
+if min(signature_guard, signature_return, white) < 0:
+    errors.append("firmware-flash baseline ordering is incomplete")
+elif not (signature_guard < signature_return < white):
+    errors.append("new firmware baseline must return before WHITE RST acknowledgement")
+
 # Progress must persist across the reset itself, but an abandoned sequence must
 # expire. This is what lets the hardware RST/EN button be used safely.
 for required in (
