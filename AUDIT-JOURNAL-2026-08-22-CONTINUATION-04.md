@@ -95,12 +95,56 @@ Conclusion for point 2:
 
 One RGB defect remains open: the final approximately five-second success indication appears WHITE in the supplied video, while the contract/source requires RED for five seconds. Do not reopen the reset detection or factory-reset logic for this symptom; isolate the RGB success-color path specifically.
 
+## RED RGB root cause isolation and implementation fix (2026-08-22)
+
+The exact firmware actually flashed during the hardware test was recovered from the 2026-08-21 UART/flash log:
+
+- HomeGuard-S3 Build-1813;
+- app commit `22d9f1e804b33d890deca54fdb38595d171ea0ac`;
+- compile time 2026-08-21 17:15;
+- this build already contains the `b83157e6...` physical RST/RGB reset base.
+
+Therefore the WHITE final indication was not caused by testing an old pre-RED firmware.
+
+Inspection of that exact flashed commit confirmed:
+
+- onboard RGB is driven as one WS2812 on GPIO48;
+- WHITE frame is `FF FF FF`;
+- RED frame is GRB `00 FF 00`;
+- the successful factory-reset path explicitly calls `set_red()` and blocks for five seconds before OFF/reboot;
+- no later boot task can overwrite the LED during that early-boot five-second confirmation;
+- mutable-state erase itself does not reboot before RED.
+
+The concrete electrical/protocol mismatch was in the custom WS2812 RMT bit timing. At 10 MHz the previous driver used:
+
+- logical 0: 0.3 us HIGH + 0.9 us LOW (`3/9` ticks);
+- logical 1: 0.9 us HIGH + 0.3 us LOW (`9/3` ticks).
+
+Espressif's conservative WS2812 reference timing at the same 10 MHz is:
+
+- logical 0: 0.4 us HIGH + 0.8 us LOW (`4/8` ticks);
+- logical 1: 0.8 us HIGH + 0.4 us LOW (`8/4` ticks).
+
+This distinction is material for a mixed-color frame such as RED (`00 FF 00`), while all-zero/all-one frames such as OFF/WHITE can still appear correct with marginal timings.
+
+Implementation commit:
+
+`0d743156fb367168a745d5bd19dc9cf343f2f7f2` — **fix: align onboard WS2812 timing with Espressif reference**
+
+Changes in that commit:
+
+- `firmware/esp-idf/main/hg_rgb_diagnostic.cpp`: changed only WS2812 bit timing from `3/9, 9/3` to `4/8, 8/4`; GPIO48, GRB byte order, RED frame, reset sequence and 80 us latch are unchanged;
+- `tools/check_reset_rgb_contract.py`: now locks the 10 MHz `4/8, 8/4` timing, 80 us latch and the RED/WHITE byte frames, and rejects regression to the obsolete `3/9, 9/3` timing.
+
+The physical three-step RST/EN logic is intentionally untouched because point 2 already proved it on hardware.
+
 ## Immediate next action
 
-1. Isolate and fix the final factory-reset RED indication without changing the now hardware-validated three-step RST/EN logic.
-2. Retest only the final success color on real hardware.
-3. Then continue the remaining PC Web UI flow and mobile Web UI.
-4. Record each material fix, commit SHA and hardware retest result here before moving on.
+1. Obtain the firmware artifact built from `0d743156fb367168a745d5bd19dc9cf343f2f7f2` or later main head containing that commit.
+2. Flash that new artifact; do not reuse Build-1813 for the RED retest.
+3. Retest only the physical three-step RST/EN sequence and verify the final success indication is RED for approximately five seconds.
+4. If RED passes, close the RGB defect and continue remaining PC Web UI flow, then mobile Web UI.
+5. Record the new build/run/SHA and hardware result here before moving on.
 
 ## Resume rule for the next session
 
@@ -108,4 +152,4 @@ One RGB defect remains open: the final approximately five-second success indicat
 2. Read the newest commits after the resume base above before assuming any item is still open.
 3. Check the latest `HomeGuard-S3 Build` status.
 4. Treat point 1 Web UI and point 2 physical factory reset as hardware-validated; do not reopen them unless a regression appears.
-5. Continue from the open final RED RGB defect, then PC/mobile Web UI validation.
+5. Continue from the RED retest using a build containing `0d743156...`, then PC/mobile Web UI validation.
