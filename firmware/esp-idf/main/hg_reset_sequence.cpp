@@ -5,7 +5,6 @@
 #include "hg_rgb_diagnostic.hpp"
 #include "homeguard/reset_sequence.hpp"
 
-#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
@@ -23,13 +22,12 @@ constexpr const char* kPendingKey = "pending";
 constexpr std::uint8_t kPendingValue = 1U;
 constexpr const char* kSequenceNamespace = "hg_rstseq";
 constexpr const char* kSequenceCountKey = "count";
-constexpr std::uint32_t kRtcMarker = 0x48525354U;  // "HRST"
+constexpr const char* kBootMarkerKey = "boot_seen";
+constexpr std::uint8_t kBootMarkerValue = 0xA5U;
 constexpr TickType_t kStepWhiteTicks = pdMS_TO_TICKS(hg::kFactoryResetStepWhiteMs);
 constexpr TickType_t kSequenceWindowTicks = pdMS_TO_TICKS(hg::kFactoryResetSequenceWindowMs);
 constexpr TickType_t kSuccessRedTicks = pdMS_TO_TICKS(hg::kFactoryResetSuccessRedMs);
 constexpr std::uint32_t kResetWorkerStackBytes = 4096U;
-
-RTC_NOINIT_ATTR std::uint32_t g_rst_boot_marker;
 
 esp_err_t set_pending_reset(bool pending) {
     nvs_handle_t handle{};
@@ -90,6 +88,32 @@ esp_err_t store_sequence_count(std::uint8_t count) {
         error = nvs_set_u8(handle, kSequenceCountKey, count);
     }
 
+    if (error == ESP_OK) error = nvs_commit(handle);
+    nvs_close(handle);
+    return error;
+}
+
+esp_err_t load_boot_marker(bool& valid) {
+    valid = false;
+    nvs_handle_t handle{};
+    const auto open_error = nvs_open(kSequenceNamespace, NVS_READONLY, &handle);
+    if (open_error == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (open_error != ESP_OK) return open_error;
+
+    std::uint8_t value = 0U;
+    auto error = nvs_get_u8(handle, kBootMarkerKey, &value);
+    nvs_close(handle);
+    if (error == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (error != ESP_OK) return error;
+    valid = value == kBootMarkerValue;
+    return ESP_OK;
+}
+
+esp_err_t store_boot_marker() {
+    nvs_handle_t handle{};
+    auto error = nvs_open(kSequenceNamespace, NVS_READWRITE, &handle);
+    if (error != ESP_OK) return error;
+    error = nvs_set_u8(handle, kBootMarkerKey, kBootMarkerValue);
     if (error == ESP_OK) error = nvs_commit(handle);
     nvs_close(handle);
     return error;
@@ -190,21 +214,46 @@ esp_err_t stage_factory_reset_request() {
 bool handle_physical_rst_factory_reset() {
     if (handle_pending_factory_reset()) return true;
 
-    const bool rtc_state_was_valid = g_rst_boot_marker == kRtcMarker;
-    g_rst_boot_marker = kRtcMarker;
-
     const auto reason = esp_reset_reason();
-    const bool reset_press = hg::reset_press_detected(
-        rtc_state_was_valid,
-        reason == ESP_RST_EXT,
-        reason == ESP_RST_POWERON);
 
     std::uint8_t previous_count = 0U;
-    const auto load_error = load_sequence_count(previous_count);
-    if (load_error != ESP_OK) {
-        ESP_LOGE(kTag, "Cannot load physical RST sequence: %s", esp_err_to_name(load_error));
+    const auto load_count_error = load_sequence_count(previous_count);
+    if (load_count_error != ESP_OK) {
+        ESP_LOGE(kTag, "Cannot load physical RST sequence: %s", esp_err_to_name(load_count_error));
         return false;
     }
+
+    bool boot_marker_was_valid = false;
+    const auto load_marker_error = load_boot_marker(boot_marker_was_valid);
+    if (load_marker_error != ESP_OK) {
+        ESP_LOGE(kTag, "Cannot load physical RST boot marker: %s", esp_err_to_name(load_marker_error));
+        return false;
+    }
+
+    // HW-678 evidence: both a true cold start and its physical RST/EN button
+    // are reported as POWERON, while RTC_NOINIT does not survive EN reset.
+    // Establish one persistent baseline boot after a fresh NVS. Only later
+    // POWERON boots can advance the gesture. This makes the first boot after
+    // erase/Factory Reset safe and lets the real RST button work thereafter.
+    if (!boot_marker_was_valid) {
+        const auto marker_error = store_boot_marker();
+        if (marker_error != ESP_OK) {
+            ESP_LOGE(kTag, "Cannot establish physical RST boot marker: %s", esp_err_to_name(marker_error));
+            return false;
+        }
+        if (previous_count != 0U) {
+            (void)store_sequence_count(0U);
+        }
+        ESP_LOGI(kTag,
+                 "Persistent RST boot baseline established; reset reason=%d is not counted",
+                 static_cast<int>(reason));
+        return false;
+    }
+
+    const bool reset_press = hg::reset_press_detected(
+        boot_marker_was_valid,
+        reason == ESP_RST_EXT,
+        reason == ESP_RST_POWERON);
 
     if (!reset_press) {
         if (previous_count != 0U) {
