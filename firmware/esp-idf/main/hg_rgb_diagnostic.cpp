@@ -13,9 +13,6 @@ namespace homeguard::idf {
 
 namespace {
 constexpr std::uint32_t kResolutionHz = 10'000'000U;  // 0.1 us ticks
-// Hardware-validated timing for the onboard addressable RGB LED on this board.
-// Build-1813 produced reliable WHITE/OFF feedback with these pulse widths;
-// Build-1855 changed them to 4/8 and 8/4 and the physical LED stopped responding.
 constexpr std::uint32_t kT0hTicks = 3U;
 constexpr std::uint32_t kT0lTicks = 9U;
 constexpr std::uint32_t kT1hTicks = 9U;
@@ -85,10 +82,8 @@ esp_err_t RgbDiagnostic::set_white(int gpio) {
 esp_err_t RgbDiagnostic::set_red(int gpio) {
     if (!supported_gpio(gpio)) return ESP_ERR_INVALID_ARG;
 
-    // WS2812 wire order is GRB. Keep success RED deliberately below full
-    // brightness so the tiny onboard LED is visibly red instead of saturating
-    // phone video/highlights into an apparently white spot.
-    const std::array<std::uint8_t, 3> red{{0x00U, 0x40U, 0x00U}};
+    // WS2812 wire order is GRB, therefore red is G=0, R=255, B=0.
+    const std::array<std::uint8_t, 3> red{{0x00U, 0xffU, 0x00U}};
     return transmit_rgb(gpio, red);
 }
 
