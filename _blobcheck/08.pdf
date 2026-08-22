@@ -1,0 +1,29 @@
+# HomeGuard-S3 Component Library
+
+Ця директорія є еталонною бібліотекою фізичних компонентів проєкту HomeGuard-S3.
+
+## Правило
+
+**1 компонент = 1 односторінкова PDF-картка:** фото конкретного компонента, точна назва/маркування, перевірювані параметри та ключові піни/підключення.
+
+Не підміняти компонент іншим модулем лише через однаковий чип. Якщо фото, маркування або параметр не підтверджені — не домислювати.
+
+## Затверджені компоненти
+
+| ID | Компонент | Статус |
+|---|---|---|
+| HG-COMP-001 | ESP S3-N16R8 HW678 V0.0.0 WiFi+BT Sixspan | APPROVED |
+| HG-COMP-002 | W5500 Ethernet Module, blue PCB, RJ45 | APPROVED |
+| HG-COMP-003 | Micro SD / TF SPI Module | APPROVED |
+| HG-COMP-004 | ADS1115 HW-198 16Bit I2C ADC+PGA, qty 2 | APPROVED |
+| HG-COMP-005 | INA226 IIC / CJMCU-226 | APPROVED |
+| HG-COMP-006 | PZEM-004T 004T-100A-D-P + external Close CT | APPROVED |
+| HG-COMP-007 | KWS-40007 motorized ball valve 1/2 in, 3-wire/2-point, AC 220 V | APPROVED |
+
+## Наступний зареєстрований компонент
+
+**HG-COMP-008 — 4-channel 5 V optocoupler relay module**  
+Користувач надав фото плати: синя 4-релейна плата, 4 оптопари, 5 V. Остаточна PDF-картка має бути сформована саме з наданого фото; деталі, яких не видно/не підтверджено, не вигадувати.
+
+---
+Last update: 2026-08-22
