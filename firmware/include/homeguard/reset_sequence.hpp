@@ -15,14 +15,15 @@ struct ResetSequenceStep {
     bool trigger_factory_reset{false};
 };
 
-// On this board the physical RST/EN button is reported by ESP-IDF as POWERON.
-// RTC_NOINIT state survives that reset but not a true cold power-up, so POWERON
-// counts only when the RTC marker was already valid before this boot.
+// Hardware evidence from HW-678 shows that the physical RST/EN button is
+// reported as POWERON and that RTC_NOINIT does not survive that reset. A small
+// persistent boot marker is therefore used as the baseline: the very first
+// POWERON without a marker is not a gesture step; later POWERON resets can be.
 constexpr bool reset_press_detected(
-    bool rtc_state_was_valid,
+    bool boot_marker_was_valid,
     bool external_rst,
     bool poweron_rst) noexcept {
-    return external_rst || (poweron_rst && rtc_state_was_valid);
+    return external_rst || (poweron_rst && boot_marker_was_valid);
 }
 
 constexpr ResetSequenceStep advance_reset_sequence(

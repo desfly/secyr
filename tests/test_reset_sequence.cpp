@@ -7,11 +7,12 @@ void test_reset_sequence() {
     CHECK(hg::kFactoryResetSequenceWindowMs == 5000U);
     CHECK(hg::kFactoryResetSuccessRedMs == 5000U);
 
-    // True cold POWERON must not count as a user's RST/EN step.
+    // Fresh NVS has no persistent boot marker, therefore the first POWERON is
+    // baseline establishment rather than a destructive-reset gesture step.
     CHECK(!hg::reset_press_detected(false, false, true));
 
-    // On this board the hardware RST/EN button is reported as POWERON. Once
-    // the RTC marker proves a previous live boot, that reset is a valid step.
+    // HW-678 reports its physical RST/EN button as POWERON. Once the persistent
+    // boot baseline exists, a later POWERON can advance the reset sequence.
     CHECK(hg::reset_press_detected(true, false, true));
     CHECK(hg::reset_press_detected(false, true, false));
     CHECK(!hg::reset_press_detected(true, false, false));
