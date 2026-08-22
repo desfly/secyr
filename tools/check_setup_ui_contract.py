@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Regression gate for the first-boot setup UI."""
+"""Regression gate for the first-boot setup UI.
+
+This is a source/contract check only. It never upgrades the bug status to
+HW PASS/FIXED; real browser validation on flashed hardware is still required.
+"""
 from pathlib import Path
 import sys
 
@@ -41,17 +45,27 @@ require('<select id="hgSetupWifiSsid"' not in source,
 require('id="hgSetupWifiSsid" type="text"' in source,
         "manual/hidden SSID fallback missing")
 
-# Hardware validation caught a regression where setup password fields had no
-# visibility control. The embedded suffix must attach compact eye buttons after
-# the dynamic setup form is inserted, without changing setup-card geometry.
+# Password visibility controls must live with the dynamic auth/setup form source,
+# not as a firmware-layer patch. This still does not prove rendered behavior.
 for required in (
-    'attachPasswordToggle("hgSetupWifiPassword", "hgSetupWifiPasswordToggle"',
-    'attachPasswordToggle("hgSetupPin", "hgSetupPinToggle"',
-    'password.style.paddingRight = "52px"',
-    'new MutationObserver(ensurePasswordToggles)',
-    'toggle.textContent = "👁"',
+    'function attachPasswordEye(',
+    'className = "hg-password-eye"',
+    'attachPasswordEye("hgSetupWifiPassword", "Показати пароль Wi-Fi")',
+    'attachPasswordEye("hgSetupPin", "Показати пароль / PIN")',
+    'attachPasswordEye("hgLoginPin", "Показати пароль / PIN")',
+    '.hg-password-label input{padding-right:52px!important}',
+    'button.hg-password-eye{position:absolute!important',
+    'button.innerHTML = \'<svg viewBox="0 0 24 24" aria-hidden="true">',
 ):
-    require(required in embedded, f"setup password visibility regression: missing {required}")
+    require(required in source, f"source-owned password visibility control missing: {required}")
+
+for forbidden in (
+    'attachPasswordToggle(',
+    'ensurePasswordToggles',
+    'passwordToggleObserver',
+):
+    require(forbidden not in embedded,
+            f"legacy firmware-layer password-eye patch still present: {forbidden}")
 
 if errors:
     print("Setup UI contract FAIL", file=sys.stderr)
@@ -59,8 +73,9 @@ if errors:
         print(f" - {error}", file=sys.stderr)
     raise SystemExit(1)
 
-print("Setup UI contract PASS")
+print("Setup UI contract PASS (source only; hardware validation still required)")
 print(" - desktop: wide two-column setup")
 print(" - mobile: single-column setup at <=720px")
 print(" - Wi-Fi scan: visible AP rows, no dropdown")
-print(" - setup passwords: compact visibility eye controls for Wi-Fi and Admin PIN")
+print(" - password eyes: source-owned controls for Wi-Fi, Admin PIN and login PIN")
+print(" - legacy firmware-layer password-eye patch: absent")
