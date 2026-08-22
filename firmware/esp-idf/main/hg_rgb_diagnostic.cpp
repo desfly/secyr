@@ -13,10 +13,12 @@ namespace homeguard::idf {
 
 namespace {
 constexpr std::uint32_t kResolutionHz = 10'000'000U;  // 0.1 us ticks
-constexpr std::uint32_t kT0hTicks = 3U;
-constexpr std::uint32_t kT0lTicks = 9U;
-constexpr std::uint32_t kT1hTicks = 9U;
-constexpr std::uint32_t kT1lTicks = 3U;
+// Match Espressif's WS2812 reference timing at 10 MHz:
+// T0 = 0.4 us HIGH + 0.8 us LOW; T1 = 0.8 us HIGH + 0.4 us LOW.
+constexpr std::uint32_t kT0hTicks = 4U;
+constexpr std::uint32_t kT0lTicks = 8U;
+constexpr std::uint32_t kT1hTicks = 8U;
+constexpr std::uint32_t kT1lTicks = 4U;
 constexpr std::uint32_t kWs2812ResetUs = 80U;
 
 esp_err_t transmit_rgb(int gpio, const std::array<std::uint8_t, 3>& grb) {

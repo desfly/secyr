@@ -4,9 +4,11 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "firmware" / "esp-idf" / "main" / "hg_reset_sequence.cpp"
 HEADER = ROOT / "firmware" / "include" / "homeguard" / "reset_sequence.hpp"
+RGB_DRIVER = ROOT / "firmware" / "esp-idf" / "main" / "hg_rgb_diagnostic.cpp"
 
 runtime = RUNTIME.read_text(encoding="utf-8")
 header = HEADER.read_text(encoding="utf-8")
+rgb_driver = RGB_DRIVER.read_text(encoding="utf-8")
 errors = []
 
 # Approved HomeGuard-S3 reset contract: physical RST/EN only, three accepted
@@ -91,6 +93,32 @@ if min(erase, consume_pending, red, red_delay, red_off, red_restart) < 0:
     errors.append("RED successful-reset confirmation path is incomplete")
 elif not (erase < consume_pending < red < red_delay < red_off < red_restart):
     errors.append("successful Factory Reset must be erase -> consume pending -> RED -> 5 s -> OFF -> reboot")
+
+# The onboard WS2812 must use the same conservative 10 MHz pulse timing as the
+# Espressif reference implementation. The earlier 0.3/0.9 and 0.9/0.3 us
+# timings worked for all-zero/all-one frames but proved unreliable for the
+# mixed 00 FF 00 RED frame on the real HomeGuard-S3 board.
+for expected in (
+    "kResolutionHz = 10'000'000U",
+    "kT0hTicks = 4U",
+    "kT0lTicks = 8U",
+    "kT1hTicks = 8U",
+    "kT1lTicks = 4U",
+    "kWs2812ResetUs = 80U",
+    "red{{0x00U, 0xffU, 0x00U}}",
+    "white{{0xffU, 0xffU, 0xffU}}",
+):
+    if expected not in rgb_driver:
+        errors.append(f"onboard WS2812 contract changed: missing {expected}")
+
+for forbidden in (
+    "kT0hTicks = 3U",
+    "kT0lTicks = 9U",
+    "kT1hTicks = 9U",
+    "kT1lTicks = 3U",
+):
+    if forbidden in rgb_driver:
+        errors.append(f"obsolete WS2812 timing returned: {forbidden}")
 
 if errors:
     for error in errors:
