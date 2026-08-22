@@ -49,10 +49,25 @@ Observed PASS:
 - Wi-Fi and first-Admin controls are present.
 
 Observed FAIL / regression:
-- Password visibility eye controls are absent from BOTH `Пароль Wi-Fi` and `Пароль / PIN` fields on the setup page.
-- Current `web/access-session.js` `showSetup()` markup contains plain `type="password"` inputs for `#hgSetupWifiPassword` and `#hgSetupPin` with no visibility-toggle button/wrapper, matching the hardware screenshot.
-- This must be treated as a real Web UI regression, not a browser rendering issue.
+- Password visibility eye controls were absent from BOTH `Пароль Wi-Fi` and `Пароль / PIN` fields on the setup page.
+- Current setup form uses dynamically inserted password inputs, while the existing embedded eye-control only targeted the main Network-page `#wifiPassword` field.
 
-Checkpoint status: LAYOUT PASS, PASSWORD-VISIBILITY CONTROL FAIL.
+### Fix applied
 
-Per evidence discipline, freeze the full test here until this setup-page regression is fixed and rebuilt. After the eye controls are restored, resume at Wi-Fi scan/AP rendering on the same checkpoint.
+Commit `7bd216bdb9a98c20013703b0518de8ef15ffaa93` — `fix(web): restore setup password eye controls`.
+
+Minimal embedded-browser change in `firmware/esp-idf/main/hg_web_http.cpp`:
+- generalizes the already proven main Wi-Fi eye-control helper;
+- adds compact eye toggle for dynamic setup `#hgSetupWifiPassword`;
+- adds compact eye toggle for dynamic setup `#hgSetupPin`;
+- uses a `MutationObserver` because these setup fields are created later by `access-session.js`;
+- reserves only 52 px inside each password input for the eye; setup card width, grid, typography and overall geometry are unchanged;
+- toggles `password <-> text`, updates aria state/title, then returns focus to the field.
+
+Commit `19963e81bd31dff82851dd4c2896f3138dbd8003` — `test(web): lock setup password eye controls`.
+
+`tools/check_setup_ui_contract.py` now fails CI if either setup eye-control, the dynamic observer, or right-side input reservation disappears again.
+
+Checkpoint status: LAYOUT PASS; PASSWORD-VISIBILITY DEFECT FIXED IN SOURCE; HARDWARE RECHECK PENDING NEW GREEN BUILD.
+
+Resume point after new artifact: flash verified build, return to `192.168.4.1`, confirm both setup eye controls visually and functionally, then continue with Wi-Fi scan/AP rendering.
