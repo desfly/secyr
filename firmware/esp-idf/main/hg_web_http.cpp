@@ -174,49 +174,8 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     }
   }
 
-  function attachPasswordToggle(passwordId, toggleId, showLabel, hideLabel) {
-    const password = document.getElementById(passwordId);
-    if (!password || document.getElementById(toggleId)) return;
-    const label = password.parentElement;
-    if (!label) return;
-
-    label.style.position = "relative";
-    password.style.paddingRight = "52px";
-
-    const toggle = document.createElement("button");
-    toggle.id = toggleId;
-    toggle.type = "button";
-    toggle.textContent = "👁";
-    toggle.setAttribute("aria-label", showLabel);
-    toggle.setAttribute("aria-pressed", "false");
-    toggle.title = showLabel;
-    toggle.style.cssText = "position:absolute;right:7px;bottom:6px;width:40px;height:34px;margin:0;padding:0;border:0;background:transparent;color:inherit;cursor:pointer;font-size:18px;line-height:34px;text-align:center;z-index:2";
-    toggle.addEventListener("click", () => {
-      const show = password.type === "password";
-      password.type = show ? "text" : "password";
-      toggle.setAttribute("aria-pressed", show ? "true" : "false");
-      toggle.setAttribute("aria-label", show ? hideLabel : showLabel);
-      toggle.title = show ? hideLabel : showLabel;
-      toggle.textContent = show ? "◉" : "👁";
-      password.focus();
-      const end = password.value.length;
-      if (typeof password.setSelectionRange === "function") password.setSelectionRange(end, end);
-    });
-    label.appendChild(toggle);
-  }
-
-  function ensurePasswordToggles() {
-    attachPasswordToggle("wifiPassword", "wifiPasswordToggle", "Показати пароль Wi-Fi", "Сховати пароль Wi-Fi");
-    attachPasswordToggle("hgSetupWifiPassword", "hgSetupWifiPasswordToggle", "Показати пароль Wi-Fi", "Сховати пароль Wi-Fi");
-    attachPasswordToggle("hgSetupPin", "hgSetupPinToggle", "Показати PIN адміністратора", "Сховати PIN адміністратора");
-  }
-
   window.addEventListener("hashchange", applyEmbeddedView);
   applyEmbeddedView();
-  ensurePasswordToggles();
-
-  const passwordToggleObserver = new MutationObserver(ensurePasswordToggles);
-  passwordToggleObserver.observe(document.body, { childList: true, subtree: true });
 })();
 )JS";
 
