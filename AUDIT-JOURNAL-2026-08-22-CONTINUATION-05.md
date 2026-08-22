@@ -4,7 +4,7 @@ Date: 2026-08-22 (Europe/Kyiv)
 Repository: `desfly/secyr`
 Previous journal: `AUDIT-JOURNAL-2026-08-22-CONTINUATION-04.md`
 
-## Green CI checkpoint after WS2812 RED fix
+## Build #1855 checkpoint
 
 Authoritative GitHub Actions run supplied by the user:
 
@@ -16,45 +16,77 @@ Authoritative GitHub Actions run supplied by the user:
 - Event: `push`
 - Status: `completed`
 - Conclusion: `success`
-- Started: `2026-08-22T09:27:23Z`
-- Completed: `2026-08-22T09:31:26Z`
+- Firmware artifact: `HomeGuard-S3-firmware`, artifact `9473876245`
+- Artifact SHA256: `d9db99f5c27a50788ea93ed0092e8dadce6a28bd8620b09d70c19151c7c5122d`
+- `homeguard_s3.bin` SHA256 verified by the user before flashing: `a6eeb1040e7525969388b7dcadb3cb98c803fb1a482c0b554f5ca8c681929d06`
 
-This head contains implementation commit:
+Build #1855 contained implementation commit:
 
 `0d743156fb367168a745d5bd19dc9cf343f2f7f2` — **fix: align onboard WS2812 timing with Espressif reference**
 
-## Job results
+That commit changed the RGB RMT bit timing from the previously hardware-working `3/9, 9/3` ticks to `4/8, 8/4` ticks and updated the CI contract to require the new timing.
 
-All three jobs completed successfully:
+## Hardware retest of Build #1855 — FAIL
 
-- `Host validation` — SUCCESS
-  - importantly, `Physical RST/RGB reset contract` — SUCCESS
-- `ESP-IDF 5.4.4 firmware` — SUCCESS
-- `Android debug APK` — SUCCESS
+The user performed a clean hardware deployment:
 
-## Firmware artifact for hardware retest
+1. verified the exact Build #1855 firmware SHA256;
+2. executed `esptool erase-flash` successfully on COM6;
+3. flashed bootloader, partition table, OTA data and `homeguard_s3.bin` successfully;
+4. all esptool writes reported `Hash of data verified`.
 
-Use this artifact, not Build-1813:
+Real-hardware result after the clean flash:
 
-- Artifact name: `HomeGuard-S3-firmware`
-- Artifact ID: `9473876245`
-- Size: `9,934,417` bytes
-- SHA256 digest: `d9db99f5c27a50788ea93ed0092e8dadce6a28bd8620b09d70c19151c7c5122d`
-- Head SHA: `6c640c4c961ae31207f40ea6e7ba3c5a0b724755`
-- Expiration: 2026-11-20
+- onboard RGB did **not light at all** during reboot;
+- onboard RGB did **not light at all** on physical RST/EN presses;
+- therefore the Build #1855 `4/8, 8/4` timing change is incompatible with this physical board.
 
-Other green artifacts from the same run:
+This is a direct hardware regression. CI success for Build #1855 did not validate the electrical RGB waveform and must not be interpreted as hardware success.
 
-- `MyFist-Android` — artifact `9473847832`
-- `HomeGuard-S3-ESP-IDF-diagnostics` — artifact `9473875911`
-- `HomeGuard-S3-host-diagnostics` — artifact `9473846766`
+## Correction of the previous root-cause claim
 
-## Next hardware action
+The previous journal wording that identified `3/9, 9/3` timing as the cause of the final RED problem was speculative and is superseded by the physical Build #1855 result.
 
-1. Download `HomeGuard-S3-firmware` from Build #1855 / run `32564986337`.
-2. Flash the ESP32-S3 using the established COM6 command/layout.
-3. Retest the already-proven physical 3x RST/EN sequence.
-4. The only acceptance point for this retest is the final success RGB indication: it must be RED for approximately five seconds before OFF/reboot.
-5. If RED passes, close the RGB defect and continue PC Web UI validation, then mobile.
+Known hardware evidence is now:
 
-Do not reopen the already hardware-validated reset detection/factory erase unless a new regression is observed.
+- Build-1813 / commit `22d9f1e804b33d890deca54fdb38595d171ea0ac` used `3/9, 9/3` and produced visible WHITE RST acknowledgements on the real board;
+- Build #1855 used `4/8, 8/4` and produced no RGB output at all.
+
+Therefore `3/9, 9/3` is the hardware-proven baseline for this board and must be restored.
+
+The earlier final five-second indication appearing WHITE came from phone-video observation and did not justify changing the physical bit timing. Full-brightness color saturation remains a plausible visibility issue, so the next RED test reduces only RED intensity while preserving the proven waveform.
+
+## Corrective implementation
+
+Corrective source change prepared after the Build #1855 hardware failure:
+
+- restore RMT timing to hardware-proven `3/9, 9/3` ticks at 10 MHz;
+- keep the 80 us reset/latch interval;
+- keep WHITE acknowledgement at `FF FF FF`;
+- keep standard GRB RED channel selection but reduce RED intensity to `00 40 00` (25%) so the five-second success indication is visibly chromatic and less likely to saturate camera/highlights;
+- do not change the already hardware-validated three-step RST/EN detection, sequence persistence, erase staging or five-second success duration;
+- update `tools/check_reset_rgb_contract.py` so CI rejects the hardware-failed `4/8, 8/4` timing and locks the restored hardware baseline.
+
+## Validation status
+
+Still hardware-PASS and not to be reopened without regression evidence:
+
+- three physical RST/EN presses are recognized;
+- destructive factory reset occurs;
+- stored infrastructure Wi-Fi is erased;
+- AP provisioning returns at `192.168.4.1`;
+- first-Admin setup returns.
+
+Open item:
+
+- RGB output must first return with the restored timing;
+- final success indication must be visibly RED for approximately five seconds.
+
+## Immediate next action
+
+1. Build the corrective firmware containing restored `3/9, 9/3` timing and reduced-brightness RED.
+2. Verify CI, obtain the exact new artifact/run/SHA.
+3. Flash that artifact on COM6.
+4. Confirm WHITE acknowledgement is restored on RST/EN.
+5. Complete the three-step sequence and verify final RED for approximately five seconds.
+6. Record the physical result before making another RGB change.
