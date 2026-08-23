@@ -295,11 +295,42 @@
     } catch(error){title.textContent="HomeGuard-S3";hint.textContent="Стан доступу недоступний.";message.textContent=`Помилка: ${error.message}`;form.innerHTML='<button type="button" id="hgRetryAuth">Повторити</button>';form.querySelector("button").onclick=loadAccessState;}
   }
 
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  async function confirmBootstrapAfterInterruptedResponse(id) {
+    for (let attempt = 0; attempt < 10; ++attempt) {
+      if (attempt) await wait(500);
+      try {
+        const response = await originalFetch("/api/v1/access/state", {cache:"no-store"});
+        const body = await apiBody(response);
+        if (!response.ok || body.ok === false) continue;
+        if (body.state === "login_required") {
+          showLogin(id);
+          message.textContent = "Admin створений. Відповідь перервалася під час перемикання Wi-Fi, але запис підтверджено. Увійдіть новим PIN.";
+          return true;
+        }
+        if (body.state === "setup_required") return false;
+      } catch (_) {
+      }
+    }
+    return false;
+  }
+
   async function submitSetup() {
     const id=form.querySelector("#hgSetupId")?.value.trim()||"",name=form.querySelector("#hgSetupName")?.value.trim()||"",pin=form.querySelector("#hgSetupPin")?.value.trim()||"";
     if(!id||!name||!/^\d{4,12}$/.test(pin)){message.textContent="Введіть ID, ім’я та PIN 4–12 цифр.";return;}
     const button=form.querySelector('button[type="submit"]');button.disabled=true;message.textContent="Створення адміністратора…";
-    try {const response=await originalFetch("/api/v1/access/users",{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"bootstrap",id,name,pin})});const body=await apiBody(response);if(!response.ok||body.ok===false)throw new Error(body.reason||String(response.status));showLogin(id);message.textContent="Admin створений. Безпарольний setup закрито. Увійдіть новим паролем.";} catch(error){message.textContent=`Не вдалося створити Admin: ${error.message}`;button.disabled=false;}
+    try {
+      const response=await originalFetch("/api/v1/access/users",{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"bootstrap",id,name,pin})});
+      const body=await apiBody(response);
+      if(!response.ok||body.ok===false)throw new Error(body.reason||String(response.status));
+      showLogin(id);
+      message.textContent="Admin створений. Безпарольний setup закрито. Увійдіть новим паролем.";
+    } catch(error) {
+      if (await confirmBootstrapAfterInterruptedResponse(id)) return;
+      message.textContent=`Не вдалося створити Admin: ${error.message}`;
+      button.disabled=false;
+    }
   }
 
   async function submitLogin() {
