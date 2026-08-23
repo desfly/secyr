@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ESP = ROOT / "firmware" / "esp-idf"
 MAIN = ESP / "main"
 WORKFLOW = ROOT / ".github" / "workflows" / "homeguard-build.yml"
+SETUP_AP_GUARD = MAIN / "hg_setup_ap_guard.cpp"
 
 errors = []
 warnings = []
@@ -18,6 +19,7 @@ required = [
     MAIN / "CMakeLists.txt",
     MAIN / "app_main.cpp",
     MAIN / "hg_version.hpp",
+    SETUP_AP_GUARD,
     WORKFLOW,
 ]
 
@@ -69,6 +71,37 @@ elif int(socket_match.group(1)) < 16:
 app_main_text = (MAIN / "app_main.cpp").read_text(encoding="utf-8")
 if "config.lru_purge_enable = true;" not in app_main_text:
     errors.append("HTTP server must keep LRU socket purge enabled")
+
+# Recovery invariant: creating an Admin is not proof that the station handover
+# succeeded. The setup AP may be disabled only after WIFI_STA_DEF owns IPv4.
+# This source gate prevents a future regression back to Admin -> immediate AP off.
+if SETUP_AP_GUARD.exists():
+    setup_ap_guard_text = SETUP_AP_GUARD.read_text(encoding="utf-8")
+    required_handover_contract = [
+        "bool sta_has_ipv4()",
+        'esp_netif_get_handle_from_ifkey("WIFI_STA_DEF")',
+        "esp_netif_get_ip_info(sta_netif, &info) == ESP_OK && info.ip.addr != 0U",
+        "if (!sta_has_ipv4()) return ESP_ERR_INVALID_STATE;",
+        "Admin ready but STA has no IPv4; keeping setup AP active until network handover succeeds",
+        "STA IPv4 ready; closing setup AP",
+    ]
+    for item in required_handover_contract:
+        if item not in setup_ap_guard_text:
+            errors.append(f"setup AP handover contract missing: {item}")
+
+    immediate_shutdown = (
+        "if (!access_runtime::bootstrap_allowed()) {\n"
+        "        return disable_setup_ap();\n"
+        "    }"
+    )
+    if immediate_shutdown in setup_ap_guard_text:
+        errors.append("setup AP must not shut down merely because Admin/bootstrap is locked")
+
+    wait_pos = setup_ap_guard_text.find("if (!sta_has_ipv4()) {")
+    close_pos = setup_ap_guard_text.find("STA IPv4 ready; closing setup AP")
+    disable_pos = setup_ap_guard_text.find("const auto error = disable_setup_ap_with_retries();")
+    if wait_pos < 0 or close_pos < 0 or disable_pos < 0 or not (wait_pos < close_pos < disable_pos):
+        errors.append("setup AP shutdown must be ordered after the STA IPv4 readiness gate")
 
 version_text = (MAIN / "hg_version.hpp").read_text(encoding="utf-8")
 version_fields = dict(re.findall(r'^#define\s+(HG_[A-Z0-9_]+)\s+"([^"]*)"', version_text, flags=re.MULTILINE))
