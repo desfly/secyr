@@ -18,48 +18,34 @@ constexpr unsigned kTaskPriority = 3;
 void setup_ap_guard_task(void*)
 {
     bool bootstrap_seen = false;
+    bool response_delay_applied = false;
 
     for (;;) {
         if (access_runtime::bootstrap_allowed()) {
             bootstrap_seen = true;
-            vTaskDelay(kPollDelay);
-            continue;
-        }
-
-        wifi_mode_t mode = WIFI_MODE_NULL;
-        const auto get_mode_error = esp_wifi_get_mode(&mode);
-        if (get_mode_error == ESP_ERR_WIFI_NOT_INIT || mode == WIFI_MODE_NULL) {
-            vTaskDelay(kPollDelay);
-            continue;
-        }
-        if (get_mode_error != ESP_OK) {
-            ESP_LOGW(kTag, "Cannot inspect Wi-Fi mode while closing setup AP: %s", esp_err_to_name(get_mode_error));
-            vTaskDelay(kPollDelay);
-            continue;
-        }
-
-        if (mode == WIFI_MODE_STA) {
-            ESP_LOGI(kTag, "Setup AP already disabled");
-            break;
-        }
-
-        if (mode != WIFI_MODE_APSTA && mode != WIFI_MODE_AP) {
+            response_delay_applied = false;
             vTaskDelay(kPollDelay);
             continue;
         }
 
         // When the first Admin has just been persisted, leave enough time for
         // the bootstrap HTTP response to reach the browser before the AP drops.
-        // On later boots with an existing Admin, close the AP immediately.
-        if (bootstrap_seen) vTaskDelay(kPostBootstrapResponseDelay);
+        // On later boots with an existing Admin there is no response to protect,
+        // so the guard immediately starts trying to force STA-only mode.
+        if (bootstrap_seen && !response_delay_applied) {
+            response_delay_applied = true;
+            vTaskDelay(kPostBootstrapResponseDelay);
+        }
 
+        // Before esp_wifi_init()/esp_wifi_start() this returns an error. Retry
+        // until Wi-Fi is ready. Once ready, setting STA mode removes the open
+        // 192.168.4.1 setup AP while preserving the configured station link.
         const auto set_mode_error = esp_wifi_set_mode(WIFI_MODE_STA);
         if (set_mode_error == ESP_OK) {
             ESP_LOGI(kTag, "Open setup AP disabled; Wi-Fi is now STA-only");
             break;
         }
 
-        ESP_LOGE(kTag, "Failed to disable setup AP: %s", esp_err_to_name(set_mode_error));
         vTaskDelay(kPollDelay);
     }
 
