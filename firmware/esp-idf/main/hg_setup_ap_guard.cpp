@@ -15,7 +15,7 @@ namespace {
 constexpr const char* kTag = "hg_setup_ap";
 constexpr TickType_t kPollDelay = pdMS_TO_TICKS(100);
 constexpr TickType_t kPostBootstrapResponseDelay = pdMS_TO_TICKS(750);
-constexpr unsigned kTaskStackBytes = 2048;
+constexpr unsigned kTaskStackBytes = 8192;
 constexpr unsigned kTaskPriority = 3;
 static char kCaptivePortalUri[] = "http://192.168.4.1";
 
@@ -52,6 +52,8 @@ bool configure_setup_captive_portal()
 
 void setup_ap_guard_task(void*)
 {
+    ESP_LOGI(kTag, "Setup AP guard task started");
+
     bool bootstrap_seen = false;
     bool response_delay_applied = false;
     bool captive_portal_configured = false;
