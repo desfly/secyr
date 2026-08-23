@@ -18,6 +18,7 @@ constexpr std::uint16_t kSingleShot = 0x0100;
 constexpr std::uint16_t kPga4096 = 0x0200;
 constexpr std::uint16_t kDataRate128 = 0x0080;
 constexpr std::uint16_t kComparatorDisabled = 0x0003;
+constexpr TickType_t kAccessTimeout = pdMS_TO_TICKS(250);
 
 }  // namespace
 
@@ -30,6 +31,7 @@ esp_err_t Ads1115::initialize(
     }
 
     device_ = nullptr;
+    mutex_ = nullptr;
     address_ = 0;
 
     i2c_master_dev_handle_t candidate = nullptr;
@@ -52,6 +54,17 @@ esp_err_t Ads1115::initialize(
         device_ = nullptr;
         address_ = 0;
         return error;
+    }
+
+    // A conversion is a multi-step transaction: select MUX, wait, then read.
+    // Protect the whole sequence because telemetry and diagnostic HTTP may read
+    // the same ADC concurrently.
+    mutex_ = xSemaphoreCreateMutex();
+    if (mutex_ == nullptr) {
+        (void)i2c_master_bus_rm_device(candidate);
+        device_ = nullptr;
+        address_ = 0;
+        return ESP_ERR_NO_MEM;
     }
 
     address_ = address;
@@ -110,8 +123,11 @@ esp_err_t Ads1115::read_single_ended_mv(
     std::uint8_t channel,
     float* millivolts)
 {
-    if (device_ == nullptr || millivolts == nullptr || channel > 3) {
+    if (device_ == nullptr || mutex_ == nullptr || millivolts == nullptr || channel > 3) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (xSemaphoreTake(mutex_, kAccessTimeout) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
     }
 
     const std::uint16_t mux =
@@ -121,21 +137,19 @@ esp_err_t Ads1115::read_single_ended_mv(
         kDataRate128 | kComparatorDisabled;
 
     auto error = write_register(kConfigRegister, config);
-    if (error != ESP_OK) {
-        return error;
+    if (error == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+
+        std::uint16_t raw_unsigned = 0;
+        error = read_register(kConversionRegister, &raw_unsigned);
+        if (error == ESP_OK) {
+            const auto raw = static_cast<std::int16_t>(raw_unsigned);
+            *millivolts = static_cast<float>(raw) * 0.125F;
+        }
     }
 
-    vTaskDelay(pdMS_TO_TICKS(10));
-
-    std::uint16_t raw_unsigned = 0;
-    error = read_register(kConversionRegister, &raw_unsigned);
-    if (error != ESP_OK) {
-        return error;
-    }
-
-    const auto raw = static_cast<std::int16_t>(raw_unsigned);
-    *millivolts = static_cast<float>(raw) * 0.125F;
-    return ESP_OK;
+    (void)xSemaphoreGive(mutex_);
+    return error;
 }
 
 esp_err_t Ads1115::read_all_single_ended_mv(
@@ -166,7 +180,7 @@ esp_err_t Ads1115::read_all_single_ended_mv(
 
 bool Ads1115::ready() const noexcept
 {
-    return device_ != nullptr;
+    return device_ != nullptr && mutex_ != nullptr;
 }
 
 std::uint8_t Ads1115::address() const noexcept
