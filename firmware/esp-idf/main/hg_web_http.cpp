@@ -109,7 +109,8 @@ esp_err_t WebHttp::css_get(httpd_req_t* request)
   .brand{height:auto!important;min-height:34px!important;justify-content:flex-start!important;align-items:center!important;padding:0 8px!important}
   .brand h1{font-size:24px!important;letter-spacing:-.5px!important}
   .bruce{height:96px!important;max-height:96px!important;margin:4px 0 8px!important;border-radius:10px!important;overflow:hidden!important}
-  .bruce img{display:block!important;width:100%!important;height:100%!important;max-height:96px!important;object-fit:contain!important;object-position:center center!important}
+  .bruce img{object-fit:contain!important;object-position:center center!important}
+  .bruce img{display:block!important;width:100%!important;height:100%!important;max-height:96px!important}
   .sidebar nav{display:none!important;margin:0!important;padding:0!important;flex-direction:column!important;gap:4px!important}
   .sidebar.mobile-nav-open nav{display:flex!important}
   .sidebar nav a{min-height:40px!important;margin:0!important;padding:8px 12px!important;border-radius:8px!important;font-size:14px!important;display:flex!important;align-items:center!important;gap:8px!important}
