@@ -16,7 +16,7 @@ namespace {
 constexpr const char* kTag = "hg_setup_ap";
 constexpr TickType_t kPollDelay = pdMS_TO_TICKS(100);
 constexpr TickType_t kPostBootstrapResponseDelay = pdMS_TO_TICKS(750);
-constexpr unsigned kTaskStackBytes = 2048;
+constexpr unsigned kTaskStackBytes = 6144;
 constexpr unsigned kTaskPriority = 3;
 static char kCaptivePortalUri[] = "http://192.168.4.1";
 
@@ -85,19 +85,6 @@ void setup_ap_guard_task(void*)
     vTaskDelete(nullptr);
 }
 
-class SetupApGuardStarter {
-public:
-    SetupApGuardStarter()
-    {
-        const auto error = start_setup_ap_guard();
-        if (error != ESP_OK) {
-            ESP_LOGE(kTag, "Setup AP guard startup failed: %s", esp_err_to_name(error));
-        }
-    }
-};
-
-SetupApGuardStarter g_setup_ap_guard_starter;
-
 }  // namespace
 
 esp_err_t start_setup_ap_guard()
@@ -113,7 +100,7 @@ esp_err_t start_setup_ap_guard()
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_LOGI(kTag, "Setup AP guard task started");
+    ESP_LOGI(kTag, "Setup AP guard task started after Wi-Fi init");
     return ESP_OK;
 }
 
