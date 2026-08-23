@@ -3,6 +3,7 @@
 #include "driver/i2c_master.h"
 #include "esp_err.h"
 
+#include <array>
 #include <cstdint>
 
 namespace homeguard::idf {
@@ -18,6 +19,10 @@ public:
     esp_err_t read_single_ended_mv(
         std::uint8_t channel,
         float* millivolts);
+
+    esp_err_t read_all_single_ended_mv(
+        std::array<float, 4>* millivolts,
+        std::array<bool, 4>* valid);
 
     bool ready() const noexcept;
     std::uint8_t address() const noexcept;
