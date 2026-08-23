@@ -1,3 +1,4 @@
+#include "hg_setup_ap_guard.hpp"
 #include "hg_access_runtime.hpp"
 
 #include "esp_err.h"
@@ -67,18 +68,11 @@ void setup_ap_guard_task(void*)
             continue;
         }
 
-        // When the first Admin has just been persisted, leave enough time for
-        // the bootstrap HTTP response to reach the browser before the AP drops.
-        // On later boots with an existing Admin there is no response to protect,
-        // so the guard immediately starts trying to force STA-only mode.
         if (bootstrap_seen && !response_delay_applied) {
             response_delay_applied = true;
             vTaskDelay(kPostBootstrapResponseDelay);
         }
 
-        // Before esp_wifi_init()/esp_wifi_start() this returns an error. Retry
-        // until Wi-Fi is ready. Once ready, setting STA mode removes the open
-        // 192.168.4.1 setup AP while preserving the configured station link.
         const auto set_mode_error = esp_wifi_set_mode(WIFI_MODE_STA);
         if (set_mode_error == ESP_OK) {
             ESP_LOGI(kTag, "Open setup AP disabled; Wi-Fi is now STA-only");
@@ -91,22 +85,23 @@ void setup_ap_guard_task(void*)
     vTaskDelete(nullptr);
 }
 
-class SetupApGuardStarter {
-public:
-    SetupApGuardStarter()
-    {
-        if (xTaskCreate(&setup_ap_guard_task,
-                        "hg_setup_ap_guard",
-                        kTaskStackBytes,
-                        nullptr,
-                        kTaskPriority,
-                        nullptr) != pdPASS) {
-            ESP_LOGE(kTag, "Unable to start setup AP guard task");
-        }
-    }
-};
-
-SetupApGuardStarter g_setup_ap_guard_starter;
-
 }  // namespace
+
+esp_err_t start_setup_ap_guard()
+{
+    const auto result = xTaskCreate(&setup_ap_guard_task,
+                                    "hg_setup_ap_guard",
+                                    kTaskStackBytes,
+                                    nullptr,
+                                    kTaskPriority,
+                                    nullptr);
+    if (result != pdPASS) {
+        ESP_LOGE(kTag, "Unable to start setup AP guard task");
+        return ESP_ERR_NO_MEM;
+    }
+
+    ESP_LOGI(kTag, "Setup AP guard task started explicitly");
+    return ESP_OK;
+}
+
 }  // namespace homeguard::idf
