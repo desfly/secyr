@@ -1,5 +1,7 @@
 #include "hg_ads1115.hpp"
 #include "hg_i2c_bus.hpp"
+
+#include <array>
 #include <cstdint>
 
 #include "freertos/FreeRTOS.h"
@@ -27,21 +29,43 @@ esp_err_t Ads1115::initialize(
         return ESP_ERR_INVALID_ARG;
     }
 
-    const auto error = bus.add_device(
+    device_ = nullptr;
+    address_ = 0;
+
+    i2c_master_dev_handle_t candidate = nullptr;
+    auto error = bus.add_device(
         address,
         400000,
-        &device_);
-
-    if (error == ESP_OK) {
-        address_ = address;
+        &candidate);
+    if (error != ESP_OK) {
+        return error;
     }
-    return error;
+
+    // Adding a device handle does not prove that hardware exists. Bind the
+    // candidate temporarily and perform a real register transaction so READY
+    // means the ADS1115 actually acknowledged on the physical I2C bus.
+    device_ = candidate;
+    std::uint16_t config = 0;
+    error = read_register(kConfigRegister, &config);
+    if (error != ESP_OK) {
+        (void)i2c_master_bus_rm_device(candidate);
+        device_ = nullptr;
+        address_ = 0;
+        return error;
+    }
+
+    address_ = address;
+    return ESP_OK;
 }
 
 esp_err_t Ads1115::write_register(
     std::uint8_t reg,
     std::uint16_t value)
 {
+    if (device_ == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     const std::uint8_t data[]{
         reg,
         static_cast<std::uint8_t>(value >> 8),
@@ -58,6 +82,9 @@ esp_err_t Ads1115::read_register(
     std::uint8_t reg,
     std::uint16_t* value)
 {
+    if (device_ == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
     if (value == nullptr) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -109,6 +136,32 @@ esp_err_t Ads1115::read_single_ended_mv(
     const auto raw = static_cast<std::int16_t>(raw_unsigned);
     *millivolts = static_cast<float>(raw) * 0.125F;
     return ESP_OK;
+}
+
+esp_err_t Ads1115::read_all_single_ended_mv(
+    std::array<float, 4>* millivolts,
+    std::array<bool, 4>* valid)
+{
+    if (device_ == nullptr || millivolts == nullptr || valid == nullptr) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    millivolts->fill(0.0F);
+    valid->fill(false);
+    esp_err_t first_error = ESP_OK;
+
+    for (std::uint8_t channel = 0; channel < 4; ++channel) {
+        float value = 0.0F;
+        const auto error = read_single_ended_mv(channel, &value);
+        if (error == ESP_OK) {
+            (*millivolts)[channel] = value;
+            (*valid)[channel] = true;
+        } else if (first_error == ESP_OK) {
+            first_error = error;
+        }
+    }
+
+    return first_error;
 }
 
 bool Ads1115::ready() const noexcept
