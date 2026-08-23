@@ -48,9 +48,10 @@ User tested the firmware built from `65f4b553740fec60ea4592671e3dfe911723a7c7` a
 
 - **Wi-Fi: OK** — setup/home-network handover is working as intended in the tested scenario;
 - **Web UI on PC: OK**;
-- **Web UI on mobile: OK**.
+- **Web UI on mobile: OK**;
+- **Reset indication: OK** — reset sequence observed as **3 white indications followed by 1 red indication** (`3 white + 1 red`).
 
-These three items are now treated as hardware/user-validated PASS for this build. This record must be preserved as the reference point before further firmware/UI changes.
+These four items are now treated as hardware/user-validated PASS for this build. This record must be preserved as the reference point before further firmware/UI changes.
 
 ## Validation status
 
@@ -59,3 +60,4 @@ These three items are now treated as hardware/user-validated PASS for this build
 - Wi-Fi hardware validation: **PASS (user confirmed)**.
 - Web UI desktop validation: **PASS (user confirmed)**.
 - Web UI mobile validation: **PASS (user confirmed)**.
+- Reset indication sequence `3 white + 1 red`: **PASS (user confirmed)**.
