@@ -11,12 +11,15 @@
 #include "hg_ds3231.hpp"
 #include "hg_ina226.hpp"
 
+#include <string>
+
 namespace homeguard::idf {
 
 class HardwareBootstrap {
 public:
     esp_err_t initialize();
     const HardwareRuntimeStatus& status() const noexcept;
+    std::string analog_snapshot_json();
 
     Ads1115& zone_adc() noexcept;
     Ads1115& telemetry_adc() noexcept;
