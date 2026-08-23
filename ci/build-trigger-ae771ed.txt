@@ -1,0 +1,2 @@
+Build trigger for latest HomeGuard-S3 firmware.
+Source commit: ae771ed096011610bc9dc25d3a5094fd4f9b43f4
