@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_netif_ip_addr.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -16,6 +17,7 @@ namespace {
 constexpr const char* kTag = "hg_setup_ap";
 constexpr TickType_t kPollDelay = pdMS_TO_TICKS(100);
 constexpr TickType_t kPostBootstrapResponseDelay = pdMS_TO_TICKS(750);
+constexpr TickType_t kStaReadyPollDelay = pdMS_TO_TICKS(250);
 constexpr TickType_t kDisableRetryDelay = pdMS_TO_TICKS(250);
 constexpr unsigned kDisableRetryCount = 8;
 constexpr unsigned kTaskStackBytes = 12288;
@@ -53,6 +55,15 @@ bool configure_setup_captive_portal()
     return true;
 }
 
+bool sta_has_ipv4()
+{
+    auto* sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta_netif == nullptr) return false;
+
+    esp_netif_ip_info_t info{};
+    return esp_netif_get_ip_info(sta_netif, &info) == ESP_OK && info.ip.addr != 0U;
+}
+
 esp_err_t disable_setup_ap()
 {
     // esp_wifi_set_mode() is idempotent for the current STA-only state, so there
@@ -72,6 +83,7 @@ esp_err_t disable_setup_ap_with_retries()
     esp_err_t last_error = ESP_FAIL;
     for (unsigned attempt = 0; attempt < kDisableRetryCount; ++attempt) {
         if (access_runtime::bootstrap_allowed()) return ESP_ERR_INVALID_STATE;
+        if (!sta_has_ipv4()) return ESP_ERR_INVALID_STATE;
         last_error = disable_setup_ap();
         if (last_error == ESP_OK) return ESP_OK;
         vTaskDelay(kDisableRetryDelay);
@@ -81,20 +93,45 @@ esp_err_t disable_setup_ap_with_retries()
 
 void setup_ap_guard_task(void*)
 {
+    bool waiting_for_sta_logged = false;
+
     for (;;) {
         while (access_runtime::bootstrap_allowed()) {
+            waiting_for_sta_logged = false;
             vTaskDelay(kPollDelay);
         }
 
         // The bootstrap HTTP response must have time to leave the socket before
-        // dropping the SoftAP that carried that request. Re-check afterwards:
-        // a failed Admin persist rolls bootstrap back to allowed=true.
+        // any transport change. A failed Admin persist rolls bootstrap back to
+        // allowed=true, so always re-check after this grace period.
         vTaskDelay(kPostBootstrapResponseDelay);
         if (access_runtime::bootstrap_allowed()) continue;
 
+        // Never strand the installer. Admin existence alone is not sufficient
+        // proof that the station handover succeeded. Keep the setup AP alive
+        // until the STA interface actually owns an IPv4 address. This also
+        // provides a recovery path after reboot when the configured WLAN is
+        // temporarily unavailable.
+        if (!sta_has_ipv4()) {
+            if (!waiting_for_sta_logged) {
+                ESP_LOGW(kTag, "Admin ready but STA has no IPv4; keeping setup AP active until network handover succeeds");
+                waiting_for_sta_logged = true;
+            }
+            vTaskDelay(kStaReadyPollDelay);
+            continue;
+        }
+
+        ESP_LOGI(kTag, "STA IPv4 ready; closing setup AP");
         const auto error = disable_setup_ap_with_retries();
-        if (error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
-            ESP_LOGE(kTag, "Setup AP remained enabled after Admin bootstrap: %s", esp_err_to_name(error));
+        if (error == ESP_ERR_INVALID_STATE) {
+            waiting_for_sta_logged = false;
+            vTaskDelay(kStaReadyPollDelay);
+            continue;
+        }
+        if (error != ESP_OK) {
+            ESP_LOGE(kTag, "Setup AP remained enabled after STA became reachable: %s", esp_err_to_name(error));
+            vTaskDelay(kDisableRetryDelay);
+            continue;
         }
         vTaskDelete(nullptr);
     }
@@ -104,13 +141,10 @@ void setup_ap_guard_task(void*)
 
 esp_err_t start_setup_ap_guard()
 {
-    // Normal boot with a persisted Admin must be STA-only from this point on.
-    // Wi-Fi is fully initialized before this function is called from app_main.
-    if (!access_runtime::bootstrap_allowed()) {
-        return disable_setup_ap();
-    }
-
-    if (!configure_setup_captive_portal()) {
+    // NetworkHttp starts AP+STA so first-time setup is always reachable. The AP
+    // guard now owns the transition to STA-only and performs it only after an
+    // Admin exists AND the station interface has a usable IPv4 address.
+    if (access_runtime::bootstrap_allowed() && !configure_setup_captive_portal()) {
         ESP_LOGW(kTag, "Setup captive portal advertisement unavailable; keeping bootstrap AP active");
     }
 
