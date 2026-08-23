@@ -2,6 +2,8 @@
 
 #include "driver/i2c_master.h"
 #include "esp_err.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include <array>
 #include <cstdint>
@@ -36,6 +38,7 @@ private:
         std::uint16_t* value);
 
     i2c_master_dev_handle_t device_{nullptr};
+    SemaphoreHandle_t mutex_{nullptr};
     std::uint8_t address_{0};
 };
 
