@@ -40,6 +40,7 @@ idf_component_register(
         "hg_gpio_output_backend.cpp"
         "hg_access_nvs.cpp"
         "hg_access_http.cpp"
+        "hg_setup_ap_guard.cpp"
         "hg_commissioning_nvs.cpp"
         "hg_factory_reset.cpp"
         "hg_reset_sequence.cpp"
