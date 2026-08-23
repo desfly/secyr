@@ -16,7 +16,7 @@ namespace {
 constexpr const char* kTag = "hg_setup_ap";
 constexpr TickType_t kPollDelay = pdMS_TO_TICKS(100);
 constexpr TickType_t kPostBootstrapResponseDelay = pdMS_TO_TICKS(750);
-constexpr unsigned kTaskStackBytes = 6144;
+constexpr unsigned kTaskStackBytes = 12288;
 constexpr unsigned kTaskPriority = 3;
 static char kCaptivePortalUri[] = "http://192.168.4.1";
 
@@ -51,37 +51,27 @@ bool configure_setup_captive_portal()
     return true;
 }
 
+esp_err_t disable_setup_ap()
+{
+    const auto error = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (error == ESP_OK) {
+        ESP_LOGI(kTag, "Open setup AP disabled; Wi-Fi is now STA-only");
+    } else {
+        ESP_LOGE(kTag, "Unable to disable setup AP: %s", esp_err_to_name(error));
+    }
+    return error;
+}
+
 void setup_ap_guard_task(void*)
 {
-    bool bootstrap_seen = false;
-    bool response_delay_applied = false;
-    bool captive_portal_configured = false;
-
-    for (;;) {
-        if (access_runtime::bootstrap_allowed()) {
-            bootstrap_seen = true;
-            response_delay_applied = false;
-            if (!captive_portal_configured) {
-                captive_portal_configured = configure_setup_captive_portal();
-            }
-            vTaskDelay(kPollDelay);
-            continue;
-        }
-
-        if (bootstrap_seen && !response_delay_applied) {
-            response_delay_applied = true;
-            vTaskDelay(kPostBootstrapResponseDelay);
-        }
-
-        const auto set_mode_error = esp_wifi_set_mode(WIFI_MODE_STA);
-        if (set_mode_error == ESP_OK) {
-            ESP_LOGI(kTag, "Open setup AP disabled; Wi-Fi is now STA-only");
-            break;
-        }
-
+    while (access_runtime::bootstrap_allowed()) {
         vTaskDelay(kPollDelay);
     }
 
+    // The bootstrap HTTP response must have time to leave the socket before
+    // dropping the SoftAP that carried that request.
+    vTaskDelay(kPostBootstrapResponseDelay);
+    (void)disable_setup_ap();
     vTaskDelete(nullptr);
 }
 
@@ -89,6 +79,16 @@ void setup_ap_guard_task(void*)
 
 esp_err_t start_setup_ap_guard()
 {
+    // Normal boot with a persisted Admin must not create a background task.
+    // Wi-Fi is fully initialized before this function is called from app_main.
+    if (!access_runtime::bootstrap_allowed()) {
+        return disable_setup_ap();
+    }
+
+    if (!configure_setup_captive_portal()) {
+        ESP_LOGW(kTag, "Setup captive portal advertisement unavailable; keeping bootstrap AP active");
+    }
+
     const auto result = xTaskCreate(&setup_ap_guard_task,
                                     "hg_setup_ap_guard",
                                     kTaskStackBytes,
@@ -100,7 +100,7 @@ esp_err_t start_setup_ap_guard()
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_LOGI(kTag, "Setup AP guard task started");
+    ESP_LOGI(kTag, "Setup AP guard task started after Wi-Fi initialization");
     return ESP_OK;
 }
 
