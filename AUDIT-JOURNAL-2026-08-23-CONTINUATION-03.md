@@ -64,3 +64,27 @@ ADS1115 #2 0x49 detected; A0 conversion self-test ... mV
 The authenticated analog endpoint should then report two devices with addresses 72 (`0x48`) and 73 (`0x49`) and four `channels_mv` values for each.
 
 Do not mark dual ADS1115 integration as hardware PASS until both physical addresses and conversion reads are observed on the real ESP32-S3.
+
+## Hardware validation result — PASS
+
+User flashed and booted HomeGuard-S3 Build-1979 from commit `312e61f47eb2de8d616de4fc796fbf98bfed85aa` on the real ESP32-S3 hardware.
+
+UART evidence:
+
+```text
+I (1310) hg_hardware: ADS1115 #1 0x48 detected; A0 conversion self-test 586.000 mV
+I (1320) hg_hardware: ADS1115 #2 0x49 detected; A0 conversion self-test 587.000 mV
+```
+
+Validation:
+
+- ADS1115 #1 physical detection at `0x48`: PASS;
+- ADS1115 #1 conversion read: PASS, A0 = 586.000 mV at boot self-test;
+- ADS1115 #2 physical detection at `0x49`: PASS;
+- ADS1115 #2 conversion read: PASS, A0 = 587.000 mV at boot self-test;
+- shared I2C bus on GPIO4/GPIO5: PASS for both devices concurrently present;
+- Build identity observed in UART: `HomeGuard-S3 Build-1979 (312e61f47eb2de8d616de4fc796fbf98bfed85aa)`.
+
+Dual ADS1115 first-stage hardware integration is therefore **PASS**.
+
+Open/floating analog inputs are not yet treated as calibrated sensor measurements. The next validation stage is to exercise A0..A3 on both devices through the authenticated `/api/v1/hardware/analog` endpoint and then apply deterministic known-voltage tests before assigning sensor semantics or calibration.
