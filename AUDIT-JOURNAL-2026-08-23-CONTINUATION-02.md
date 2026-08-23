@@ -36,14 +36,26 @@ Commit `8e7adc6aa9b2bf51c7cdc863cbe7ce23fbd483a6` (`Gate setup AP shutdown on ST
 - setup AP shutdown is allowed merely because bootstrap/Admin is locked;
 - the shutdown call is ordered before the STA IPv4 readiness gate.
 
-## Build trigger
+## Build under validation
 
-This journal commit intentionally creates a fresh `push` on `main` so `.github/workflows/homeguard-build.yml` runs against the corrected firmware plus the new regression gate.
+Build source commit: `65f4b553740fec60ea4592671e3dfe911723a7c7` (`Document STA IPv4 handover fix and trigger build`).
 
-Target for the next hardware test: firmware built from this commit or a direct descendant containing both `5a800910` and `8e7adc6`.
+This build contains both the firmware correction (`5a800910`) and the CI regression gate (`8e7adc6`).
+
+## Hardware / UI validation result — USER CONFIRMED PASS
+
+User tested the firmware built from `65f4b553740fec60ea4592671e3dfe911723a7c7` and confirmed:
+
+- **Wi-Fi: OK** — setup/home-network handover is working as intended in the tested scenario;
+- **Web UI on PC: OK**;
+- **Web UI on mobile: OK**.
+
+These three items are now treated as hardware/user-validated PASS for this build. This record must be preserved as the reference point before further firmware/UI changes.
 
 ## Validation status
 
-- Code correction: PRESENT.
-- CI regression gate: PRESENT.
-- Hardware validation of the corrected handover: PENDING next green firmware artifact.
+- Code correction: **PASS / PRESENT**.
+- CI regression gate: **PASS / PRESENT**.
+- Wi-Fi hardware validation: **PASS (user confirmed)**.
+- Web UI desktop validation: **PASS (user confirmed)**.
+- Web UI mobile validation: **PASS (user confirmed)**.
