@@ -1,0 +1,2 @@
+Build trigger for compact first-boot setup firmware.
+Source commit: f20122088fcc16d55a0a1e97bd5ab9456c3253f4
