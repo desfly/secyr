@@ -9,6 +9,8 @@
   <style>
     .bruce{background:none!important;filter:none!important;opacity:1!important;display:grid;place-items:center;overflow:hidden}
     .bruce img{display:block;width:100%;height:100%;object-fit:contain;object-position:center center}
+    html body #hgAuthGate .hg-auth-bruce{object-position:right center!important;opacity:1!important;filter:none!important}
+    html body #hgAuthGate .hg-auth-shade{background:transparent!important}
     .lan-grid{display:grid;gap:8px;margin-top:12px}.lan-device{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;padding:11px 13px;border:1px solid #d7deea;border-radius:9px;background:#fff}.lan-device small{color:#66758b}.lan-device strong{overflow-wrap:anywhere}
     .cloud-config{max-width:920px;margin-top:18px}.cloud-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.cloud-fields label{display:block}.cloud-fields input{display:block;width:100%;margin-top:6px;padding:11px;border:1px solid #d7deea;border-radius:8px;box-sizing:border-box}.cloud-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px}
     .nav-group-label{display:flex;align-items:center;gap:8px;padding:9px 14px 5px;color:#cbd6e4;font-weight:700;font-size:13px;cursor:default;user-select:none}
@@ -129,6 +131,80 @@
 <div id="toast" hidden></div>
 <button id="refresh" hidden>Оновити</button>
 <script src="/app.js?v=285"></script>
-<script src="/access-session.js?v=286"></script>
+<script src="/access-session.js?v=287"></script>
+<script>
+(() => {
+  let handoverPending = false;
+  let generation = 0;
+  const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  const adminButton = () => document.querySelector('#hgAuthForm button[type="submit"]');
+  const setupMessage = () => document.querySelector('#hgAuthMessage');
+  const wifiStatus = () => document.querySelector('#hgSetupWifiStatus');
+  const setAdminLocked = (locked) => { const button = adminButton(); if (button) button.disabled = locked; };
+
+  async function responseBody(response) {
+    const text = await response.text();
+    try { return text ? JSON.parse(text) : {}; } catch (_) { return {}; }
+  }
+
+  async function waitForWifiHandover(expectedSsid, token) {
+    for (let attempt = 0; attempt < 70 && token === generation; ++attempt) {
+      await delay(500);
+      try {
+        const response = await fetch('/api/v1/network/status', {cache:'no-store'});
+        const body = await responseBody(response);
+        if (!response.ok || body.ok === false) continue;
+        const state = String(body.state || '');
+        const ssid = String(body.ssid || '');
+        const candidatePending = body.candidatePending === true;
+        if (state === 'connected' && !candidatePending && ssid === expectedSsid) {
+          handoverPending = false;
+          setAdminLocked(false);
+          const status = wifiStatus();
+          if (status) status.textContent = `Wi-Fi ${expectedSsid} підключено. Тепер створіть Admin.`;
+          return;
+        }
+        if (attempt > 5 && !candidatePending && (state === 'error' || (state === 'connected' && ssid && ssid !== expectedSsid))) {
+          handoverPending = false;
+          setAdminLocked(false);
+          const status = wifiStatus();
+          if (status) status.textContent = 'Перемикання Wi-Fi не завершилось на обраній мережі. Admin можна створити, а мережу повторити після входу.';
+          return;
+        }
+      } catch (_) {
+      }
+    }
+    if (token !== generation) return;
+    handoverPending = false;
+    setAdminLocked(false);
+    const status = wifiStatus();
+    if (status) status.textContent = 'Очікування Wi-Fi завершено. Можна створювати Admin.';
+  }
+
+  document.addEventListener('click', event => {
+    const button = event.target.closest?.('#hgSetupWifiConnect');
+    if (!button) return;
+    const ssid = document.querySelector('#hgSetupWifiSsid')?.value.trim() || '';
+    const password = document.querySelector('#hgSetupWifiPassword')?.value || '';
+    if (!ssid || (password && password.length < 8)) return;
+    handoverPending = true;
+    const token = ++generation;
+    setAdminLocked(true);
+    const message = setupMessage();
+    if (message) message.textContent = 'Дочекайтеся завершення перемикання Wi-Fi перед створенням Admin.';
+    setTimeout(() => waitForWifiHandover(ssid, token), 250);
+  }, true);
+
+  document.addEventListener('submit', event => {
+    if (!handoverPending || event.target?.id !== 'hgAuthForm') return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const message = setupMessage();
+    if (message) message.textContent = 'Wi-Fi ще перемикається. Створення Admin буде доступне після стабілізації мережі.';
+  }, true);
+
+  new MutationObserver(() => { if (handoverPending) setAdminLocked(true); }).observe(document.body, {childList:true, subtree:true});
+})();
+</script>
 </body>
 </html>
