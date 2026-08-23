@@ -22,7 +22,16 @@ esp_err_t InfrastructureHttp::register_handlers(
         .handler = &InfrastructureHttp::status_get,
         .user_ctx = this,
     };
-    return httpd_register_uri_handler(server, &status_route);
+    auto error = httpd_register_uri_handler(server, &status_route);
+    if (error != ESP_OK) return error;
+
+    const httpd_uri_t analog_route{
+        .uri = "/api/v1/hardware/analog",
+        .method = HTTP_GET,
+        .handler = &InfrastructureHttp::analog_get,
+        .user_ctx = this,
+    };
+    return httpd_register_uri_handler(server, &analog_route);
 }
 
 esp_err_t InfrastructureHttp::status_get(httpd_req_t* request)
@@ -35,6 +44,21 @@ esp_err_t InfrastructureHttp::status_get(httpd_req_t* request)
     }
 
     const auto body = hardware_runtime_json(self->hardware_->status());
+    httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    return httpd_resp_send(request, body.c_str(), body.size());
+}
+
+esp_err_t InfrastructureHttp::analog_get(httpd_req_t* request)
+{
+    if (request == nullptr || request->user_ctx == nullptr) return ESP_ERR_INVALID_ARG;
+    auto* self = static_cast<InfrastructureHttp*>(request->user_ctx);
+    if (self->hardware_ == nullptr || self->access_control_ == nullptr) return ESP_FAIL;
+    if (!request_auth::authenticated(request, *self->access_control_)) {
+        return request_auth::send_login_required(request);
+    }
+
+    const auto body = self->hardware_->analog_snapshot_json();
     httpd_resp_set_type(request, "application/json");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, body.c_str(), body.size());
