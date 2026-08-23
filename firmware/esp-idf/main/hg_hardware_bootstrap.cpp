@@ -4,6 +4,7 @@
 #include "esp_log.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <iomanip>
 #include <sstream>
