@@ -101,31 +101,35 @@ esp_err_t WebHttp::css_get(httpd_req_t* request)
     static constexpr char kFirmwareCssFix[] = R"CSS(
 
 [hidden]{display:none!important}
+#mobileNavToggle{display:none}
 @media (max-width:760px){
   html,body{max-width:100%;overflow-x:hidden}
   .shell{display:block!important;min-height:100vh}
-  .sidebar{position:relative!important;top:auto!important;width:100%!important;height:auto!important;min-height:0!important;padding:10px 10px 12px!important;overflow:visible!important}
+  .sidebar{position:relative!important;top:auto!important;width:100%!important;height:auto!important;min-height:0!important;padding:10px!important;overflow:hidden!important}
   .brand{height:auto!important;min-height:34px!important;justify-content:flex-start!important;align-items:center!important;padding:0 8px!important}
   .brand h1{font-size:24px!important;letter-spacing:-.5px!important}
-  .bruce{height:180px!important;margin:4px 0 8px!important;border-radius:10px!important;overflow:visible!important}
-  .bruce img{object-fit:contain!important;object-position:center center!important}
-  .sidebar nav{display:none!important;margin:0!important;padding:0!important}
+  .bruce{height:96px!important;max-height:96px!important;margin:4px 0 8px!important;border-radius:10px!important;overflow:hidden!important}
+  .bruce img{display:block!important;width:100%!important;height:100%!important;max-height:96px!important;object-fit:contain!important;object-position:center center!important}
+  .sidebar nav{display:none!important;margin:0!important;padding:0!important;flex-direction:column!important;gap:4px!important}
   .sidebar.mobile-nav-open nav{display:flex!important}
-  .sidebar nav a{min-height:44px!important;margin:0!important;padding:10px 12px!important;border-radius:10px!important;font-size:15px!important;display:flex!important;align-items:center!important;gap:8px!important}
+  .sidebar nav a{min-height:40px!important;margin:0!important;padding:8px 12px!important;border-radius:8px!important;font-size:14px!important;display:flex!important;align-items:center!important;gap:8px!important}
+  #mobileNavToggle{display:block!important;width:100%!important;margin:0!important;padding:10px 12px!important;border:1px solid rgba(255,255,255,.28)!important;border-radius:8px!important;background:#173551!important;color:#fff!important;font:inherit!important;font-weight:700!important;text-align:left!important}
   .side-foot{display:none!important}
   .workspace{min-width:0!important;width:100%!important}
-  .workspace header{padding:14px 14px 10px!important;gap:8px!important;align-items:flex-start!important;flex-wrap:wrap!important}
-  .workspace header h2{font-size:24px!important;margin:0!important}
-  .workspace header p{margin:3px 0 0!important}
-  .header-status{width:100%!important;justify-content:space-between!important;gap:8px!important}
+  .workspace header{padding:12px 14px!important;gap:6px!important;align-items:flex-start!important;flex-wrap:wrap!important}
+  .workspace header h2{font-size:22px!important;margin:0!important}
+  .workspace header p{font-size:14px!important;margin:3px 0 0!important}
+  .header-status{display:none!important}
   main{padding:12px!important}
   .status-grid,.two-col{grid-template-columns:1fr!important;gap:10px!important}
   .status-grid article,.panel{min-width:0!important}
+  .status-grid article{min-height:104px!important;padding:14px!important}
   .quick{grid-template-columns:repeat(2,minmax(0,1fr))!important}
   .cloud-fields{grid-template-columns:1fr!important}
   .lan-device{grid-template-columns:1fr!important;gap:6px!important}
   #networkPage .panel>div[style*="grid-template-columns:repeat(3"]{grid-template-columns:1fr!important}
   #networkPage .panel>div[style*="grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto"]{grid-template-columns:1fr!important}
+  #hgSessionLogout{position:static!important;display:block!important;width:calc(100% - 24px)!important;margin:12px!important;box-sizing:border-box!important}
   button,input,select{max-width:100%}
 }
 )CSS";
@@ -147,6 +151,29 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
   const dashboardBody = document.querySelector(".two-col");
   const network = document.getElementById("networkPage");
   const system = document.getElementById("system");
+  const sidebar = document.querySelector(".sidebar");
+  const bruce = sidebar?.querySelector(".bruce");
+  const nav = sidebar?.querySelector("nav");
+
+  if (sidebar && bruce && nav && !document.getElementById("mobileNavToggle")) {
+    const toggle = document.createElement("button");
+    toggle.id = "mobileNavToggle";
+    toggle.type = "button";
+    toggle.textContent = "☰ Меню";
+    toggle.setAttribute("aria-expanded", "false");
+    bruce.insertAdjacentElement("afterend", toggle);
+    const closeMenu = () => {
+      sidebar.classList.remove("mobile-nav-open");
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.textContent = "☰ Меню";
+    };
+    toggle.addEventListener("click", () => {
+      const open = sidebar.classList.toggle("mobile-nav-open");
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.textContent = open ? "✕ Закрити меню" : "☰ Меню";
+    });
+    nav.querySelectorAll("a").forEach(link => link.addEventListener("click", closeMenu));
+  }
 
   function applyEmbeddedView() {
     const hash = window.location.hash || "#overview";
