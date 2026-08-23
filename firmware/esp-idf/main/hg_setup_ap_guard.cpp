@@ -85,19 +85,6 @@ void setup_ap_guard_task(void*)
     vTaskDelete(nullptr);
 }
 
-class SetupApGuardStarter {
-public:
-    SetupApGuardStarter()
-    {
-        const auto error = start_setup_ap_guard();
-        if (error != ESP_OK) {
-            ESP_LOGE(kTag, "Setup AP guard startup failed: %s", esp_err_to_name(error));
-        }
-    }
-};
-
-SetupApGuardStarter g_setup_ap_guard_starter;
-
 }  // namespace
 
 esp_err_t start_setup_ap_guard()
