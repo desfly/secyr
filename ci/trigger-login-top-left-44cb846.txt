@@ -1,0 +1,2 @@
+Temporary PR-only CI trigger for compact top-left login card.
+Source commit: 44cb846b4c76150679236967fe2929c10f3811e7
