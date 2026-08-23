@@ -34,6 +34,10 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # Provisioning secret writes are blocked in software while NVS encryption is off.
 
 CONFIG_LWIP_LOCAL_HOSTNAME="homeguard-s3"
+# Advertise DHCP option 114 while the factory setup AP is active. Android and
+# iOS can then open the local setup page without treating the no-Internet AP as
+# a dead network. The runtime URI is http://192.168.4.1.
+CONFIG_ESP_ENABLE_DHCP_CAPTIVEPORTAL=y
 # Explicit descriptor budget: HTTPD keeps 3 internal sockets in addition to its
 # client sessions, while mDNS, device discovery, DNS and MQTT also need sockets.
 # ESP-IDF's lwIP default of 10 is too small for a normal browser asset burst.
