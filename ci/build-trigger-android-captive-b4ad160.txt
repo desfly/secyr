@@ -1,0 +1,2 @@
+Build trigger for Android captive portal setup fix.
+Source commit: b4ad16056cf72f7276317ef1884eba360b6fc315
