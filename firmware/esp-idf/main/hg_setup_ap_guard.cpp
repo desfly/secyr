@@ -16,6 +16,8 @@ namespace {
 constexpr const char* kTag = "hg_setup_ap";
 constexpr TickType_t kPollDelay = pdMS_TO_TICKS(100);
 constexpr TickType_t kPostBootstrapResponseDelay = pdMS_TO_TICKS(750);
+constexpr TickType_t kDisableRetryDelay = pdMS_TO_TICKS(250);
+constexpr unsigned kDisableRetryCount = 8;
 constexpr unsigned kTaskStackBytes = 12288;
 constexpr unsigned kTaskPriority = 3;
 static char kCaptivePortalUri[] = "http://192.168.4.1";
@@ -53,6 +55,13 @@ bool configure_setup_captive_portal()
 
 esp_err_t disable_setup_ap()
 {
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    const auto mode_error = esp_wifi_get_mode(&mode);
+    if (mode_error == ESP_OK && mode == WIFI_MODE_STA) {
+        ESP_LOGI(kTag, "Setup AP already disabled; Wi-Fi is STA-only");
+        return ESP_OK;
+    }
+
     const auto error = esp_wifi_set_mode(WIFI_MODE_STA);
     if (error == ESP_OK) {
         ESP_LOGI(kTag, "Open setup AP disabled; Wi-Fi is now STA-only");
@@ -62,24 +71,44 @@ esp_err_t disable_setup_ap()
     return error;
 }
 
+esp_err_t disable_setup_ap_with_retries()
+{
+    esp_err_t last_error = ESP_FAIL;
+    for (unsigned attempt = 0; attempt < kDisableRetryCount; ++attempt) {
+        if (access_runtime::bootstrap_allowed()) return ESP_ERR_INVALID_STATE;
+        last_error = disable_setup_ap();
+        if (last_error == ESP_OK) return ESP_OK;
+        vTaskDelay(kDisableRetryDelay);
+    }
+    return last_error;
+}
+
 void setup_ap_guard_task(void*)
 {
-    while (access_runtime::bootstrap_allowed()) {
-        vTaskDelay(kPollDelay);
-    }
+    for (;;) {
+        while (access_runtime::bootstrap_allowed()) {
+            vTaskDelay(kPollDelay);
+        }
 
-    // The bootstrap HTTP response must have time to leave the socket before
-    // dropping the SoftAP that carried that request.
-    vTaskDelay(kPostBootstrapResponseDelay);
-    (void)disable_setup_ap();
-    vTaskDelete(nullptr);
+        // The bootstrap HTTP response must have time to leave the socket before
+        // dropping the SoftAP that carried that request. Re-check afterwards:
+        // a failed Admin persist rolls bootstrap back to allowed=true.
+        vTaskDelay(kPostBootstrapResponseDelay);
+        if (access_runtime::bootstrap_allowed()) continue;
+
+        const auto error = disable_setup_ap_with_retries();
+        if (error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(kTag, "Setup AP remained enabled after Admin bootstrap: %s", esp_err_to_name(error));
+        }
+        vTaskDelete(nullptr);
+    }
 }
 
 }  // namespace
 
 esp_err_t start_setup_ap_guard()
 {
-    // Normal boot with a persisted Admin must not create a background task.
+    // Normal boot with a persisted Admin must be STA-only from this point on.
     // Wi-Fi is fully initialized before this function is called from app_main.
     if (!access_runtime::bootstrap_allowed()) {
         return disable_setup_ap();
