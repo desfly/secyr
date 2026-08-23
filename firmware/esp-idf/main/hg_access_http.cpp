@@ -253,8 +253,6 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
             return send_json(request, "{\"ok\":false,\"reason\":\"invalid_bootstrap_admin\"}");
         }
 
-        bootstrap_allowed_ = false;
-        access_runtime::lock_bootstrap();
         std::array<std::uint8_t, 16> salt{};
         esp_fill_random(salt.data(), salt.size());
         const bool user_set = access_->set_user(id, name, AccessRole::Admin, pin, salt, true);
@@ -276,7 +274,10 @@ esp_err_t AccessHttp::handle_users(httpd_req_t* request) {
             return send_json(request, "{\"ok\":false,\"reason\":\"persist_failed\"}");
         }
         http_session::revoke_all();
-        return send_json(request, "{\"ok\":true,\"state\":\"login_required\",\"role\":\"admin\"}");
+        const auto response_result = send_json(request, "{\"ok\":true,\"state\":\"login_required\",\"role\":\"admin\"}");
+        bootstrap_allowed_ = false;
+        access_runtime::lock_bootstrap();
+        return response_result;
     }
 
     std::string actor;
