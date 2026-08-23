@@ -1,0 +1,2 @@
+Temporary PR-only CI trigger for Bruce right alignment and Admin Wi-Fi handover guard.
+Source main commit: 4108e2ef42bc924595ffce0eb3fbdaaac49fe2b1
