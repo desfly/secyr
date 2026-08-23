@@ -30,27 +30,29 @@
     #hgAuthGate .hg-setup-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}
     #hgAuthGate .hg-setup-panel{min-width:0;padding:18px;border:1px solid rgba(255,255,255,.16);border-radius:12px;background:rgba(16,36,58,.48)}
     #hgAuthGate .hg-setup-networks{display:grid;gap:6px;max-height:230px;overflow:auto;margin-top:10px;padding-right:2px}
+    #hgAuthGate .hg-setup-networks[hidden]{display:none!important}
     #hgAuthGate .hg-setup-network{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;margin:0;padding:10px 12px;text-align:left;background:#10243a;color:#fff;border:1px solid rgba(255,255,255,.18);border-radius:8px;font-weight:600}
     #hgAuthGate .hg-setup-network:hover,#hgAuthGate .hg-setup-network:focus-visible,#hgAuthGate .hg-setup-network[aria-selected="true"]{border-color:#6ea8ff;background:#183f68;outline:none}
     #hgAuthGate .hg-setup-network span{color:#b8c6d4;font-weight:500;white-space:nowrap}
     #hgSessionLogout{position:fixed;right:14px;bottom:14px;z-index:2000;padding:9px 12px;border-radius:9px;border:1px solid #d7deea;background:#fff;font:inherit;font-weight:700}
     .hg-legacy-auth-field{display:none!important}
     @media(min-width:1100px){
-      #hgAuthGate.hg-setup-mode .hg-auth-stage{display:flex!important;align-items:center!important;justify-content:flex-start!important;padding:1.4vw!important;overflow:hidden!important}
-      #hgAuthGate.hg-setup-mode .hg-auth-card{box-sizing:border-box!important;width:52vw!important;max-width:none!important;min-width:0!important;margin:0!important;padding:2vw!important;border-radius:18px!important;background:rgba(7,19,31,.98)!important;backdrop-filter:none!important}
-      #hgAuthGate.hg-setup-mode h2{font-size:2vw!important;line-height:1.08!important;margin-bottom:.55vw!important}
-      #hgAuthGate.hg-setup-mode h3{font-size:1.42vw!important;line-height:1.12!important;margin-bottom:.9vw!important}
-      #hgAuthGate.hg-setup-mode p{font-size:.95vw!important;line-height:1.4!important;margin-bottom:1.15vw!important}
-      #hgAuthGate.hg-setup-mode .hg-setup-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:1.4vw!important}
-      #hgAuthGate.hg-setup-mode .hg-setup-panel{padding:1.5vw!important;border-radius:14px!important}
-      #hgAuthGate.hg-setup-mode label{font-size:1.05vw!important;line-height:1.2!important;margin:.75vw 0!important}
-      #hgAuthGate.hg-setup-mode input,#hgAuthGate.hg-setup-mode select{min-height:3.25vw!important;font-size:1.05vw!important;line-height:1.2!important;padding:.8vw .95vw!important;border-radius:10px!important}
-      #hgAuthGate.hg-setup-mode .hg-password-label input{padding-right:52px!important}
-      #hgAuthGate.hg-setup-mode button{min-height:3.25vw!important;font-size:1.02vw!important;line-height:1.15!important;padding:.8vw .95vw!important;border-radius:10px!important}
-      #hgAuthGate.hg-setup-mode button.hg-password-eye{width:36px!important;height:36px!important;min-height:36px!important;margin:0!important;padding:0!important;border-radius:6px!important}
-      #hgAuthGate.hg-setup-mode .hg-setup-status{font-size:.9vw!important;line-height:1.35!important;margin-top:.65vw!important}
-      #hgAuthGate.hg-setup-mode .hg-setup-networks{max-height:17vw!important;gap:.45vw!important}
-      #hgAuthGate.hg-setup-mode .hg-setup-network{min-height:3vw!important;font-size:.95vw!important;padding:.65vw .8vw!important}
+      #hgAuthGate.hg-setup-mode .hg-auth-stage{display:flex!important;align-items:center!important;justify-content:flex-start!important;padding:.8vw!important;overflow:hidden!important}
+      #hgAuthGate.hg-setup-mode .hg-auth-card{box-sizing:border-box!important;width:40vw!important;max-width:none!important;min-width:0!important;margin:0!important;padding:1.05vw!important;border-radius:12px!important;background:rgba(7,19,31,.98)!important;backdrop-filter:none!important}
+      #hgAuthGate.hg-setup-mode h2{font-size:1.35vw!important;line-height:1.08!important;margin-bottom:.3vw!important}
+      #hgAuthGate.hg-setup-mode h3{font-size:1vw!important;line-height:1.12!important;margin-bottom:.48vw!important}
+      #hgAuthGate.hg-setup-mode p{font-size:.72vw!important;line-height:1.35!important;margin-bottom:.6vw!important}
+      #hgAuthGate.hg-setup-mode .hg-setup-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:.8vw!important}
+      #hgAuthGate.hg-setup-mode .hg-setup-panel{padding:.8vw!important;border-radius:10px!important}
+      #hgAuthGate.hg-setup-mode label{font-size:.78vw!important;line-height:1.15!important;margin:.4vw 0!important}
+      #hgAuthGate.hg-setup-mode input,#hgAuthGate.hg-setup-mode select{min-height:2.25vw!important;font-size:.78vw!important;line-height:1.15!important;padding:.48vw .6vw!important;border-radius:7px!important}
+      #hgAuthGate.hg-setup-mode .hg-password-label input{padding-right:42px!important}
+      #hgAuthGate.hg-setup-mode button{min-height:2.25vw!important;font-size:.76vw!important;line-height:1.1!important;margin-top:.45vw!important;padding:.48vw .6vw!important;border-radius:7px!important}
+      #hgAuthGate.hg-setup-mode button.hg-password-eye{right:5px!important;bottom:4px!important;width:30px!important;height:30px!important;min-height:30px!important;margin:0!important;padding:0!important;border-radius:5px!important}
+      #hgAuthGate.hg-setup-mode button.hg-password-eye svg{width:18px!important;height:18px!important}
+      #hgAuthGate.hg-setup-mode .hg-setup-status{font-size:.68vw!important;line-height:1.3!important;margin-top:.35vw!important}
+      #hgAuthGate.hg-setup-mode .hg-setup-networks{max-height:10vw!important;gap:.3vw!important;margin-top:.4vw!important}
+      #hgAuthGate.hg-setup-mode .hg-setup-network{min-height:2.05vw!important;font-size:.72vw!important;padding:.35vw .5vw!important}
     }
     @media(max-width:720px){
       #hgAuthGate .hg-auth-stage{padding:16px}
@@ -239,7 +241,7 @@
 
   async function setupScanWifi() {
     const button=form.querySelector("#hgSetupWifiScan"),list=form.querySelector("#hgSetupWifiNetworks"),ssidField=form.querySelector("#hgSetupWifiSsid"),status=form.querySelector("#hgSetupWifiStatus");
-    if(!button||!list||!ssidField||!status)return; button.disabled=true; status.textContent="Сканування…"; list.replaceChildren();
+    if(!button||!list||!ssidField||!status)return; button.disabled=true; status.textContent="Сканування…"; list.hidden=false; list.replaceChildren();
     try {
       const response=await originalFetch("/api/v1/network/scan",{cache:"no-store"}); const body=await apiBody(response);
       if(!response.ok||body.ok===false)throw new Error(body.reason||String(response.status));
@@ -253,15 +255,25 @@
         row.onclick=()=>{
           list.querySelectorAll(".hg-setup-network").forEach(candidate=>candidate.setAttribute("aria-selected","false"));
           row.setAttribute("aria-selected","true");
-          if(ssid){ssidField.value=ssid;form.querySelector("#hgSetupWifiPassword")?.focus();}
-          else{ssidField.value="";ssidField.focus();}
+          if(ssid){
+            ssidField.value=ssid;
+            status.textContent=`Обрано: ${ssid}. Введіть пароль Wi‑Fi.`;
+            list.hidden=true;
+            form.querySelector("#hgSetupWifiPassword")?.focus();
+          } else {
+            ssidField.value="";
+            status.textContent="Прихована мережа: введіть SSID вручну.";
+            list.hidden=true;
+            ssidField.focus();
+          }
         };
         list.appendChild(row);
       });
+      list.hidden=networks.length===0;
       status.textContent=networks.length?`Знайдено мереж: ${networks.length}. Оберіть мережу зі списку.`:"Мереж не знайдено. SSID можна ввести вручну.";
       if(networks.length)list.querySelector(".hg-setup-network")?.focus();
       else ssidField.focus();
-    } catch(error){status.textContent=`Помилка сканування: ${error.message}`;} finally {button.disabled=false;}
+    } catch(error){list.hidden=true;status.textContent=`Помилка сканування: ${error.message}`;} finally {button.disabled=false;}
   }
 
   async function setupConnectWifi() {
