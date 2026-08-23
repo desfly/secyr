@@ -43,6 +43,14 @@ inline esp_err_t nvs_set_u8(nvs_handle_t, const char*, std::uint8_t) {
     return ESP_OK;
 }
 
+inline esp_err_t nvs_get_u32(nvs_handle_t, const char*, std::uint32_t*) {
+    return ESP_ERR_NVS_NOT_FOUND;
+}
+
+inline esp_err_t nvs_set_u32(nvs_handle_t, const char*, std::uint32_t) {
+    return ESP_OK;
+}
+
 inline esp_err_t nvs_erase_key(nvs_handle_t, const char*) {
     return ESP_ERR_NVS_NOT_FOUND;
 }
