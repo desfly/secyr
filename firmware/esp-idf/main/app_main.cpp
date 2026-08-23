@@ -17,6 +17,7 @@
 #include "hg_access_nvs.hpp"
 #include "hg_access_http.hpp"
 #include "hg_access_runtime.hpp"
+#include "hg_setup_ap_guard.hpp"
 #include "hg_access_time.hpp"
 #include "hg_commissioning_nvs.hpp"
 #include "hg_reset_sequence.hpp"
@@ -279,8 +280,15 @@ extern "C" void app_main()
 
     g_network_http.set_access_control(&g_access_control);
     const auto network_error = g_network_http.begin();
-    if (network_error != ESP_OK) ESP_LOGE(kTag, "Wi-Fi network runtime failed: %s", esp_err_to_name(network_error));
-    else ESP_LOGI(kTag, "Wi-Fi network runtime ready");
+    if (network_error != ESP_OK) {
+        ESP_LOGE(kTag, "Wi-Fi network runtime failed: %s", esp_err_to_name(network_error));
+    } else {
+        ESP_LOGI(kTag, "Wi-Fi network runtime ready");
+        const auto setup_ap_error = homeguard::idf::start_setup_ap_guard();
+        if (setup_ap_error != ESP_OK) {
+            ESP_LOGE(kTag, "Setup AP guard failed after Wi-Fi initialization: %s", esp_err_to_name(setup_ap_error));
+        }
+    }
 
     const auto cloud_identity_error = g_cloud_link.prepare_identity();
     if (cloud_identity_error != ESP_OK) ESP_LOGE(kTag, "Cloud identity preparation failed: %s", esp_err_to_name(cloud_identity_error));
