@@ -8,6 +8,11 @@ ESP = ROOT / "firmware" / "esp-idf"
 MAIN = ESP / "main"
 WORKFLOW = ROOT / ".github" / "workflows" / "homeguard-build.yml"
 SETUP_AP_GUARD = MAIN / "hg_setup_ap_guard.cpp"
+ADS1115 = MAIN / "hg_ads1115.cpp"
+ADS1115_HEADER = MAIN / "hg_ads1115.hpp"
+HARDWARE_BOOTSTRAP = MAIN / "hg_hardware_bootstrap.cpp"
+INFRASTRUCTURE_HTTP = MAIN / "hg_infrastructure_http.cpp"
+BOARD = MAIN / "hg_board_hw678.hpp"
 
 errors = []
 warnings = []
@@ -20,6 +25,11 @@ required = [
     MAIN / "app_main.cpp",
     MAIN / "hg_version.hpp",
     SETUP_AP_GUARD,
+    ADS1115,
+    ADS1115_HEADER,
+    HARDWARE_BOOTSTRAP,
+    INFRASTRUCTURE_HTTP,
+    BOARD,
     WORKFLOW,
 ]
 
@@ -102,6 +112,44 @@ if SETUP_AP_GUARD.exists():
     disable_pos = setup_ap_guard_text.find("const auto error = disable_setup_ap_with_retries();")
     if wait_pos < 0 or close_pos < 0 or disable_pos < 0 or not (wait_pos < close_pos < disable_pos):
         errors.append("setup AP shutdown must be ordered after the STA IPv4 readiness gate")
+
+# Dual ADS1115 invariant: both physical modules share the approved I2C bus,
+# have distinct addresses, must ACK a real register transaction before READY,
+# serialize conversion sequences, and expose all 8 raw channels for diagnostics.
+if ADS1115.exists() and ADS1115_HEADER.exists() and HARDWARE_BOOTSTRAP.exists() and INFRASTRUCTURE_HTTP.exists() and BOARD.exists():
+    ads_text = ADS1115.read_text(encoding="utf-8")
+    ads_header_text = ADS1115_HEADER.read_text(encoding="utf-8")
+    hardware_text = HARDWARE_BOOTSTRAP.read_text(encoding="utf-8")
+    infrastructure_text = INFRASTRUCTURE_HTTP.read_text(encoding="utf-8")
+    board_text = BOARD.read_text(encoding="utf-8")
+
+    ads_contract = [
+        "read_register(kConfigRegister, &config)",
+        "i2c_master_bus_rm_device(candidate)",
+        "xSemaphoreCreateMutex()",
+        "xSemaphoreTake(mutex_, kAccessTimeout)",
+        "read_all_single_ended_mv",
+    ]
+    for item in ads_contract:
+        if item not in ads_text and item not in ads_header_text:
+            errors.append(f"ADS1115 driver contract missing: {item}")
+
+    hardware_contract = [
+        "zone_adc_.initialize(i2c_, 0x48)",
+        "telemetry_adc_.initialize(i2c_, 0x49)",
+        "ADS1115 #1 0x48",
+        "ADS1115 #2 0x49",
+        "analog_snapshot_json()",
+        "channels_mv",
+    ]
+    for item in hardware_contract:
+        if item not in hardware_text:
+            errors.append(f"dual ADS1115 bootstrap contract missing: {item}")
+
+    if '/api/v1/hardware/analog' not in infrastructure_text:
+        errors.append("dual ADS1115 diagnostic API route missing")
+    if "kI2cSda = GPIO_NUM_4" not in board_text or "kI2cScl = GPIO_NUM_5" not in board_text:
+        errors.append("dual ADS1115 bus must remain on approved GPIO4 SDA / GPIO5 SCL")
 
 version_text = (MAIN / "hg_version.hpp").read_text(encoding="utf-8")
 version_fields = dict(re.findall(r'^#define\s+(HG_[A-Z0-9_]+)\s+"([^"]*)"', version_text, flags=re.MULTILINE))
