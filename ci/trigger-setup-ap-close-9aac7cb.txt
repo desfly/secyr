@@ -1,0 +1,2 @@
+Build trigger for setup AP shutdown after first Admin.
+Source commit: 9aac7cb623db891feb7546766cf70704f5853be8
