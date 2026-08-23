@@ -1,6 +1,72 @@
 #include "hg_hardware_bootstrap.hpp"
+#include "hg_board_hw678.hpp"
+
+#include "esp_log.h"
+
+#include <array>
+#include <cstdint>
+#include <iomanip>
+#include <sstream>
 
 namespace homeguard::idf {
+
+namespace {
+
+constexpr const char* kTag = "hg_hardware";
+
+void append_adc_snapshot(
+    std::ostringstream& output,
+    const char* role,
+    std::uint8_t expected_address,
+    Ads1115& adc)
+{
+    std::array<float, 4> values{};
+    std::array<bool, 4> valid{};
+    const auto read_error = adc.ready()
+        ? adc.read_all_single_ended_mv(&values, &valid)
+        : ESP_ERR_INVALID_STATE;
+
+    output << "{\"role\":\"" << role << "\","
+           << "\"address\":" << static_cast<unsigned>(expected_address) << ","
+           << "\"address_hex\":\"0x"
+           << std::uppercase << std::hex << static_cast<unsigned>(expected_address)
+           << std::nouppercase << std::dec << "\","
+           << "\"ready\":" << (adc.ready() ? "true" : "false") << ","
+           << "\"read_ok\":" << (read_error == ESP_OK ? "true" : "false") << ","
+           << "\"channels_mv\":[";
+
+    output << std::fixed << std::setprecision(3);
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index != 0U) output << ',';
+        if (valid[index]) output << values[index];
+        else output << "null";
+    }
+    output << "]}";
+}
+
+void validate_adc_conversion(
+    const char* label,
+    Ads1115& adc,
+    HardwareModuleStatus& status)
+{
+    if (!adc.ready()) return;
+
+    float sample_mv = 0.0F;
+    const auto error = adc.read_single_ended_mv(0, &sample_mv);
+    if (error != ESP_OK) {
+        status = {
+            HardwareModuleState::Degraded,
+            std::string(label) + " detected but conversion read failed",
+            1,
+        };
+        ESP_LOGW(kTag, "%s conversion self-test failed: %s", label, esp_err_to_name(error));
+        return;
+    }
+
+    ESP_LOGI(kTag, "%s detected; A0 conversion self-test %.3f mV", label, static_cast<double>(sample_mv));
+}
+
+}  // namespace
 
 HardwareModuleStatus HardwareBootstrap::module_status(
     esp_err_t error,
@@ -39,15 +105,25 @@ esp_err_t HardwareBootstrap::initialize()
         zone_adc_.initialize(i2c_, 0x48);
     status_.ads1115_zones = module_status(
         zone_error,
-        "ADS1115 0x48",
-        "ADS1115 0x48 not detected");
+        "ADS1115 #1 0x48, A0-A3 raw mV",
+        "ADS1115 #1 0x48 not detected");
+    if (zone_error == ESP_OK) {
+        validate_adc_conversion("ADS1115 #1 0x48", zone_adc_, status_.ads1115_zones);
+    } else {
+        ESP_LOGW(kTag, "ADS1115 #1 0x48 not detected: %s", esp_err_to_name(zone_error));
+    }
 
     const auto telemetry_error =
         telemetry_adc_.initialize(i2c_, 0x49);
     status_.ads1115_telemetry = module_status(
         telemetry_error,
-        "ADS1115 0x49",
-        "ADS1115 0x49 not detected");
+        "ADS1115 #2 0x49, A0-A3 raw mV",
+        "ADS1115 #2 0x49 not detected");
+    if (telemetry_error == ESP_OK) {
+        validate_adc_conversion("ADS1115 #2 0x49", telemetry_adc_, status_.ads1115_telemetry);
+    } else {
+        ESP_LOGW(kTag, "ADS1115 #2 0x49 not detected: %s", esp_err_to_name(telemetry_error));
+    }
 
     const auto mcp_error =
         mcp23017_.initialize(i2c_, 0x20);
@@ -136,6 +212,22 @@ const HardwareRuntimeStatus&
 HardwareBootstrap::status() const noexcept
 {
     return status_;
+}
+
+std::string HardwareBootstrap::analog_snapshot_json()
+{
+    std::ostringstream output;
+    output << "{\"ok\":"
+           << (zone_adc_.ready() && telemetry_adc_.ready() ? "true" : "false")
+           << ",\"bus\":{\"sda_gpio\":" << static_cast<int>(board::kI2cSda)
+           << ",\"scl_gpio\":" << static_cast<int>(board::kI2cScl)
+           << "},\"devices\":[";
+
+    append_adc_snapshot(output, "zones", 0x48, zone_adc_);
+    output << ',';
+    append_adc_snapshot(output, "telemetry", 0x49, telemetry_adc_);
+    output << "]}";
+    return output.str();
 }
 
 Ads1115& HardwareBootstrap::zone_adc() noexcept
