@@ -55,13 +55,9 @@ bool configure_setup_captive_portal()
 
 esp_err_t disable_setup_ap()
 {
-    wifi_mode_t mode = WIFI_MODE_NULL;
-    const auto mode_error = esp_wifi_get_mode(&mode);
-    if (mode_error == ESP_OK && mode == WIFI_MODE_STA) {
-        ESP_LOGI(kTag, "Setup AP already disabled; Wi-Fi is STA-only");
-        return ESP_OK;
-    }
-
+    // esp_wifi_set_mode() is idempotent for the current STA-only state, so there
+    // is no need to query the mode first. Keeping this path minimal also keeps
+    // the ESP-IDF host mock aligned with the production call surface.
     const auto error = esp_wifi_set_mode(WIFI_MODE_STA);
     if (error == ESP_OK) {
         ESP_LOGI(kTag, "Open setup AP disabled; Wi-Fi is now STA-only");
