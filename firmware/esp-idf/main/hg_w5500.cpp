@@ -8,6 +8,7 @@
 #include "esp_event.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
 
@@ -120,6 +121,27 @@ esp_err_t W5500::initialize()
         return error;
     }
     ESP_LOGI(kTag, "Ethernet driver installed");
+
+    // W5500 does not contain a factory-programmed unique MAC address. Derive
+    // the ESP-IDF Ethernet MAC from the ESP32-S3 base MAC and program it into
+    // the W5500 before the network interface is attached.
+    uint8_t eth_mac[6]{};
+    error = esp_read_mac(eth_mac, ESP_MAC_ETH);
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag, "esp_read_mac(ESP_MAC_ETH) failed: %s", esp_err_to_name(error));
+        return error;
+    }
+
+    error = esp_eth_ioctl(eth_, ETH_CMD_S_MAC_ADDR, eth_mac);
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag, "ETH_CMD_S_MAC_ADDR failed: %s", esp_err_to_name(error));
+        return error;
+    }
+
+    ESP_LOGI(
+        kTag,
+        "Ethernet MAC set to %02x:%02x:%02x:%02x:%02x:%02x",
+        eth_mac[0], eth_mac[1], eth_mac[2], eth_mac[3], eth_mac[4], eth_mac[5]);
 
     esp_netif_config_t netif_config =
         ESP_NETIF_DEFAULT_ETH();
