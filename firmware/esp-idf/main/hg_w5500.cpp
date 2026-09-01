@@ -1,12 +1,10 @@
 #include "hg_w5500.hpp"
 #include "hg_board_hw678.hpp"
 
-#include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_eth_mac_spi.h"
 #include "esp_eth_phy.h"
 #include "esp_event.h"
-#include "esp_check.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
@@ -18,23 +16,24 @@ namespace homeguard::idf {
 
 namespace {
 constexpr const char* kTag = "hg_w5500";
+constexpr std::uint32_t kLinkPollPeriodMs = 100;
 }
 
 esp_err_t W5500::initialize()
 {
     if (status_.initialized) {
-        ESP_LOGI(kTag, "initialize skipped: already initialized");
         return ESP_OK;
     }
 
     ESP_LOGI(
         kTag,
-        "DIAG init: SCK=%d MOSI=%d MISO=%d CS=%d RST=%d; polling mode, INT ignored",
+        "W5500 init: SCK=%d MOSI=%d MISO=%d CS=%d RST=%d polling=%ums",
         static_cast<int>(board::kW5500Sck),
         static_cast<int>(board::kW5500Mosi),
         static_cast<int>(board::kW5500Miso),
         static_cast<int>(board::kW5500Cs),
-        static_cast<int>(board::kW5500Reset));
+        static_cast<int>(board::kW5500Reset),
+        static_cast<unsigned>(kLinkPollPeriodMs));
 
     const spi_bus_config_t bus_config{
         .mosi_io_num = board::kW5500Mosi,
@@ -59,7 +58,6 @@ esp_err_t W5500::initialize()
         ESP_LOGE(kTag, "SPI bus init failed: %s", esp_err_to_name(error));
         return error;
     }
-    ESP_LOGI(kTag, "SPI bus ready: %s", esp_err_to_name(error));
 
     spi_device_interface_config_t spi_config{
         .command_bits = 16,
@@ -84,11 +82,11 @@ esp_err_t W5500::initialize()
             SPI2_HOST,
             &spi_config);
 
-    // DIAGNOSTIC MODE: ignore the hardware interrupt line entirely and poll
-    // W5500 over SPI. If LINK starts working in this build, GPIO9/INT is the
-    // remaining suspect.
+    // Production mode: poll link state over the verified SPI path instead of
+    // depending on the external INT line. This keeps Ethernet operational even
+    // when the W5500 interrupt path is unavailable.
     w5500_config.int_gpio_num = -1;
-    w5500_config.poll_period_ms = 100;
+    w5500_config.poll_period_ms = kLinkPollPeriodMs;
 
     eth_mac_config_t mac_config =
         ETH_MAC_DEFAULT_CONFIG();
@@ -120,11 +118,9 @@ esp_err_t W5500::initialize()
         ESP_LOGE(kTag, "esp_eth_driver_install failed: %s", esp_err_to_name(error));
         return error;
     }
-    ESP_LOGI(kTag, "Ethernet driver installed");
 
-    // W5500 does not contain a factory-programmed unique MAC address. Derive
-    // the ESP-IDF Ethernet MAC from the ESP32-S3 base MAC and program it into
-    // the W5500 before the network interface is attached.
+    // W5500 needs a valid Ethernet MAC supplied by the host. Use the ESP32-S3
+    // Ethernet MAC derived by ESP-IDF and program it before attaching netif.
     uint8_t eth_mac[6]{};
     error = esp_read_mac(eth_mac, ESP_MAC_ETH);
     if (error != ESP_OK) {
@@ -140,7 +136,7 @@ esp_err_t W5500::initialize()
 
     ESP_LOGI(
         kTag,
-        "Ethernet MAC set to %02x:%02x:%02x:%02x:%02x:%02x",
+        "Ethernet MAC %02x:%02x:%02x:%02x:%02x:%02x",
         eth_mac[0], eth_mac[1], eth_mac[2], eth_mac[3], eth_mac[4], eth_mac[5]);
 
     esp_netif_config_t netif_config =
@@ -180,22 +176,19 @@ esp_err_t W5500::initialize()
     }
 
     status_.initialized = true;
-    ESP_LOGI(kTag, "W5500 INIT OK");
+    ESP_LOGI(kTag, "W5500 ready");
     return ESP_OK;
 }
 
 esp_err_t W5500::start()
 {
     if (!status_.initialized || eth_ == nullptr) {
-        ESP_LOGE(kTag, "W5500 START rejected: not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
     const auto error = esp_eth_start(eth_);
-    if (error == ESP_OK) {
-        ESP_LOGI(kTag, "W5500 START OK; waiting for LINK");
-    } else {
-        ESP_LOGE(kTag, "W5500 START FAIL: %s", esp_err_to_name(error));
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag, "W5500 start failed: %s", esp_err_to_name(error));
     }
     return error;
 }
@@ -221,12 +214,12 @@ void W5500::on_eth_event(
 
     if (id == ETHERNET_EVENT_CONNECTED) {
         self->status_.link_up = true;
-        ESP_LOGI(kTag, "W5500 LINK UP");
+        ESP_LOGI(kTag, "LINK UP");
     } else if (id == ETHERNET_EVENT_DISCONNECTED) {
         self->status_.link_up = false;
         self->status_.has_ip = false;
         self->status_.ipv4.clear();
-        ESP_LOGW(kTag, "W5500 LINK DOWN");
+        ESP_LOGW(kTag, "LINK DOWN");
     }
 }
 
@@ -252,7 +245,7 @@ void W5500::on_ip_event(
 
     self->status_.has_ip = true;
     self->status_.ipv4 = buffer;
-    ESP_LOGI(kTag, "W5500 GOT IP: %s", buffer);
+    ESP_LOGI(kTag, "IPv4 %s", buffer);
 }
 
 const W5500Status& W5500::status() const noexcept
