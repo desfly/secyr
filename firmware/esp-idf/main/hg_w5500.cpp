@@ -8,7 +8,6 @@
 #include "esp_event.h"
 #include "esp_check.h"
 #include "esp_log.h"
-#include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
 
@@ -86,7 +85,7 @@ esp_err_t W5500::initialize()
 
     // DIAGNOSTIC MODE: ignore the hardware interrupt line entirely and poll
     // W5500 over SPI. If LINK starts working in this build, GPIO9/INT is the
-    // remaining suspect. ESP-IDF requires int_gpio_num < 0 for polling mode.
+    // remaining suspect.
     w5500_config.int_gpio_num = -1;
     w5500_config.poll_period_ms = 100;
 
@@ -121,22 +120,6 @@ esp_err_t W5500::initialize()
         return error;
     }
     ESP_LOGI(kTag, "Ethernet driver installed");
-
-    uint8_t eth_mac[6]{};
-    error = esp_read_mac(eth_mac, ESP_MAC_ETH);
-    if (error != ESP_OK) {
-        ESP_LOGE(kTag, "esp_read_mac(ESP_MAC_ETH) failed: %s", esp_err_to_name(error));
-        return error;
-    }
-    error = esp_eth_ioctl(eth_, ETH_CMD_S_MAC_ADDR, eth_mac);
-    if (error != ESP_OK) {
-        ESP_LOGE(kTag, "ETH_CMD_S_MAC_ADDR failed: %s", esp_err_to_name(error));
-        return error;
-    }
-    ESP_LOGI(
-        kTag,
-        "Ethernet MAC set to %02x:%02x:%02x:%02x:%02x:%02x",
-        eth_mac[0], eth_mac[1], eth_mac[2], eth_mac[3], eth_mac[4], eth_mac[5]);
 
     esp_netif_config_t netif_config =
         ESP_NETIF_DEFAULT_ETH();
@@ -222,10 +205,6 @@ void W5500::on_eth_event(
         self->status_.has_ip = false;
         self->status_.ipv4.clear();
         ESP_LOGW(kTag, "W5500 LINK DOWN");
-    } else if (id == ETHERNET_EVENT_START) {
-        ESP_LOGI(kTag, "W5500 ETH EVENT START");
-    } else if (id == ETHERNET_EVENT_STOP) {
-        ESP_LOGI(kTag, "W5500 ETH EVENT STOP");
     }
 }
 
