@@ -79,6 +79,7 @@ esp_err_t SdStorage::mount()
     if (error == ESP_OK) {
         status_.mounted = true;
         refresh_space();
+        error = self_test();
     }
     return error;
 }
