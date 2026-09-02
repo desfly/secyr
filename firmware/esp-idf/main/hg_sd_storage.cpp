@@ -2,6 +2,7 @@
 #include "hg_board_hw678.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
