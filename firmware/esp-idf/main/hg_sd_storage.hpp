@@ -20,6 +20,7 @@ public:
     esp_err_t mount();
     esp_err_t unmount();
     esp_err_t refresh_space();
+    esp_err_t self_test();
     const SdStorageStatus& status() const noexcept;
 
 private:
