@@ -49,16 +49,15 @@ esp_err_t SdStorage::mount()
         SPI3_HOST,
         &bus_config,
         SPI_DMA_CH_AUTO);
-    if (error != ESP_OK &&
-        error != ESP_ERR_INVALID_STATE) {
+    if (error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(kTag, "SPI3 init failed: %s", esp_err_to_name(error));
         return error;
     }
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     host.slot = SPI3_HOST;
 
-    sdspi_device_config_t slot =
-        SDSPI_DEVICE_CONFIG_DEFAULT();
+    sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot.gpio_cs = board::kSdCs;
     slot.host_id = SPI3_HOST;
 
@@ -76,13 +75,29 @@ esp_err_t SdStorage::mount()
         &slot,
         &mount_config,
         &card_);
-
-    if (error == ESP_OK) {
-        status_.mounted = true;
-        refresh_space();
-        error = self_test();
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag, "microSD mount failed: %s", esp_err_to_name(error));
+        return error;
     }
-    return error;
+
+    status_.mounted = true;
+    const auto space_error = refresh_space();
+    if (space_error != ESP_OK) {
+        ESP_LOGW(kTag, "microSD mounted, but free-space query failed: %s",
+            esp_err_to_name(space_error));
+    }
+
+    ESP_LOGI(kTag,
+        "microSD READY: mount=%s CS=%d SCK=%d MOSI=%d MISO=%d total=%llu free=%llu",
+        status_.mount_point.c_str(),
+        static_cast<int>(board::kSdCs),
+        static_cast<int>(board::kSdSck),
+        static_cast<int>(board::kSdMosi),
+        static_cast<int>(board::kSdMiso),
+        static_cast<unsigned long long>(status_.total_bytes),
+        static_cast<unsigned long long>(status_.free_bytes));
+
+    return ESP_OK;
 }
 
 esp_err_t SdStorage::unmount()
@@ -91,15 +106,15 @@ esp_err_t SdStorage::unmount()
         return ESP_OK;
     }
 
-    const auto error =
-        esp_vfs_fat_sdcard_unmount(
-            status_.mount_point.c_str(),
-            card_);
+    const auto error = esp_vfs_fat_sdcard_unmount(
+        status_.mount_point.c_str(),
+        card_);
 
     if (error == ESP_OK) {
         status_ = {};
         status_.mount_point = "/sdcard";
         card_ = nullptr;
+        ESP_LOGI(kTag, "microSD unmounted");
     }
     return error;
 }
