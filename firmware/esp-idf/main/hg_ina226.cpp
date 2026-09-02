@@ -18,6 +18,24 @@ constexpr std::uint8_t kCalibration = 0x05;
 constexpr std::uint8_t kManufacturerId = 0xFE;
 constexpr std::uint8_t kDieId = 0xFF;
 
+void scan_i2c_bus(I2cBus& bus)
+{
+    ESP_LOGI(kTag, "I2C FULL SCAN START: 0x08..0x77");
+    unsigned found = 0;
+    for (std::uint16_t address = 0x08; address <= 0x77; ++address) {
+        const auto probe = i2c_master_probe(
+            bus.handle(),
+            static_cast<std::uint8_t>(address),
+            30);
+        if (probe == ESP_OK) {
+            ++found;
+            ESP_LOGI(kTag, "I2C FOUND: 0x%02X", static_cast<unsigned>(address));
+        }
+    }
+    ESP_LOGI(kTag, "I2C FULL SCAN DONE: %u device(s) ACK", found);
+    ESP_LOGI(kTag, "Expected currently: ADS1115 0x48, ADS1115 0x49, INA226 usually 0x40");
+}
+
 }  // namespace
 
 esp_err_t Ina226::initialize(
@@ -43,9 +61,6 @@ esp_err_t Ina226::initialize(
     ESP_LOGI(kTag, "INA226 probe start: address=0x%02X", static_cast<unsigned>(address));
     auto probe_error = i2c_master_probe(bus.handle(), address, 100);
 
-    // A failed transaction to a physically absent commissioning device can
-    // occasionally leave the ESP-IDF master in a recoverable invalid state.
-    // Reset only the controller state, then retry the real INA226 probe once.
     if (probe_error == ESP_ERR_INVALID_STATE) {
         ESP_LOGW(kTag, "INA226 probe returned INVALID_STATE; resetting I2C bus and retrying");
         const auto reset_error = i2c_master_bus_reset(bus.handle());
@@ -62,6 +77,7 @@ esp_err_t Ina226::initialize(
             "INA226 PROBE FAIL at 0x%02X: %s",
             static_cast<unsigned>(address),
             esp_err_to_name(probe_error));
+        scan_i2c_bus(bus);
         return probe_error;
     }
     ESP_LOGI(kTag, "INA226 PROBE ACK: 0x%02X", static_cast<unsigned>(address));
