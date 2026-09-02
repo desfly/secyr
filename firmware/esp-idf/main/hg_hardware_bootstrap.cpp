@@ -60,11 +60,11 @@ void validate_adc_conversion(
             std::string(label) + " detected but conversion read failed",
             1,
         };
-        ESP_LOGW(kTag, "%s conversion self-test failed: %s", label, esp_err_to_name(error));
+        ESP_LOGE(kTag, "TEST FAIL: %s conversion: %s", label, esp_err_to_name(error));
         return;
     }
 
-    ESP_LOGI(kTag, "%s detected; A0 conversion self-test %.3f mV", label, static_cast<double>(sample_mv));
+    ESP_LOGI(kTag, "TEST PASS: %s A0=%.3f mV", label, static_cast<double>(sample_mv));
 }
 
 }  // namespace
@@ -91,6 +91,8 @@ HardwareModuleStatus HardwareBootstrap::module_status(
 esp_err_t HardwareBootstrap::initialize()
 {
     status_.safe_outputs_forced = true;
+    ESP_LOGI(kTag, "========== 5-MODULE BENCH TEST START ==========");
+    ESP_LOGI(kTag, "Expected: ADS1115@0x48, ADS1115@0x49, INA226@0x40, microSD, W5500");
 
     auto error = i2c_.initialize();
     status_.i2c = module_status(
@@ -99,8 +101,10 @@ esp_err_t HardwareBootstrap::initialize()
         "I2C bus initialization failed");
 
     if (error != ESP_OK) {
+        ESP_LOGE(kTag, "TEST FAIL: I2C bus GPIO4/GPIO5: %s", esp_err_to_name(error));
         return error;
     }
+    ESP_LOGI(kTag, "I2C READY: SDA=GPIO4 SCL=GPIO5 400kHz");
 
     const auto zone_error =
         zone_adc_.initialize(i2c_, 0x48);
@@ -111,7 +115,7 @@ esp_err_t HardwareBootstrap::initialize()
     if (zone_error == ESP_OK) {
         validate_adc_conversion("ADS1115 #1 0x48", zone_adc_, status_.ads1115_zones);
     } else {
-        ESP_LOGW(kTag, "ADS1115 #1 0x48 not detected: %s", esp_err_to_name(zone_error));
+        ESP_LOGE(kTag, "TEST FAIL: ADS1115 #1 0x48 not detected: %s", esp_err_to_name(zone_error));
     }
 
     const auto telemetry_error =
@@ -123,7 +127,7 @@ esp_err_t HardwareBootstrap::initialize()
     if (telemetry_error == ESP_OK) {
         validate_adc_conversion("ADS1115 #2 0x49", telemetry_adc_, status_.ads1115_telemetry);
     } else {
-        ESP_LOGW(kTag, "ADS1115 #2 0x49 not detected: %s", esp_err_to_name(telemetry_error));
+        ESP_LOGE(kTag, "TEST FAIL: ADS1115 #2 0x49 not detected: %s", esp_err_to_name(telemetry_error));
     }
 
     const auto mcp_error =
@@ -138,16 +142,42 @@ esp_err_t HardwareBootstrap::initialize()
             mcp23017_.force_safe_outputs() == ESP_OK;
     }
 
+    // CJMCU-226 board fitted in HomeGuard-S3 has R100 = 0.100 ohm.
+    // INA226 shunt ADC full scale is about 81.92 mV, therefore 0.8 A
+    // keeps the configured current range inside the hardware measurement range.
     const auto ina_error =
         ina226_.initialize(
             i2c_,
             0x40,
-            0.010F,
-            20.0F);
+            0.100F,
+            0.8F);
     status_.ina226 = module_status(
         ina_error,
-        "INA226 0x40, shunt 10 mOhm",
+        "INA226 0x40, R100 100 mOhm",
         "INA226 0x40 not detected");
+
+    if (ina_error == ESP_OK) {
+        Ina226Reading reading{};
+        const auto read_error = ina226_.read(&reading);
+        if (read_error == ESP_OK) {
+            ESP_LOGI(
+                kTag,
+                "TEST PASS: INA226 0x40 bus=%.4fV shunt=%.4fmV current=%.5fA power=%.5fW",
+                static_cast<double>(reading.bus_voltage_v),
+                static_cast<double>(reading.shunt_voltage_mv),
+                static_cast<double>(reading.current_a),
+                static_cast<double>(reading.power_w));
+        } else {
+            status_.ina226 = {
+                HardwareModuleState::Degraded,
+                "INA226 0x40 detected but measurement read failed",
+                1,
+            };
+            ESP_LOGE(kTag, "TEST FAIL: INA226 0x40 read: %s", esp_err_to_name(read_error));
+        }
+    } else {
+        ESP_LOGE(kTag, "TEST FAIL: INA226 0x40 not detected: %s", esp_err_to_name(ina_error));
+    }
 
     const auto rtc_error =
         ds3231_.initialize(i2c_, 0x68);
@@ -162,6 +192,27 @@ esp_err_t HardwareBootstrap::initialize()
         sd_error,
         "microSD mounted at /sdcard",
         "microSD mount failed");
+
+    if (sd_error == ESP_OK) {
+        const auto sd_test_error = sd_storage_.self_test();
+        if (sd_test_error == ESP_OK) {
+            status_.micro_sd = {
+                HardwareModuleState::Ready,
+                "microSD mount + WRITE/READ self-test passed",
+                0,
+            };
+            ESP_LOGI(kTag, "TEST PASS: microSD mount + WRITE + READ + VERIFY");
+        } else {
+            status_.micro_sd = {
+                HardwareModuleState::Degraded,
+                "microSD mounted but WRITE/READ self-test failed",
+                1,
+            };
+            ESP_LOGE(kTag, "TEST FAIL: microSD WRITE/READ: %s", esp_err_to_name(sd_test_error));
+        }
+    } else {
+        ESP_LOGE(kTag, "TEST FAIL: microSD mount: %s", esp_err_to_name(sd_error));
+    }
 
     const auto eth_error =
         w5500_.initialize();
@@ -178,8 +229,17 @@ esp_err_t HardwareBootstrap::initialize()
                 "W5500 initialized but start failed",
                 1,
             };
+            ESP_LOGE(kTag, "TEST FAIL: W5500 start: %s", esp_err_to_name(start_error));
+        } else {
+            ESP_LOGI(kTag, "W5500 SPI TEST PASS: waiting for LINK UP and IPv4");
         }
+    } else {
+        ESP_LOGE(kTag, "TEST FAIL: W5500 initialize: %s", esp_err_to_name(eth_error));
     }
+
+    ESP_LOGI(kTag, "========== 5-MODULE BENCH TEST BOOT PHASE DONE ==========");
+    ESP_LOGI(kTag, "W5500 final PASS is LINK UP + IPv4 in subsequent log lines");
+
     const auto one_wire_error =
         one_wire_.initialize();
     status_.one_wire = module_status(
