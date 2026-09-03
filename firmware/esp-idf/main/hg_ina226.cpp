@@ -20,20 +20,80 @@ constexpr std::uint8_t kDieId = 0xFF;
 
 void scan_i2c_bus(I2cBus& bus)
 {
-    ESP_LOGI(kTag, "I2C FULL SCAN START: 0x08..0x77");
-    unsigned found = 0;
-    for (std::uint16_t address = 0x08; address <= 0x77; ++address) {
+    // Dedicated INA226 diagnostic scan.  Scan every normal 7-bit slave
+    // address, not merely the expected 0x40, and repeat the scan using
+    // several probe timeouts.  The reserved 0x00..0x02 and 0x78..0x7F
+    // ranges are intentionally not addressed.
+    constexpr int kProbeTimeoutsMs[]{20, 50, 100, 250, 500};
+
+    ESP_LOGI(kTag, "========== INA226 DEDICATED ADDRESS SCAN ==========");
+    ESP_LOGI(kTag, "SDA=GPIO4 SCL=GPIO5; normal 7-bit range 0x03..0x77");
+    ESP_LOGI(kTag, "INA226 legal address window is 0x40..0x4F");
+
+    unsigned total_acks = 0;
+    for (unsigned pass = 0; pass < 5; ++pass) {
+        const int timeout_ms = kProbeTimeoutsMs[pass];
+        unsigned found = 0;
+
+        ESP_LOGI(
+            kTag,
+            "I2C SCAN PASS %u/5 START: 0x03..0x77 timeout=%dms",
+            pass + 1,
+            timeout_ms);
+
+        for (std::uint16_t address = 0x03; address <= 0x77; ++address) {
+            const auto probe = i2c_master_probe(
+                bus.handle(),
+                static_cast<std::uint8_t>(address),
+                timeout_ms);
+            if (probe == ESP_OK) {
+                ++found;
+                ++total_acks;
+                ESP_LOGW(
+                    kTag,
+                    "I2C ACK PASS %u: address=0x%02X%s",
+                    pass + 1,
+                    static_cast<unsigned>(address),
+                    (address >= 0x40 && address <= 0x4F)
+                        ? "  <== INA226 ADDRESS CANDIDATE"
+                        : "");
+            }
+        }
+
+        ESP_LOGI(
+            kTag,
+            "I2C SCAN PASS %u/5 DONE: %u device(s) ACK",
+            pass + 1,
+            found);
+    }
+
+    ESP_LOGI(kTag, "INA226 ADDRESS WINDOW CHECK: 0x40..0x4F");
+    unsigned ina_candidates = 0;
+    for (std::uint16_t address = 0x40; address <= 0x4F; ++address) {
         const auto probe = i2c_master_probe(
             bus.handle(),
             static_cast<std::uint8_t>(address),
-            30);
+            500);
         if (probe == ESP_OK) {
-            ++found;
-            ESP_LOGI(kTag, "I2C FOUND: 0x%02X", static_cast<unsigned>(address));
+            ++ina_candidates;
+            ESP_LOGW(
+                kTag,
+                "INA226 CANDIDATE ACK: 0x%02X",
+                static_cast<unsigned>(address));
         }
     }
-    ESP_LOGI(kTag, "I2C FULL SCAN DONE: %u device(s) ACK", found);
-    ESP_LOGI(kTag, "Expected currently: ADS1115 0x48, ADS1115 0x49, INA226 usually 0x40");
+
+    ESP_LOGI(
+        kTag,
+        "========== INA226 SCAN COMPLETE: total ACK events=%u, candidate addresses=%u ==========" ,
+        total_acks,
+        ina_candidates);
+
+    if (total_acks == 0) {
+        ESP_LOGE(
+            kTag,
+            "NO I2C DEVICE ACKED ANY NORMAL 7-BIT ADDRESS. Check module/pull-ups/chip itself.");
+    }
 }
 
 }  // namespace
