@@ -24,7 +24,6 @@ config HOMEGUARD_WIFI_RETRY_SECONDS
     range 1 300
     default 10
 
-
 config HOMEGUARD_TASK_WATCHDOG_SECONDS
     int "Task watchdog timeout"
     range 3 60
@@ -141,6 +140,22 @@ config HOMEGUARD_FACTORY_RESET_HOLD_MS
     range 5000 30000
     default 10000
     depends on HOMEGUARD_SERVICE_BUTTON_GPIO >= 0
+
+config HOMEGUARD_PZEM004T_TX_GPIO
+    int "PZEM-004T UART TX GPIO (ESP TX -> PZEM RX)"
+    range -1 48
+    default -1
+
+config HOMEGUARD_PZEM004T_RX_GPIO
+    int "PZEM-004T UART RX GPIO (PZEM TX -> ESP RX)"
+    range -1 48
+    default -1
+
+config HOMEGUARD_PZEM004T_ADDRESS
+    int "PZEM-004T Modbus slave address"
+    range 1 247
+    default 1
+    depends on HOMEGUARD_PZEM004T_TX_GPIO >= 0 && HOMEGUARD_PZEM004T_RX_GPIO >= 0
 
 endmenu
 endmenu

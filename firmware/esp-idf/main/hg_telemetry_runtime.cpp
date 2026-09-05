@@ -18,22 +18,17 @@
 namespace homeguard::idf {
 
 namespace {
-
 constexpr const char* kTag = "hg_telemetry";
 constexpr TickType_t kTelemetryPeriod = pdMS_TO_TICKS(1000);
 
 hg::HealthState module_health(homeguard::HardwareModuleState state)
 {
     switch (state) {
-        case homeguard::HardwareModuleState::Ready:
-            return hg::HealthState::Ok;
+        case homeguard::HardwareModuleState::Ready: return hg::HealthState::Ok;
         case homeguard::HardwareModuleState::Degraded:
-        case homeguard::HardwareModuleState::Missing:
-            return hg::HealthState::Degraded;
-        case homeguard::HardwareModuleState::Fault:
-            return hg::HealthState::Failed;
-        default:
-            return hg::HealthState::Unknown;
+        case homeguard::HardwareModuleState::Missing: return hg::HealthState::Degraded;
+        case homeguard::HardwareModuleState::Fault: return hg::HealthState::Failed;
+        default: return hg::HealthState::Unknown;
     }
 }
 
@@ -51,18 +46,13 @@ hg::SystemMode system_mode(const hg::SystemModel& model)
 
 hg::ZoneState zone_state(const hg::ZoneRecord& zone)
 {
-    if (!zone.enabled || zone.bypassed || zone.state == hg::ModelZoneState::Bypassed) {
-        return hg::ZoneState::Disabled;
-    }
+    if (!zone.enabled || zone.bypassed || zone.state == hg::ModelZoneState::Bypassed) return hg::ZoneState::Disabled;
     switch (zone.state) {
-        case hg::ModelZoneState::Tamper:
-            return hg::ZoneState::Tamper;
+        case hg::ModelZoneState::Tamper: return hg::ZoneState::Tamper;
         case hg::ModelZoneState::Open:
         case hg::ModelZoneState::Alarm:
-        case hg::ModelZoneState::Fault:
-            return hg::ZoneState::Open;
-        default:
-            return hg::ZoneState::Normal;
+        case hg::ModelZoneState::Fault: return hg::ZoneState::Open;
+        default: return hg::ZoneState::Normal;
     }
 }
 
@@ -72,36 +62,18 @@ std::uint64_t rtc_epoch(Ds3231& rtc, bool& valid)
     valid = rtc.read_time(&value) == ESP_OK;
     if (!valid) return 0;
     const auto epoch = std::mktime(&value);
-    if (epoch < 0) {
-        valid = false;
-        return 0;
-    }
+    if (epoch < 0) { valid = false; return 0; }
     return static_cast<std::uint64_t>(epoch);
 }
-
 }  // namespace
 
-esp_err_t TelemetryRuntime::start(
-    HardwareBootstrap* hardware,
-    WebsocketTelemetry* websocket,
-    const hg::SystemModel* system_model)
+esp_err_t TelemetryRuntime::start(HardwareBootstrap* hardware, WebsocketTelemetry* websocket, const hg::SystemModel* system_model)
 {
-    if (hardware == nullptr || websocket == nullptr || system_model == nullptr) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
+    if (hardware == nullptr || websocket == nullptr || system_model == nullptr) return ESP_ERR_INVALID_ARG;
     hardware_ = hardware;
     websocket_ = websocket;
     system_model_ = system_model;
-
-    const auto result = xTaskCreate(
-        &TelemetryRuntime::task_entry,
-        "hg_telemetry",
-        7168,
-        this,
-        6,
-        nullptr);
-
+    const auto result = xTaskCreate(&TelemetryRuntime::task_entry, "hg_telemetry", 7168, this, 6, nullptr);
     return result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
@@ -132,42 +104,28 @@ void TelemetryRuntime::run()
         wifi_ap_record_t wifi_ap{};
         const bool wifi_connected = esp_wifi_sta_get_ap_info(&wifi_ap) == ESP_OK;
         const auto ethernet_status = hardware_->ethernet().status();
-        const auto transport = ethernet_status.link_up && ethernet_status.has_ip
-            ? hg::Transport::Ethernet
-            : (wifi_connected ? hg::Transport::WifiSta : hg::Transport::EmergencyAp);
-        health_.set(hg::Component::Wifi,
-                    wifi_connected ? hg::HealthState::Ok : hg::HealthState::Degraded,
-                    now_ms);
+        const auto transport = ethernet_status.link_up && ethernet_status.has_ip ? hg::Transport::Ethernet : (wifi_connected ? hg::Transport::WifiSta : hg::Transport::EmergencyAp);
+        health_.set(hg::Component::Wifi, wifi_connected ? hg::HealthState::Ok : hg::HealthState::Degraded, now_ms);
 
         std::array<hg::ZoneState, 5> zones{};
         zones.fill(hg::ZoneState::Disabled);
         const auto zone_count = std::min<std::size_t>(zones.size(), system_model_->zone_count());
         for (std::size_t index = 0; index < zone_count; ++index) {
-            if (const auto* zone = system_model_->zone_at(index); zone != nullptr) {
-                zones[index] = zone_state(*zone);
-            }
+            if (const auto* zone = system_model_->zone_at(index); zone != nullptr) zones[index] = zone_state(*zone);
         }
 
-        // The telemetry ADS1115 is sampled directly. Until a pressure-sensor
-        // transfer function is configured, values are intentionally carried as
-        // millivolts rather than being mislabeled as bar/kPa.
         std::array<hg::PressureState, 2> pressures{};
         std::array<float, 2> pressure_values{};
         std::array<bool, 2> pressure_valid{};
         auto& analog_adc = hardware_->telemetry_adc();
         for (std::size_t index = 0; index < pressures.size(); ++index) {
-            if (!analog_adc.ready()) {
-                pressures[index] = hg::PressureState::Disabled;
-                continue;
-            }
+            if (!analog_adc.ready()) { pressures[index] = hg::PressureState::Disabled; continue; }
             float millivolts = 0.0F;
             if (analog_adc.read_single_ended_mv(static_cast<std::uint8_t>(index), &millivolts) == ESP_OK) {
                 pressure_values[index] = millivolts;
                 pressure_valid[index] = true;
                 pressures[index] = hg::PressureState::Normal;
-            } else {
-                pressures[index] = hg::PressureState::SensorFault;
-            }
+            } else pressures[index] = hg::PressureState::SensorFault;
         }
 
         std::array<float, 8> temperatures{};
@@ -176,9 +134,7 @@ void TelemetryRuntime::run()
         auto& one_wire = hardware_->one_wire();
         if (one_wire.ready()) {
             if (one_wire.device_count() == 0U) (void)one_wire.discover();
-            if (one_wire.device_count() > 0U && one_wire.convert_all() == ESP_OK) {
-                (void)one_wire.read_all();
-            }
+            if (one_wire.device_count() > 0U && one_wire.convert_all() == ESP_OK) (void)one_wire.read_all();
             const auto count = std::min<std::size_t>(one_wire.device_count(), temperatures.size());
             temperature_count = static_cast<std::uint8_t>(count);
             const auto* devices = one_wire.devices();
@@ -190,42 +146,35 @@ void TelemetryRuntime::run()
 
         Ina226Reading battery{};
         auto& battery_monitor = hardware_->battery_monitor();
-        const bool battery_valid =
-            battery_monitor.ready() && battery_monitor.read(&battery) == ESP_OK;
+        const bool battery_valid = battery_monitor.ready() && battery_monitor.read(&battery) == ESP_OK;
+
+        Pzem004tReading ac{};
+        auto& ac_meter = hardware_->ac_meter();
+        const bool ac_meter_valid = ac_meter.ready() && ac_meter.read(&ac) == ESP_OK;
 
         const auto frame = builder_.build(
-            now_ms,
-            epoch,
-            system_mode(*system_model_),
-            transport,
-            zones,
-            pressures,
-            health_,
-            temperatures,
-            temperature_valid,
-            temperature_count,
-            battery.bus_voltage_v,
-            battery.current_a,
-            battery.power_w,
-            battery_valid,
-            pressure_values,
-            pressure_valid);
+            now_ms, epoch, system_mode(*system_model_), transport, zones, pressures, health_,
+            temperatures, temperature_valid, temperature_count,
+            battery.bus_voltage_v, battery.current_a, battery.power_w, battery_valid,
+            pressure_values, pressure_valid,
+            ac.voltage_v, ac.current_a, ac.active_power_w, ac.energy_kwh,
+            ac.frequency_hz, ac.power_factor, ac.power_alarm, ac_meter_valid);
 
         websocket_->publish(frame);
-
-        if ((++cycles % 60U) == 0U) {
-            hardware_->storage().refresh_space();
-        }
+        if ((++cycles % 60U) == 0U) hardware_->storage().refresh_space();
 
         ESP_LOGD(kTag,
-                 "telemetry seq=%llu transport=%.*s analog0=%.1fmV analog1=%.1fmV temperatures=%u battery=%s",
+                 "telemetry seq=%llu transport=%.*s analog0=%.1fmV analog1=%.1fmV temperatures=%u battery=%s pzem=%s U=%.1fV I=%.3fA P=%.1fW",
                  static_cast<unsigned long long>(frame.sequence),
                  static_cast<int>(hg::to_string(frame.transport).size()),
                  hg::to_string(frame.transport).data(),
-                 frame.pressure_values[0],
-                 frame.pressure_values[1],
+                 frame.pressure_values[0], frame.pressure_values[1],
                  static_cast<unsigned>(frame.temperature_count),
-                 frame.battery_valid ? "ok" : "fault");
+                 frame.battery_valid ? "ok" : "fault",
+                 frame.ac_meter_valid ? "ok" : "off/fault",
+                 static_cast<double>(frame.ac_voltage_v),
+                 static_cast<double>(frame.ac_current_a),
+                 static_cast<double>(frame.ac_power_w));
 
         vTaskDelay(kTelemetryPeriod);
     }

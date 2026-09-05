@@ -6,6 +6,7 @@
 #include "hg_mcp23017.hpp"
 #include "hg_w5500.hpp"
 #include "hg_rs485.hpp"
+#include "hg_pzem004t.hpp"
 #include "hg_onewire_runtime.hpp"
 #include "hg_sd_storage.hpp"
 #include "hg_ds3231.hpp"
@@ -30,6 +31,7 @@ public:
     W5500& ethernet() noexcept;
     OneWireRuntime& one_wire() noexcept;
     Rs485Runtime& rs485() noexcept;
+    Pzem004t& ac_meter() noexcept;
 
 private:
     static HardwareModuleStatus module_status(
@@ -48,6 +50,7 @@ private:
     W5500 w5500_;
     OneWireRuntime one_wire_;
     Rs485Runtime rs485_;
+    Pzem004t pzem004t_;
 };
 
 }  // namespace homeguard::idf

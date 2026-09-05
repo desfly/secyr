@@ -1,5 +1,6 @@
 #include "hg_hardware_bootstrap.hpp"
 #include "hg_board_hw678.hpp"
+#include "sdkconfig.h"
 
 #include "esp_log.h"
 
@@ -106,8 +107,7 @@ esp_err_t HardwareBootstrap::initialize()
     }
     ESP_LOGI(kTag, "I2C READY: SDA=GPIO4 SCL=GPIO5 400kHz");
 
-    const auto zone_error =
-        zone_adc_.initialize(i2c_, 0x48);
+    const auto zone_error = zone_adc_.initialize(i2c_, 0x48);
     status_.ads1115_zones = module_status(
         zone_error,
         "ADS1115 #1 0x48, A0-A3 raw mV",
@@ -118,8 +118,7 @@ esp_err_t HardwareBootstrap::initialize()
         ESP_LOGE(kTag, "TEST FAIL: ADS1115 #1 0x48 not detected: %s", esp_err_to_name(zone_error));
     }
 
-    const auto telemetry_error =
-        telemetry_adc_.initialize(i2c_, 0x49);
+    const auto telemetry_error = telemetry_adc_.initialize(i2c_, 0x49);
     status_.ads1115_telemetry = module_status(
         telemetry_error,
         "ADS1115 #2 0x49, A0-A3 raw mV",
@@ -130,27 +129,18 @@ esp_err_t HardwareBootstrap::initialize()
         ESP_LOGE(kTag, "TEST FAIL: ADS1115 #2 0x49 not detected: %s", esp_err_to_name(telemetry_error));
     }
 
-    const auto mcp_error =
-        mcp23017_.initialize(i2c_, 0x20);
+    const auto mcp_error = mcp23017_.initialize(i2c_, 0x20);
     status_.mcp23017 = module_status(
         mcp_error,
         "MCP23017 0x20, outputs forced OFF",
         "MCP23017 0x20 not detected");
 
     if (mcp_error == ESP_OK) {
-        status_.safe_outputs_forced =
-            mcp23017_.force_safe_outputs() == ESP_OK;
+        status_.safe_outputs_forced = mcp23017_.force_safe_outputs() == ESP_OK;
     }
 
     // CJMCU-226 board fitted in HomeGuard-S3 has R100 = 0.100 ohm.
-    // INA226 shunt ADC full scale is about 81.92 mV, therefore 0.8 A
-    // keeps the configured current range inside the hardware measurement range.
-    const auto ina_error =
-        ina226_.initialize(
-            i2c_,
-            0x40,
-            0.100F,
-            0.8F);
+    const auto ina_error = ina226_.initialize(i2c_, 0x40, 0.100F, 0.8F);
     status_.ina226 = module_status(
         ina_error,
         "INA226 0x40, R100 100 mOhm",
@@ -179,15 +169,13 @@ esp_err_t HardwareBootstrap::initialize()
         ESP_LOGE(kTag, "TEST FAIL: INA226 0x40 not detected: %s", esp_err_to_name(ina_error));
     }
 
-    const auto rtc_error =
-        ds3231_.initialize(i2c_, 0x68);
+    const auto rtc_error = ds3231_.initialize(i2c_, 0x68);
     status_.ds3231 = module_status(
         rtc_error,
         "DS3231 0x68",
         "DS3231 0x68 not detected");
 
-    const auto sd_error =
-        sd_storage_.mount();
+    const auto sd_error = sd_storage_.mount();
     status_.micro_sd = module_status(
         sd_error,
         "microSD mounted at /sdcard",
@@ -214,8 +202,7 @@ esp_err_t HardwareBootstrap::initialize()
         ESP_LOGE(kTag, "TEST FAIL: microSD mount: %s", esp_err_to_name(sd_error));
     }
 
-    const auto eth_error =
-        w5500_.initialize();
+    const auto eth_error = w5500_.initialize();
     status_.w5500 = module_status(
         eth_error,
         "W5500 initialized",
@@ -240,16 +227,14 @@ esp_err_t HardwareBootstrap::initialize()
     ESP_LOGI(kTag, "========== 5-MODULE BENCH TEST BOOT PHASE DONE ==========");
     ESP_LOGI(kTag, "W5500 final PASS is LINK UP + IPv4 in subsequent log lines");
 
-    const auto one_wire_error =
-        one_wire_.initialize();
+    const auto one_wire_error = one_wire_.initialize();
     status_.one_wire = module_status(
         one_wire_error,
         "1-Wire initialized on GPIO6",
         "1-Wire initialization failed");
 
     if (one_wire_error == ESP_OK) {
-        const auto discovery_error =
-            one_wire_.discover();
+        const auto discovery_error = one_wire_.discover();
         if (discovery_error != ESP_OK) {
             status_.one_wire = {
                 HardwareModuleState::Degraded,
@@ -259,18 +244,46 @@ esp_err_t HardwareBootstrap::initialize()
         }
     }
 
-    const auto rs485_error =
-        rs485_.initialize(9600);
+    const auto rs485_error = rs485_.initialize(9600);
     status_.rs485 = module_status(
         rs485_error,
         "RS-485 UART1 9600 8N1 half-duplex",
         "RS-485 initialization failed");
 
+#if CONFIG_HOMEGUARD_PZEM004T_TX_GPIO >= 0 && CONFIG_HOMEGUARD_PZEM004T_RX_GPIO >= 0
+    const auto pzem_error = pzem004t_.initialize(
+        UART_NUM_2,
+        CONFIG_HOMEGUARD_PZEM004T_TX_GPIO,
+        CONFIG_HOMEGUARD_PZEM004T_RX_GPIO,
+        static_cast<std::uint8_t>(CONFIG_HOMEGUARD_PZEM004T_ADDRESS));
+    if (pzem_error == ESP_OK) {
+        Pzem004tReading reading{};
+        const auto read_error = pzem004t_.read(&reading);
+        if (read_error == ESP_OK) {
+            ESP_LOGI(
+                kTag,
+                "PZEM PASS: U=%.1fV I=%.3fA P=%.1fW E=%.3fkWh F=%.1fHz PF=%.2f alarm=%s",
+                static_cast<double>(reading.voltage_v),
+                static_cast<double>(reading.current_a),
+                static_cast<double>(reading.active_power_w),
+                static_cast<double>(reading.energy_kwh),
+                static_cast<double>(reading.frequency_hz),
+                static_cast<double>(reading.power_factor),
+                reading.power_alarm ? "yes" : "no");
+        } else {
+            ESP_LOGE(kTag, "PZEM read failed: %s", esp_err_to_name(read_error));
+        }
+    } else {
+        ESP_LOGE(kTag, "PZEM UART2 initialize failed: %s", esp_err_to_name(pzem_error));
+    }
+#else
+    ESP_LOGI(kTag, "PZEM-004T driver integrated but disabled: TX/RX GPIOs are not assigned in canonical HW map");
+#endif
+
     return ESP_OK;
 }
 
-const HardwareRuntimeStatus&
-HardwareBootstrap::status() const noexcept
+const HardwareRuntimeStatus& HardwareBootstrap::status() const noexcept
 {
     return status_;
 }
@@ -291,49 +304,15 @@ std::string HardwareBootstrap::analog_snapshot_json()
     return output.str();
 }
 
-Ads1115& HardwareBootstrap::zone_adc() noexcept
-{
-    return zone_adc_;
-}
-
-Ads1115& HardwareBootstrap::telemetry_adc() noexcept
-{
-    return telemetry_adc_;
-}
-
-Mcp23017& HardwareBootstrap::io_expander() noexcept
-{
-    return mcp23017_;
-}
-
-Ina226& HardwareBootstrap::battery_monitor() noexcept
-{
-    return ina226_;
-}
-
-Ds3231& HardwareBootstrap::rtc() noexcept
-{
-    return ds3231_;
-}
-
-SdStorage& HardwareBootstrap::storage() noexcept
-{
-    return sd_storage_;
-}
-
-W5500& HardwareBootstrap::ethernet() noexcept
-{
-    return w5500_;
-}
-
-OneWireRuntime& HardwareBootstrap::one_wire() noexcept
-{
-    return one_wire_;
-}
-
-Rs485Runtime& HardwareBootstrap::rs485() noexcept
-{
-    return rs485_;
-}
+Ads1115& HardwareBootstrap::zone_adc() noexcept { return zone_adc_; }
+Ads1115& HardwareBootstrap::telemetry_adc() noexcept { return telemetry_adc_; }
+Mcp23017& HardwareBootstrap::io_expander() noexcept { return mcp23017_; }
+Ina226& HardwareBootstrap::battery_monitor() noexcept { return ina226_; }
+Ds3231& HardwareBootstrap::rtc() noexcept { return ds3231_; }
+SdStorage& HardwareBootstrap::storage() noexcept { return sd_storage_; }
+W5500& HardwareBootstrap::ethernet() noexcept { return w5500_; }
+OneWireRuntime& HardwareBootstrap::one_wire() noexcept { return one_wire_; }
+Rs485Runtime& HardwareBootstrap::rs485() noexcept { return rs485_; }
+Pzem004t& HardwareBootstrap::ac_meter() noexcept { return pzem004t_; }
 
 }  // namespace homeguard::idf
