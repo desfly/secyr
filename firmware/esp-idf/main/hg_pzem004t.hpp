@@ -3,6 +3,7 @@
 #include "driver/uart.h"
 #include "esp_err.h"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace homeguard::idf {
