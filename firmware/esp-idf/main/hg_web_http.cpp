@@ -245,15 +245,17 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
       const admin = window.HomeGuardAuth?.role?.() === "admin";
       const count = document.getElementById("zoneCount");
       if (count) count.textContent = String(zones.length || 8);
+
+      target.style.display = "grid";
+      target.style.gridTemplateColumns = "repeat(2,minmax(0,1fr))";
+      target.style.gap = "0 12px";
       target.innerHTML = zones.map((zone) => {
         const meta = zoneStateMeta[zone.state] || zoneStateMeta.open;
-        const mv = zone.valid ? `${(Number(zone.mv) / 1000).toFixed(3)} V` : "ADC —";
         const edit = admin ? ` title="Натисніть, щоб змінити назву" style="cursor:pointer"` : "";
-        return `<div class="zone hg-zone-live" data-zone-id="${Number(zone.id)}" style="display:grid;grid-template-columns:42px minmax(0,1fr) 82px 82px;gap:10px;align-items:center">
+        return `<div class="zone hg-zone-live" data-zone-id="${Number(zone.id)}" style="display:grid;grid-template-columns:34px minmax(0,1fr) 92px;gap:8px;align-items:center;min-height:42px;padding:0 4px">
           <b>Z${Number(zone.id)}</b>
           <span class="hg-zone-name"${edit}>${zoneEscape(zone.name || `Зона ${zone.id}`)}</span>
-          <small style="text-align:right;color:#66758b">${mv}</small>
-          <span style="display:flex;align-items:center;justify-content:flex-end;gap:7px;font-weight:700"><i style="display:inline-block;width:11px;height:11px;border-radius:50%;background:${meta.color};box-shadow:0 0 0 2px rgba(0,0,0,.06)"></i>${meta.label}</span>
+          <span style="display:flex;align-items:center;justify-content:flex-end;gap:6px;font-weight:700;white-space:nowrap"><i style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${meta.color}"></i>${meta.label}</span>
         </div>`;
       }).join("");
       if (admin) {
