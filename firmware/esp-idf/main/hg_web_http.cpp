@@ -203,9 +203,9 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
   }
 
   const zoneStateMeta = {
-    normal: {label:"НОРМА", color:"#22c55e"},
-    open: {label:"ОБРИВ", color:"#ef4444"},
-    short: {label:"КЗ", color:"#eab308"}
+    normal: {color:"#22c55e"},
+    open: {color:"#ef4444"},
+    short: {color:"#eab308"}
   };
   const zoneEscape = (value) => String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#39;");
   let zoneRefreshBusy = false;
@@ -252,10 +252,10 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
       target.innerHTML = zones.map((zone) => {
         const meta = zoneStateMeta[zone.state] || zoneStateMeta.open;
         const edit = admin ? ` title="Натисніть, щоб змінити назву" style="cursor:pointer"` : "";
-        return `<div class="zone hg-zone-live" data-zone-id="${Number(zone.id)}" style="display:grid;grid-template-columns:34px minmax(0,1fr) 92px;gap:8px;align-items:center;min-height:42px;padding:0 4px">
+        return `<div class="zone hg-zone-live" data-zone-id="${Number(zone.id)}" style="display:grid;grid-template-columns:14px 34px minmax(0,1fr);gap:8px;align-items:center;min-height:42px;padding:0 4px">
+          <i aria-label="${zoneEscape(zone.state || "open")}" style="display:inline-block;width:11px;height:11px;border-radius:50%;background:${meta.color}"></i>
           <b>Z${Number(zone.id)}</b>
           <span class="hg-zone-name"${edit}>${zoneEscape(zone.name || `Зона ${zone.id}`)}</span>
-          <span style="display:flex;align-items:center;justify-content:flex-end;gap:6px;font-weight:700;white-space:nowrap"><i style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${meta.color}"></i>${meta.label}</span>
         </div>`;
       }).join("");
       if (admin) {
