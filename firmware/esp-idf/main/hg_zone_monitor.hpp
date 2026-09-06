@@ -3,6 +3,8 @@
 #include "hg_ads1115.hpp"
 #include "homeguard/system_model.hpp"
 #include "esp_err.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include <array>
 #include <cstddef>
@@ -37,9 +39,6 @@ public:
     esp_err_t load();
     esp_err_t save() const;
     esp_err_t set_name(std::size_t index, const std::string& name);
-
-    const std::array<ZoneLiveState, kZoneCount>& live() const noexcept { return live_; }
-    const std::array<ZoneConfig, kZoneCount>& config() const noexcept { return config_; }
     std::string snapshot_json() const;
 
 private:
@@ -51,6 +50,7 @@ private:
     Ads1115* adc0_{nullptr};
     Ads1115* adc1_{nullptr};
     hg::SystemModel* model_{nullptr};
+    SemaphoreHandle_t mutex_{nullptr};
     std::array<ZoneLiveState, kZoneCount> live_{};
     std::array<ZoneConfig, kZoneCount> config_{};
 };
