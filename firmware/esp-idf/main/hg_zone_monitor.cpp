@@ -89,7 +89,7 @@ esp_err_t ZoneMonitor::load()
 
     for (const auto& item : loaded) {
         if (item.name.back() != '\0' || item.short_max_mv < 0.0F || item.open_min_mv <= item.short_max_mv || item.open_min_mv > 5000.0F) {
-            return ESP_ERR_INVALID_RESPONSE;
+            return ESP_ERR_INVALID_STATE;
         }
     }
 
