@@ -131,7 +131,7 @@ ZoneElectricalState ZoneMonitor::classify(float mv, const ZoneConfig& cfg) const
 
 esp_err_t ZoneMonitor::start(Ads1115* adc0, Ads1115* adc1, hg::SystemModel* model)
 {
-    if (adc0 == nullptr || adc1 == nullptr || model == nullptr) return ESP_ERR_INVALID_ARG;
+    if (adc0 == nullptr || adc1 == nullptr) return ESP_ERR_INVALID_ARG;
     if (mutex_ == nullptr) mutex_ = xSemaphoreCreateMutex();
     if (mutex_ == nullptr) return ESP_ERR_NO_MEM;
 
@@ -205,8 +205,7 @@ std::string ZoneMonitor::snapshot_json() const
             << ",\"name\":\"" << json_escape(config[i].name.data()) << "\""
             << ",\"mv\":" << live[i].millivolts
             << ",\"valid\":" << (live[i].valid ? "true" : "false")
-            << ",\"state\":\"" << zone_electrical_state_name(live[i].state) << "\"}"
-            ;
+            << ",\"state\":\"" << zone_electrical_state_name(live[i].state) << "\"}";
     }
     out << "],\"thresholds\":{\"note\":\"provisional_until_calibration\"}}";
     return out.str();
