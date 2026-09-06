@@ -1,11 +1,18 @@
 #include "hg_infrastructure_http.hpp"
 #include "hg_hardware_bootstrap.hpp"
 #include "hg_request_auth.hpp"
+#include "hg_zone_http.hpp"
+#include "hg_zone_monitor.hpp"
 #include "homeguard/hardware_runtime.hpp"
 
 #include <cstddef>
 
 namespace homeguard::idf {
+namespace {
+ZoneMonitor g_zone_monitor;
+ZoneHttp g_zone_http;
+bool g_zone_monitor_started = false;
+}
 
 esp_err_t InfrastructureHttp::register_handlers(
     httpd_handle_t server,
@@ -31,7 +38,16 @@ esp_err_t InfrastructureHttp::register_handlers(
         .handler = &InfrastructureHttp::analog_get,
         .user_ctx = this,
     };
-    return httpd_register_uri_handler(server, &analog_route);
+    error = httpd_register_uri_handler(server, &analog_route);
+    if (error != ESP_OK) return error;
+
+    if (!g_zone_monitor_started) {
+        error = g_zone_monitor.start(&hardware_->zone_adc(), &hardware_->telemetry_adc(), nullptr);
+        if (error != ESP_OK) return error;
+        g_zone_monitor_started = true;
+    }
+
+    return g_zone_http.register_handlers(server, &g_zone_monitor, access_control);
 }
 
 esp_err_t InfrastructureHttp::status_get(httpd_req_t* request)
