@@ -270,6 +270,13 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     }
   }
 
+  // The base app refresh loop used to repaint #zones from /api/v1/system/zones
+  // (the legacy 2-zone model). Redirect that renderer to the live 8-zone source
+  // so the old 5-second refresh can no longer overwrite the ADS1115 view.
+  if (typeof renderZones === "function") {
+    renderZones = () => { void refreshZoneLive(); };
+  }
+
   window.addEventListener("hashchange", applyEmbeddedView);
   applyEmbeddedView();
   setInterval(refreshZoneLive, 1000);
