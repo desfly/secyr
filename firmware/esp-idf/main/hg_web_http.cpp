@@ -202,8 +202,78 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     }
   }
 
+  const zoneStateMeta = {
+    normal: {label:"НОРМА", color:"#22c55e"},
+    open: {label:"ОБРИВ", color:"#ef4444"},
+    short: {label:"КЗ", color:"#eab308"}
+  };
+  const zoneEscape = (value) => String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#39;");
+  let zoneRefreshBusy = false;
+
+  async function saveZoneName(id, currentName) {
+    if (window.HomeGuardAuth?.role?.() !== "admin") return;
+    const nextName = window.prompt(`Назва зони Z${id}`, currentName || `Зона ${id}`);
+    if (nextName === null) return;
+    const name = nextName.trim();
+    if (!name || name.length > 23) {
+      if (typeof showToast === "function") showToast("Назва має містити 1–23 символи");
+      return;
+    }
+    const response = await fetch("/api/v1/zones/name", {
+      method:"POST",
+      cache:"no-store",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id:String(id), name, actor:window.HomeGuardAuth?.actor?.() || ""})
+    });
+    if (!response.ok) {
+      if (typeof showToast === "function") showToast("Не вдалося зберегти назву зони");
+      return;
+    }
+    await refreshZoneLive();
+  }
+
+  async function refreshZoneLive() {
+    if (zoneRefreshBusy || window.HomeGuardAuth?.authenticated?.() !== true) return;
+    const target = document.getElementById("zones");
+    if (!target) return;
+    zoneRefreshBusy = true;
+    try {
+      const response = await fetch("/api/v1/zones/live", {cache:"no-store"});
+      if (!response.ok) return;
+      const body = await response.json();
+      const zones = Array.isArray(body?.zones) ? body.zones : [];
+      const admin = window.HomeGuardAuth?.role?.() === "admin";
+      const count = document.getElementById("zoneCount");
+      if (count) count.textContent = String(zones.length || 8);
+      target.innerHTML = zones.map((zone) => {
+        const meta = zoneStateMeta[zone.state] || zoneStateMeta.open;
+        const mv = zone.valid ? `${(Number(zone.mv) / 1000).toFixed(3)} V` : "ADC —";
+        const edit = admin ? ` title="Натисніть, щоб змінити назву" style="cursor:pointer"` : "";
+        return `<div class="zone hg-zone-live" data-zone-id="${Number(zone.id)}" style="display:grid;grid-template-columns:42px minmax(0,1fr) 82px 82px;gap:10px;align-items:center">
+          <b>Z${Number(zone.id)}</b>
+          <span class="hg-zone-name"${edit}>${zoneEscape(zone.name || `Зона ${zone.id}`)}</span>
+          <small style="text-align:right;color:#66758b">${mv}</small>
+          <span style="display:flex;align-items:center;justify-content:flex-end;gap:7px;font-weight:700"><i style="display:inline-block;width:11px;height:11px;border-radius:50%;background:${meta.color};box-shadow:0 0 0 2px rgba(0,0,0,.06)"></i>${meta.label}</span>
+        </div>`;
+      }).join("");
+      if (admin) {
+        target.querySelectorAll(".hg-zone-name").forEach((node) => {
+          node.addEventListener("click", () => {
+            const row = node.closest("[data-zone-id]");
+            saveZoneName(Number(row?.dataset.zoneId || 0), node.textContent || "");
+          });
+        });
+      }
+    } catch (_) {
+    } finally {
+      zoneRefreshBusy = false;
+    }
+  }
+
   window.addEventListener("hashchange", applyEmbeddedView);
   applyEmbeddedView();
+  setInterval(refreshZoneLive, 1000);
+  setTimeout(refreshZoneLive, 500);
 })();
 )JS";
 
