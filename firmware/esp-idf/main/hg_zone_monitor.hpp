@@ -26,7 +26,7 @@ struct ZoneLiveState {
 };
 
 struct ZoneConfig {
-    std::array<char, 24> name{};
+    std::array<char, 64> name{};
     float short_max_mv{500.0F};
     float open_min_mv{3000.0F};
 };
