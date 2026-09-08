@@ -27,8 +27,8 @@ struct ZoneLiveState {
 
 struct ZoneConfig {
     std::array<char, 64> name{};
-    float short_max_mv{500.0F};
-    float open_min_mv{3000.0F};
+    float short_max_mv{200.0F};
+    float open_min_mv{2730.0F};
 };
 
 class ZoneMonitor {
@@ -45,7 +45,7 @@ private:
     static void task_entry(void* context);
     void run();
     void set_defaults();
-    ZoneElectricalState classify(float mv, const ZoneConfig& cfg) const noexcept;
+    ZoneElectricalState classify(float mv, const ZoneConfig& cfg, ZoneElectricalState previous) const noexcept;
 
     Ads1115* adc0_{nullptr};
     Ads1115* adc1_{nullptr};
