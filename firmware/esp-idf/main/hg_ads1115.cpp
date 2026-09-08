@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 
+#include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -16,11 +17,15 @@ constexpr std::uint8_t kConfigRegister = 0x01;
 constexpr std::uint16_t kStart = 0x8000;
 constexpr std::uint16_t kSingleShot = 0x0100;
 constexpr std::uint16_t kPga4096 = 0x0200;
-// 860 samples/s: one conversion is ~1.16 ms. Waiting 2 ms leaves margin
-// while keeping a full 8-zone sweep fast enough for sub-50 ms detection.
 constexpr std::uint16_t kDataRate860 = 0x00E0;
 constexpr std::uint16_t kComparatorDisabled = 0x0003;
 constexpr TickType_t kAccessTimeout = pdMS_TO_TICKS(250);
+// ADS1115 at 860 SPS completes one conversion in about 1.16 ms.
+// Use a real microsecond delay instead of pdMS_TO_TICKS(2): this firmware
+// runs FreeRTOS at 100 Hz, so a 2 ms tick delay collapses to 0 ticks and can
+// read the previous MUX channel. 1.5 ms gives conversion margin and keeps a
+// full 8-zone sweep fast enough for sub-50 ms confirmed detection.
+constexpr std::uint32_t kConversionWaitUs = 1500;
 
 }  // namespace
 
@@ -140,7 +145,7 @@ esp_err_t Ads1115::read_single_ended_mv(
 
     auto error = write_register(kConfigRegister, config);
     if (error == ESP_OK) {
-        vTaskDelay(pdMS_TO_TICKS(2));
+        esp_rom_delay_us(kConversionWaitUs);
 
         std::uint16_t raw_unsigned = 0;
         error = read_register(kConversionRegister, &raw_unsigned);
