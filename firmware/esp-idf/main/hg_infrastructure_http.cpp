@@ -4,6 +4,7 @@
 #include "hg_zone_http.hpp"
 #include "hg_zone_monitor.hpp"
 #include "homeguard/hardware_runtime.hpp"
+#include "homeguard/system_model.hpp"
 
 #include <cstddef>
 
@@ -17,9 +18,12 @@ bool g_zone_monitor_started = false;
 esp_err_t InfrastructureHttp::register_handlers(
     httpd_handle_t server,
     HardwareBootstrap* hardware,
-    homeguard::AccessControl* access_control)
+    homeguard::AccessControl* access_control,
+    hg::SystemModel* system_model)
 {
-    if (server == nullptr || hardware == nullptr || access_control == nullptr) return ESP_ERR_INVALID_ARG;
+    if (server == nullptr || hardware == nullptr || access_control == nullptr || system_model == nullptr) {
+        return ESP_ERR_INVALID_ARG;
+    }
     hardware_ = hardware;
     access_control_ = access_control;
 
@@ -42,7 +46,7 @@ esp_err_t InfrastructureHttp::register_handlers(
     if (error != ESP_OK) return error;
 
     if (!g_zone_monitor_started) {
-        error = g_zone_monitor.start(&hardware_->zone_adc(), &hardware_->telemetry_adc(), nullptr);
+        error = g_zone_monitor.start(&hardware_->zone_adc(), &hardware_->telemetry_adc(), system_model);
         if (error != ESP_OK) return error;
         g_zone_monitor_started = true;
     }
