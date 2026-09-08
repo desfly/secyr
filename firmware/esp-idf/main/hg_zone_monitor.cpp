@@ -27,18 +27,19 @@ constexpr const char* kNvsKey = "config_v1";
 //   SHORT:  0.00 V nominal -> 0..0.20 V
 //   NORMAL: 1.89 V nominal -> 1.69..2.09 V
 //   OPEN:   2.93 V nominal -> 2.73..3.13 V nominal band.
-// Voltages above 3.13 V remain OPEN (fail-safe). The gaps between valid
-// bands are hysteresis/dead-band and do not change the last stable state.
+// Voltages above 3.13 V remain OPEN (fail-safe). Any voltage outside the
+// approved SHORT or NORMAL bands is treated as OPEN/fault so a floating or
+// unpopulated ADS1115 input can never remain falsely NORMAL.
 constexpr float kShortMaxMv = 200.0F;
 constexpr float kNormalMinMv = 1690.0F;
 constexpr float kNormalMaxMv = 2090.0F;
 constexpr float kOpenMinMv = 2730.0F;
 constexpr float kOpenNominalMaxMv = 3130.0F;
 
-// Deliberately non-fast reaction: sample every 250 ms and require a new
-// electrical state to remain stable for 1 second before publishing it.
+// Sample every 250 ms and require a new electrical state to remain stable
+// for 250 ms before publishing it.
 constexpr TickType_t kPollPeriod = pdMS_TO_TICKS(250);
-constexpr std::int64_t kStateConfirmUs = 1000000;
+constexpr std::int64_t kStateConfirmUs = 250000;
 
 std::string json_escape(const char* text)
 {
@@ -151,13 +152,13 @@ esp_err_t ZoneMonitor::set_name(std::size_t index, const std::string& name)
 
 ZoneElectricalState ZoneMonitor::classify(float mv, const ZoneConfig& cfg, ZoneElectricalState previous) const noexcept
 {
+    (void)previous;
     if (mv <= cfg.short_max_mv) return ZoneElectricalState::Short;
     if (mv >= kNormalMinMv && mv <= kNormalMaxMv) return ZoneElectricalState::Normal;
-    if (mv >= cfg.open_min_mv) return ZoneElectricalState::Open;
 
-    // 0.20..1.69 V and 2.09..2.73 V are deliberate dead-bands. Noise or
-    // contact bounce there must not flip the displayed zone state.
-    return previous;
+    // Everything outside the valid SHORT/NORMAL bands is fail-safe OPEN.
+    // This prevents floating/unwired ADS1115 channels from latching NORMAL.
+    return ZoneElectricalState::Open;
 }
 
 esp_err_t ZoneMonitor::start(Ads1115* adc0, Ads1115* adc1, hg::SystemModel* model)
@@ -219,7 +220,7 @@ void ZoneMonitor::run()
 
                 if (!initialized[zone]) {
                     // Establish the initial state immediately at boot; the
-                    // 1-second confirmation applies to subsequent changes.
+                    // 250 ms confirmation applies to subsequent changes.
                     next[zone].state = candidate;
                     initialized[zone] = true;
                     pending_state[zone] = candidate;
