@@ -9,6 +9,7 @@ import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceCommand
 import ua.homeguard.s3.model.DeviceEndpoint
+import ua.homeguard.s3.model.ZoneStatus
 import ua.homeguard.s3.network.HttpDeviceApi
 import ua.homeguard.s3.storage.SettingsStore
 import java.util.concurrent.atomic.AtomicLong
@@ -59,6 +60,12 @@ class CommandController(
             settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
         }
         return session
+    }
+
+    suspend fun liveZones(): List<ZoneStatus> {
+        val target = localTarget()
+        require(localHttpSessionToken.isNotBlank()) { "authorization required" }
+        return createApi(target).liveZones()
     }
 
     fun logout() {
