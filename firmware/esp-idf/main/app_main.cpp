@@ -146,8 +146,10 @@ void restore_cloud_config()
 void initialize_system_model()
 {
     g_system_model.add_partition(1);
-    g_system_model.add_zone(1, "Zone 1", hg::ModelZoneType::Perimeter);
-    g_system_model.add_zone(2, "Zone 2", hg::ModelZoneType::Interior);
+    for (std::uint16_t id = 1; id <= 8; ++id) {
+        const std::string name = "Zone " + std::to_string(id);
+        g_system_model.add_zone(id, name, id == 1 ? hg::ModelZoneType::Perimeter : hg::ModelZoneType::Interior);
+    }
     g_system_model.add_output(1, hg::ModelOutputType::Siren);
     g_system_model.add_output(2, hg::ModelOutputType::Valve);
     g_system_model.add_output(3, hg::ModelOutputType::Valve);
@@ -191,7 +193,7 @@ esp_err_t start_http_server()
     if (error != ESP_OK) return rollback_http(error, "LAN discovery routes");
     error = g_cloud_http.register_handlers(g_http_server, &g_cloud_link, &g_cloud_store, &g_access_control);
     if (error != ESP_OK) return rollback_http(error, "cloud routes");
-    error = g_http_api.register_handlers(g_http_server, &g_hardware, &g_access_control);
+    error = g_http_api.register_handlers(g_http_server, &g_hardware, &g_access_control, &g_system_model);
     if (error != ESP_OK) return rollback_http(error, "hardware routes");
     error = g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus, &g_access_control);
     if (error != ESP_OK) return rollback_http(error, "system routes");
