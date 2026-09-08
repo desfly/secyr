@@ -20,7 +20,25 @@ namespace {
 constexpr const char* kTag = "hg_zones";
 constexpr const char* kNvsNamespace = "hg_zones";
 constexpr const char* kNvsKey = "config_v1";
+
+// Approved HomeGuard-S3 zone input circuit:
+// R2=6.8 kOhm to +12 V, R3=2.2 kOhm to GND, EOL=3 kOhm.
+// Calculated ADS1115 voltages with +/-0.20 V tolerance:
+//   SHORT:  0.00 V nominal -> 0..0.20 V
+//   NORMAL: 1.89 V nominal -> 1.69..2.09 V
+//   OPEN:   2.93 V nominal -> 2.73..3.13 V nominal band.
+// Voltages above 3.13 V remain OPEN (fail-safe). The gaps between valid
+// bands are hysteresis/dead-band and do not change the last stable state.
+constexpr float kShortMaxMv = 200.0F;
+constexpr float kNormalMinMv = 1690.0F;
+constexpr float kNormalMaxMv = 2090.0F;
+constexpr float kOpenMinMv = 2730.0F;
+constexpr float kOpenNominalMaxMv = 3130.0F;
+
+// Deliberately non-fast reaction: sample every 250 ms and require a new
+// electrical state to remain stable for 1 second before publishing it.
 constexpr TickType_t kPollPeriod = pdMS_TO_TICKS(250);
+constexpr std::int64_t kStateConfirmUs = 1000000;
 
 std::string json_escape(const char* text)
 {
@@ -67,8 +85,8 @@ void ZoneMonitor::set_defaults()
     for (std::size_t i = 0; i < config_.size(); ++i) {
         config_[i] = {};
         std::snprintf(config_[i].name.data(), config_[i].name.size(), "Зона %u", static_cast<unsigned>(i + 1U));
-        config_[i].short_max_mv = 500.0F;
-        config_[i].open_min_mv = 3000.0F;
+        config_[i].short_max_mv = kShortMaxMv;
+        config_[i].open_min_mv = kOpenMinMv;
     }
 }
 
@@ -87,10 +105,16 @@ esp_err_t ZoneMonitor::load()
     if (error != ESP_OK) return error;
     if (size != sizeof(loaded)) return ESP_ERR_INVALID_SIZE;
 
-    for (const auto& item : loaded) {
+    for (auto& item : loaded) {
         if (item.name.back() != '\0' || item.short_max_mv < 0.0F || item.open_min_mv <= item.short_max_mv || item.open_min_mv > 5000.0F) {
             return ESP_ERR_INVALID_STATE;
         }
+
+        // Thresholds are hardware-defined, not user calibration. Preserve the
+        // saved zone name, but force the approved electrical thresholds even
+        // when older firmware left legacy values in NVS.
+        item.short_max_mv = kShortMaxMv;
+        item.open_min_mv = kOpenMinMv;
     }
 
     if (mutex_ != nullptr) xSemaphoreTake(mutex_, portMAX_DELAY);
@@ -125,11 +149,15 @@ esp_err_t ZoneMonitor::set_name(std::size_t index, const std::string& name)
     return save();
 }
 
-ZoneElectricalState ZoneMonitor::classify(float mv, const ZoneConfig& cfg) const noexcept
+ZoneElectricalState ZoneMonitor::classify(float mv, const ZoneConfig& cfg, ZoneElectricalState previous) const noexcept
 {
     if (mv <= cfg.short_max_mv) return ZoneElectricalState::Short;
+    if (mv >= kNormalMinMv && mv <= kNormalMaxMv) return ZoneElectricalState::Normal;
     if (mv >= cfg.open_min_mv) return ZoneElectricalState::Open;
-    return ZoneElectricalState::Normal;
+
+    // 0.20..1.69 V and 2.09..2.73 V are deliberate dead-bands. Noise or
+    // contact bounce there must not flip the displayed zone state.
+    return previous;
 }
 
 esp_err_t ZoneMonitor::start(Ads1115* adc0, Ads1115* adc1, hg::SystemModel* model)
@@ -160,6 +188,10 @@ void ZoneMonitor::task_entry(void* context)
 void ZoneMonitor::run()
 {
     std::array<ZoneLiveState, kZoneCount> next{};
+    std::array<ZoneElectricalState, kZoneCount> pending_state{};
+    std::array<std::int64_t, kZoneCount> pending_since_us{};
+    std::array<bool, kZoneCount> initialized{};
+
     while (true) {
         for (std::size_t zone = 0; zone < kZoneCount; ++zone) {
             Ads1115* adc = zone < 4U ? adc0_ : adc1_;
@@ -174,7 +206,35 @@ void ZoneMonitor::run()
 
             next[zone].millivolts = valid ? mv : 0.0F;
             next[zone].valid = valid;
-            next[zone].state = valid ? classify(mv, cfg) : ZoneElectricalState::Open;
+
+            if (!valid) {
+                // ADC/read failure is fail-safe and is not delayed.
+                next[zone].state = ZoneElectricalState::Open;
+                initialized[zone] = true;
+                pending_state[zone] = ZoneElectricalState::Open;
+                pending_since_us[zone] = 0;
+            } else {
+                const auto candidate = classify(mv, cfg, next[zone].state);
+                const auto now_us = esp_timer_get_time();
+
+                if (!initialized[zone]) {
+                    // Establish the initial state immediately at boot; the
+                    // 1-second confirmation applies to subsequent changes.
+                    next[zone].state = candidate;
+                    initialized[zone] = true;
+                    pending_state[zone] = candidate;
+                    pending_since_us[zone] = 0;
+                } else if (candidate == next[zone].state) {
+                    pending_state[zone] = candidate;
+                    pending_since_us[zone] = 0;
+                } else if (pending_since_us[zone] == 0 || pending_state[zone] != candidate) {
+                    pending_state[zone] = candidate;
+                    pending_since_us[zone] = now_us;
+                } else if ((now_us - pending_since_us[zone]) >= kStateConfirmUs) {
+                    next[zone].state = candidate;
+                    pending_since_us[zone] = 0;
+                }
+            }
 
             if (model_ != nullptr) {
                 (void)model_->set_zone_state(
@@ -210,7 +270,14 @@ std::string ZoneMonitor::snapshot_json() const
             << ",\"valid\":" << (live[i].valid ? "true" : "false")
             << ",\"state\":\"" << zone_electrical_state_name(live[i].state) << "\"}";
     }
-    out << "],\"thresholds\":{\"note\":\"provisional_until_calibration\"}}";
+    out << "],\"thresholds\":{"
+        << "\"short_max_mv\":" << kShortMaxMv << ','
+        << "\"normal_min_mv\":" << kNormalMinMv << ','
+        << "\"normal_max_mv\":" << kNormalMaxMv << ','
+        << "\"open_min_mv\":" << kOpenMinMv << ','
+        << "\"open_nominal_max_mv\":" << kOpenNominalMaxMv << ','
+        << "\"confirm_ms\":" << (kStateConfirmUs / 1000)
+        << "}}";
     return out.str();
 }
 
