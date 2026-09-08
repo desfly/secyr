@@ -26,6 +26,7 @@ import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.model.ZoneStatus
 import ua.homeguard.s3.network.ControllerIdentity
 import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
     private val accessGateBusy = MutableStateFlow(false)
     private val accessGateMessage = MutableStateFlow("")
     private val setupWifiNetworks = MutableStateFlow<List<SetupWifiChoice>>(emptyList())
+    private val liveZones = MutableStateFlow<List<ZoneStatus>>(emptyList())
     private val addDeviceOpen = MutableStateFlow(false)
     private val provisioningOpen = MutableStateFlow(false)
     private val deviceListOpen = MutableStateFlow(true)
@@ -173,6 +175,21 @@ class MainActivity : ComponentActivity() {
         discovery.start()
         session.start()
 
+        // Live security zones use the same authenticated endpoint as the web UI.
+        // Keep this path independent from the legacy 5-zone websocket snapshot.
+        lifecycleScope.launch {
+            while (true) {
+                if (accessSession.value != null) {
+                    runCatching { commands.liveZones() }
+                        .onSuccess { liveZones.value = it }
+                        .onFailure { liveZones.value = emptyList() }
+                } else if (liveZones.value.isNotEmpty()) {
+                    liveZones.value = emptyList()
+                }
+                delay(350)
+            }
+        }
+
         setContent {
             val appSettings by settings.settings.collectAsState()
             val devices by discovery.devices.collectAsState()
@@ -182,6 +199,7 @@ class MainActivity : ComponentActivity() {
             val endpoint by resolver.endpoint.collectAsState()
             val provisioningState by provisioning.state.collectAsState()
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
+            val zones by liveZones.collectAsState()
             val events by telemetry.events().collectAsState(initial = emptyList())
             val commandMessage by commandStatus.collectAsState()
             val maintenanceMessage by backupStatus.collectAsState()
@@ -293,7 +311,7 @@ class MainActivity : ComponentActivity() {
                         localDevices = devices.size,
                         route = endpoint.path.name,
                         deviceId = appSettings.deviceId,
-                        snapshot = snapshot,
+                        snapshot = snapshot.copy(zones = zones),
                         events = events,
                         diagnostics = diagnostics,
                         backupStatus = maintenanceMessage,
@@ -509,6 +527,7 @@ class MainActivity : ComponentActivity() {
     private fun logoutOperator() {
         commands.logout()
         accessSession.value = null
+        liveZones.value = emptyList()
         operatorPin.value = ""
         accessLifecycle.value = AccessLifecycleState.LOGIN_REQUIRED
         commandStatus.value = "Сеанс завершено"
@@ -547,6 +566,7 @@ class MainActivity : ComponentActivity() {
                     commands.logout()
                     settings.selectDevice("")
                     accessSession.value = null
+                    liveZones.value = emptyList()
                     accessLifecycle.value = AccessLifecycleState.UNAVAILABLE
                     operatorPin.value = ""
                     addDeviceOpen.value = false
@@ -626,6 +646,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         commands.logout()
         accessSession.value = null
+        liveZones.value = emptyList()
         operatorPin.value = ""
         session.stop()
         discovery.stop()
