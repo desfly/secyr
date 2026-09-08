@@ -1,12 +1,16 @@
 package ua.homeguard.s3.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -22,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -34,6 +39,7 @@ import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.model.ZoneStatus
 import ua.homeguard.s3.ui.components.MaintenancePanel
 
 @Composable
@@ -157,6 +163,35 @@ fun DashboardScreen(
         }
 
         item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Статус охорони", style = MaterialTheme.typography.titleMedium)
+                    StatusRow("Режим", securityModeLabel(snapshot.mode.name))
+                    StatusRow("Стан системи", snapshot.health.name)
+                    StatusRow("Транспорт", snapshot.transport.name)
+                    Text("Телеметрія #${snapshot.sequence}", style = MaterialTheme.typography.bodySmall)
+                    Text("Uptime: ${snapshot.uptimeMs} ms", style = MaterialTheme.typography.bodySmall)
+                    Text("Команда: $commandStatus", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Зони", style = MaterialTheme.typography.titleMedium)
+                    if (snapshot.zones.isEmpty()) {
+                        Text("Очікування живих даних зон…", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        snapshot.zones.sortedBy { it.index }.forEach { zone ->
+                            ZoneStatusRow(zone)
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
             MaintenancePanel(
                 diagnostics = diagnostics,
                 backupStatus = backupStatus,
@@ -214,20 +249,6 @@ fun DashboardScreen(
                         OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("Вийти") }
                     }
                     Text("PIN зберігається тільки в оперативній пам’яті застосунку.", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Система", style = MaterialTheme.typography.titleMedium)
-                    StatusRow("Режим", snapshot.mode.name)
-                    StatusRow("Стан", snapshot.health.name)
-                    StatusRow("Транспорт", snapshot.transport.name)
-                    Text("Телеметрія #${snapshot.sequence}", style = MaterialTheme.typography.bodySmall)
-                    Text("Uptime: ${snapshot.uptimeMs} ms", style = MaterialTheme.typography.bodySmall)
-                    Text("Команда: $commandStatus", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -314,18 +335,6 @@ fun DashboardScreen(
             }
         }
 
-        item { Text("Зони", style = MaterialTheme.typography.titleMedium) }
-        if (snapshot.zones.isEmpty()) item { Text("Очікування живих даних зон…") }
-        else items(snapshot.zones, key = { it.index }) { zone ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(zone.name, style = MaterialTheme.typography.titleSmall)
-                    Text(if (zone.enabled) "Активна" else "Вимкнена", style = MaterialTheme.typography.bodySmall)
-                    Text(zone.state.uppercase())
-                }
-            }
-        }
-
         item { Text("Тиск / аналогові канали", style = MaterialTheme.typography.titleMedium) }
         if (snapshot.pressures.isEmpty()) item { Text("Немає даних") }
         else items(snapshot.pressures, key = { it.index }) { pressure ->
@@ -338,6 +347,45 @@ fun DashboardScreen(
             }
         }
     }
+}
+
+@Composable
+private fun ZoneStatusRow(zone: ZoneStatus) {
+    val normalized = zone.state.trim().lowercase()
+    val label = when {
+        !zone.enabled -> "НЕМАЄ ДАНИХ"
+        normalized == "normal" -> "НОРМА"
+        normalized == "short" -> "КЗ"
+        normalized == "open" -> "ОБРИВ"
+        normalized == "tamper" -> "ТРИВОГА"
+        normalized == "disabled" -> "ВИМКНЕНО"
+        else -> normalized.uppercase().ifBlank { "НЕВІДОМО" }
+    }
+    val color = when {
+        !zone.enabled -> MaterialTheme.colorScheme.error
+        normalized == "normal" -> Color(0xFF2E7D32)
+        normalized == "short" -> Color(0xFFFFB300)
+        normalized == "open" || normalized == "tamper" -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.outline
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(modifier = Modifier.size(12.dp).background(color, CircleShape))
+        Text("Z${zone.index + 1}", style = MaterialTheme.typography.bodyMedium)
+        Text(zone.name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+private fun securityModeLabel(mode: String): String = when (mode) {
+    "DISARMED" -> "ЗНЯТО"
+    "ARMED_HOME" -> "ОХОРОНА: ДІМ"
+    "ARMED_AWAY" -> "ОХОРОНА: ПОВНА"
+    "ALARM" -> "ТРИВОГА"
+    "MAINTENANCE" -> "СЕРВІС"
+    else -> mode
 }
 
 @Composable
