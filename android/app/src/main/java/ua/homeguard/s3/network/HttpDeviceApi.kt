@@ -88,6 +88,8 @@ class HttpDeviceApi(
         )
     }
 
+    suspend fun liveZones(): List<ZoneStatus> = JsonParsers.liveZones(execute(RuntimeApiContract.ZONES_LIVE_PATH))
+
     suspend fun networkStatus(): JSONObject = execute(RuntimeApiContract.NETWORK_STATUS_PATH)
 
     suspend fun configureWifi(ssid: String, password: String, actor: String): JSONObject {
