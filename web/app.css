@@ -52,11 +52,11 @@
   html body .status-grid article{min-height:104px!important;padding:14px!important}
 }
 
-/* Approved zone dashboard: hardware grouping is column-wise: ADS1115 0x48 = Z1-Z4 left, ADS1115 0x49 = Z5-Z8 right. */
-#zones.zones{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-template-rows:repeat(4,56px)!important;grid-auto-flow:column!important;gap:0 12px!important;border:0!important;border-radius:0!important;overflow:visible!important}
+/* Approved zone dashboard: exactly one status dot, Z number, and zone name in 4 x 2 layout. */
+#zones.zones{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:0 12px!important;border:0!important;border-radius:0!important;overflow:visible!important}
 #zones .hg-zone-live{display:grid!important;grid-template-columns:16px 64px minmax(0,1fr)!important;gap:14px!important;align-items:center!important;height:56px!important;min-height:56px!important;padding:0 12px!important;border:1px solid #e0e5ec!important;border-bottom:0!important;justify-content:initial!important}
-#zones .hg-zone-live:nth-child(1),#zones .hg-zone-live:nth-child(5){border-radius:10px 10px 0 0!important}
-#zones .hg-zone-live:nth-child(4),#zones .hg-zone-live:nth-child(8){border-bottom:1px solid #e0e5ec!important;border-radius:0 0 10px 10px!important}
+#zones .hg-zone-live:nth-child(1),#zones .hg-zone-live:nth-child(2){border-radius:10px 10px 0 0!important}
+#zones .hg-zone-live:nth-child(7),#zones .hg-zone-live:nth-child(8){border-bottom:1px solid #e0e5ec!important;border-radius:0 0 10px 10px!important}
 #zones .hg-zone-live:before{content:none!important;display:none!important}
 #zones .hg-zone-live i{display:block!important;width:14px!important;height:14px!important;border-radius:50%!important;margin:0!important}
 #zones .hg-zone-live b{font-size:16px!important;font-weight:700!important;line-height:1!important;color:#101827!important;margin:0!important}
