@@ -36,10 +36,13 @@ constexpr float kNormalMaxMv = 2090.0F;
 constexpr float kOpenMinMv = 2730.0F;
 constexpr float kOpenNominalMaxMv = 3130.0F;
 
-// Sample every 250 ms and require a new electrical state to remain stable
-// for 250 ms before publishing it.
-constexpr TickType_t kPollPeriod = pdMS_TO_TICKS(250);
-constexpr std::int64_t kStateConfirmUs = 250000;
+// ADS1115 now runs at 860 SPS with a 2 ms conversion wait. A full 8-zone
+// sweep is therefore about 16-20 ms. Require two consecutive readings of a
+// new state and pause only 1 ms between sweeps: normal response is kept below
+// the requested 50 ms while still rejecting a one-sample glitch.
+constexpr TickType_t kSweepPause = pdMS_TO_TICKS(1);
+constexpr std::uint8_t kConfirmSamples = 2;
+constexpr std::uint32_t kTargetResponseMs = 50;
 
 std::string json_escape(const char* text)
 {
@@ -190,7 +193,7 @@ void ZoneMonitor::run()
 {
     std::array<ZoneLiveState, kZoneCount> next{};
     std::array<ZoneElectricalState, kZoneCount> pending_state{};
-    std::array<std::int64_t, kZoneCount> pending_since_us{};
+    std::array<std::uint8_t, kZoneCount> pending_count{};
     std::array<bool, kZoneCount> initialized{};
 
     while (true) {
@@ -213,27 +216,30 @@ void ZoneMonitor::run()
                 next[zone].state = ZoneElectricalState::Open;
                 initialized[zone] = true;
                 pending_state[zone] = ZoneElectricalState::Open;
-                pending_since_us[zone] = 0;
+                pending_count[zone] = 0;
             } else {
                 const auto candidate = classify(mv, cfg, next[zone].state);
-                const auto now_us = esp_timer_get_time();
 
                 if (!initialized[zone]) {
-                    // Establish the initial state immediately at boot; the
-                    // 250 ms confirmation applies to subsequent changes.
+                    // Establish the initial state immediately at boot.
                     next[zone].state = candidate;
                     initialized[zone] = true;
                     pending_state[zone] = candidate;
-                    pending_since_us[zone] = 0;
+                    pending_count[zone] = 0;
                 } else if (candidate == next[zone].state) {
                     pending_state[zone] = candidate;
-                    pending_since_us[zone] = 0;
-                } else if (pending_since_us[zone] == 0 || pending_state[zone] != candidate) {
+                    pending_count[zone] = 0;
+                } else if (pending_state[zone] != candidate) {
+                    // First reading of a possible new state.
                     pending_state[zone] = candidate;
-                    pending_since_us[zone] = now_us;
-                } else if ((now_us - pending_since_us[zone]) >= kStateConfirmUs) {
-                    next[zone].state = candidate;
-                    pending_since_us[zone] = 0;
+                    pending_count[zone] = 1;
+                } else {
+                    // Second consecutive reading confirms the transition.
+                    if (pending_count[zone] < kConfirmSamples) ++pending_count[zone];
+                    if (pending_count[zone] >= kConfirmSamples) {
+                        next[zone].state = candidate;
+                        pending_count[zone] = 0;
+                    }
                 }
             }
 
@@ -248,7 +254,7 @@ void ZoneMonitor::run()
         xSemaphoreTake(mutex_, portMAX_DELAY);
         live_ = next;
         xSemaphoreGive(mutex_);
-        vTaskDelay(kPollPeriod);
+        vTaskDelay(kSweepPause);
     }
 }
 
@@ -277,7 +283,8 @@ std::string ZoneMonitor::snapshot_json() const
         << "\"normal_max_mv\":" << kNormalMaxMv << ','
         << "\"open_min_mv\":" << kOpenMinMv << ','
         << "\"open_nominal_max_mv\":" << kOpenNominalMaxMv << ','
-        << "\"confirm_ms\":" << (kStateConfirmUs / 1000)
+        << "\"confirm_samples\":" << static_cast<unsigned>(kConfirmSamples) << ','
+        << "\"target_response_ms\":" << kTargetResponseMs
         << "}}";
     return out.str();
 }
