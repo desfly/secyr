@@ -61,3 +61,7 @@
 #zones .hg-zone-live i{display:block!important;width:14px!important;height:14px!important;border-radius:50%!important;margin:0!important}
 #zones .hg-zone-live b{font-size:16px!important;font-weight:700!important;line-height:1!important;color:#101827!important;margin:0!important}
 #zones .hg-zone-live .hg-zone-name{display:block!important;flex:none!important;font-size:16px!important;line-height:1.1!important;color:#101827!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;margin:0!important}
+
+/* Password visibility control: keep the eye readable even when Chrome autofill paints the input light. */
+html body #hgAuthGate button.hg-password-eye{background:rgba(255,255,255,.94)!important;color:#10243a!important;border:1px solid rgba(16,36,58,.28)!important;box-shadow:0 1px 3px rgba(0,0,0,.18)!important}
+html body #hgAuthGate button.hg-password-eye:hover,html body #hgAuthGate button.hg-password-eye:focus-visible{background:#fff!important;color:#07131f!important;outline:2px solid #6ea8ff!important;outline-offset:1px!important}
