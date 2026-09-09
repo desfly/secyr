@@ -325,7 +325,7 @@ extern "C" void app_main()
     // MCP23017 relay path disabled. Four relays are direct ESP32-S3 GPIO.
     const auto relay_error = g_relays.start(&g_zone_monitor);
     if (relay_error != ESP_OK) ESP_LOGE(kTag, "Direct GPIO relay runtime failed: %s", esp_err_to_name(relay_error));
-    else ESP_LOGI(kTag, "Relay runtime ready: LIGHT=GPIO33 LOCK=GPIO34 VALVE1=GPIO38 VALVE2=GPIO47");
+    else ESP_LOGI(kTag, "Relay runtime ready: LIGHT=GPIO1 LOCK=GPIO2 VALVE1=GPIO38 VALVE2=GPIO47");
 
     const auto http_error = start_http_server();
     if (http_error != ESP_OK) {
