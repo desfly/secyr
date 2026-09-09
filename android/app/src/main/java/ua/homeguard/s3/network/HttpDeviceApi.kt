@@ -90,6 +90,16 @@ class HttpDeviceApi(
 
     suspend fun liveZones(): List<ZoneStatus> = JsonParsers.liveZones(execute(RuntimeApiContract.ZONES_LIVE_PATH))
 
+    suspend fun relayState(): RelayControlState = parseRelayState(execute("/api/v1/outputs/relay-state"))
+
+    suspend fun setLight(active: Boolean, actor: String): RelayControlState = parseRelayState(
+        execute("/api/v1/outputs/light", "POST", JSONObject().put("active", active).put("actor", actor.trim()))
+    )
+
+    suspend fun pulseLock(actor: String): RelayControlState = parseRelayState(
+        execute("/api/v1/outputs/lock/pulse", "POST", JSONObject().put("actor", actor.trim()))
+    )
+
     suspend fun networkStatus(): JSONObject = execute(RuntimeApiContract.NETWORK_STATUS_PATH)
 
     suspend fun configureWifi(ssid: String, password: String, actor: String): JSONObject {
@@ -157,10 +167,17 @@ class HttpDeviceApi(
     }
 
     private suspend fun runtimeLockPulse(actor: String): CommandReply {
-        val json = execute("/api/v1/outputs/lock/pulse", "POST", JSONObject().put("actor", actor))
-        val accepted = json.optBoolean("ok", false)
-        return CommandReply(accepted = accepted, code = if (accepted) "lock_5s" else json.optString("reason", "rejected"))
+        val state = pulseLock(actor)
+        return CommandReply(accepted = state.lockActive, code = if (state.lockActive) "lock_5s" else "rejected")
     }
+
+    private fun parseRelayState(json: JSONObject): RelayControlState = RelayControlState(
+        lightActive = json.optBoolean("lightActive", false),
+        lightManual = json.optBoolean("lightManual", false),
+        lightAutomatic = json.optBoolean("lightAutomatic", false),
+        lockActive = json.optBoolean("lockActive", false),
+        lockRemainingMs = json.optInt("lockRemainingMs", 0).coerceAtLeast(0),
+    )
 
     override suspend fun diagnostics(): Diagnostics = JsonParsers.diagnostics(execute(LegacyApiContract.HEALTH_PATH))
     override suspend fun snapshot(): SystemSnapshot = JsonParsers.snapshot(execute(LegacyApiContract.STATUS_PATH))
