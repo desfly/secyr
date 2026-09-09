@@ -114,9 +114,6 @@ esp_err_t ZoneMonitor::load()
             return ESP_ERR_INVALID_STATE;
         }
 
-        // Thresholds are hardware-defined, not user calibration. Preserve the
-        // saved zone name, but force the approved electrical thresholds even
-        // when older firmware left legacy values in NVS.
         item.short_max_mv = kShortMaxMv;
         item.open_min_mv = kOpenMinMv;
     }
@@ -158,9 +155,6 @@ ZoneElectricalState ZoneMonitor::classify(float mv, const ZoneConfig& cfg, ZoneE
     (void)previous;
     if (mv <= cfg.short_max_mv) return ZoneElectricalState::Short;
     if (mv >= kNormalMinMv && mv <= kNormalMaxMv) return ZoneElectricalState::Normal;
-
-    // Everything outside the valid SHORT/NORMAL bands is fail-safe OPEN.
-    // This prevents floating/unwired ADS1115 channels from latching NORMAL.
     return ZoneElectricalState::Open;
 }
 
@@ -173,6 +167,7 @@ esp_err_t ZoneMonitor::start(Ads1115* adc0, Ads1115* adc1, hg::SystemModel* mode
     adc0_ = adc0;
     adc1_ = adc1;
     model_ = model;
+    first_sweep_complete_ = false;
     set_defaults();
     const auto load_error = load();
     if (load_error != ESP_OK) {
@@ -212,7 +207,6 @@ void ZoneMonitor::run()
             next[zone].valid = valid;
 
             if (!valid) {
-                // ADC/read failure is fail-safe and is not delayed.
                 next[zone].state = ZoneElectricalState::Open;
                 initialized[zone] = true;
                 pending_state[zone] = ZoneElectricalState::Open;
@@ -221,7 +215,6 @@ void ZoneMonitor::run()
                 const auto candidate = classify(mv, cfg, next[zone].state);
 
                 if (!initialized[zone]) {
-                    // Establish the initial state immediately at boot.
                     next[zone].state = candidate;
                     initialized[zone] = true;
                     pending_state[zone] = candidate;
@@ -230,11 +223,9 @@ void ZoneMonitor::run()
                     pending_state[zone] = candidate;
                     pending_count[zone] = 0;
                 } else if (pending_state[zone] != candidate) {
-                    // First reading of a possible new state.
                     pending_state[zone] = candidate;
                     pending_count[zone] = 1;
                 } else {
-                    // Second consecutive reading confirms the transition.
                     if (pending_count[zone] < kConfirmSamples) ++pending_count[zone];
                     if (pending_count[zone] >= kConfirmSamples) {
                         next[zone].state = candidate;
@@ -253,6 +244,7 @@ void ZoneMonitor::run()
 
         xSemaphoreTake(mutex_, portMAX_DELAY);
         live_ = next;
+        first_sweep_complete_ = true;
         xSemaphoreGive(mutex_);
         vTaskDelay(kSweepPause);
     }
