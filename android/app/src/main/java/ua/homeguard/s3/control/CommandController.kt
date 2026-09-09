@@ -54,24 +54,20 @@ class CommandController(
         val target = endpoint.value
         require(target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank()) { "controller offline" }
 
-        // PIN exists only during this login call. Never persist or reuse it for
-        // commands. The returned Bearer token becomes the local auth boundary.
         clearLocalSession()
         val api = createApi(target)
         val session = api.login(actor, credential)
         if (target.path != ControlPath.CLOUD) {
             localHttpSessionToken = session.sessionToken
             localActor = session.actor
-            issueFreshTelemetryTicket(target)
+            // Keep this call explicit: login establishes the HTTP Bearer session,
+            // then obtains the first single-use WebSocket handshake ticket.
+            val telemetryToken = api.telemetrySession(session.actor)
+            settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
         }
         return session
     }
 
-    /**
-     * A telemetry token is intentionally a one-use WebSocket handshake ticket.
-     * When the socket is lost, DeviceSession calls this method to mint a fresh
-     * ticket through the still-authenticated HTTP Bearer session.
-     */
     suspend fun refreshTelemetryToken(): String {
         val target = localTarget()
         require(localHttpSessionToken.isNotBlank() && localActor.isNotBlank()) {
@@ -101,8 +97,6 @@ class CommandController(
             type = type,
             challenge = challenge,
             actor = actor.trim(),
-            // LEGACY cloud-only compatibility: local runtime never needs or
-            // serializes this credential after login.
             credential = if (target.path == ControlPath.CLOUD) credential else "",
         )
         return api.command(command)
