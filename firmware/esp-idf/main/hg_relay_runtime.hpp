@@ -20,8 +20,6 @@ public:
 
     esp_err_t start(Mcp23017* expander, ZoneMonitor* zones);
     bool request_lock_pulse();
-    bool light_active() const;
-    bool lock_active() const;
 
 private:
     static void task_entry(void* context);
