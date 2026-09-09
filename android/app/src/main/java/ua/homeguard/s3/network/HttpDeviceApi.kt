@@ -104,8 +104,6 @@ class HttpDeviceApi(
         )
     }
 
-    // LEGACY v1 source compatibility only. Runtime v2 intentionally ignores
-    // the acting credential and never serializes it after login.
     @Deprecated("Use configureWifi(ssid, password, actor); Bearer session authenticates the actor")
     suspend fun configureWifi(ssid: String, password: String, actor: String, credential: String): JSONObject =
         configureWifi(ssid, password, actor)
@@ -139,6 +137,7 @@ class HttpDeviceApi(
             CommandType.DISARM -> runtimeSecurityCommand("security.disarm", actor)
             CommandType.OPEN_VALVES -> runtimeValveCommand(true, actor)
             CommandType.CLOSE_VALVES -> runtimeValveCommand(false, actor)
+            CommandType.LOCK -> runtimeLockPulse(actor)
             else -> CommandReply(false, code = "runtime_command_not_wired")
         }
     }
@@ -155,6 +154,12 @@ class HttpDeviceApi(
             if (!json.optBoolean("ok", false)) return CommandReply(false, code = json.optString("reason", json.optString("status", "rejected")))
         }
         return CommandReply(true, code = "accepted")
+    }
+
+    private suspend fun runtimeLockPulse(actor: String): CommandReply {
+        val json = execute("/api/v1/outputs/lock/pulse", "POST", JSONObject().put("actor", actor))
+        val accepted = json.optBoolean("ok", false)
+        return CommandReply(accepted = accepted, code = if (accepted) "lock_5s" else json.optString("reason", "rejected"))
     }
 
     override suspend fun diagnostics(): Diagnostics = JsonParsers.diagnostics(execute(LegacyApiContract.HEALTH_PATH))
@@ -178,7 +183,7 @@ class HttpDeviceApi(
         continuation.invokeOnCancellation { cancel() }
         enqueue(object : Callback {
             override fun onFailure(call: Call, error: IOException) { if (continuation.isActive) continuation.resumeWithException(error) }
-            override fun onResponse(call: Call, response: Response) { continuation.resume(response) }
+            override fun onResponse(call: Call, response: Response) { if (continuation.isActive) continuation.resume(response) else response.close() }
         })
     }
 }
