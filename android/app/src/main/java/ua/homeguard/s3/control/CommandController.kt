@@ -9,6 +9,7 @@ import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceCommand
 import ua.homeguard.s3.model.DeviceEndpoint
+import ua.homeguard.s3.model.RelayControlState
 import ua.homeguard.s3.model.ZoneStatus
 import ua.homeguard.s3.network.HttpDeviceApi
 import ua.homeguard.s3.storage.SettingsStore
@@ -47,15 +48,12 @@ class CommandController(
         val target = localTarget()
         localHttpSessionToken = ""
         localRuntimeApi = null
-        return createApi(target).setupConfigureWifi(ssid, password)
+        createApi(target).setupConfigureWifi(ssid, password)
     }
 
     suspend fun login(actor: String, credential: String): AccessSession {
         val target = endpoint.value
         require(target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank()) { "controller offline" }
-
-        // PIN exists only during this login call. Never persist or reuse it for
-        // commands. The returned Bearer token becomes the local auth boundary.
         localHttpSessionToken = ""
         localRuntimeApi = null
         val api = createApi(target)
@@ -74,6 +72,24 @@ class CommandController(
         require(localHttpSessionToken.isNotBlank()) { "authorization required" }
         val api = localRuntimeApi ?: error("local session unavailable")
         return api.liveZones()
+    }
+
+    suspend fun relayState(): RelayControlState {
+        localTarget()
+        require(localHttpSessionToken.isNotBlank()) { "authorization required" }
+        return (localRuntimeApi ?: error("local session unavailable")).relayState()
+    }
+
+    suspend fun setLight(active: Boolean, actor: String): RelayControlState {
+        localTarget()
+        require(localHttpSessionToken.isNotBlank()) { "authorization required" }
+        return (localRuntimeApi ?: error("local session unavailable")).setLight(active, actor)
+    }
+
+    suspend fun pulseLock(actor: String): RelayControlState {
+        localTarget()
+        require(localHttpSessionToken.isNotBlank()) { "authorization required" }
+        return (localRuntimeApi ?: error("local session unavailable")).pulseLock(actor)
     }
 
     fun logout() {
@@ -98,8 +114,6 @@ class CommandController(
             type = type,
             challenge = challenge,
             actor = actor.trim(),
-            // LEGACY cloud-only compatibility: local runtime never needs or
-            // serializes this credential after login.
             credential = if (target.path == ControlPath.CLOUD) credential else "",
         )
         return api.command(command)
