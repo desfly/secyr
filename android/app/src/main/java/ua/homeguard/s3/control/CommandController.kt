@@ -19,28 +19,29 @@ class CommandController(
 ) {
     private val requestIds = AtomicLong(System.currentTimeMillis())
     @Volatile private var localHttpSessionToken: String = ""
+    @Volatile private var localActor: String = ""
 
     suspend fun accessState(): AccessLifecycleState {
         val target = localTarget()
-        localHttpSessionToken = ""
+        clearLocalSession()
         return createApi(target).accessState()
     }
 
     suspend fun bootstrapAdmin(id: String, name: String, pin: String) {
         val target = localTarget()
-        localHttpSessionToken = ""
+        clearLocalSession()
         createApi(target).bootstrapAdmin(id, name, pin)
     }
 
     suspend fun setupWifiScan(): JSONObject {
         val target = localTarget()
-        localHttpSessionToken = ""
+        clearLocalSession()
         return createApi(target).setupWifiScan()
     }
 
     suspend fun setupConfigureWifi(ssid: String, password: String): JSONObject {
         val target = localTarget()
-        localHttpSessionToken = ""
+        clearLocalSession()
         return createApi(target).setupConfigureWifi(ssid, password)
     }
 
@@ -50,19 +51,32 @@ class CommandController(
 
         // PIN exists only during this login call. Never persist or reuse it for
         // commands. The returned Bearer token becomes the local auth boundary.
-        localHttpSessionToken = ""
+        clearLocalSession()
         val api = createApi(target)
         val session = api.login(actor, credential)
         if (target.path != ControlPath.CLOUD) {
             localHttpSessionToken = session.sessionToken
-            val telemetryToken = api.telemetrySession(session.actor)
-            settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
+            localActor = session.actor
+            issueFreshTelemetryTicket(target)
         }
         return session
     }
 
+    /**
+     * A telemetry token is intentionally a one-use WebSocket handshake ticket.
+     * When the socket is lost, DeviceSession calls this method to mint a fresh
+     * ticket through the still-authenticated HTTP Bearer session.
+     */
+    suspend fun refreshTelemetryToken(): String {
+        val target = localTarget()
+        require(localHttpSessionToken.isNotBlank() && localActor.isNotBlank()) {
+            "authenticated local HTTP session unavailable"
+        }
+        return issueFreshTelemetryTicket(target)
+    }
+
     fun logout() {
-        localHttpSessionToken = ""
+        clearLocalSession()
     }
 
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
@@ -87,6 +101,17 @@ class CommandController(
             credential = if (target.path == ControlPath.CLOUD) credential else "",
         )
         return api.command(command)
+    }
+
+    private suspend fun issueFreshTelemetryTicket(target: DeviceEndpoint): String {
+        val token = createApi(target).telemetrySession(localActor)
+        settings.update(settings.settings.value.copy(telemetryToken = token))
+        return token
+    }
+
+    private fun clearLocalSession() {
+        localHttpSessionToken = ""
+        localActor = ""
     }
 
     private fun localTarget(): DeviceEndpoint {
