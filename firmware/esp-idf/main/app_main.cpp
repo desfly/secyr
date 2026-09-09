@@ -246,7 +246,6 @@ void start_authenticated_telemetry_websocket()
     const bool started = g_websocket_telemetry.begin(g_http_server, token);
     std::fill(token.begin(), token.end(), '\0');
     token.clear();
-
     if (!started) {
         ESP_LOGE(kTag, "Authenticated telemetry websocket registration failed");
         return;
@@ -323,9 +322,10 @@ extern "C" void app_main()
     if (zones_error != ESP_OK) ESP_LOGE(kTag, "8-zone live monitor failed: %s", esp_err_to_name(zones_error));
     else ESP_LOGI(kTag, "8-zone live monitor started");
 
-    const auto relay_error = g_relays.start(&g_hardware.io_expander(), &g_zone_monitor);
-    if (relay_error != ESP_OK) ESP_LOGE(kTag, "MCP23017 light/lock relay runtime failed: %s", esp_err_to_name(relay_error));
-    else ESP_LOGI(kTag, "Relay runtime ready: LIGHT=GPA0 60s cycles, LOCK=GPA6 5s pulse");
+    // MCP23017 relay path disabled. Four relays are direct ESP32-S3 GPIO.
+    const auto relay_error = g_relays.start(&g_zone_monitor);
+    if (relay_error != ESP_OK) ESP_LOGE(kTag, "Direct GPIO relay runtime failed: %s", esp_err_to_name(relay_error));
+    else ESP_LOGI(kTag, "Relay runtime ready: LIGHT=GPIO33 LOCK=GPIO34 VALVE1=GPIO38 VALVE2=GPIO47");
 
     const auto http_error = start_http_server();
     if (http_error != ESP_OK) {
