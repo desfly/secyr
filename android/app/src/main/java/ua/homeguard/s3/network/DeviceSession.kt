@@ -91,7 +91,7 @@ class DeviceSession(
         telemetry.connect(endpoint.websocketUrl, target.token, pin)
     }
 
-    private fun handleUnauthorized(deviceId: String) {
+    private suspend fun handleUnauthorized(deviceId: String) {
         reconnectJob?.cancel()
         reconnectJob = null
         val target = activeTarget ?: return
@@ -121,9 +121,6 @@ class DeviceSession(
                         refreshLocalTicket(settings.settings.value.deviceId, allowDurableFallback = true)
                         return@launch
                     }
-                    // Network is probably still absent. Keep waiting and retry
-                    // the authenticated HTTP ticket request instead of reusing
-                    // an already consumed WebSocket ticket.
                     continue
                 }
 
@@ -141,8 +138,6 @@ class DeviceSession(
 
             val current = settings.settings.value
             if (allowDurableFallback && current.telemetryToken.isNotBlank() && current.apiToken.isNotBlank()) {
-                // A provisioned local API token is a durable WebSocket fallback
-                // when the login-scoped HTTP session disappeared after reboot.
                 settings.update(current.copy(telemetryToken = ""))
             } else {
                 RegisteredDeviceStore.markActiveAuthorization(deviceId, false)
