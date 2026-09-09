@@ -41,15 +41,25 @@ public:
     esp_err_t set_name(std::size_t index, const std::string& name);
     std::string snapshot_json() const;
 
+    bool first_sweep_complete() const noexcept
+    {
+        if (mutex_ != nullptr) xSemaphoreTake(mutex_, portMAX_DELAY);
+        const bool complete = first_sweep_complete_;
+        if (mutex_ != nullptr) xSemaphoreGive(mutex_);
+        return complete;
+    }
+
     // Relay automation consumes the same debounced live state that is exposed
-    // to Web/Android. Invalid/unread channels are fail-safe alarm conditions.
+    // to Web/Android. After the first sweep, invalid/unread channels are
+    // fail-safe alarm conditions.
     bool alarm_active(std::size_t index) const noexcept
     {
         if (index >= kZoneCount) return true;
         if (mutex_ != nullptr) xSemaphoreTake(mutex_, portMAX_DELAY);
         const auto state = live_[index];
+        const bool complete = first_sweep_complete_;
         if (mutex_ != nullptr) xSemaphoreGive(mutex_);
-        return !state.valid || state.state != ZoneElectricalState::Normal;
+        return complete && (!state.valid || state.state != ZoneElectricalState::Normal);
     }
 
 private:
@@ -64,6 +74,7 @@ private:
     SemaphoreHandle_t mutex_{nullptr};
     std::array<ZoneLiveState, kZoneCount> live_{};
     std::array<ZoneConfig, kZoneCount> config_{};
+    bool first_sweep_complete_{false};
 };
 
 const char* zone_electrical_state_name(ZoneElectricalState state) noexcept;
