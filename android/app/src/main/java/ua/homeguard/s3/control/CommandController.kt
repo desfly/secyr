@@ -10,6 +10,7 @@ import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceCommand
 import ua.homeguard.s3.model.DeviceEndpoint
 import ua.homeguard.s3.network.HttpDeviceApi
+import ua.homeguard.s3.network.LocalTelemetryTicketBroker
 import ua.homeguard.s3.storage.SettingsStore
 import java.util.concurrent.atomic.AtomicLong
 
@@ -20,6 +21,10 @@ class CommandController(
     private val requestIds = AtomicLong(System.currentTimeMillis())
     @Volatile private var localHttpSessionToken: String = ""
     @Volatile private var localActor: String = ""
+
+    init {
+        LocalTelemetryTicketBroker.install { refreshTelemetryToken() }
+    }
 
     suspend fun accessState(): AccessLifecycleState {
         val target = localTarget()
