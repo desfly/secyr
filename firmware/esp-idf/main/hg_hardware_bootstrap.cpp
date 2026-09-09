@@ -130,17 +130,24 @@ esp_err_t HardwareBootstrap::initialize()
         ESP_LOGE(kTag, "TEST FAIL: ADS1115 #2 0x49 not detected: %s", esp_err_to_name(telemetry_error));
     }
 
-    const auto mcp_error =
-        mcp23017_.initialize(i2c_, 0x20);
-    status_.mcp23017 = module_status(
-        mcp_error,
-        "MCP23017 0x20, outputs forced OFF",
-        "MCP23017 0x20 not detected");
-
-    if (mcp_error == ESP_OK) {
-        status_.safe_outputs_forced =
-            mcp23017_.force_safe_outputs() == ESP_OK;
-    }
+    // MCP23017 relay path intentionally disabled.
+    // Relays are now driven directly from ESP32-S3 GPIO33/34/38/47.
+    // Keep the driver/member in the source tree so this path can be restored
+    // later without changing the public hardware bootstrap interface.
+    //
+    // const auto mcp_error = mcp23017_.initialize(i2c_, 0x20);
+    // status_.mcp23017 = module_status(
+    //     mcp_error,
+    //     "MCP23017 0x20, outputs forced OFF",
+    //     "MCP23017 0x20 not detected");
+    // if (mcp_error == ESP_OK) {
+    //     status_.safe_outputs_forced = mcp23017_.force_safe_outputs() == ESP_OK;
+    // }
+    status_.mcp23017 = {
+        HardwareModuleState::NotInitialized,
+        "disabled: relays use direct GPIO33/34/38/47",
+        0,
+    };
 
     // CJMCU-226 board fitted in HomeGuard-S3 has R100 = 0.100 ohm.
     // INA226 shunt ADC full scale is about 81.92 mV, therefore 0.8 A
