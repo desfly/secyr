@@ -29,10 +29,11 @@ inline constexpr gpio_num_t kRs485Rx = GPIO_NUM_18;
 inline constexpr gpio_num_t kServiceButton = GPIO_NUM_21;
 
 // Direct relay outputs. MCP23017 relay control is intentionally disabled.
-// Numeric casts are deliberate: the host ESP-IDF mock exposes only a subset
-// of gpio_num_t enum names, while the ESP32-S3 target supports these GPIOs.
-inline constexpr gpio_num_t kRelayLight = static_cast<gpio_num_t>(33);
-inline constexpr gpio_num_t kRelayLock = static_cast<gpio_num_t>(34);
+// GPIO33-GPIO37 are not used here because the N16R8 module can use them for
+// Octal PSRAM high data/DQS signals. GPIO1/2/38/47 are free in the canonical
+// HomeGuard board map and avoid the fixed peripheral buses below.
+inline constexpr gpio_num_t kRelayLight = static_cast<gpio_num_t>(1);
+inline constexpr gpio_num_t kRelayLock = static_cast<gpio_num_t>(2);
 inline constexpr gpio_num_t kRelayValve1 = static_cast<gpio_num_t>(38);
 inline constexpr gpio_num_t kRelayValve2 = static_cast<gpio_num_t>(47);
 
@@ -49,11 +50,11 @@ inline constexpr bool is_reserved_gpio(int gpio) noexcept
 {
     switch (gpio) {
     case 0:
+    case 1:
+    case 2:
     case 3:
     case 19:
     case 20:
-    case 33:
-    case 34:
     case 35:
     case 36:
     case 37:
