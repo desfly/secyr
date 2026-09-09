@@ -8,6 +8,7 @@
 
 namespace homeguard::idf {
 
+class Mcp23017;
 class ZoneMonitor;
 
 struct RelayRuntimeState {
@@ -26,10 +27,17 @@ public:
     static constexpr std::uint32_t kLockPulseMs = 5'000U;
 
     esp_err_t start(ZoneMonitor* zones);
+
+    // Compatibility only: the MCP23017 argument is intentionally ignored.
+    // Relay control has moved to four direct ESP32-S3 GPIO outputs.
+    esp_err_t start(Mcp23017* unused_expander, ZoneMonitor* zones);
+
     bool set_manual_light(bool active);
     bool request_lock_pulse();
     bool set_valve(std::uint8_t index, bool active);
     RelayRuntimeState state();
+
+    static RelayRuntime* active_runtime() noexcept;
 
 private:
     static void task_entry(void* context);
