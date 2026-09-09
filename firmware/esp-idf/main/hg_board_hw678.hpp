@@ -28,6 +28,12 @@ inline constexpr gpio_num_t kRs485Rx = GPIO_NUM_18;
 
 inline constexpr gpio_num_t kServiceButton = GPIO_NUM_21;
 
+// Direct relay outputs. MCP23017 relay control is intentionally disabled.
+inline constexpr gpio_num_t kRelayLight = GPIO_NUM_33;
+inline constexpr gpio_num_t kRelayLock = GPIO_NUM_34;
+inline constexpr gpio_num_t kRelayValve1 = GPIO_NUM_38;
+inline constexpr gpio_num_t kRelayValve2 = GPIO_NUM_47;
+
 inline constexpr gpio_num_t kSdCs = GPIO_NUM_39;
 inline constexpr gpio_num_t kSdSck = GPIO_NUM_40;
 inline constexpr gpio_num_t kSdMosi = GPIO_NUM_41;
@@ -44,13 +50,17 @@ inline constexpr bool is_reserved_gpio(int gpio) noexcept
     case 3:
     case 19:
     case 20:
+    case 33:
+    case 34:
     case 35:
     case 36:
     case 37:
+    case 38:
     case 43:
     case 44:
     case 45:
     case 46:
+    case 47:
     case 48:
         return true;
     default:
