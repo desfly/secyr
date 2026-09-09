@@ -19,6 +19,7 @@ data class AccessCapabilities(
         CommandType.ARM_AWAY -> armAway
         CommandType.DISARM -> disarm
         CommandType.OPEN_VALVES, CommandType.CLOSE_VALVES -> valves
+        CommandType.LOCK,
         CommandType.SILENCE, CommandType.RESET_ALARM,
         CommandType.ENTER_MAINTENANCE, CommandType.EXIT_MAINTENANCE -> false
     }
