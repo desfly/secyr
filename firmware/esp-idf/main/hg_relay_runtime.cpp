@@ -58,6 +58,8 @@ bool RelayRuntime::write_state_locked(bool light, bool lock)
     if (expander_->write_outputs(outputs) != ESP_OK) {
         expander_->force_safe_outputs();
         light_active_ = false;
+        manual_light_ = false;
+        automatic_light_ = false;
         lock_active_ = false;
         light_deadline_ms_ = 0;
         lock_deadline_ms_ = 0;
@@ -66,6 +68,17 @@ bool RelayRuntime::write_state_locked(bool light, bool lock)
     light_active_ = light;
     lock_active_ = lock;
     return true;
+}
+
+bool RelayRuntime::set_manual_light(bool active)
+{
+    if (mutex_ == nullptr || expander_ == nullptr) return false;
+    if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(250)) != pdTRUE) return false;
+    manual_light_ = active;
+    const bool requested = manual_light_ || automatic_light_;
+    const bool ok = requested == light_active_ || write_state_locked(requested, lock_active_);
+    xSemaphoreGive(mutex_);
+    return ok;
 }
 
 bool RelayRuntime::request_lock_pulse()
@@ -89,6 +102,24 @@ bool RelayRuntime::request_lock_pulse()
     return accepted;
 }
 
+RelayRuntimeState RelayRuntime::state()
+{
+    RelayRuntimeState out{};
+    if (mutex_ == nullptr) return out;
+    if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(250)) != pdTRUE) return out;
+    const auto now = now_ms();
+    out.light_active = light_active_;
+    out.light_manual = manual_light_;
+    out.light_automatic = automatic_light_;
+    out.lock_active = lock_active_;
+    if (lock_active_ && lock_deadline_ms_ > now) {
+        const auto remaining = lock_deadline_ms_ - now;
+        out.lock_remaining_ms = remaining > UINT32_MAX ? UINT32_MAX : static_cast<std::uint32_t>(remaining);
+    }
+    xSemaphoreGive(mutex_);
+    return out;
+}
+
 void RelayRuntime::task_entry(void* context)
 {
     static_cast<RelayRuntime*>(context)->run();
@@ -101,24 +132,23 @@ void RelayRuntime::run()
         const bool alarm = zones_->alarm_active(0) || zones_->alarm_active(1);
 
         if (xSemaphoreTake(mutex_, portMAX_DELAY) == pdTRUE) {
-            bool next_light = light_active_;
-            bool next_lock = lock_active_;
-
-            if (!light_active_ && alarm) {
-                next_light = true;
+            if (!automatic_light_ && alarm) {
+                automatic_light_ = true;
                 light_deadline_ms_ = now + kLightCycleMs;
-                ESP_LOGI(kTag, "Z1/Z2 alarm: light relay ON for a 60 second cycle");
-            } else if (light_active_ && now >= light_deadline_ms_) {
+                ESP_LOGI(kTag, "Z1/Z2 alarm: automatic light cycle ON for 60 seconds");
+            } else if (automatic_light_ && now >= light_deadline_ms_) {
                 if (alarm) {
                     light_deadline_ms_ = now + kLightCycleMs;
                     ESP_LOGI(kTag, "Z1/Z2 still in alarm: next 60 second light cycle");
                 } else {
-                    next_light = false;
+                    automatic_light_ = false;
                     light_deadline_ms_ = 0;
-                    ESP_LOGI(kTag, "Light cycle complete and Z1/Z2 normal: light relay OFF");
+                    ESP_LOGI(kTag, "Automatic light cycle complete and Z1/Z2 normal");
                 }
             }
 
+            const bool next_light = manual_light_ || automatic_light_;
+            bool next_lock = lock_active_;
             if (lock_active_ && now >= lock_deadline_ms_) {
                 next_lock = false;
                 lock_deadline_ms_ = 0;
