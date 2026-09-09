@@ -28,7 +28,9 @@ class DeviceSession(
                 SessionTarget(endpoint, token)
             }.distinctUntilChanged().collect { target: SessionTarget ->
                 val endpoint = target.endpoint
-                if (endpoint.path == ControlPath.OFFLINE || endpoint.websocketUrl.isBlank() || target.token.isBlank()) {
+                if (endpoint.path == ControlPath.OFFLINE || endpoint.websocketUrl.isBlank()) {
+                    telemetry.disconnect()
+                } else if (endpoint.path == ControlPath.CLOUD && target.token.isBlank()) {
                     telemetry.disconnect()
                 } else {
                     val pin = if (endpoint.path == ControlPath.CLOUD) "" else endpoint.certificateSha256
