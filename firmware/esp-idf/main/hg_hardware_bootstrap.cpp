@@ -131,7 +131,7 @@ esp_err_t HardwareBootstrap::initialize()
     }
 
     // MCP23017 relay path intentionally disabled.
-    // Relays are now driven directly from ESP32-S3 GPIO33/34/38/47.
+    // Relays are now driven directly from ESP32-S3 GPIO1/2/38/47.
     // Keep the driver/member in the source tree so this path can be restored
     // later without changing the public hardware bootstrap interface.
     //
@@ -145,7 +145,7 @@ esp_err_t HardwareBootstrap::initialize()
     // }
     status_.mcp23017 = {
         HardwareModuleState::NotInitialized,
-        "disabled: relays use direct GPIO33/34/38/47",
+        "disabled: relays use direct GPIO1/2/38/47",
         0,
     };
 
