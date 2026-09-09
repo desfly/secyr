@@ -10,9 +10,7 @@
 
 namespace {
 constexpr char tag[] = "hg_ws";
-// A login-scoped telemetry bearer may be reused for reconnects during the
-// operator session. Provisioned local_api_token remains the long-lived path.
-constexpr std::int64_t kSessionTokenLifetimeUs = 12LL * 60LL * 60LL * 1'000'000LL;
+constexpr std::int64_t kSessionTokenLifetimeUs = 60'000'000;
 }
 
 struct WebsocketTelemetry::BroadcastWork {
@@ -90,9 +88,14 @@ bool WebsocketTelemetry::authorize(httpd_req_t* request) {
             session_token_issued_us_[i] = 0;
             continue;
         }
-        // Session telemetry tokens are deliberately reusable within their
-        // bounded lifetime so Android can reconnect after Wi-Fi/socket loss.
-        if (session.authorized(authorization)) return true;
+        if (session.authorized(authorization)) {
+            // Session tokens are short-lived handshake tickets. Consume them
+            // after one successful upgrade; Android requests a fresh ticket
+            // from its authenticated HTTP session when reconnecting.
+            session.clear();
+            session_token_issued_us_[i] = 0;
+            return true;
+        }
     }
     return false;
 }
