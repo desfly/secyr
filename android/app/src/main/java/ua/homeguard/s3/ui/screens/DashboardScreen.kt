@@ -183,9 +183,7 @@ fun DashboardScreen(
                     if (snapshot.zones.isEmpty()) {
                         Text("Очікування живих даних зон…", style = MaterialTheme.typography.bodySmall)
                     } else {
-                        snapshot.zones.sortedBy { it.index }.forEach { zone ->
-                            ZoneStatusRow(zone)
-                        }
+                        snapshot.zones.sortedBy { it.index }.forEach { zone -> ZoneStatusRow(zone) }
                     }
                 }
             }
@@ -268,6 +266,7 @@ fun DashboardScreen(
             Text("Керування", style = MaterialTheme.typography.titleMedium)
             if (!authenticated) Text("Увійдіть, щоб активувати дозволені команди", style = MaterialTheme.typography.bodySmall)
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(enabled = canCommand(CommandType.LOCK), onClick = { onCommand(CommandType.LOCK) }, modifier = Modifier.fillMaxWidth()) { Text("🔒 Замок · 5 секунд") }
                 Button(enabled = canCommand(CommandType.ARM_HOME), onClick = { onCommand(CommandType.ARM_HOME) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: дім") }
                 Button(enabled = canCommand(CommandType.ARM_AWAY), onClick = { onCommand(CommandType.ARM_AWAY) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: повна") }
                 OutlinedButton(enabled = canCommand(CommandType.DISARM), onClick = { pendingDangerousCommand = CommandType.DISARM }, modifier = Modifier.fillMaxWidth()) { Text("Зняти з охорони") }
