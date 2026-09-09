@@ -48,7 +48,7 @@ class CommandController(
         val target = localTarget()
         localHttpSessionToken = ""
         localRuntimeApi = null
-        createApi(target).setupConfigureWifi(ssid, password)
+        return createApi(target).setupConfigureWifi(ssid, password)
     }
 
     suspend fun login(actor: String, credential: String): AccessSession {
