@@ -37,6 +37,7 @@ import ua.homeguard.s3.events.EventLogFilter
 import ua.homeguard.s3.events.EventLogFilterEngine
 import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
+import ua.homeguard.s3.model.RelayControlState
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.model.ZoneStatus
@@ -49,6 +50,7 @@ fun DashboardScreen(
     route: String,
     deviceId: String,
     snapshot: SystemSnapshot,
+    relayState: RelayControlState,
     events: List<SystemEventRecord>,
     diagnostics: SystemDiagnostics,
     backupStatus: String,
@@ -74,6 +76,8 @@ fun DashboardScreen(
     onExportSettings: () -> Unit,
     onImportSettings: () -> Unit,
     onFactoryReset: () -> Unit,
+    onLightToggle: (Boolean) -> Unit,
+    onLockPulse: () -> Unit,
     onCommand: (CommandType) -> Unit,
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
@@ -266,7 +270,43 @@ fun DashboardScreen(
             Text("Керування", style = MaterialTheme.typography.titleMedium)
             if (!authenticated) Text("Увійдіть, щоб активувати дозволені команди", style = MaterialTheme.typography.bodySmall)
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(enabled = canCommand(CommandType.LOCK), onClick = { onCommand(CommandType.LOCK) }, modifier = Modifier.fillMaxWidth()) { Text("🔒 Замок · 5 секунд") }
+                val relayEnabled = adminAuthenticated && relayState.available
+                val lightLabel = when {
+                    !relayState.available -> "◌ Освітлення · НЕМАЄ ДАНИХ"
+                    relayState.lightActive && relayState.lightAutomatic && !relayState.lightManual -> "● Освітлення · АВТО ON"
+                    relayState.lightActive && relayState.lightManual -> "● Освітлення · РУЧНЕ ON"
+                    relayState.lightActive -> "● Освітлення · ON"
+                    else -> "○ Освітлення · OFF"
+                }
+                if (relayState.lightActive) {
+                    Button(
+                        enabled = relayEnabled,
+                        onClick = { onLightToggle(!relayState.lightManual) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(lightLabel) }
+                } else {
+                    OutlinedButton(
+                        enabled = relayEnabled,
+                        onClick = { onLightToggle(true) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(lightLabel) }
+                }
+                if (relayState.lightAutomatic) {
+                    Text("Автоматика Z1/Z2 активна; ручне OFF не перериває поточний 60-секундний цикл.", style = MaterialTheme.typography.bodySmall)
+                }
+
+                val lockSeconds = (relayState.lockRemainingMs + 999) / 1000
+                val lockLabel = when {
+                    !relayState.available -> "◌ Замок · НЕМАЄ ДАНИХ"
+                    relayState.lockActive -> "● Замок · ON · ${lockSeconds} с"
+                    else -> "○ Замок · OFF"
+                }
+                if (relayState.lockActive) {
+                    Button(enabled = relayEnabled, onClick = onLockPulse, modifier = Modifier.fillMaxWidth()) { Text(lockLabel) }
+                } else {
+                    OutlinedButton(enabled = relayEnabled, onClick = onLockPulse, modifier = Modifier.fillMaxWidth()) { Text(lockLabel) }
+                }
+
                 Button(enabled = canCommand(CommandType.ARM_HOME), onClick = { onCommand(CommandType.ARM_HOME) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: дім") }
                 Button(enabled = canCommand(CommandType.ARM_AWAY), onClick = { onCommand(CommandType.ARM_AWAY) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: повна") }
                 OutlinedButton(enabled = canCommand(CommandType.DISARM), onClick = { pendingDangerousCommand = CommandType.DISARM }, modifier = Modifier.fillMaxWidth()) { Text("Зняти з охорони") }
