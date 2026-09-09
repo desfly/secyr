@@ -14,6 +14,7 @@ namespace homeguard::idf {
 namespace {
 constexpr const char* kTag = "relay_runtime";
 constexpr TickType_t kPollTicks = pdMS_TO_TICKS(100);
+RelayRuntime* g_active_runtime = nullptr;
 
 bool configure_safe_output(gpio_num_t pin)
 {
@@ -28,9 +29,22 @@ bool write_pin(gpio_num_t pin, bool active)
 }
 }
 
+RelayRuntime* RelayRuntime::active_runtime() noexcept
+{
+    return g_active_runtime;
+}
+
 std::uint64_t RelayRuntime::now_ms()
 {
     return static_cast<std::uint64_t>(esp_timer_get_time() / 1000ULL);
+}
+
+esp_err_t RelayRuntime::start(Mcp23017* unused_expander, ZoneMonitor* zones)
+{
+    (void)unused_expander;
+    // MCP23017 relay path disabled. Keep this overload only so older bootstrap
+    // call sites compile while all actual relay writes use direct GPIO below.
+    return start(zones);
 }
 
 esp_err_t RelayRuntime::start(ZoneMonitor* zones)
@@ -62,6 +76,7 @@ esp_err_t RelayRuntime::start(ZoneMonitor* zones)
         return ESP_ERR_NO_MEM;
     }
 
+    g_active_runtime = this;
     ESP_LOGI(kTag,
         "Direct relay GPIO ready: LIGHT=%d LOCK=%d VALVE1=%d VALVE2=%d",
         static_cast<int>(board::kRelayLight),
