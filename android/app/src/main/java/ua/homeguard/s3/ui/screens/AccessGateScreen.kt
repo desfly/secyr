@@ -17,8 +17,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -32,11 +34,29 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import ua.homeguard.s3.R
 import ua.homeguard.s3.model.AccessLifecycleState
 
 data class SetupWifiChoice(val ssid: String, val rssi: Int)
+
+private val AccessFieldAccent = Color(0xFF9C7BEF)
+private val AccessFieldBorder = Color(0xFFB8A7E8)
+
+@Composable
+private fun accessFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Color.White,
+    unfocusedTextColor = Color.White,
+    disabledTextColor = Color(0xFFBFC7D1),
+    cursorColor = AccessFieldAccent,
+    focusedBorderColor = AccessFieldAccent,
+    unfocusedBorderColor = AccessFieldBorder,
+    focusedLabelColor = AccessFieldAccent,
+    unfocusedLabelColor = Color(0xFFE2D9FA),
+    focusedPlaceholderColor = Color(0xFFCCD2DA),
+    unfocusedPlaceholderColor = Color(0xFFCCD2DA),
+)
 
 @Composable
 fun AccessGateScreen(
@@ -54,8 +74,10 @@ fun AccessGateScreen(
     var actor by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
+    var pinVisible by remember { mutableStateOf(false) }
     var wifiSsid by remember { mutableStateOf("") }
     var wifiPassword by remember { mutableStateOf("") }
+    var wifiPasswordVisible by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -118,14 +140,21 @@ fun AccessGateScreen(
                             onValueChange = { wifiSsid = it.take(32) },
                             label = { Text("SSID") },
                             singleLine = true,
+                            colors = accessFieldColors(),
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedTextField(
                             value = wifiPassword,
                             onValueChange = { wifiPassword = it.take(64) },
                             label = { Text("Пароль Wi-Fi") },
-                            visualTransformation = PasswordVisualTransformation(),
+                            visualTransformation = if (wifiPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { wifiPasswordVisible = !wifiPasswordVisible }) {
+                                    Text(if (wifiPasswordVisible) "🙈" else "👁", color = Color.White)
+                                }
+                            },
                             singleLine = true,
+                            colors = accessFieldColors(),
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedButton(
@@ -141,6 +170,7 @@ fun AccessGateScreen(
                             onValueChange = { actor = it.take(23) },
                             label = { Text("ID адміністратора") },
                             singleLine = true,
+                            colors = accessFieldColors(),
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedTextField(
@@ -148,6 +178,7 @@ fun AccessGateScreen(
                             onValueChange = { name = it.take(31) },
                             label = { Text("Ім'я") },
                             singleLine = true,
+                            colors = accessFieldColors(),
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedTextField(
@@ -155,8 +186,14 @@ fun AccessGateScreen(
                             onValueChange = { pin = it.filter(Char::isDigit).take(12) },
                             label = { Text("Пароль / PIN") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                            visualTransformation = PasswordVisualTransformation(),
+                            visualTransformation = if (pinVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { pinVisible = !pinVisible }) {
+                                    Text(if (pinVisible) "🙈" else "👁", color = Color.White)
+                                }
+                            },
                             singleLine = true,
+                            colors = accessFieldColors(),
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Button(
@@ -173,6 +210,7 @@ fun AccessGateScreen(
                             onValueChange = { actor = it.take(23) },
                             label = { Text("Користувач") },
                             singleLine = true,
+                            colors = accessFieldColors(),
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedTextField(
@@ -180,8 +218,14 @@ fun AccessGateScreen(
                             onValueChange = { pin = it.filter(Char::isDigit).take(12) },
                             label = { Text("Пароль / PIN") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                            visualTransformation = PasswordVisualTransformation(),
+                            visualTransformation = if (pinVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { pinVisible = !pinVisible }) {
+                                    Text(if (pinVisible) "🙈" else "👁", color = Color.White)
+                                }
+                            },
                             singleLine = true,
+                            colors = accessFieldColors(),
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Button(
