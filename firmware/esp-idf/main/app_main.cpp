@@ -148,6 +148,12 @@ void initialize_system_model()
     g_system_model.add_partition(1);
     g_system_model.add_zone(1, "Zone 1", hg::ModelZoneType::Perimeter);
     g_system_model.add_zone(2, "Zone 2", hg::ModelZoneType::Interior);
+    g_system_model.add_zone(3, "Zone 3", hg::ModelZoneType::Perimeter);
+    g_system_model.add_zone(4, "Zone 4", hg::ModelZoneType::Perimeter);
+    g_system_model.add_zone(5, "Zone 5", hg::ModelZoneType::Perimeter);
+    g_system_model.add_zone(6, "Zone 6", hg::ModelZoneType::Perimeter);
+    g_system_model.add_zone(7, "Zone 7", hg::ModelZoneType::Perimeter);
+    g_system_model.add_zone(8, "Zone 8", hg::ModelZoneType::Perimeter);
     g_system_model.add_output(1, hg::ModelOutputType::Siren);
     g_system_model.add_output(2, hg::ModelOutputType::Valve);
     g_system_model.add_output(3, hg::ModelOutputType::Valve);
@@ -218,15 +224,18 @@ void start_authenticated_telemetry_websocket()
 {
     if (g_http_server == nullptr) return;
 
+    // The WebSocket must exist even on controllers that were commissioned
+    // without a provisioned long-lived local API token. In that case Android
+    // authenticates through /api/v1/telemetry/session after normal login.
+    std::string token;
     hg::ProvisioningPayload provisioning{};
-    if (!g_provisioning_store.load_provisioning(provisioning) || !provisioning.valid({})) {
-        provisioning.clear_secrets();
-        ESP_LOGW(kTag, "Provisioned local API token unavailable; telemetry websocket remains fail-closed");
-        return;
+    if (g_provisioning_store.load_provisioning(provisioning) && provisioning.valid({})) {
+        token = std::move(provisioning.local_api_token);
+    } else {
+        ESP_LOGW(kTag, "Provisioned local API token unavailable; telemetry uses login session tokens only");
     }
-
-    std::string token = std::move(provisioning.local_api_token);
     provisioning.clear_secrets();
+
     const bool started = g_websocket_telemetry.begin(g_http_server, token);
     std::fill(token.begin(), token.end(), '\0');
     token.clear();
