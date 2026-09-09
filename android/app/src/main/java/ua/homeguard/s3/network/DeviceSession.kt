@@ -25,6 +25,7 @@ class DeviceSession(
     private var job: Job? = null
     private var authorizationJob: Job? = null
     private var reconnectJob: Job? = null
+    private var ticketRefreshJob: Job? = null
     @Volatile private var activeTarget: SessionTarget? = null
 
     fun start() {
@@ -32,23 +33,13 @@ class DeviceSession(
         job = scope.launch {
             combine(endpointProvider, settings.settings) { endpoint, appSettings ->
                 when (endpoint.path) {
-                    ControlPath.CLOUD -> SessionTarget(endpoint, appSettings.apiToken, "")
-                    ControlPath.OFFLINE -> SessionTarget(endpoint, "", "")
-                    else -> {
-                        // Prefer the login-scoped telemetry token while it is valid.
-                        // A provisioned local API token is the reboot-safe fallback.
-                        val sessionToken = appSettings.telemetryToken
-                        val localApiToken = appSettings.apiToken
-                        SessionTarget(
-                            endpoint = endpoint,
-                            token = sessionToken.ifBlank { localApiToken },
-                            fallbackToken = if (
-                                sessionToken.isNotBlank() &&
-                                localApiToken.isNotBlank() &&
-                                localApiToken != sessionToken
-                            ) localApiToken else "",
-                        )
-                    }
+                    ControlPath.CLOUD -> SessionTarget(endpoint, appSettings.apiToken, false)
+                    ControlPath.OFFLINE -> SessionTarget(endpoint, "", false)
+                    else -> SessionTarget(
+                        endpoint = endpoint,
+                        token = appSettings.telemetryToken.ifBlank { appSettings.apiToken },
+                        oneShotTicket = appSettings.telemetryToken.isNotBlank(),
+                    )
                 }
             }.distinctUntilChanged().collect { target: SessionTarget ->
                 activeTarget = target
@@ -62,22 +53,12 @@ class DeviceSession(
             telemetry.connection().collect { state ->
                 val deviceId = settings.settings.value.deviceId
                 when (state) {
-                    TelemetryConnectionState.UNAUTHORIZED -> {
-                        reconnectJob?.cancel()
-                        reconnectJob = null
-                        val target = activeTarget
-                        if (target != null && target.fallbackToken.isNotBlank()) {
-                            // A login-scoped token becomes invalid after an ESP reboot.
-                            // Drop it once and let the flow reconnect with the durable
-                            // provisioned local API token instead of getting stuck at 401.
-                            settings.update(settings.settings.value.copy(telemetryToken = ""))
-                        } else {
-                            RegisteredDeviceStore.markActiveAuthorization(deviceId, false)
-                        }
-                    }
+                    TelemetryConnectionState.UNAUTHORIZED -> handleUnauthorized(deviceId)
                     TelemetryConnectionState.CONNECTED -> {
                         reconnectJob?.cancel()
                         reconnectJob = null
+                        ticketRefreshJob?.cancel()
+                        ticketRefreshJob = null
                         RegisteredDeviceStore.markActiveAuthorization(deviceId, true)
                     }
                     TelemetryConnectionState.OFFLINE -> scheduleReconnect()
@@ -90,9 +71,11 @@ class DeviceSession(
     fun stop() {
         activeTarget = null
         reconnectJob?.cancel()
+        ticketRefreshJob?.cancel()
         job?.cancel()
         authorizationJob?.cancel()
         reconnectJob = null
+        ticketRefreshJob = null
         job = null
         authorizationJob = null
         telemetry.disconnect()
@@ -108,23 +91,71 @@ class DeviceSession(
         telemetry.connect(endpoint.websocketUrl, target.token, pin)
     }
 
+    private fun handleUnauthorized(deviceId: String) {
+        reconnectJob?.cancel()
+        reconnectJob = null
+        val target = activeTarget ?: return
+        if (!isLocal(target.endpoint) || !target.oneShotTicket) {
+            RegisteredDeviceStore.markActiveAuthorization(deviceId, false)
+            return
+        }
+        refreshLocalTicket(deviceId, allowDurableFallback = true)
+    }
+
     private fun scheduleReconnect() {
         if (!settings.settings.value.autoReconnect) return
-        if (reconnectJob?.isActive == true) return
+        if (reconnectJob?.isActive == true || ticketRefreshJob?.isActive == true) return
         val target = activeTarget ?: return
         if (target.endpoint.path == ControlPath.OFFLINE || target.endpoint.websocketUrl.isBlank() || target.token.isBlank()) return
 
         reconnectJob = scope.launch {
-            delay(RECONNECT_DELAY_MS)
-            if (activeTarget == target && telemetry.connection().value == TelemetryConnectionState.OFFLINE) {
+            while (activeTarget == target && telemetry.connection().value == TelemetryConnectionState.OFFLINE) {
+                delay(RECONNECT_DELAY_MS)
+                if (activeTarget != target || telemetry.connection().value != TelemetryConnectionState.OFFLINE) return@launch
+
+                if (isLocal(target.endpoint) && target.oneShotTicket) {
+                    val refreshed = runCatching { LocalTelemetryTicketBroker.refresh() }
+                    if (refreshed.isSuccess) return@launch
+                    val message = refreshed.exceptionOrNull()?.message.orEmpty()
+                    if (message.contains("401") || message.contains("403") || message.contains("authenticated local HTTP session unavailable")) {
+                        refreshLocalTicket(settings.settings.value.deviceId, allowDurableFallback = true)
+                        return@launch
+                    }
+                    // Network is probably still absent. Keep waiting and retry
+                    // the authenticated HTTP ticket request instead of reusing
+                    // an already consumed WebSocket ticket.
+                    continue
+                }
+
                 connectTarget(target)
+                return@launch
             }
         }
     }
 
+    private fun refreshLocalTicket(deviceId: String, allowDurableFallback: Boolean) {
+        if (ticketRefreshJob?.isActive == true) return
+        ticketRefreshJob = scope.launch {
+            val result = runCatching { LocalTelemetryTicketBroker.refresh() }
+            if (result.isSuccess) return@launch
+
+            val current = settings.settings.value
+            if (allowDurableFallback && current.telemetryToken.isNotBlank() && current.apiToken.isNotBlank()) {
+                // A provisioned local API token is a durable WebSocket fallback
+                // when the login-scoped HTTP session disappeared after reboot.
+                settings.update(current.copy(telemetryToken = ""))
+            } else {
+                RegisteredDeviceStore.markActiveAuthorization(deviceId, false)
+            }
+        }
+    }
+
+    private fun isLocal(endpoint: DeviceEndpoint): Boolean =
+        endpoint.path != ControlPath.CLOUD && endpoint.path != ControlPath.OFFLINE
+
     private data class SessionTarget(
         val endpoint: DeviceEndpoint,
         val token: String,
-        val fallbackToken: String,
+        val oneShotTicket: Boolean,
     )
 }
