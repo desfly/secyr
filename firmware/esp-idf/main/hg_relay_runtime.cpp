@@ -79,25 +79,11 @@ bool RelayRuntime::request_lock_pulse()
             ESP_LOGI(kTag, "Lock relay ON for %u ms", static_cast<unsigned>(kLockPulseMs));
         }
     } else {
-        // Idempotent repeated press: do not extend the original 5 second pulse.
         ESP_LOGI(kTag, "Lock pulse already active; repeat ignored without extending deadline");
     }
 
     xSemaphoreGive(mutex_);
     return accepted;
-}
-
-bool RelayRuntime::light_active() const
-{
-    if (mutex_ == nullptr) return false;
-    auto* mutex = const_cast<SemaphoreHandle_t*>(&mutex_);
-    (void)mutex;
-    return light_active_;
-}
-
-bool RelayRuntime::lock_active() const
-{
-    return lock_active_;
 }
 
 void RelayRuntime::task_entry(void* context)
@@ -121,7 +107,6 @@ void RelayRuntime::run()
                 ESP_LOGI(kTag, "Z1/Z2 alarm: light relay ON for a 60 second cycle");
             } else if (light_active_ && now >= light_deadline_ms_) {
                 if (alarm) {
-                    // Keep the relay energized and start a fresh full minute.
                     light_deadline_ms_ = now + kLightCycleMs;
                     ESP_LOGI(kTag, "Z1/Z2 still in alarm: next 60 second light cycle");
                 } else {
