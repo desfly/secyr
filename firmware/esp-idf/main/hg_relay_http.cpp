@@ -33,10 +33,9 @@ esp_err_t send_state(httpd_req_t* request, RelayRuntime& relays)
     return httpd_resp_send(request, body.c_str(), static_cast<ssize_t>(body.size()));
 }
 
-bool authorize_actor(httpd_req_t* request, RelayHttp* self, const std::string& actor)
+bool authorize_actor(httpd_req_t* request, homeguard::AccessControl* access, const std::string& actor)
 {
-    return self != nullptr && self->access_control_ != nullptr &&
-        request_auth::authenticated_actor(request, *self->access_control_, actor);
+    return access != nullptr && request_auth::authenticated_actor(request, *access, actor);
 }
 
 }  // namespace
@@ -86,7 +85,7 @@ esp_err_t RelayHttp::light_post(httpd_req_t* request)
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_command\"}", -1);
     }
 
-    if (!authorize_actor(request, self, actor)) {
+    if (!authorize_actor(request, self->access_control_, actor)) {
         http_util::scrub(body);
         return request_auth::send_login_required(request);
     }
@@ -121,7 +120,7 @@ esp_err_t RelayHttp::lock_post(httpd_req_t* request)
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"missing_actor\"}", -1);
     }
 
-    if (!authorize_actor(request, self, actor)) {
+    if (!authorize_actor(request, self->access_control_, actor)) {
         http_util::scrub(body);
         return request_auth::send_login_required(request);
     }
