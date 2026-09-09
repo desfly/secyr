@@ -163,6 +163,7 @@ internal object JsonParsers {
         1 -> "open"
         2 -> "tamper"
         3 -> "disabled"
+        4 -> "short"
         else -> "unknown"
     }
 
