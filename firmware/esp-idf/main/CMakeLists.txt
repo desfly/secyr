@@ -32,6 +32,8 @@ idf_component_register(
         "hg_hardware_bootstrap.cpp"
         "hg_zone_monitor.cpp"
         "hg_zone_http.cpp"
+        "hg_relay_runtime.cpp"
+        "hg_relay_http.cpp"
         "hg_telemetry_runtime.cpp"
         "hg_telemetry_session_http.cpp"
         "hg_infrastructure_http.cpp"
