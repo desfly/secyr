@@ -2,6 +2,7 @@
 
 const nativeFetch = window.fetch.bind(window);
 let apiQueueTail = Promise.resolve();
+let liveRelayState = null;
 
 function requestUrl(input) {
   if (typeof input === "string") return input;
@@ -117,6 +118,110 @@ function renderOutputs(data) {
     return `<div class="${item.active ? "" : "muted"}"><b>⇆</b><span>${isValve ? "Клапан" : "Вих."} ${id}</span><small>${item.active ? "Увімк." : "Вимк."}</small>${controls}</div>`;
   }).join("") : "<div><span>Очікування реальних даних контролера…</span></div>";
   target.querySelectorAll("[data-output-id]").forEach(button => { button.onclick = () => sendOutputCommand(button); });
+}
+
+function ensureRelayControls() {
+  const quick = document.querySelector(".quick");
+  if (!quick || document.querySelector("#lightRelayControl")) return;
+  const light = document.createElement("button");
+  light.id = "lightRelayControl";
+  light.type = "button";
+  light.innerHTML = "<b>◌</b><strong>Освітлення</strong><small>Немає даних</small>";
+  light.onclick = () => setManualLight();
+  const lock = document.createElement("button");
+  lock.id = "lockRelayControl";
+  lock.type = "button";
+  lock.innerHTML = "<b>◌</b><strong>Замок</strong><small>Немає даних</small>";
+  lock.onclick = () => pulseLock();
+  quick.append(light, lock);
+  renderRelayState(null);
+}
+
+function renderRelayState(data) {
+  ensureRelayControls();
+  liveRelayState = data && data.ok !== false ? data : null;
+  const light = document.querySelector("#lightRelayControl");
+  const lock = document.querySelector("#lockRelayControl");
+  if (!light || !lock) return;
+  const admin = window.HomeGuardAuth?.role?.() === "admin";
+  const available = Boolean(liveRelayState);
+  light.disabled = !admin || !available;
+  lock.disabled = !admin || !available;
+
+  if (!available) {
+    light.setAttribute("aria-pressed", "false");
+    lock.setAttribute("aria-pressed", "false");
+    light.innerHTML = "<b>◌</b><strong>Освітлення</strong><small>Немає даних</small>";
+    lock.innerHTML = "<b>◌</b><strong>Замок</strong><small>Немає даних</small>";
+    light.style.boxShadow = "";
+    lock.style.boxShadow = "";
+    return;
+  }
+
+  const lightOn = liveRelayState.lightActive === true;
+  const manual = liveRelayState.lightManual === true;
+  const automatic = liveRelayState.lightAutomatic === true;
+  const lightDetail = lightOn
+    ? (automatic && !manual ? "АВТО ON · Z1/Z2" : manual ? (automatic ? "РУЧНЕ + АВТО ON" : "РУЧНЕ ON") : "ON")
+    : "OFF";
+  light.setAttribute("aria-pressed", String(lightOn));
+  light.innerHTML = `<b>${lightOn ? "●" : "○"}</b><strong>Освітлення</strong><small>${lightDetail}</small>`;
+  light.style.boxShadow = lightOn ? "inset 0 0 0 2px #22c55e" : "";
+
+  const lockOn = liveRelayState.lockActive === true;
+  const seconds = Math.max(0, Math.ceil(Number(liveRelayState.lockRemainingMs || 0) / 1000));
+  lock.setAttribute("aria-pressed", String(lockOn));
+  lock.innerHTML = `<b>${lockOn ? "●" : "○"}</b><strong>Замок</strong><small>${lockOn ? `ON · ${seconds} с` : "OFF"}</small>`;
+  lock.style.boxShadow = lockOn ? "inset 0 0 0 2px #f59e0b" : "";
+}
+
+async function refreshRelayState() {
+  if (!authenticatedUi()) {
+    renderRelayState(null);
+    return;
+  }
+  try {
+    renderRelayState(await api("/api/v1/outputs/relay-state"));
+  } catch (_) {
+    renderRelayState(null);
+  }
+}
+
+async function setManualLight() {
+  if (!liveRelayState || window.HomeGuardAuth?.role?.() !== "admin") return;
+  const actor = window.HomeGuardAuth?.actor?.() || "";
+  const requested = liveRelayState.lightManual !== true;
+  const button = document.querySelector("#lightRelayControl");
+  if (button) button.disabled = true;
+  try {
+    const state = await api("/api/v1/outputs/light", {
+      method: "POST",
+      body: JSON.stringify({actor, active: requested})
+    });
+    renderRelayState(state);
+    if (state.lightAutomatic && !state.lightManual) showToast("Ручне світло OFF; автоматичний цикл Z1/Z2 ще активний");
+    else showToast(state.lightActive ? "Освітлення ON" : "Освітлення OFF");
+  } catch (error) {
+    showToast(`Освітлення: ${error.message}`);
+    await refreshRelayState();
+  }
+}
+
+async function pulseLock() {
+  if (!liveRelayState || window.HomeGuardAuth?.role?.() !== "admin") return;
+  const actor = window.HomeGuardAuth?.actor?.() || "";
+  const button = document.querySelector("#lockRelayControl");
+  if (button) button.disabled = true;
+  try {
+    renderRelayState(await api("/api/v1/outputs/lock/pulse", {
+      method: "POST",
+      body: JSON.stringify({actor})
+    }));
+    showToast("Замок ON · 5 секунд");
+  } catch (error) {
+    showToast(`Замок: ${error.message}`);
+    await refreshRelayState();
+  }
 }
 
 function renderNetwork(status) {
@@ -540,12 +645,14 @@ const scheduler = {
   busy: false,
   nextCore: 0,
   nextCloud: 0,
-  nextLan: 0
+  nextLan: 0,
+  nextRelay: 0
 };
 
 const CORE_POLL_MS = 5000;
 const CLOUD_POLL_MS = 10000;
 const LAN_POLL_MS = 15000;
+const RELAY_POLL_MS = 1000;
 
 async function schedulerStep() {
   tickClock();
@@ -556,9 +663,15 @@ async function schedulerStep() {
     scheduler.nextCore = 0;
     scheduler.nextCloud = 0;
     scheduler.nextLan = 0;
+    scheduler.nextRelay = 0;
+    renderRelayState(null);
   } else if (!scheduler.busy) {
     scheduler.busy = true;
     try {
+      if (scheduler.nextRelay === 0 || now >= scheduler.nextRelay) {
+        scheduler.nextRelay = Date.now() + RELAY_POLL_MS;
+        await refreshRelayState();
+      }
       if (scheduler.nextCore === 0 || now >= scheduler.nextCore) {
         scheduler.nextCore = Date.now() + CORE_POLL_MS;
         await refresh();
@@ -582,11 +695,13 @@ async function schedulerStep() {
 function bootUi() {
   ensureNetworkAuthPanel();
   ensureAccessPanel();
+  ensureRelayControls();
   document.querySelector("#wifiScan").onclick = scanWifi;
   document.querySelector("#wifiConnect").onclick = connectWifi;
   document.querySelector("#refresh").onclick = async () => {
     await refresh();
     if (authenticatedUi()) {
+      await refreshRelayState();
       await refreshCloudStatus();
       await refreshLan(false);
     }
@@ -607,7 +722,8 @@ window.HomeGuardUiRuntime = {
   refresh,
   refreshNetwork,
   refreshCloudStatus,
-  refreshLan
+  refreshLan,
+  refreshRelayState
 };
 
 bootUi();

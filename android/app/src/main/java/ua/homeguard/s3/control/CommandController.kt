@@ -9,6 +9,8 @@ import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceCommand
 import ua.homeguard.s3.model.DeviceEndpoint
+import ua.homeguard.s3.model.RelayControlState
+import ua.homeguard.s3.model.ZoneStatus
 import ua.homeguard.s3.network.HttpDeviceApi
 import ua.homeguard.s3.storage.SettingsStore
 import java.util.concurrent.atomic.AtomicLong
@@ -19,50 +21,80 @@ class CommandController(
 ) {
     private val requestIds = AtomicLong(System.currentTimeMillis())
     @Volatile private var localHttpSessionToken: String = ""
+    @Volatile private var localRuntimeApi: HttpDeviceApi? = null
 
     suspend fun accessState(): AccessLifecycleState {
         val target = localTarget()
         localHttpSessionToken = ""
+        localRuntimeApi = null
         return createApi(target).accessState()
     }
 
     suspend fun bootstrapAdmin(id: String, name: String, pin: String) {
         val target = localTarget()
         localHttpSessionToken = ""
+        localRuntimeApi = null
         createApi(target).bootstrapAdmin(id, name, pin)
     }
 
     suspend fun setupWifiScan(): JSONObject {
         val target = localTarget()
         localHttpSessionToken = ""
+        localRuntimeApi = null
         return createApi(target).setupWifiScan()
     }
 
     suspend fun setupConfigureWifi(ssid: String, password: String): JSONObject {
         val target = localTarget()
         localHttpSessionToken = ""
+        localRuntimeApi = null
         return createApi(target).setupConfigureWifi(ssid, password)
     }
 
     suspend fun login(actor: String, credential: String): AccessSession {
         val target = endpoint.value
         require(target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank()) { "controller offline" }
-
-        // PIN exists only during this login call. Never persist or reuse it for
-        // commands. The returned Bearer token becomes the local auth boundary.
         localHttpSessionToken = ""
+        localRuntimeApi = null
         val api = createApi(target)
         val session = api.login(actor, credential)
         if (target.path != ControlPath.CLOUD) {
             localHttpSessionToken = session.sessionToken
+            localRuntimeApi = api
             val telemetryToken = api.telemetrySession(session.actor)
             settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
         }
         return session
     }
 
+    suspend fun liveZones(): List<ZoneStatus> {
+        localTarget()
+        require(localHttpSessionToken.isNotBlank()) { "authorization required" }
+        val api = localRuntimeApi ?: error("local session unavailable")
+        return api.liveZones()
+    }
+
+    suspend fun relayState(): RelayControlState {
+        localTarget()
+        require(localHttpSessionToken.isNotBlank()) { "authorization required" }
+        return (localRuntimeApi ?: error("local session unavailable")).relayState()
+    }
+
+    suspend fun setLight(active: Boolean, actor: String): RelayControlState {
+        localTarget()
+        require(localHttpSessionToken.isNotBlank()) { "authorization required" }
+        return (localRuntimeApi ?: error("local session unavailable")).setLight(active, actor)
+    }
+
+    suspend fun pulseLock(actor: String): RelayControlState {
+        localTarget()
+        require(localHttpSessionToken.isNotBlank()) { "authorization required" }
+        return (localRuntimeApi ?: error("local session unavailable")).pulseLock(actor)
+    }
+
     fun logout() {
         localHttpSessionToken = ""
+        localRuntimeApi = null
     }
 
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
@@ -74,7 +106,7 @@ class CommandController(
             return CommandReply(accepted = false, code = "authorization_required")
         }
 
-        val api = createApi(target)
+        val api = if (target.path != ControlPath.CLOUD) localRuntimeApi ?: createApi(target) else createApi(target)
         val challenge = if (target.path == ControlPath.CLOUD && requiresChallenge(type)) api.challenge(type) else null
         val command = DeviceCommand(
             requestId = requestIds.incrementAndGet(),
@@ -82,8 +114,6 @@ class CommandController(
             type = type,
             challenge = challenge,
             actor = actor.trim(),
-            // LEGACY cloud-only compatibility: local runtime never needs or
-            // serializes this credential after login.
             credential = if (target.path == ControlPath.CLOUD) credential else "",
         )
         return api.command(command)

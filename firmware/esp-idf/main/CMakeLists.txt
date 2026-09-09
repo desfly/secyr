@@ -4,7 +4,9 @@
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/web")
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/index.html" "${CMAKE_CURRENT_LIST_DIR}/web/index.html" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.css" "${CMAKE_CURRENT_LIST_DIR}/web/app.css" COPYONLY)
-configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.js" "${CMAKE_CURRENT_LIST_DIR}/web/app.js" COPYONLY)
+file(READ "${CMAKE_CURRENT_LIST_DIR}/../../../web/app.js" HG_WEB_APP_JS)
+file(READ "${CMAKE_CURRENT_LIST_DIR}/../../../web/lock-control.js" HG_WEB_LOCK_JS)
+file(WRITE "${CMAKE_CURRENT_LIST_DIR}/web/app.js" "${HG_WEB_APP_JS}\n${HG_WEB_LOCK_JS}\n")
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/access-session.js" "${CMAKE_CURRENT_LIST_DIR}/web/access-session.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/factory-reset.js" "${CMAKE_CURRENT_LIST_DIR}/web/factory-reset.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/bruce.jpg" "${CMAKE_CURRENT_LIST_DIR}/web/bruce.jpg" COPYONLY)
@@ -30,6 +32,10 @@ idf_component_register(
         "hg_onewire_runtime.cpp"
         "hg_rs485.cpp"
         "hg_hardware_bootstrap.cpp"
+        "hg_zone_monitor.cpp"
+        "hg_zone_http.cpp"
+        "hg_relay_runtime.cpp"
+        "hg_relay_http.cpp"
         "hg_telemetry_runtime.cpp"
         "hg_telemetry_session_http.cpp"
         "hg_infrastructure_http.cpp"
