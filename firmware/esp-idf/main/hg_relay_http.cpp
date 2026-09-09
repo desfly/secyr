@@ -1,0 +1,70 @@
+#include "hg_relay_http.hpp"
+
+#include "hg_http_util.hpp"
+#include "hg_relay_runtime.hpp"
+#include "hg_request_auth.hpp"
+#include "homeguard/access_control.hpp"
+
+#include <string>
+
+namespace homeguard::idf {
+
+esp_err_t RelayHttp::register_handlers(
+    httpd_handle_t server,
+    RelayRuntime* relays,
+    homeguard::AccessControl* access_control)
+{
+    if (server == nullptr || relays == nullptr || access_control == nullptr) return ESP_ERR_INVALID_ARG;
+    relays_ = relays;
+    access_control_ = access_control;
+
+    const httpd_uri_t route{
+        .uri = "/api/v1/outputs/lock/pulse",
+        .method = HTTP_POST,
+        .handler = &RelayHttp::lock_post,
+        .user_ctx = this,
+    };
+    return httpd_register_uri_handler(server, &route);
+}
+
+esp_err_t RelayHttp::lock_post(httpd_req_t* request)
+{
+    auto* self = request == nullptr ? nullptr : static_cast<RelayHttp*>(request->user_ctx);
+    if (self == nullptr || self->relays_ == nullptr || self->access_control_ == nullptr) return ESP_FAIL;
+
+    std::string body;
+    if (!http_util::read_body(request, 256U, body)) {
+        httpd_resp_set_status(request, "400 Bad Request");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_body\"}", -1);
+    }
+
+    std::string actor;
+    if (!http_util::parse_json_string(body, "actor", actor) || actor.empty()) {
+        http_util::scrub(body);
+        httpd_resp_set_status(request, "400 Bad Request");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"missing_actor\"}", -1);
+    }
+
+    if (!request_auth::authenticated_actor(request, *self->access_control_, actor)) {
+        http_util::scrub(body);
+        return request_auth::send_login_required(request);
+    }
+
+    const auto decision = self->access_control_->authorize_session(actor, "output.control");
+    http_util::scrub(body);
+    if (decision != homeguard::AuditDecision::Allowed) {
+        httpd_resp_set_status(request, "403 Forbidden");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"forbidden\"}", -1);
+    }
+
+    if (!self->relays_->request_lock_pulse()) {
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"relay_unavailable\"}", -1);
+    }
+
+    httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    return httpd_resp_send(request, "{\"ok\":true,\"pulseMs\":5000}", -1);
+}
+
+}  // namespace homeguard::idf
