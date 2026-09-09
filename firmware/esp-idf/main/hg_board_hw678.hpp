@@ -29,10 +29,12 @@ inline constexpr gpio_num_t kRs485Rx = GPIO_NUM_18;
 inline constexpr gpio_num_t kServiceButton = GPIO_NUM_21;
 
 // Direct relay outputs. MCP23017 relay control is intentionally disabled.
-inline constexpr gpio_num_t kRelayLight = GPIO_NUM_33;
-inline constexpr gpio_num_t kRelayLock = GPIO_NUM_34;
-inline constexpr gpio_num_t kRelayValve1 = GPIO_NUM_38;
-inline constexpr gpio_num_t kRelayValve2 = GPIO_NUM_47;
+// Numeric casts are deliberate: the host ESP-IDF mock exposes only a subset
+// of gpio_num_t enum names, while the ESP32-S3 target supports these GPIOs.
+inline constexpr gpio_num_t kRelayLight = static_cast<gpio_num_t>(33);
+inline constexpr gpio_num_t kRelayLock = static_cast<gpio_num_t>(34);
+inline constexpr gpio_num_t kRelayValve1 = static_cast<gpio_num_t>(38);
+inline constexpr gpio_num_t kRelayValve2 = static_cast<gpio_num_t>(47);
 
 inline constexpr gpio_num_t kSdCs = GPIO_NUM_39;
 inline constexpr gpio_num_t kSdSck = GPIO_NUM_40;
