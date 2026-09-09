@@ -4,7 +4,10 @@
 #include "hg_zone_monitor.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
+#include <cstdint>
 
 namespace homeguard::idf {
 namespace {
