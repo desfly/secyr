@@ -1,5 +1,6 @@
 #include "hg_output_http.hpp"
 #include "hg_http_util.hpp"
+#include "hg_relay_runtime.hpp"
 #include "hg_request_auth.hpp"
 #include "homeguard/output_command.hpp"
 
@@ -104,7 +105,8 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
     }
 
     const auto* output = model_->output(output_id);
-    const std::string command = output != nullptr && output->type == hg::ModelOutputType::Valve
+    const bool is_valve = output != nullptr && output->type == hg::ModelOutputType::Valve;
+    const std::string command = is_valve
         ? (active ? "valve.open" : "valve.close")
         : "output.control";
     const auto decision = access_control_->authorize_session(actor, command);
@@ -119,13 +121,26 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
     const auto result = hg::apply_output_command(
         *model_, *readiness_, {output_id, active, alarm_active, 0});
 
-    if (result.status == hg::OutputCommandStatus::Applied && !physical_->synchronize(*model_, *readiness_)) {
-        (void)model_->set_output_active(output_id, false, 0);
-        (void)physical_->force_safe();
-        httpd_resp_set_status(request, "503 Service Unavailable");
-        httpd_resp_set_type(request, "application/json");
-        return httpd_resp_send(request,
-            "{\"ok\":false,\"reason\":\"physical_output_failure\",\"active\":false}", -1);
+    if (result.status == hg::OutputCommandStatus::Applied) {
+        bool physical_ok = true;
+        if (is_valve && (output_id == 2U || output_id == 3U)) {
+            // Valve relays are now direct ESP32 GPIO38/GPIO47. Do not send
+            // these commands through the legacy PhysicalOutputRuntime path.
+            auto* relays = RelayRuntime::active_runtime();
+            physical_ok = relays != nullptr && relays->set_valve(
+                static_cast<std::uint8_t>(output_id - 2U), active);
+        } else {
+            physical_ok = physical_->synchronize(*model_, *readiness_);
+        }
+
+        if (!physical_ok) {
+            (void)model_->set_output_active(output_id, false, 0);
+            if (!is_valve) (void)physical_->force_safe();
+            httpd_resp_set_status(request, "503 Service Unavailable");
+            httpd_resp_set_type(request, "application/json");
+            return httpd_resp_send(request,
+                "{\"ok\":false,\"reason\":\"physical_output_failure\",\"active\":false}", -1);
+        }
     }
 
     std::string response = std::string{"{\"ok\":"} +
