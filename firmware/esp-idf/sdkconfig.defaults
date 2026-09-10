@@ -29,6 +29,15 @@ CONFIG_COMPILER_STACK_CHECK_MODE_ALL=y
 CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
+# HomeGuard Bluetooth transport. Peripheral role serves the Android app;
+# central role is reserved for bound BLE key-fob profile adapters.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_SM_SC=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3
+
 # Bench-test safety profile: do not enable HMAC-backed NVS encryption until
 # the production eFuse allocation has been verified on the target module.
 # Provisioning secret writes are blocked in software while NVS encryption is off.
