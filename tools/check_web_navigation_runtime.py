@@ -89,20 +89,41 @@ def find_chrome() -> str:
 
 
 def dump_dom(chrome: str, url: str, budget_ms: int = 3500) -> str:
-    command = [
-        chrome,
-        "--headless",
-        "--no-sandbox",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        f"--virtual-time-budget={budget_ms}",
-        "--dump-dom",
-        url,
-    ]
-    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=25)
-    if result.returncode != 0:
-        raise RuntimeError(f"Chromium failed for {url}: {result.stderr[-1200:]}")
-    return result.stdout
+    """Render one page in an isolated Chrome profile.
+
+    GitHub-hosted Chrome can occasionally hang before producing --dump-dom even
+    when the page itself is healthy. Give that infrastructure-only failure one
+    clean retry with a fresh profile; real browser/script failures still fail
+    immediately and deterministic timeouts fail on the second attempt.
+    """
+    last_timeout: subprocess.TimeoutExpired | None = None
+    for attempt in range(2):
+        with tempfile.TemporaryDirectory(prefix="homeguard-chrome-") as profile:
+            command = [
+                chrome,
+                "--headless",
+                "--no-sandbox",
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                "--disable-background-networking",
+                "--disable-extensions",
+                "--no-first-run",
+                f"--user-data-dir={profile}",
+                f"--virtual-time-budget={budget_ms}",
+                "--dump-dom",
+                url,
+            ]
+            try:
+                result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=25)
+            except subprocess.TimeoutExpired as exc:
+                last_timeout = exc
+                if attempt == 0:
+                    continue
+                raise RuntimeError(f"Chromium timed out twice for {url}") from exc
+            if result.returncode != 0:
+                raise RuntimeError(f"Chromium failed for {url}: {result.stderr[-1200:]}")
+            return result.stdout
+    raise RuntimeError(f"Chromium timed out for {url}: {last_timeout}")
 
 
 def parse_dom(dom: str) -> NavParser:
