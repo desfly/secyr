@@ -29,7 +29,7 @@ std::string dashboard_runtime_json(HardwareBootstrap& hardware)
             bt_mac[0], bt_mac[1], bt_mac[2], bt_mac[3], bt_mac[4], bt_mac[5]);
     }
 
-    const bool ble_ready = ble_transport_ready();
+    const bool ble_available = ble_transport_ready();
     const bool ble_connected = ble_transport_connected();
     const char* lan_state = ethernet.has_ip ? "connected" : (ethernet.link_up ? "link" : "offline");
 
@@ -37,7 +37,8 @@ std::string dashboard_runtime_json(HardwareBootstrap& hardware)
         std::to_string(static_cast<std::uint64_t>(esp_timer_get_time() / 1000LL)) +
         ",\"lan\":{\"state\":\"" + lan_state +
         "\",\"name\":\"Ethernet\",\"ip\":\"" + ethernet.ipv4 +
-        "\"},\"ble\":{\"ready\":" + (ble_ready ? "true" : "false") +
+        "\"},\"ble\":{\"ready\":" + (ble_connected ? "true" : "false") +
+        ",\"available\":" + (ble_available ? "true" : "false") +
         ",\"connected\":" + (ble_connected ? "true" : "false") +
         ",\"name\":\"HomeGuard-S3\",\"address\":\"" + bt_address + "\"}}";
     return out;
