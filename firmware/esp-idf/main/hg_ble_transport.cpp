@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <utility>
 
@@ -46,15 +48,29 @@ int rx_access(std::uint16_t, std::uint16_t, ble_gatt_access_ctxt* ctxt, void*) {
     return g_owner->accept_rx_fragment(value.data(),copied);
 }
 
-const ble_gatt_svc_def kServices[] = {{
-    .type = BLE_GATT_SVC_TYPE_PRIMARY,
-    .uuid = &kServiceUuid.u,
-    .characteristics = (ble_gatt_chr_def[]) {
-        {.uuid=&kRxUuid.u,.access_cb=rx_access,.flags=BLE_GATT_CHR_F_WRITE|BLE_GATT_CHR_F_WRITE_NO_RSP|BLE_GATT_CHR_F_WRITE_ENC},
-        {.uuid=&kTxUuid.u,.access_cb=nullptr,.flags=BLE_GATT_CHR_F_NOTIFY|BLE_GATT_CHR_F_READ_ENC,.val_handle=&g_tx_value_handle},
-        {0}
-    }
-},{0}};
+const ble_gatt_chr_def kCharacteristics[] = {
+    {
+        .uuid = &kRxUuid.u,
+        .access_cb = rx_access,
+        .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP | BLE_GATT_CHR_F_WRITE_ENC,
+    },
+    {
+        .uuid = &kTxUuid.u,
+        .access_cb = nullptr,
+        .flags = BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_READ_ENC,
+        .val_handle = &g_tx_value_handle,
+    },
+    {0}
+};
+
+const ble_gatt_svc_def kServices[] = {
+    {
+        .type = BLE_GATT_SVC_TYPE_PRIMARY,
+        .uuid = &kServiceUuid.u,
+        .characteristics = kCharacteristics,
+    },
+    {0}
+};
 
 int gap_event(ble_gap_event* event, void*) {
     if (!g_owner || !event) return 0;
@@ -81,12 +97,18 @@ int gap_event(ble_gap_event* event, void*) {
 
 void stack_sync() {
     if (!g_owner) return;
-    if (ble_hs_id_infer_auto(0,g_owner->own_address_type_storage()) != 0) { ESP_LOGE(kTag,"Cannot infer BLE identity address"); return; }
+    if (ble_hs_id_infer_auto(0,g_owner->own_address_type_storage()) != 0) {
+        ESP_LOGE(kTag,"Cannot infer BLE identity address");
+        return;
+    }
     const auto error = g_owner->advertise();
     if (error != ESP_OK) ESP_LOGE(kTag,"BLE advertising failed: %s",esp_err_to_name(error));
 }
 
-void host_task(void*) { nimble_port_run(); vTaskDelete(nullptr); }
+void host_task(void*) {
+    nimble_port_run();
+    vTaskDelete(nullptr);
+}
 }
 
 namespace homeguard::idf {
@@ -113,39 +135,92 @@ esp_err_t BleTransport::start(const char* device_name) {
     return ESP_OK;
 }
 
-void BleTransport::set_message_handler(MessageHandler handler, void* context) { message_handler_=handler; message_context_=context; }
-bool BleTransport::connected() const { return connection_handle_ != BLE_HS_CONN_HANDLE_NONE && notify_enabled_; }
-esp_err_t BleTransport::publish_telemetry(const hg::TelemetryFrame& frame) { return notify_message(kTelemetryType,hg::telemetry_json(frame)); }
-std::uint8_t* BleTransport::own_address_type_storage() { return &own_address_type_; }
+void BleTransport::set_message_handler(MessageHandler handler, void* context) {
+    message_handler_=handler;
+    message_context_=context;
+}
+
+bool BleTransport::connected() const {
+    return connection_handle_ != BLE_HS_CONN_HANDLE_NONE && notify_enabled_;
+}
+
+esp_err_t BleTransport::publish_telemetry(const hg::TelemetryFrame& frame) {
+    return notify_message(kTelemetryType,hg::telemetry_json(frame));
+}
+
+std::uint8_t* BleTransport::own_address_type_storage() {
+    return &own_address_type_;
+}
 
 void BleTransport::on_connected(std::uint16_t handle) {
-    connection_handle_=handle; notify_enabled_=false; reset_rx();
+    connection_handle_=handle;
+    notify_enabled_=false;
+    reset_rx();
     ESP_LOGI(kTag,"Android BLE link connected; handle=%u",handle);
 }
-void BleTransport::on_disconnected() { connection_handle_=BLE_HS_CONN_HANDLE_NONE; notify_enabled_=false; reset_rx(); }
-void BleTransport::on_notify_subscription(bool enabled) { notify_enabled_=enabled; ESP_LOGI(kTag,"BLE telemetry notifications %s",enabled?"enabled":"disabled"); }
+
+void BleTransport::on_disconnected() {
+    connection_handle_=BLE_HS_CONN_HANDLE_NONE;
+    notify_enabled_=false;
+    reset_rx();
+}
+
+void BleTransport::on_notify_subscription(bool enabled) {
+    notify_enabled_=enabled;
+    ESP_LOGI(kTag,"BLE telemetry notifications %s",enabled?"enabled":"disabled");
+}
 
 esp_err_t BleTransport::advertise() {
     ble_hs_adv_fields fields{};
     fields.flags=BLE_HS_ADV_F_DISC_GEN|BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.uuids128=const_cast<ble_uuid128_t*>(&kServiceUuid); fields.num_uuids128=1; fields.uuids128_is_complete=1;
+    fields.uuids128=const_cast<ble_uuid128_t*>(&kServiceUuid);
+    fields.num_uuids128=1;
+    fields.uuids128_is_complete=1;
     if (ble_gap_adv_set_fields(&fields) != 0) return ESP_FAIL;
-    ble_gap_adv_params params{}; params.conn_mode=BLE_GAP_CONN_MODE_UND; params.disc_mode=BLE_GAP_DISC_MODE_GEN;
+    ble_gap_adv_params params{};
+    params.conn_mode=BLE_GAP_CONN_MODE_UND;
+    params.disc_mode=BLE_GAP_DISC_MODE_GEN;
     return ble_gap_adv_start(own_address_type_,nullptr,BLE_HS_FOREVER,&params,gap_event,nullptr)==0 ? ESP_OK : ESP_FAIL;
 }
 
-void BleTransport::reset_rx() { rx_type_=0; rx_message_id_=0; rx_expected_count_=0; rx_next_index_=0; rx_payload_.clear(); }
+void BleTransport::reset_rx() {
+    rx_type_=0;
+    rx_message_id_=0;
+    rx_expected_count_=0;
+    rx_next_index_=0;
+    rx_payload_.clear();
+}
+
 int BleTransport::accept_rx_fragment(const std::uint8_t* data,std::size_t size) {
     if (!data || size<kHeaderSize || data[0]!=kProtocolVersion) return BLE_ATT_ERR_UNLIKELY;
-    const auto type=data[1]; const auto id=static_cast<std::uint16_t>(data[2])|(static_cast<std::uint16_t>(data[3])<<8U);
-    const auto index=data[4], count=data[5];
+    const auto type=data[1];
+    const auto id=static_cast<std::uint16_t>(data[2])|(static_cast<std::uint16_t>(data[3])<<8U);
+    const auto index=data[4];
+    const auto count=data[5];
     if (!count || index>=count) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
-    if (index==0) { reset_rx(); rx_type_=type; rx_message_id_=id; rx_expected_count_=count; }
-    if (type!=rx_type_ || id!=rx_message_id_ || count!=rx_expected_count_ || index!=rx_next_index_) { reset_rx(); return BLE_ATT_ERR_UNLIKELY; }
+    if (index==0) {
+        reset_rx();
+        rx_type_=type;
+        rx_message_id_=id;
+        rx_expected_count_=count;
+    }
+    if (type!=rx_type_ || id!=rx_message_id_ || count!=rx_expected_count_ || index!=rx_next_index_) {
+        reset_rx();
+        return BLE_ATT_ERR_UNLIKELY;
+    }
     const auto n=size-kHeaderSize;
-    if (rx_payload_.size()+n>kMaxMessageBytes) { reset_rx(); return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN; }
-    rx_payload_.append(reinterpret_cast<const char*>(data+kHeaderSize),n); ++rx_next_index_;
-    if (rx_next_index_==rx_expected_count_) { const auto t=rx_type_; auto completed=std::move(rx_payload_); reset_rx(); if (message_handler_) message_handler_(t,completed,message_context_); }
+    if (rx_payload_.size()+n>kMaxMessageBytes) {
+        reset_rx();
+        return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    }
+    rx_payload_.append(reinterpret_cast<const char*>(data+kHeaderSize),n);
+    ++rx_next_index_;
+    if (rx_next_index_==rx_expected_count_) {
+        const auto t=rx_type_;
+        auto completed=std::move(rx_payload_);
+        reset_rx();
+        if (message_handler_) message_handler_(t,completed,message_context_);
+    }
     return 0;
 }
 
@@ -163,9 +238,15 @@ esp_err_t BleTransport::notify_message(std::uint8_t type,const std::string& payl
         const auto start=index*payload_limit;
         const auto n=start<payload.size()?std::min(payload_limit,payload.size()-start):0;
         std::array<std::uint8_t,kMaxGattValue> frame{};
-        frame[0]=kProtocolVersion; frame[1]=type; frame[2]=id&0xffU; frame[3]=(id>>8U)&0xffU; frame[4]=index; frame[5]=fragments;
+        frame[0]=kProtocolVersion;
+        frame[1]=type;
+        frame[2]=static_cast<std::uint8_t>(id&0xffU);
+        frame[3]=static_cast<std::uint8_t>((id>>8U)&0xffU);
+        frame[4]=static_cast<std::uint8_t>(index);
+        frame[5]=static_cast<std::uint8_t>(fragments);
         if (n) std::memcpy(frame.data()+kHeaderSize,payload.data()+start,n);
-        auto* om=ble_hs_mbuf_from_flat(frame.data(),kHeaderSize+n); if (!om) return ESP_ERR_NO_MEM;
+        auto* om=ble_hs_mbuf_from_flat(frame.data(),kHeaderSize+n);
+        if (!om) return ESP_ERR_NO_MEM;
         if (ble_gatts_notify_custom(connection_handle_,g_tx_value_handle,om)!=0) return ESP_FAIL;
     }
     return ESP_OK;
