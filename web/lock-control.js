@@ -206,3 +206,32 @@
     path: "direct-relay-api",
   };
 })();
+
+/* Zone cards are generated in numeric DOM order Z1..Z8. Force the two-column
+ * dashboard to fill by column so the approved visual order is:
+ * left Z1-Z4, right Z5-Z8. This changes presentation only. */
+(() => {
+  const style = document.createElement("style");
+  style.id = "hg-zone-column-order";
+  style.textContent = `
+    #zones.zones {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      grid-template-rows: repeat(4, 56px) !important;
+      grid-auto-flow: column !important;
+    }
+    #zones .hg-zone-live {
+      border-radius: 0 !important;
+      border-bottom: 0 !important;
+    }
+    #zones .hg-zone-live:nth-child(1),
+    #zones .hg-zone-live:nth-child(5) {
+      border-radius: 10px 10px 0 0 !important;
+    }
+    #zones .hg-zone-live:nth-child(4),
+    #zones .hg-zone-live:nth-child(8) {
+      border-bottom: 1px solid #e0e5ec !important;
+      border-radius: 0 0 10px 10px !important;
+    }
+  `;
+  document.head.appendChild(style);
+})();
