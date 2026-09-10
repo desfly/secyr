@@ -5,9 +5,8 @@ file(MAKE_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/web")
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/index.html" "${CMAKE_CURRENT_LIST_DIR}/web/index.html" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.css" "${CMAKE_CURRENT_LIST_DIR}/web/app.css" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/app.js" "${CMAKE_CURRENT_LIST_DIR}/web/app.js" COPYONLY)
-file(READ "${CMAKE_CURRENT_LIST_DIR}/../../../web/remotes-admin.js" HG_REMOTES_ADMIN_JS)
-file(APPEND "${CMAKE_CURRENT_LIST_DIR}/web/app.js" "\n${HG_REMOTES_ADMIN_JS}\n")
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/access-session.js" "${CMAKE_CURRENT_LIST_DIR}/web/access-session.js" COPYONLY)
+configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/remotes-admin.js" "${CMAKE_CURRENT_LIST_DIR}/web/remotes-admin.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/factory-reset.js" "${CMAKE_CURRENT_LIST_DIR}/web/factory-reset.js" COPYONLY)
 configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/bruce.jpg" "${CMAKE_CURRENT_LIST_DIR}/web/bruce.jpg" COPYONLY)
 
@@ -93,6 +92,7 @@ idf_component_register(
         "web/app.css"
         "web/app.js"
         "web/access-session.js"
+        "web/remotes-admin.js"
         "web/factory-reset.js"
     EMBED_FILES
         "web/bruce.jpg"
