@@ -19,6 +19,8 @@ extern const uint8_t _binary_access_session_js_start[] = {0};
 extern const uint8_t _binary_access_session_js_end[] = {0};
 extern const uint8_t _binary_factory_reset_js_start[] = {0};
 extern const uint8_t _binary_factory_reset_js_end[] = {0};
+extern const uint8_t _binary_remotes_admin_js_start[] = {0};
+extern const uint8_t _binary_remotes_admin_js_end[] = {0};
 extern const uint8_t _binary_bruce_jpg_start[] = {0};
 extern const uint8_t _binary_bruce_jpg_end[] = {0};
 
