@@ -1,6 +1,5 @@
 #include "hg_telemetry_runtime.hpp"
 #include "hg_hardware_bootstrap.hpp"
-#include "hg_ble_transport.hpp"
 #include "websocket_telemetry.hpp"
 #include "homeguard/system_model.hpp"
 #include "homeguard/hardware_calibration.hpp"
@@ -67,9 +66,12 @@ std::uint64_t rtc_epoch(Ds3231& rtc,bool& valid) {
 }
 }
 
-esp_err_t TelemetryRuntime::start(HardwareBootstrap* hardware,WebsocketTelemetry* websocket,BleTransport* ble,const hg::SystemModel* system_model) {
-    if (!hardware || !websocket || !ble || !system_model) return ESP_ERR_INVALID_ARG;
-    hardware_=hardware; websocket_=websocket; ble_=ble; system_model_=system_model;
+esp_err_t TelemetryRuntime::start(HardwareBootstrap* hardware,WebsocketTelemetry* websocket,const hg::SystemModel* system_model) {
+    if (!hardware || !websocket || !system_model) return ESP_ERR_INVALID_ARG;
+    hardware_=hardware; websocket_=websocket; system_model_=system_model;
+    const auto ble_error=ble_.start("HomeGuard-S3");
+    if (ble_error!=ESP_OK) ESP_LOGE(kTag,"BLE transport failed to start: %s",esp_err_to_name(ble_error));
+    else ESP_LOGI(kTag,"BLE transport ready: HomeGuard-S3");
     const auto result=xTaskCreate(&TelemetryRuntime::task_entry,"hg_telemetry",7168,this,6,nullptr);
     return result==pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }
@@ -97,7 +99,6 @@ void TelemetryRuntime::run() {
         const auto transport=ethernet_status.link_up&&ethernet_status.has_ip ? hg::Transport::Ethernet : (wifi_connected?hg::Transport::WifiSta:hg::Transport::EmergencyAp);
         health_.set(hg::Component::Wifi,wifi_connected?hg::HealthState::Ok:hg::HealthState::Degraded,now_ms);
 
-        // Canonical mapping: ADS1115 #1 A0..A3 -> zones 1..4; #2 A0..A3 -> zones 5..8.
         std::array<hg::ZoneState,8> zones{}; zones.fill(hg::ZoneState::Disabled);
         sample_zone_adc(hardware_->zone_adc(),0,zones); sample_zone_adc(hardware_->telemetry_adc(),4,zones);
 
@@ -124,12 +125,10 @@ void TelemetryRuntime::run() {
         const bool battery_valid=battery_monitor.ready() && battery_monitor.read(&battery)==ESP_OK;
 
         const auto frame=builder_.build(now_ms,epoch,system_mode(*system_model_),transport,zones,pressures,health_,temperatures,temperature_valid,temperature_count,battery.bus_voltage_v,battery.current_a,battery.power_w,battery_valid,pressure_values,pressure_valid);
-
-        // One canonical frame feeds both live transports. BLE never re-samples or reinterprets zones.
         websocket_->publish(frame);
-        if (ble_->connected()) {
-            const auto ble_error=ble_->publish_telemetry(frame);
-            if (ble_error!=ESP_OK) ESP_LOGW(kTag,"BLE telemetry publish failed: %s",esp_err_to_name(ble_error));
+        if (ble_.connected()) {
+            const auto error=ble_.publish_telemetry(frame);
+            if (error!=ESP_OK) ESP_LOGW(kTag,"BLE telemetry publish failed: %s",esp_err_to_name(error));
         }
 
         if ((++cycles%60U)==0U) hardware_->storage().refresh_space();
@@ -137,7 +136,7 @@ void TelemetryRuntime::run() {
             static_cast<unsigned long long>(frame.sequence),static_cast<int>(hg::to_string(frame.transport).size()),hg::to_string(frame.transport).data(),
             static_cast<unsigned>(frame.zones[0]),static_cast<unsigned>(frame.zones[1]),static_cast<unsigned>(frame.zones[2]),static_cast<unsigned>(frame.zones[3]),
             static_cast<unsigned>(frame.zones[4]),static_cast<unsigned>(frame.zones[5]),static_cast<unsigned>(frame.zones[6]),static_cast<unsigned>(frame.zones[7]),
-            static_cast<unsigned>(frame.temperature_count),frame.battery_valid?"ok":"fault",ble_->connected()?"connected":"idle");
+            static_cast<unsigned>(frame.temperature_count),frame.battery_valid?"ok":"fault",ble_.connected()?"connected":"idle");
         vTaskDelay(kTelemetryPeriod);
     }
 }
