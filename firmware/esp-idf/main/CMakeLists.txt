@@ -14,6 +14,7 @@ configure_file("${CMAKE_CURRENT_LIST_DIR}/../../../web/bruce.jpg" "${CMAKE_CURRE
 idf_component_register(
     SRCS
         "app_main.cpp"
+        "hg_ble_transport.cpp"
         "hg_web_http.cpp"
         "hg_network_http.cpp"
         "hg_lan_http.cpp"
@@ -73,6 +74,7 @@ idf_component_register(
         "../../include"
     REQUIRES
         app_update
+        bt
         device_discovery
         driver
         esp_eth
