@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 
+#include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -16,9 +17,10 @@ constexpr std::uint8_t kConfigRegister = 0x01;
 constexpr std::uint16_t kStart = 0x8000;
 constexpr std::uint16_t kSingleShot = 0x0100;
 constexpr std::uint16_t kPga4096 = 0x0200;
-constexpr std::uint16_t kDataRate128 = 0x0080;
+constexpr std::uint16_t kDataRate860 = 0x00E0;
 constexpr std::uint16_t kComparatorDisabled = 0x0003;
 constexpr TickType_t kAccessTimeout = pdMS_TO_TICKS(250);
+constexpr std::uint32_t kConversionWaitUs = 1500;
 
 }  // namespace
 
@@ -43,9 +45,6 @@ esp_err_t Ads1115::initialize(
         return error;
     }
 
-    // Adding a device handle does not prove that hardware exists. Bind the
-    // candidate temporarily and perform a real register transaction so READY
-    // means the ADS1115 actually acknowledged on the physical I2C bus.
     device_ = candidate;
     std::uint16_t config = 0;
     error = read_register(kConfigRegister, &config);
@@ -56,9 +55,6 @@ esp_err_t Ads1115::initialize(
         return error;
     }
 
-    // A conversion is a multi-step transaction: select MUX, wait, then read.
-    // Protect the whole sequence because telemetry and diagnostic HTTP may read
-    // the same ADC concurrently.
     mutex_ = xSemaphoreCreateMutex();
     if (mutex_ == nullptr) {
         (void)i2c_master_bus_rm_device(candidate);
@@ -134,11 +130,11 @@ esp_err_t Ads1115::read_single_ended_mv(
         static_cast<std::uint16_t>(0x4000 + (channel << 12));
     const std::uint16_t config =
         kStart | mux | kPga4096 | kSingleShot |
-        kDataRate128 | kComparatorDisabled;
+        kDataRate860 | kComparatorDisabled;
 
     auto error = write_register(kConfigRegister, config);
     if (error == ESP_OK) {
-        vTaskDelay(pdMS_TO_TICKS(10));
+        esp_rom_delay_us(kConversionWaitUs);
 
         std::uint16_t raw_unsigned = 0;
         error = read_register(kConversionRegister, &raw_unsigned);
