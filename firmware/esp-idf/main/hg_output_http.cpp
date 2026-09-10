@@ -3,14 +3,35 @@
 #include "hg_request_auth.hpp"
 #include "homeguard/output_command.hpp"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#include <atomic>
 #include <charconv>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <new>
 #include <string>
 
 namespace homeguard::idf {
 namespace {
+
+constexpr std::uint16_t kLightOutputId = 4;
+constexpr std::uint16_t kLockOutputId = 5;
+constexpr std::uint16_t kLockPulseMs = 5000;
+constexpr unsigned kPulseTaskStackBytes = 3072;
+constexpr unsigned kPulseTaskPriority = 4;
+std::atomic<std::uint32_t> g_lock_pulse_generation{0};
+
+struct LockPulseContext {
+    hg::SystemModel* model{};
+    hg::BootReadinessReport* readiness{};
+    hg::PhysicalOutputRuntime* physical{};
+    hg::SystemEventBus* bus{};
+    std::uint32_t generation{};
+};
+
 OutputHttp* self_from(httpd_req_t* request) {
     return static_cast<OutputHttp*>(request->user_ctx);
 }
@@ -38,7 +59,52 @@ bool parse_bool(const std::string& body, const char* key, bool& value) {
     if (body.compare(pos, 5, "false") == 0) { value = false; return true; }
     return false;
 }
+
+void lock_pulse_off_task(void* argument) {
+    auto* context = static_cast<LockPulseContext*>(argument);
+    if (context == nullptr) {
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(kLockPulseMs));
+    if (g_lock_pulse_generation.load() == context->generation &&
+        context->model != nullptr && context->readiness != nullptr && context->physical != nullptr) {
+        (void)context->model->set_output_active(kLockOutputId, false, 0);
+        (void)context->physical->synchronize(*context->model, *context->readiness);
+        if (context->bus != nullptr) {
+            context->bus->publish({hg::SystemEventType::ConfigChanged, kLockOutputId, 0, 0, 5500});
+            (void)context->bus->dispatch_all();
+        }
+    }
+
+    delete context;
+    vTaskDelete(nullptr);
 }
+
+bool schedule_lock_off(
+    hg::SystemModel* model,
+    hg::BootReadinessReport* readiness,
+    hg::PhysicalOutputRuntime* physical,
+    hg::SystemEventBus* bus)
+{
+    const auto generation = g_lock_pulse_generation.fetch_add(1) + 1U;
+    auto* context = new (std::nothrow) LockPulseContext{model, readiness, physical, bus, generation};
+    if (context == nullptr) return false;
+    if (xTaskCreate(
+            &lock_pulse_off_task,
+            "hg_lock_5s",
+            kPulseTaskStackBytes,
+            context,
+            kPulseTaskPriority,
+            nullptr) != pdPASS) {
+        delete context;
+        return false;
+    }
+    return true;
+}
+
+}  // namespace
 
 esp_err_t OutputHttp::register_handlers(
     httpd_handle_t server,
@@ -54,6 +120,19 @@ esp_err_t OutputHttp::register_handlers(
     readiness_ = readiness;
     physical_ = physical;
     bus_ = bus;
+
+    // Cemented logical output roles for the HomeGuard dashboard. Physical GPIO
+    // values are NOT guessed here: output 4 is routed to verified aux1 and
+    // output 5 to verified aux2 by PhysicalOutputRuntime.
+    if (model_->output(kLightOutputId) == nullptr &&
+        !model_->add_output(kLightOutputId, hg::ModelOutputType::Light)) {
+        return ESP_FAIL;
+    }
+    if (model_->output(kLockOutputId) == nullptr &&
+        !model_->add_output(kLockOutputId, hg::ModelOutputType::Relay)) {
+        return ESP_FAIL;
+    }
+
     const httpd_uri_t route{
         .uri="/api/v1/system/output-command",
         .method=HTTP_POST,
@@ -77,6 +156,7 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
     }
 
     std::uint16_t output_id{};
+    std::uint16_t pulse_ms{};
     bool active{};
     bool alarm_active{};
     std::string actor;
@@ -86,6 +166,23 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_command\"}", -1);
     }
     (void)parse_bool(body, "alarmActive", alarm_active);
+    (void)parse_uint(body, "pulseMs", pulse_ms);
+
+    // The lock relay is deliberately fail-safe: it can only be energized by
+    // the canonical five-second pulse command. A permanent ON request is never
+    // accepted from Web/Android/API.
+    if (output_id == kLockOutputId && active && pulse_ms != kLockPulseMs) {
+        http_util::scrub(body);
+        httpd_resp_set_status(request, "400 Bad Request");
+        httpd_resp_set_type(request, "application/json");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"lock_requires_5s_pulse\"}", -1);
+    }
+    if (pulse_ms != 0U && (output_id != kLockOutputId || !active || pulse_ms != kLockPulseMs)) {
+        http_util::scrub(body);
+        httpd_resp_set_status(request, "400 Bad Request");
+        httpd_resp_set_type(request, "application/json");
+        return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"invalid_pulse\"}", -1);
+    }
 
     if (!http_util::parse_json_string(body, "actor", actor) || actor.empty()) {
         http_util::scrub(body);
@@ -128,11 +225,25 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
             "{\"ok\":false,\"reason\":\"physical_output_failure\",\"active\":false}", -1);
     }
 
+    if (result.status == hg::OutputCommandStatus::Applied && output_id == kLockOutputId) {
+        if (!active) {
+            (void)g_lock_pulse_generation.fetch_add(1);
+        } else if (!schedule_lock_off(model_, readiness_, physical_, bus_)) {
+            (void)model_->set_output_active(kLockOutputId, false, 0);
+            (void)physical_->synchronize(*model_, *readiness_);
+            httpd_resp_set_status(request, "503 Service Unavailable");
+            httpd_resp_set_type(request, "application/json");
+            return httpd_resp_send(request,
+                "{\"ok\":false,\"reason\":\"lock_timer_start_failed\",\"active\":false}", -1);
+        }
+    }
+
     std::string response = std::string{"{\"ok\":"} +
         (result.status == hg::OutputCommandStatus::Applied ? "true" : "false") +
         ",\"status\":\"" + hg::to_string(result.status) +
         "\",\"interlock\":\"" + hg::to_string(result.interlock) +
-        "\",\"active\":" + (result.resulting_active ? "true" : "false") + "}";
+        "\",\"active\":" + (result.resulting_active ? "true" : "false") +
+        ",\"pulseMs\":" + std::to_string(pulse_ms) + "}";
 
     if (result.status != hg::OutputCommandStatus::Applied) {
         httpd_resp_set_status(request, "409 Conflict");
