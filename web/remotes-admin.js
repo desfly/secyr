@@ -179,3 +179,208 @@
     if (event.target.closest?.('a[href="#system"]')) setTimeout(refreshWhenRelevant, 0);
   });
 })();
+
+/* Dashboard runtime: keep the approved visual shell, but restore the exact
+   known-good direct relay path and a single fast live-zone reader. */
+(() => {
+  const ZONE_POLL_MS = 100;
+  const RELAY_POLL_MS = 200;
+  let liveRelayState = null;
+  let zoneBusy = false;
+  let relayBusy = false;
+  let lastZoneSignature = "";
+
+  const q = id => document.getElementById(id);
+  const isAuthenticated = () => window.HomeGuardAuth?.authenticated?.() === true;
+  const isAdmin = () => window.HomeGuardAuth?.role?.() === "admin";
+  const actor = () => window.HomeGuardAuth?.actor?.() || "";
+  const esc = value => String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#39;");
+
+  function zoneKind(zone) {
+    if (zone?.valid === false) return "alarm";
+    if (zone?.state === "normal") return "ok";
+    if (zone?.state === "short") return "warning";
+    return "alarm";
+  }
+
+  function zoneLabel(zone) {
+    if (zone?.valid === false) return "Обрив";
+    return ({ normal: "Норма", short: "КЗ", open: "Обрив" })[zone?.state] || "Обрив";
+  }
+
+  function renderLiveZones(zones) {
+    const target = q("zones");
+    if (!target) return;
+    const list = Array.isArray(zones) ? zones.slice(0, 8) : [];
+    const signature = list.map(zone => `${zone.id}:${zone.name}:${zone.valid}:${zone.state}`).join("|");
+    if (signature === lastZoneSignature) return;
+    lastZoneSignature = signature;
+    const count = q("zoneCount");
+    if (count) count.textContent = String(list.length || "—");
+    target.innerHTML = list.map(zone => {
+      const kind = zoneKind(zone);
+      const mv = Number(zone.mv);
+      const title = Number.isFinite(mv) ? `${mv.toFixed(1)} mV` : "немає даних";
+      return `<div class="zone" title="${esc(title)}"><i class="hg-zone-dot ${kind}"></i><b class="hg-zone-id">${Number(zone.id) || "—"}</b><span class="hg-zone-name">${esc(zone.name || `Зона ${zone.id}`)}</span><strong class="hg-zone-state ${kind}">${zoneLabel(zone)}</strong><span class="hg-zone-arrow">›</span></div>`;
+    }).join("");
+  }
+
+  async function refreshLiveZones() {
+    if (zoneBusy || !isAuthenticated() || document.hidden) return;
+    zoneBusy = true;
+    try {
+      const data = await api("/api/v1/zones/live");
+      renderLiveZones(data?.zones);
+    } catch (_) {
+    } finally {
+      zoneBusy = false;
+    }
+  }
+
+  function renderRelayState(state) {
+    liveRelayState = state && state.ok !== false ? state : null;
+    const light = q("hgQuickLight");
+    const lock = q("hgQuickLock");
+    const admin = isAdmin();
+    if (light) light.disabled = !admin || !liveRelayState;
+    if (lock) lock.disabled = !admin || !liveRelayState;
+    if (!liveRelayState) {
+      if (q("hgQuickLightState")) q("hgQuickLightState").textContent = "—";
+      if (q("hgQuickLockState")) q("hgQuickLockState").textContent = "—";
+      return;
+    }
+
+    const lightOn = liveRelayState.lightActive === true;
+    const manual = liveRelayState.lightManual === true;
+    const automatic = liveRelayState.lightAutomatic === true;
+    if (q("hgQuickLightState")) {
+      q("hgQuickLightState").textContent = lightOn
+        ? (automatic && !manual ? "AUTO ON · Z1/Z2" : manual ? (automatic ? "MANUAL + AUTO ON" : "MANUAL ON") : "ON")
+        : "OFF";
+    }
+    if (light) {
+      light.setAttribute("aria-pressed", String(lightOn));
+      const icon = light.querySelector("b");
+      if (icon) icon.textContent = lightOn ? "●" : "○";
+      light.style.boxShadow = lightOn ? "inset 0 0 0 2px #22c55e" : "";
+    }
+
+    const lockOn = liveRelayState.lockActive === true;
+    const seconds = Math.max(0, Math.ceil(Number(liveRelayState.lockRemainingMs || 0) / 1000));
+    if (q("hgQuickLockState")) q("hgQuickLockState").textContent = lockOn ? `ON · ${seconds} с` : "OFF";
+    if (lock) {
+      lock.setAttribute("aria-pressed", String(lockOn));
+      lock.style.boxShadow = lockOn ? "inset 0 0 0 2px #f59e0b" : "";
+    }
+  }
+
+  async function refreshRelayState() {
+    if (relayBusy || !isAuthenticated() || document.hidden) return;
+    relayBusy = true;
+    try {
+      renderRelayState(await api("/api/v1/outputs/relay-state"));
+    } catch (_) {
+      renderRelayState(null);
+    } finally {
+      relayBusy = false;
+    }
+  }
+
+  async function setManualLight(button) {
+    if (!liveRelayState || !isAdmin()) return;
+    button.disabled = true;
+    try {
+      const state = await api("/api/v1/outputs/light", {
+        method: "POST",
+        body: JSON.stringify({ actor: actor(), active: liveRelayState.lightManual !== true })
+      });
+      renderRelayState(state);
+      showToast(state.lightActive ? "Освітлення ON" : "Освітлення OFF");
+    } catch (error) {
+      showToast(`Освітлення: ${error.message}`);
+    } finally {
+      button.disabled = false;
+      void refreshRelayState();
+    }
+  }
+
+  async function pulseLock(button) {
+    if (!isAdmin()) return;
+    button.disabled = true;
+    try {
+      renderRelayState(await api("/api/v1/outputs/lock/pulse", {
+        method: "POST",
+        body: JSON.stringify({ actor: actor() })
+      }));
+      showToast("Замок ON · 5 секунд");
+    } catch (error) {
+      showToast(`Замок: ${error.message}`);
+    } finally {
+      button.disabled = false;
+      void refreshRelayState();
+    }
+  }
+
+  function replaceLegacyQuickButton(id, handler) {
+    const old = q(id);
+    if (!old) return null;
+    const button = old.cloneNode(true);
+    button.removeAttribute("data-output-id");
+    button.removeAttribute("data-output-active");
+    button.dataset.relayDirect = "true";
+    old.replaceWith(button);
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      void handler(button);
+    });
+    return button;
+  }
+
+  function installDirectRelayBindings() {
+    replaceLegacyQuickButton("hgQuickLight", setManualLight);
+    replaceLegacyQuickButton("hgQuickLock", pulseLock);
+    document.documentElement.dataset.homeguardRelayPath = "direct-runtime";
+  }
+
+  function installCompactViewport() {
+    if (q("hgCanonicalCompactViewport")) return;
+    const style = document.createElement("style");
+    style.id = "hgCanonicalCompactViewport";
+    style.textContent = `
+      @media (min-width:1101px){
+        .workspace header{height:72px!important;padding:10px 24px!important}.workspace header h2{font-size:27px!important}.workspace header p{margin-top:1px!important;font-size:13px!important}
+        main{padding:14px 22px 18px!important}.status-grid.hg-transport-strip article{min-height:78px!important;padding:9px 15px!important;gap:11px!important}.hg-transport-icon{width:44px!important;height:44px!important;flex-basis:44px!important;font-size:31px!important}.hg-transport-copy>strong{font-size:16px!important}.hg-transport-copy>small{font-size:12px!important}
+        .two-col.hg-dashboard-grid{gap:10px!important;margin-top:10px!important;grid-template-columns:minmax(0,1.55fr) minmax(330px,.8fr)!important}.hg-dashboard-grid .hg-quick-panel{padding:10px 12px!important}.hg-dashboard-grid .hg-quick-panel h3{margin-bottom:7px!important}.hg-dashboard-grid .quick{gap:7px!important}.hg-dashboard-grid .quick button{height:70px!important;grid-template-columns:48px 1fr!important;padding:7px 12px!important;column-gap:8px!important}.hg-dashboard-grid .quick button b{font-size:31px!important}.hg-dashboard-grid .quick button strong{font-size:15px!important}.hg-dashboard-grid .quick button small{font-size:12px!important}
+        .hg-quick-secondary{gap:7px!important;margin-top:7px!important}.hg-quick-secondary button,.hg-quick-secondary .hg-quick-state{height:58px!important;gap:1px!important}.hg-quick-secondary b{font-size:21px!important}.hg-quick-secondary strong{font-size:14px!important}.hg-quick-secondary small{font-size:11px!important}
+        .hg-dashboard-grid #zones-section,.hg-dashboard-grid #io-section,.hg-dashboard-grid #events,.hg-dashboard-grid #hgDeviceInfo{padding:10px 12px!important}.hg-dashboard-grid .panel h3{font-size:17px!important;margin-bottom:7px!important}
+        #zones.zones{grid-template-rows:repeat(4,38px)!important;gap:3px 10px!important}#zones .zone{height:38px!important;padding:0 8px!important;grid-template-columns:10px 22px minmax(0,1fr) auto 10px!important;gap:6px!important}.hg-zone-state{font-size:12px!important}.hg-zone-arrow{font-size:16px!important}
+        #ioState.io{gap:6px!important}#ioState.io>div{min-height:58px!important;padding:5px!important;gap:1px!important}#ioState.io b{font-size:20px!important}#ioState.io small{font-size:11px!important}
+        .hg-device-row{min-height:25px!important;font-size:12px!important;grid-template-columns:102px minmax(0,1fr) 40px!important}.events>div{min-height:30px!important;padding:4px 0!important;font-size:12px!important}.history{padding-top:6px!important;margin-top:4px!important;font-size:12px!important}
+      }`;
+    document.head.appendChild(style);
+  }
+
+  // The old 5-second SystemModel renderer must never overwrite live ADS1115
+  // zone state. Redirect it to the same single live source used below.
+  if (typeof renderZones === "function") {
+    renderZones = () => { void refreshLiveZones(); };
+  }
+
+  installDirectRelayBindings();
+  installCompactViewport();
+  void refreshLiveZones();
+  void refreshRelayState();
+
+  async function zoneLoop() {
+    await refreshLiveZones();
+    window.setTimeout(zoneLoop, ZONE_POLL_MS);
+  }
+  async function relayLoop() {
+    await refreshRelayState();
+    window.setTimeout(relayLoop, RELAY_POLL_MS);
+  }
+  window.setTimeout(zoneLoop, ZONE_POLL_MS);
+  window.setTimeout(relayLoop, RELAY_POLL_MS);
+  window.addEventListener("focus", () => { void refreshLiveZones(); void refreshRelayState(); });
+})();
