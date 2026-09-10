@@ -2,7 +2,6 @@
 #include "hg_hardware_bootstrap.hpp"
 #include "websocket_telemetry.hpp"
 #include "homeguard/system_model.hpp"
-#include "homeguard/hardware_calibration.hpp"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -41,21 +40,14 @@ hg::SystemMode system_mode(const hg::SystemModel& model) {
     }
 }
 
-hg::ZoneState physical_zone_state(float millivolts) {
-    const homeguard::ZoneCalibration calibration{};
-    if (millivolts<=calibration.short_max_mv) return hg::ZoneState::Short;
-    if (millivolts>=calibration.open_min_mv) return hg::ZoneState::Open;
-    if (millivolts>=calibration.normal_min_mv && millivolts<=calibration.normal_max_mv) return hg::ZoneState::Normal;
-    return millivolts<calibration.normal_min_mv ? hg::ZoneState::Short : hg::ZoneState::Open;
-}
-
-void sample_zone_adc(Ads1115& adc,std::size_t first_zone,std::array<hg::ZoneState,8>& zones) {
-    for (std::size_t channel=0;channel<4;++channel) {
-        const auto zone_index=first_zone+channel; if (zone_index>=zones.size()) break;
-        if (!adc.ready()) { zones[zone_index]=hg::ZoneState::Disabled; continue; }
-        float millivolts=0.0F;
-        const auto error=adc.read_single_ended_mv(static_cast<std::uint8_t>(channel),&millivolts);
-        zones[zone_index]=error==ESP_OK ? physical_zone_state(millivolts) : hg::ZoneState::Disabled;
+hg::ZoneState zone_state(const hg::ZoneRecord& zone) {
+    if (!zone.enabled || zone.bypassed || zone.state == hg::ModelZoneState::Bypassed) return hg::ZoneState::Disabled;
+    switch (zone.state) {
+        case hg::ModelZoneState::Tamper: return hg::ZoneState::Tamper;
+        case hg::ModelZoneState::Fault: return hg::ZoneState::Short;
+        case hg::ModelZoneState::Open:
+        case hg::ModelZoneState::Alarm: return hg::ZoneState::Open;
+        default: return hg::ZoneState::Normal;
     }
 }
 
@@ -99,8 +91,15 @@ void TelemetryRuntime::run() {
         const auto transport=ethernet_status.link_up&&ethernet_status.has_ip ? hg::Transport::Ethernet : (wifi_connected?hg::Transport::WifiSta:hg::Transport::EmergencyAp);
         health_.set(hg::Component::Wifi,wifi_connected?hg::HealthState::Ok:hg::HealthState::Degraded,now_ms);
 
-        std::array<hg::ZoneState,8> zones{}; zones.fill(hg::ZoneState::Disabled);
-        sample_zone_adc(hardware_->zone_adc(),0,zones); sample_zone_adc(hardware_->telemetry_adc(),4,zones);
+        // The ZoneMonitor owns the fast ADS1115 classification loop and writes
+        // its debounced result into SystemModel. Telemetry must consume that
+        // same state so Web, Android, WebSocket and BLE cannot disagree.
+        std::array<hg::ZoneState,8> zones{};
+        zones.fill(hg::ZoneState::Disabled);
+        const auto zone_count=std::min<std::size_t>(zones.size(),system_model_->zone_count());
+        for(std::size_t index=0;index<zone_count;++index){
+            if(const auto* zone=system_model_->zone_at(index);zone!=nullptr) zones[index]=zone_state(*zone);
+        }
 
         std::array<hg::PressureState,2> pressures{}; std::array<float,2> pressure_values{}; std::array<bool,2> pressure_valid{};
         auto& analog_adc=hardware_->telemetry_adc();
@@ -140,4 +139,5 @@ void TelemetryRuntime::run() {
         vTaskDelay(kTelemetryPeriod);
     }
 }
-}
+
+}  // namespace homeguard::idf
