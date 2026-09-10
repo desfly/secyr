@@ -157,7 +157,10 @@ esp_err_t BleRemoteHttp::remove_delete(httpd_req_t* request)
 esp_err_t BleRemoteHttp::handle_list(httpd_req_t* request)
 {
     if (registry_ == nullptr || access_ == nullptr) return ESP_FAIL;
-    if (!request_auth::authenticated(request, *access_)) return request_auth::send_login_required(request);
+    if (!request_auth::authenticated_admin(request, *access_)) {
+        httpd_resp_set_status(request, "403 Forbidden");
+        return send_json(request, "{\"ok\":false,\"reason\":\"admin_required\"}");
+    }
 
     std::string body = "{\"ok\":true,\"count\":" + std::to_string(registry_->count()) +
         ",\"capacity\":" + std::to_string(hg::BleRemoteRegistry::kMaxBindings) + ",\"users\":[";
