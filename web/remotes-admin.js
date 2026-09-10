@@ -13,7 +13,7 @@
   }
 
   function isAdmin() {
-    return window.HomeGuardAuth?.role?.() === "admin" || window.HomeGuardAuth?.capabilities?.()?.accessManage === true;
+    return window.HomeGuardAuth?.role?.() === "admin";
   }
 
   async function request(options = {}) {
@@ -57,7 +57,6 @@
       <div id="bleRemoteList"></div>
       <div id="bleRemoteEditor" hidden style="margin-top:14px;padding-top:14px;border-top:1px solid #e4e7ec">
         <h4 id="bleRemoteEditorTitle">Додати брелок</h4>
-        <input id="bleRemoteOriginal" type="hidden">
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
           <label>Назва<input id="bleRemoteName" maxlength="31" placeholder="Напр. Брелок Віктора" style="display:block;width:100%;margin-top:5px"></label>
           <label>Користувач<select id="bleRemoteOwner" style="display:block;width:100%;margin-top:5px"></select></label>
@@ -87,7 +86,7 @@
     const list = panel.querySelector("#bleRemoteList");
     const state = panel.querySelector("#bleRemoteState");
     const remotes = Array.isArray(cache.remotes) ? cache.remotes : [];
-    state.textContent = remotes.length ? `У системі ${remotes.length} брелк${remotes.length === 1 ? "ок" : "и/ів"}` : "Брелків ще немає";
+    state.textContent = remotes.length ? `У системі брелків: ${remotes.length}` : "Брелків ще немає";
     list.innerHTML = remotes.map((remote, index) => `
       <div style="display:grid;grid-template-columns:minmax(140px,1.2fr) minmax(140px,1fr) minmax(180px,2fr) auto;gap:10px;align-items:center;padding:11px 0;border-top:1px solid #eef0f3">
         <div><strong>${esc(remote.name)}</strong><small style="display:block;font-family:monospace">${esc(remote.identity)}</small></div>
@@ -112,7 +111,6 @@
     const editor = panel.querySelector("#bleRemoteEditor");
     editor.hidden = false;
     panel.querySelector("#bleRemoteEditorTitle").textContent = remote ? "Змінити брелок" : "Додати брелок";
-    panel.querySelector("#bleRemoteOriginal").value = remote?.identity || "";
     panel.querySelector("#bleRemoteIdentity").value = remote?.identity || "";
     panel.querySelector("#bleRemoteIdentity").readOnly = Boolean(remote);
     panel.querySelector("#bleRemoteName").value = remote?.name || "";
@@ -170,8 +168,14 @@
     }
   }
 
+  function refreshWhenRelevant() {
+    if (window.location.hash === "#system" && isAdmin()) void refresh();
+  }
+
   window.HomeGuardRemotes = { refresh };
-  setInterval(refresh, 10000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
-  setTimeout(refresh, 1000);
+  window.addEventListener("hashchange", refreshWhenRelevant);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshWhenRelevant(); });
+  document.addEventListener("click", event => {
+    if (event.target.closest?.('a[href="#system"]')) setTimeout(refreshWhenRelevant, 0);
+  });
 })();
