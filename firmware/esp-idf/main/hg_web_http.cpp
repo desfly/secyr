@@ -12,6 +12,8 @@ extern const uint8_t app_js_start[] asm("_binary_app_js_start");
 extern const uint8_t app_js_end[] asm("_binary_app_js_end");
 extern const uint8_t access_session_js_start[] asm("_binary_access_session_js_start");
 extern const uint8_t access_session_js_end[] asm("_binary_access_session_js_end");
+extern const uint8_t remotes_admin_js_start[] asm("_binary_remotes_admin_js_start");
+extern const uint8_t remotes_admin_js_end[] asm("_binary_remotes_admin_js_end");
 extern const uint8_t factory_reset_js_start[] asm("_binary_factory_reset_js_start");
 extern const uint8_t factory_reset_js_end[] asm("_binary_factory_reset_js_end");
 extern const uint8_t bruce_jpg_start[] asm("_binary_bruce_jpg_start");
@@ -71,6 +73,7 @@ esp_err_t WebHttp::register_handlers(httpd_handle_t server)
         {.uri="/app.css", .method=HTTP_GET, .handler=&WebHttp::css_get, .user_ctx=this},
         {.uri="/app.js", .method=HTTP_GET, .handler=&WebHttp::js_get, .user_ctx=this},
         {.uri="/access-session.js", .method=HTTP_GET, .handler=&WebHttp::access_session_js_get, .user_ctx=this},
+        {.uri="/remotes-admin.js", .method=HTTP_GET, .handler=&WebHttp::remotes_admin_js_get, .user_ctx=this},
         {.uri="/factory-reset.js", .method=HTTP_GET, .handler=&WebHttp::factory_reset_js_get, .user_ctx=this},
         {.uri="/bruce.jpg", .method=HTTP_GET, .handler=&WebHttp::bruce_get, .user_ctx=this},
     };
@@ -225,6 +228,11 @@ esp_err_t WebHttp::access_session_js_get(httpd_req_t* request)
         access_session_js_end,
         reinterpret_cast<const char*>(factory_reset_js_start),
         text_asset_size(factory_reset_js_start, factory_reset_js_end));
+}
+
+esp_err_t WebHttp::remotes_admin_js_get(httpd_req_t* request)
+{
+    return send_asset(request, "application/javascript; charset=utf-8", remotes_admin_js_start, remotes_admin_js_end);
 }
 
 esp_err_t WebHttp::factory_reset_js_get(httpd_req_t* request)
