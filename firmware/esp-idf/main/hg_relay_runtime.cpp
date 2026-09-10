@@ -66,9 +66,10 @@ esp_err_t RelayRuntime::start(ZoneMonitor* zones)
     zones_ = zones;
 
     if (xTaskCreate(&RelayRuntime::task_entry, "hg_relays", 4096, this, 5, nullptr) != pdPASS) {
+        // Outputs have already been forced safe. Keep the allocated mutex here:
+        // this is a terminal startup failure and avoids depending on delete
+        // primitives that are intentionally absent from the host mock layer.
         force_safe_locked();
-        vSemaphoreDelete(mutex_);
-        mutex_ = nullptr;
         zones_ = nullptr;
         return ESP_ERR_NO_MEM;
     }
