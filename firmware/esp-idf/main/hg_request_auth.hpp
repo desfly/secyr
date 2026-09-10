@@ -34,6 +34,12 @@ inline bool authenticated(httpd_req_t* request, homeguard::AccessControl& access
     return authenticate(request, access) == homeguard::AuditDecision::Allowed;
 }
 
+inline bool authenticated_admin(httpd_req_t* request, homeguard::AccessControl& access) {
+    std::string authorization;
+    if (!read_header(request, authorization)) return false;
+    return http_session::authorized_for_role(authorization, access, homeguard::AccessRole::Admin);
+}
+
 inline bool authenticated_actor(httpd_req_t* request, homeguard::AccessControl& access,
                                 std::string_view actor) {
     std::string authorization;
