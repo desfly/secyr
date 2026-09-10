@@ -62,3 +62,5 @@ inline std::uint16_t ble_att_mtu(std::uint16_t)
 {
     return 247U;
 }
+
+extern "C" inline void ble_store_config_init(void) {}
