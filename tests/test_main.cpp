@@ -15,6 +15,7 @@ int main()
     test_output_safety();
     test_readiness();
     test_runtime_support();
+    test_ble_remote();
     test_build0009();
     test_build0032();
     test_build0038();
