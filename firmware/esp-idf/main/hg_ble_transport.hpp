@@ -45,4 +45,10 @@ private:
     void* message_context_{nullptr};
 };
 
+// Dashboard/runtime status helpers. "ready" means that the NimBLE host task
+// was created successfully; "connected" additionally means an Android client
+// is connected and subscribed to HomeGuard telemetry notifications.
+bool ble_transport_ready() noexcept;
+bool ble_transport_connected() noexcept;
+
 }  // namespace homeguard::idf
