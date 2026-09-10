@@ -37,6 +37,8 @@ struct BleRemotePermissions {
 
 struct BleRemoteBinding {
     std::array<std::uint8_t, 16> identity{};
+    std::array<char, 24> owner_user_id{};
+    std::array<char, 32> name{};
     BleRemotePermissions permissions{};
     std::uint32_t last_counter{};
     bool counter_initialized{};
@@ -61,14 +63,22 @@ public:
     static constexpr std::size_t kMaxBindings = 8;
 
     [[nodiscard]] bool bind(const std::array<std::uint8_t, 16>& identity,
+                            std::string_view owner_user_id,
+                            std::string_view name,
                             BleRemotePermissions permissions);
     [[nodiscard]] bool unbind(const std::array<std::uint8_t, 16>& identity);
     [[nodiscard]] BleRemoteResult authorize(const BleRemoteEvent& event);
     [[nodiscard]] std::size_t count() const;
+    [[nodiscard]] const BleRemoteBinding* binding_at(std::size_t index) const;
+    [[nodiscard]] const BleRemoteBinding* binding_for(const std::array<std::uint8_t, 16>& identity) const;
+    [[nodiscard]] bool import_binding(const BleRemoteBinding& binding);
+    void clear();
 
 private:
     [[nodiscard]] BleRemoteBinding* find(const std::array<std::uint8_t, 16>& identity);
     [[nodiscard]] const BleRemoteBinding* find(const std::array<std::uint8_t, 16>& identity) const;
+    static bool valid_text(std::string_view value, std::size_t capacity);
+    static void copy_text(char* destination, std::size_t capacity, std::string_view source);
 
     std::array<BleRemoteBinding, kMaxBindings> bindings_{};
 };
