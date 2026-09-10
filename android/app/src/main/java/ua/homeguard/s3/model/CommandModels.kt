@@ -1,6 +1,6 @@
 package ua.homeguard.s3.model
 
-enum class CommandType { ARM_HOME, ARM_AWAY, DISARM, SILENCE, OPEN_VALVES, CLOSE_VALVES, RESET_ALARM, ENTER_MAINTENANCE, EXIT_MAINTENANCE }
+enum class CommandType { ARM_HOME, ARM_AWAY, DISARM, SILENCE, OPEN_VALVES, CLOSE_VALVES, LOCK, RESET_ALARM, ENTER_MAINTENANCE, EXIT_MAINTENANCE }
 
 data class DeviceCommand(
     val requestId: Long,

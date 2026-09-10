@@ -4,6 +4,10 @@
 #include "esp_err.h"
 #include "esp_http_server.h"
 
+namespace hg {
+class SystemModel;
+}
+
 namespace homeguard::idf {
 
 class HardwareBootstrap;
@@ -13,7 +17,8 @@ public:
     esp_err_t register_handlers(
         httpd_handle_t server,
         HardwareBootstrap* hardware,
-        homeguard::AccessControl* access_control);
+        homeguard::AccessControl* access_control,
+        hg::SystemModel* system_model);
 
 private:
     static esp_err_t status_get(httpd_req_t* request);

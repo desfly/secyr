@@ -26,7 +26,7 @@ struct PressureCalibration {
 };
 
 struct HardwareCalibration {
-    std::array<ZoneCalibration, 8> zones{};
+    std::array<ZoneCalibration, 5> zones{};
     std::array<PressureCalibration, 2> pressure{};
     std::uint32_t crc32{0};
 };

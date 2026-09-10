@@ -2,6 +2,7 @@
 #include "hg_hardware_bootstrap.hpp"
 #include "hg_request_auth.hpp"
 #include "homeguard/hardware_runtime.hpp"
+#include "homeguard/system_model.hpp"
 
 #include <cstddef>
 
@@ -10,11 +11,20 @@ namespace homeguard::idf {
 esp_err_t InfrastructureHttp::register_handlers(
     httpd_handle_t server,
     HardwareBootstrap* hardware,
-    homeguard::AccessControl* access_control)
+    homeguard::AccessControl* access_control,
+    hg::SystemModel* system_model)
 {
-    if (server == nullptr || hardware == nullptr || access_control == nullptr) return ESP_ERR_INVALID_ARG;
+    if (server == nullptr || hardware == nullptr || access_control == nullptr || system_model == nullptr) {
+        return ESP_ERR_INVALID_ARG;
+    }
     hardware_ = hardware;
     access_control_ = access_control;
+
+    // ZoneMonitor/ZoneHttp are owned by app_main. InfrastructureHttp must not
+    // create a second monitor or register /api/v1/zones/live again: ESP-IDF
+    // rejects duplicate method+URI handlers with ESP_ERR_HTTPD_HANDLER_EXISTS
+    // and the whole HomeGuard HTTP server then rolls back.
+    (void)system_model;
 
     const httpd_uri_t status_route{
         .uri = "/api/v1/hardware/status",

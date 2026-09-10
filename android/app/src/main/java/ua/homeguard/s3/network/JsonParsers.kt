@@ -4,6 +4,20 @@ import org.json.JSONObject
 import ua.homeguard.s3.model.*
 
 internal object JsonParsers {
+    fun liveZones(json: JSONObject): List<ZoneStatus> {
+        val array = json.optJSONArray("zones") ?: return emptyList()
+        return (0 until array.length()).mapNotNull { index ->
+            val item = array.optJSONObject(index) ?: return@mapNotNull null
+            val id = item.optInt("id", index + 1).coerceAtLeast(1)
+            ZoneStatus(
+                index = id - 1,
+                name = item.optString("name", "Zone $id"),
+                state = item.optString("state", "unknown"),
+                enabled = item.optBoolean("valid", false),
+            )
+        }.sortedBy { it.index }
+    }
+
     fun snapshot(json: JSONObject): SystemSnapshot {
         val zones = json.optJSONArray("zones")?.let { array ->
             (0 until array.length()).map { index ->
@@ -16,25 +30,27 @@ internal object JsonParsers {
                         enabled = item.optBoolean("enabled", true),
                     )
                 } else {
-                    val code = array.optInt(index, -1)
+                    val raw = array.optInt(index, -1)
                     ZoneStatus(
                         index = index,
                         name = "Zone ${index + 1}",
-                        state = zoneState(code),
-                        enabled = code != 3,
+                        state = when (raw) {
+                            0 -> "normal"
+                            1 -> "open"
+                            2 -> "tamper"
+                            3 -> "disabled"
+                            else -> "unknown"
+                        },
+                        enabled = raw != 3 && raw >= 0,
                     )
                 }
             }
         }.orEmpty()
 
-        val pressureCodes = json.optJSONArray("pressures")
-        val pressureValues = json.optJSONArray("pressure_values")
-        val pressureValid = json.optJSONArray("pressure_valid")
-        val pressures = when {
-            pressureCodes == null -> emptyList()
-            pressureCodes.length() > 0 && pressureCodes.optJSONObject(0) != null ->
-                (0 until pressureCodes.length()).map { index ->
-                    val item = pressureCodes.getJSONObject(index)
+        val pressures = json.optJSONArray("pressures")?.let { array ->
+            (0 until array.length()).map { index ->
+                val item = array.optJSONObject(index)
+                if (item != null) {
                     PressureStatus(
                         index = item.optInt("index", index),
                         value = item.optDouble("value", 0.0).toFloat(),
@@ -42,19 +58,24 @@ internal object JsonParsers {
                         unit = item.optString("unit", ""),
                         valid = item.optBoolean("valid", !item.optString("state", "unknown").equals("sensor_fault", true)),
                     )
+                } else {
+                    val raw = array.optInt(index, -1)
+                    PressureStatus(
+                        index = index,
+                        value = json.optJSONArray("pressure_values")?.optDouble(index, 0.0)?.toFloat() ?: 0f,
+                        state = when (raw) {
+                            0 -> "disabled"
+                            1 -> "normal"
+                            2 -> "low"
+                            3 -> "high"
+                            4 -> "sensor_fault"
+                            else -> "unknown"
+                        },
+                        valid = json.optJSONArray("pressure_valid")?.optBoolean(index, false) ?: false,
+                    )
                 }
-            else -> (0 until pressureCodes.length()).map { index ->
-                val code = pressureCodes.optInt(index, 0)
-                val valid = pressureValid?.optBoolean(index, code != 4) ?: (code != 4)
-                PressureStatus(
-                    index = index,
-                    value = pressureValues?.optDouble(index, 0.0)?.toFloat() ?: 0.0f,
-                    state = pressureState(code),
-                    unit = "mV",
-                    valid = valid,
-                )
             }
-        }
+        }.orEmpty()
 
         val temperatures = json.optJSONArray("temperatures")?.let { array ->
             (0 until array.length()).map { index ->
@@ -69,9 +90,9 @@ internal object JsonParsers {
         } ?: run {
             val values = json.optJSONArray("temperatures_c")
             val valid = json.optJSONArray("temperature_valid")
-            val count = json.optInt("temperature_count", values?.length() ?: 0)
+            val count = json.optInt("temperature_count", values?.length() ?: 0).coerceAtLeast(0)
             if (values == null) emptyList() else (0 until minOf(count, values.length())).map { index ->
-                val isValid = valid?.optBoolean(index, true) ?: true
+                val isValid = valid?.optBoolean(index, false) ?: false
                 TemperatureStatus(
                     index = index,
                     name = "Temperature ${index + 1}",
@@ -95,7 +116,7 @@ internal object JsonParsers {
                     state = item.optString("state", "unknown"),
                 )
             }
-        } ?: if (json.has("battery_valid")) {
+        } ?: if (json.has("battery_voltage_v") || json.has("battery_current_a") || json.has("battery_power_w")) {
             listOf(
                 PowerChannelStatus(
                     index = 0,
@@ -146,34 +167,18 @@ internal object JsonParsers {
 
     private fun systemMode(json: JSONObject): SystemMode {
         val raw = json.opt("mode")
-        return when (raw) {
-            is Number -> when (raw.toInt()) {
+        return if (raw is Number) {
+            when (raw.toInt()) {
+                0 -> SystemMode.DISARMED
                 1 -> SystemMode.ARMED_HOME
                 2 -> SystemMode.ARMED_AWAY
                 3 -> SystemMode.ALARM
                 4 -> SystemMode.MAINTENANCE
                 else -> SystemMode.DISARMED
             }
-            else -> enumValue(raw?.toString().orEmpty(), SystemMode.DISARMED)
+        } else {
+            enumValue(raw?.toString().orEmpty(), SystemMode.DISARMED)
         }
-    }
-
-    private fun zoneState(code: Int): String = when (code) {
-        0 -> "normal"
-        1 -> "open"
-        2 -> "tamper"
-        3 -> "disabled"
-        4 -> "short"
-        else -> "unknown"
-    }
-
-    private fun pressureState(code: Int): String = when (code) {
-        0 -> "disabled"
-        1 -> "normal"
-        2 -> "low"
-        3 -> "high"
-        4 -> "sensor_fault"
-        else -> "unknown"
     }
 
     private inline fun <reified T : Enum<T>> enumValue(raw: String, fallback: T): T {

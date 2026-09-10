@@ -25,7 +25,9 @@ import ua.homeguard.s3.model.AccessLifecycleState
 import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
+import ua.homeguard.s3.model.RelayControlState
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.model.ZoneStatus
 import ua.homeguard.s3.network.ControllerIdentity
 import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
@@ -62,14 +64,14 @@ class MainActivity : ComponentActivity() {
     private val commandStatus = MutableStateFlow("Готово")
     private val backupStatus = MutableStateFlow("Backup/restore готовий")
     private val operatorId = MutableStateFlow("admin")
-    // LEGACY v1 UI field kept for rollback. In v2 it is populated only while
-    // submitting login and is cleared immediately after success/failure.
     private val operatorPin = MutableStateFlow("")
     private val accessSession = MutableStateFlow<AccessSession?>(null)
     private val accessLifecycle = MutableStateFlow(AccessLifecycleState.UNAVAILABLE)
     private val accessGateBusy = MutableStateFlow(false)
     private val accessGateMessage = MutableStateFlow("")
     private val setupWifiNetworks = MutableStateFlow<List<SetupWifiChoice>>(emptyList())
+    private val liveZones = MutableStateFlow<List<ZoneStatus>>(emptyList())
+    private val relayState = MutableStateFlow(RelayControlState.unavailable())
     private val addDeviceOpen = MutableStateFlow(false)
     private val provisioningOpen = MutableStateFlow(false)
     private val deviceListOpen = MutableStateFlow(true)
@@ -173,6 +175,23 @@ class MainActivity : ComponentActivity() {
         discovery.start()
         session.start()
 
+        lifecycleScope.launch {
+            while (true) {
+                if (accessSession.value != null) {
+                    runCatching { commands.liveZones() }
+                        .onSuccess { liveZones.value = it }
+                        .onFailure { liveZones.value = emptyList() }
+                    runCatching { commands.relayState() }
+                        .onSuccess { relayState.value = it }
+                        .onFailure { relayState.value = RelayControlState.unavailable() }
+                } else {
+                    if (liveZones.value.isNotEmpty()) liveZones.value = emptyList()
+                    if (relayState.value.available) relayState.value = RelayControlState.unavailable()
+                }
+                delay(350)
+            }
+        }
+
         setContent {
             val appSettings by settings.settings.collectAsState()
             val devices by discovery.devices.collectAsState()
@@ -182,6 +201,8 @@ class MainActivity : ComponentActivity() {
             val endpoint by resolver.endpoint.collectAsState()
             val provisioningState by provisioning.state.collectAsState()
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
+            val zones by liveZones.collectAsState()
+            val relays by relayState.collectAsState()
             val events by telemetry.events().collectAsState(initial = emptyList())
             val commandMessage by commandStatus.collectAsState()
             val maintenanceMessage by backupStatus.collectAsState()
@@ -261,6 +282,7 @@ class MainActivity : ComponentActivity() {
                                     commands.logout()
                                     settings.selectDevice("")
                                     accessSession.value = null
+                                    relayState.value = RelayControlState.unavailable()
                                     accessLifecycle.value = AccessLifecycleState.UNAVAILABLE
                                     operatorPin.value = ""
                                 }
@@ -282,6 +304,7 @@ class MainActivity : ComponentActivity() {
                         onBack = {
                             commands.logout()
                             accessSession.value = null
+                            relayState.value = RelayControlState.unavailable()
                             operatorPin.value = ""
                             accessLifecycle.value = AccessLifecycleState.UNAVAILABLE
                             deviceListOpen.value = true
@@ -293,7 +316,8 @@ class MainActivity : ComponentActivity() {
                         localDevices = devices.size,
                         route = endpoint.path.name,
                         deviceId = appSettings.deviceId,
-                        snapshot = snapshot,
+                        snapshot = snapshot.copy(zones = zones),
+                        relayState = relays,
                         events = events,
                         diagnostics = diagnostics,
                         backupStatus = maintenanceMessage,
@@ -315,7 +339,6 @@ class MainActivity : ComponentActivity() {
                             lifecycleScope.launch { discovery.rescan() }
                         },
                         onOperatorIdChange = { value -> operatorId.value = value.take(23) },
-                        // LEGACY v1 dashboard PIN editor is inert after v2 login.
                         onOperatorPinChange = { value ->
                             if (accessSession.value == null) operatorPin.value = value.filter(Char::isDigit).take(12)
                             else operatorPin.value = ""
@@ -338,6 +361,8 @@ class MainActivity : ComponentActivity() {
                         onExportSettings = { pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings); settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName()) },
                         onImportSettings = { settingsRestoreLauncher.launch("application/json") },
                         onFactoryReset = ::factoryResetController,
+                        onLightToggle = ::setLightRelay,
+                        onLockPulse = ::pulseLockRelay,
                         onCommand = ::executeCommand,
                     )
                 }
@@ -349,13 +374,13 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             commands.logout()
             accessSession.value = null
+            relayState.value = RelayControlState.unavailable()
             operatorPin.value = ""
             accessLifecycle.value = AccessLifecycleState.UNAVAILABLE
             accessGateMessage.value = "Перевірка стану доступу…"
             setupWifiNetworks.value = emptyList()
             settings.selectDevice(deviceId, baseUrl)
             deviceListOpen.value = false
-            // Resolver is flow-based; allow the newly selected local endpoint to propagate.
             delay(250)
             refreshAccessLifecycle()
         }
@@ -367,6 +392,7 @@ class MainActivity : ComponentActivity() {
             accessGateMessage.value = "Перевірка стану доступу…"
             commands.logout()
             accessSession.value = null
+            relayState.value = RelayControlState.unavailable()
             operatorPin.value = ""
             runCatching { commands.accessState() }
                 .onSuccess { state ->
@@ -430,7 +456,6 @@ class MainActivity : ComponentActivity() {
                     accessGateMessage.value = "Admin створений. Безпарольний setup закрито. Увійдіть новим PIN."
                 }
                 .onFailure { error ->
-                    // Failed bootstrap must not consume setup. Confirm state again.
                     accessGateMessage.value = "Admin не створений: ${error.message ?: "network"}. Setup залишається доступним."
                     runCatching { commands.accessState() }.onSuccess { accessLifecycle.value = it }
                 }
@@ -487,7 +512,6 @@ class MainActivity : ComponentActivity() {
             accessGateMessage.value = commandStatus.value
             runCatching { commands.login(actor, credential) }
                 .onSuccess { authenticated ->
-                    // v2 security boundary: erase UI copy of PIN immediately.
                     operatorPin.value = ""
                     operatorId.value = authenticated.actor
                     accessSession.value = authenticated
@@ -499,6 +523,7 @@ class MainActivity : ComponentActivity() {
                     operatorPin.value = ""
                     commands.logout()
                     accessSession.value = null
+                    relayState.value = RelayControlState.unavailable()
                     commandStatus.value = "Вхід відхилено: ${error.message ?: "network"}"
                     accessGateMessage.value = commandStatus.value
                 }
@@ -509,10 +534,58 @@ class MainActivity : ComponentActivity() {
     private fun logoutOperator() {
         commands.logout()
         accessSession.value = null
+        liveZones.value = emptyList()
+        relayState.value = RelayControlState.unavailable()
         operatorPin.value = ""
         accessLifecycle.value = AccessLifecycleState.LOGIN_REQUIRED
         commandStatus.value = "Сеанс завершено"
         accessGateMessage.value = "Сеанс завершено. Увійдіть знову."
+    }
+
+    private fun setLightRelay(active: Boolean) {
+        val authenticated = accessSession.value
+        if (authenticated == null || authenticated.role.name != "ADMIN") {
+            commandStatus.value = "Освітлення доступне тільки Admin"
+            return
+        }
+        lifecycleScope.launch {
+            commandStatus.value = if (active) "Освітлення: увімкнення…" else "Освітлення: вимкнення ручного режиму…"
+            runCatching { commands.setLight(active, authenticated.actor) }
+                .onSuccess { state ->
+                    relayState.value = state
+                    commandStatus.value = when {
+                        state.lightAutomatic && !state.lightManual -> "Освітлення ON: автоматика Z1/Z2"
+                        state.lightActive -> "Освітлення ON"
+                        else -> "Освітлення OFF"
+                    }
+                }
+                .onFailure { error ->
+                    relayState.value = RelayControlState.unavailable()
+                    if (error.message?.contains("401") == true) logoutOperator()
+                    else commandStatus.value = "Освітлення: ${error.message ?: "network"}"
+                }
+        }
+    }
+
+    private fun pulseLockRelay() {
+        val authenticated = accessSession.value
+        if (authenticated == null || authenticated.role.name != "ADMIN") {
+            commandStatus.value = "Замок доступний тільки Admin"
+            return
+        }
+        lifecycleScope.launch {
+            commandStatus.value = "Замок: імпульс…"
+            runCatching { commands.pulseLock(authenticated.actor) }
+                .onSuccess { state ->
+                    relayState.value = state
+                    commandStatus.value = if (state.lockActive) "Замок ON · 5 секунд" else "Замок OFF"
+                }
+                .onFailure { error ->
+                    relayState.value = RelayControlState.unavailable()
+                    if (error.message?.contains("401") == true) logoutOperator()
+                    else commandStatus.value = "Замок: ${error.message ?: "network"}"
+                }
+        }
     }
 
     private fun factoryResetController() {
@@ -547,6 +620,8 @@ class MainActivity : ComponentActivity() {
                     commands.logout()
                     settings.selectDevice("")
                     accessSession.value = null
+                    liveZones.value = emptyList()
+                    relayState.value = RelayControlState.unavailable()
                     accessLifecycle.value = AccessLifecycleState.UNAVAILABLE
                     operatorPin.value = ""
                     addDeviceOpen.value = false
@@ -626,6 +701,8 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         commands.logout()
         accessSession.value = null
+        liveZones.value = emptyList()
+        relayState.value = RelayControlState.unavailable()
         operatorPin.value = ""
         session.stop()
         discovery.stop()

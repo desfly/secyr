@@ -13,5 +13,6 @@ object RuntimeApiContract {
     const val NETWORK_STATUS_PATH = "/api/v1/network/status"
     const val NETWORK_SCAN_PATH = "/api/v1/network/scan"
     const val NETWORK_CONNECT_PATH = "/api/v1/network/connect"
+    const val ZONES_LIVE_PATH = "/api/v1/zones/live"
     const val TELEMETRY_PATH = "/ws/telemetry"
 }
