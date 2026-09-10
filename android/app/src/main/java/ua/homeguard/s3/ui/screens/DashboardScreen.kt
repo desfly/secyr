@@ -78,9 +78,11 @@ fun DashboardScreen(
     var eventQuery by remember { mutableStateOf("") }
     var eventSourceText by remember { mutableStateOf("") }
     var pinVisible by remember { mutableStateOf(false) }
+    var zonesExpanded by remember { mutableStateOf(false) }
     val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12 && operatorPin.all(Char::isDigit)
     val authenticated = accessSession != null
     val adminAuthenticated = accessSession?.role?.name == "ADMIN"
+    val canMonitorZones = accessSession?.capabilities?.monitor == true
     val canCommand: (CommandType) -> Boolean = { command -> accessSession?.allows(command) == true }
     val sourceFilter = eventSourceText.trim().toIntOrNull()
     val filteredEvents = EventLogFilterEngine.apply(events, EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter))
@@ -153,6 +155,47 @@ fun DashboardScreen(
                 Text("Канал: $route", style = MaterialTheme.typography.bodyMedium)
                 Text("Знайдено локально: $localDevices", style = MaterialTheme.typography.bodySmall)
                 Button(onClick = onAddDevice, modifier = Modifier.fillMaxWidth()) { Text("+ Додати пристрій") }
+            }
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        enabled = canMonitorZones,
+                        onClick = { zonesExpanded = !zonesExpanded },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (zonesExpanded) "Зони · моніторинг ▲" else "Зони · моніторинг ▼")
+                    }
+                    if (!canMonitorZones) {
+                        Text("Моніторинг зон доступний після входу з правом monitor.", style = MaterialTheme.typography.bodySmall)
+                    } else if (zonesExpanded) {
+                        if (snapshot.zones.isEmpty()) {
+                            Text("Очікування живих даних зон…", style = MaterialTheme.typography.bodySmall)
+                        } else {
+                            snapshot.zones.chunked(2).forEach { pair ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    pair.forEach { zone ->
+                                        Card(modifier = Modifier.weight(1f)) {
+                                            Column(modifier = Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                Text(zone.name, style = MaterialTheme.typography.titleSmall)
+                                                Text(zone.state.uppercase(), style = MaterialTheme.typography.bodyMedium)
+                                                Text(if (zone.enabled) "Активна" else "Вимкнена", style = MaterialTheme.typography.bodySmall)
+                                            }
+                                        }
+                                    }
+                                    if (pair.size == 1) {
+                                        Column(modifier = Modifier.weight(1f)) { }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -310,18 +353,6 @@ fun DashboardScreen(
                     Text(event.event, style = MaterialTheme.typography.titleSmall)
                     Text("#${event.sequence} · source ${event.sourceId} · value ${event.value}", style = MaterialTheme.typography.bodySmall)
                     Text("Категорія: ${EventLogFilterEngine.categoryOf(event).name}", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-
-        item { Text("Зони", style = MaterialTheme.typography.titleMedium) }
-        if (snapshot.zones.isEmpty()) item { Text("Очікування живих даних зон…") }
-        else items(snapshot.zones, key = { it.index }) { zone ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(zone.name, style = MaterialTheme.typography.titleSmall)
-                    Text(if (zone.enabled) "Активна" else "Вимкнена", style = MaterialTheme.typography.bodySmall)
-                    Text(zone.state.uppercase())
                 }
             }
         }
