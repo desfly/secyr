@@ -19,6 +19,18 @@ bool BleRemotePermissions::allows(BleRemoteAction action) const
     return false;
 }
 
+bool BleRemoteRegistry::valid_text(std::string_view value, std::size_t capacity)
+{
+    return !value.empty() && value.size() < capacity;
+}
+
+void BleRemoteRegistry::copy_text(char* destination, std::size_t capacity, std::string_view source)
+{
+    std::fill(destination, destination + capacity, '\0');
+    const auto size = std::min(source.size(), capacity - 1U);
+    std::copy_n(source.begin(), size, destination);
+}
+
 BleRemoteBinding* BleRemoteRegistry::find(const std::array<std::uint8_t, 16>& identity)
 {
     for (auto& binding : bindings_) {
@@ -36,22 +48,28 @@ const BleRemoteBinding* BleRemoteRegistry::find(const std::array<std::uint8_t, 1
 }
 
 bool BleRemoteRegistry::bind(const std::array<std::uint8_t, 16>& identity,
+                             std::string_view owner_user_id,
+                             std::string_view name,
                              BleRemotePermissions permissions)
 {
     const bool nonzero = std::any_of(identity.begin(), identity.end(), [](std::uint8_t value) { return value != 0; });
-    if (!nonzero) return false;
+    if (!nonzero || !valid_text(owner_user_id, BleRemoteBinding{}.owner_user_id.size()) ||
+        !valid_text(name, BleRemoteBinding{}.name.size())) return false;
 
     if (auto* existing = find(identity); existing != nullptr) {
+        copy_text(existing->owner_user_id.data(), existing->owner_user_id.size(), owner_user_id);
+        copy_text(existing->name.data(), existing->name.size(), name);
         existing->permissions = permissions;
         return true;
     }
 
     for (auto& binding : bindings_) {
         if (!binding.occupied) {
+            binding = {};
             binding.identity = identity;
+            copy_text(binding.owner_user_id.data(), binding.owner_user_id.size(), owner_user_id);
+            copy_text(binding.name.data(), binding.name.size(), name);
             binding.permissions = permissions;
-            binding.last_counter = 0;
-            binding.counter_initialized = false;
             binding.occupied = true;
             return true;
         }
@@ -96,6 +114,35 @@ std::size_t BleRemoteRegistry::count() const
     return static_cast<std::size_t>(std::count_if(bindings_.begin(), bindings_.end(), [](const BleRemoteBinding& binding) {
         return binding.occupied;
     }));
+}
+
+const BleRemoteBinding* BleRemoteRegistry::binding_at(std::size_t index) const
+{
+    return index < bindings_.size() && bindings_[index].occupied ? &bindings_[index] : nullptr;
+}
+
+const BleRemoteBinding* BleRemoteRegistry::binding_for(const std::array<std::uint8_t, 16>& identity) const
+{
+    return find(identity);
+}
+
+bool BleRemoteRegistry::import_binding(const BleRemoteBinding& binding)
+{
+    if (!binding.occupied) return true;
+    if (binding.owner_user_id.back() != '\0' || binding.name.back() != '\0') return false;
+    if (!valid_text(binding.owner_user_id.data(), binding.owner_user_id.size()) ||
+        !valid_text(binding.name.data(), binding.name.size())) return false;
+    if (!bind(binding.identity, binding.owner_user_id.data(), binding.name.data(), binding.permissions)) return false;
+    auto* imported = find(binding.identity);
+    if (imported == nullptr) return false;
+    imported->last_counter = binding.last_counter;
+    imported->counter_initialized = binding.counter_initialized;
+    return true;
+}
+
+void BleRemoteRegistry::clear()
+{
+    bindings_.fill({});
 }
 
 std::string_view ble_remote_action_name(BleRemoteAction action)
