@@ -29,6 +29,7 @@ constexpr std::size_t kMaxGattValue = 244;
 constexpr std::uint8_t kTelemetryType = 1;
 
 homeguard::idf::BleTransport* g_owner = nullptr;
+bool g_ready = false;
 std::uint16_t g_tx_value_handle = 0;
 
 const ble_uuid128_t kServiceUuid = BLE_UUID128_INIT(
@@ -114,15 +115,26 @@ void stack_sync() {
 
 void host_task(void*) {
     nimble_port_run();
+    g_ready = false;
     vTaskDelete(nullptr);
 }
 }
 
 namespace homeguard::idf {
+
+bool ble_transport_ready() noexcept {
+    return g_ready;
+}
+
+bool ble_transport_connected() noexcept {
+    return g_ready && g_owner != nullptr && g_owner->connected();
+}
+
 esp_err_t BleTransport::start(const char* device_name) {
     if (!device_name || !device_name[0]) return ESP_ERR_INVALID_ARG;
     if (g_owner && g_owner != this) return ESP_ERR_INVALID_STATE;
     g_owner = this;
+    g_ready = false;
     auto error = nimble_port_init();
     if (error != ESP_OK) return error;
     ble_svc_gap_init();
@@ -149,6 +161,7 @@ esp_err_t BleTransport::start(const char* device_name) {
     ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
     ble_store_config_init();
     if (xTaskCreate(host_task,"hg_ble_host",4096,nullptr,5,nullptr) != pdPASS) return ESP_ERR_NO_MEM;
+    g_ready = true;
     ESP_LOGI(kTag,"NimBLE HomeGuard transport started");
     return ESP_OK;
 }
@@ -269,4 +282,5 @@ esp_err_t BleTransport::notify_message(std::uint8_t type,const std::string& payl
     }
     return ESP_OK;
 }
-}
+
+}  // namespace homeguard::idf
