@@ -17,6 +17,7 @@ import org.json.JSONObject
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.model.Transport
 import ua.homeguard.s3.network.JsonParsers
+import java.util.ArrayDeque
 import java.util.UUID
 
 class BleHomeGuardClient(private val context: Context) {
@@ -25,6 +26,8 @@ class BleHomeGuardClient(private val context: Context) {
     private val decoder = BleFrameCodec.Decoder()
     private val stateFlow = MutableStateFlow(State.IDLE)
     private val snapshotFlow = MutableStateFlow(SystemSnapshot())
+    private val writeQueue = ArrayDeque<ByteArray>()
+    private var writeInFlight = false
     private var gatt: BluetoothGatt? = null
     private var rx: BluetoothGattCharacteristic? = null
     private var tx: BluetoothGattCharacteristic? = null
@@ -36,12 +39,9 @@ class BleHomeGuardClient(private val context: Context) {
 
     companion object {
         private val CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-
         fun runtimePermissions(): Array<String> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-        } else {
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
+        } else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
     }
 
     @SuppressLint("MissingPermission")
@@ -53,30 +53,21 @@ class BleHomeGuardClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun disconnect() {
-        gatt?.disconnect()
-        gatt?.close()
-        gatt = null
-        rx = null
-        tx = null
-        mtu = 23
-        decoder.reset()
-        snapshotFlow.value = SystemSnapshot()
-        stateFlow.value = State.IDLE
+        gatt?.disconnect(); gatt?.close(); gatt = null
+        rx = null; tx = null; mtu = 23; decoder.reset()
+        synchronized(writeQueue) { writeQueue.clear(); writeInFlight = false }
+        snapshotFlow.value = SystemSnapshot(); stateFlow.value = State.IDLE
     }
 
-    @SuppressLint("MissingPermission")
     fun sendJson(type: Int, json: JSONObject): Boolean {
-        val currentGatt = gatt ?: return false
-        val characteristic = rx ?: return false
+        if (gatt == null || rx == null || stateFlow.value != State.CONNECTED) return false
         val id = nextMessageId++ and 0xffff
         val frames = BleFrameCodec.encode(type, id, json.toString().toByteArray(Charsets.UTF_8), mtu)
-        // Stage-1 uses acknowledged writes to preserve fragment ordering. A queued async writer
-        // will replace this when command/reply routing is connected to the full app controller.
-        return frames.all { frame ->
-            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            characteristic.value = frame
-            currentGatt.writeCharacteristic(characteristic)
+        synchronized(writeQueue) {
+            frames.forEach(writeQueue::addLast)
+            if (!writeInFlight) writeNextLocked()
         }
+        return true
     }
 
     private val callback = object : BluetoothGattCallback() {
@@ -84,14 +75,11 @@ class BleHomeGuardClient(private val context: Context) {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             if (gatt !== g) return
             if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
-                stateFlow.value = State.DISCOVERING
-                g.discoverServices()
+                stateFlow.value = State.DISCOVERING; g.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                rx = null; tx = null; decoder.reset(); snapshotFlow.value = SystemSnapshot()
-                stateFlow.value = State.OFFLINE
-            } else if (status != BluetoothGatt.GATT_SUCCESS) {
-                stateFlow.value = State.ERROR
-            }
+                rx = null; tx = null; decoder.reset(); synchronized(writeQueue) { writeQueue.clear(); writeInFlight = false }
+                snapshotFlow.value = SystemSnapshot(); stateFlow.value = State.OFFLINE
+            } else if (status != BluetoothGatt.GATT_SUCCESS) stateFlow.value = State.ERROR
         }
 
         @SuppressLint("MissingPermission")
@@ -102,7 +90,7 @@ class BleHomeGuardClient(private val context: Context) {
             tx = service?.getCharacteristic(HomeGuardBleContract.TX_UUID)
             if (rx == null || tx == null) { stateFlow.value = State.ERROR; return }
             stateFlow.value = State.SUBSCRIBING
-            g.requestMtu(HomeGuardBleContract.PREFERRED_MTU)
+            if (!g.requestMtu(HomeGuardBleContract.PREFERRED_MTU)) { mtu = 23; subscribe(g) }
         }
 
         @SuppressLint("MissingPermission")
@@ -125,6 +113,15 @@ class BleHomeGuardClient(private val context: Context) {
             if (gatt !== g || descriptor.uuid != CCCD) return
             stateFlow.value = if (status == BluetoothGatt.GATT_SUCCESS) State.CONNECTED else State.ERROR
         }
+
+        override fun onCharacteristicWrite(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            if (gatt !== g || characteristic.uuid != HomeGuardBleContract.RX_UUID) return
+            synchronized(writeQueue) {
+                writeInFlight = false
+                if (status == BluetoothGatt.GATT_SUCCESS) writeNextLocked()
+                else { writeQueue.clear(); stateFlow.value = State.ERROR }
+            }
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -136,13 +133,24 @@ class BleHomeGuardClient(private val context: Context) {
         if (!g.writeDescriptor(cccd)) stateFlow.value = State.ERROR
     }
 
+    @SuppressLint("MissingPermission")
+    private fun writeNextLocked() {
+        val currentGatt = gatt ?: return
+        val characteristic = rx ?: return
+        val frame = writeQueue.pollFirst() ?: return
+        characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        characteristic.value = frame
+        writeInFlight = true
+        if (!currentGatt.writeCharacteristic(characteristic)) {
+            writeInFlight = false; writeQueue.clear(); stateFlow.value = State.ERROR
+        }
+    }
+
     private fun accept(frame: ByteArray) {
         val message = runCatching { decoder.accept(frame) }.getOrElse { decoder.reset(); stateFlow.value = State.ERROR; return }
         if (message?.type != HomeGuardBleContract.Type.TELEMETRY) return
         runCatching {
             val parsed = JsonParsers.snapshot(JSONObject(message.payload.toString(Charsets.UTF_8)))
-            // A frame can describe the controller's IP transport; while this stream is active the
-            // Android-facing transport is BLE, so diagnostics/UI must not stay NONE.
             snapshotFlow.value = parsed.copy(transport = Transport.BLE)
         }.onFailure { stateFlow.value = State.ERROR }
     }
