@@ -3,7 +3,6 @@
 #include "homeguard/telemetry.hpp"
 #include "esp_err.h"
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -19,13 +18,15 @@ public:
     esp_err_t publish_telemetry(const hg::TelemetryFrame& frame);
     bool connected() const;
 
-private:
-    friend int hg_ble_rx_access(std::uint16_t, std::uint16_t, struct ble_gatt_access_ctxt*, void*);
-    friend int hg_ble_gap_event(struct ble_gap_event*, void*);
-    friend void hg_ble_stack_sync();
-
+    // Entry points used by the NimBLE C callbacks.
     esp_err_t advertise();
     int accept_rx_fragment(const std::uint8_t* data, std::size_t size);
+    void on_connected(std::uint16_t handle);
+    void on_disconnected();
+    void on_notify_subscription(bool enabled);
+    std::uint8_t* own_address_type_storage();
+
+private:
     esp_err_t notify_message(std::uint8_t type, const std::string& payload);
     void reset_rx();
 
