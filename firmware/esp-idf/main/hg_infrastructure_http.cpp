@@ -1,11 +1,49 @@
 #include "hg_infrastructure_http.hpp"
 #include "hg_hardware_bootstrap.hpp"
+#include "hg_ble_transport.hpp"
 #include "hg_request_auth.hpp"
 #include "homeguard/hardware_runtime.hpp"
 
+#include "esp_mac.h"
+#include "esp_timer.h"
+
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <string>
 
 namespace homeguard::idf {
+namespace {
+
+std::string dashboard_runtime_json(HardwareBootstrap& hardware)
+{
+    const auto& ethernet = hardware.ethernet().status();
+
+    std::uint8_t bt_mac[6]{};
+    char bt_address[18]{};
+    if (esp_read_mac(bt_mac, ESP_MAC_BT) == ESP_OK) {
+        std::snprintf(
+            bt_address,
+            sizeof(bt_address),
+            "%02X:%02X:%02X:%02X:%02X:%02X",
+            bt_mac[0], bt_mac[1], bt_mac[2], bt_mac[3], bt_mac[4], bt_mac[5]);
+    }
+
+    const bool ble_ready = ble_transport_ready();
+    const bool ble_connected = ble_transport_connected();
+    const char* lan_state = ethernet.has_ip ? "connected" : (ethernet.link_up ? "link" : "offline");
+
+    std::string out = "{\"uptimeMs\":" +
+        std::to_string(static_cast<std::uint64_t>(esp_timer_get_time() / 1000LL)) +
+        ",\"lan\":{\"state\":\"" + lan_state +
+        "\",\"name\":\"Ethernet\",\"ip\":\"" + ethernet.ipv4 +
+        "\"},\"ble\":{\"ready\":" + (ble_ready ? "true" : "false") +
+        ",\"connected\":" + (ble_connected ? "true" : "false") +
+        ",\"name\":\"HomeGuard-S3\",\"address\":\"" + bt_address + "\"}}";
+    return out;
+}
+
+}  // namespace
 
 esp_err_t InfrastructureHttp::register_handlers(
     httpd_handle_t server,
@@ -43,7 +81,11 @@ esp_err_t InfrastructureHttp::status_get(httpd_req_t* request)
         return request_auth::send_login_required(request);
     }
 
-    const auto body = hardware_runtime_json(self->hardware_->status());
+    auto body = hardware_runtime_json(self->hardware_->status());
+    if (!body.empty() && body.back() == '}') {
+        body.pop_back();
+        body += ",\"dashboard\":" + dashboard_runtime_json(*self->hardware_) + "}";
+    }
     httpd_resp_set_type(request, "application/json");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, body.c_str(), body.size());
