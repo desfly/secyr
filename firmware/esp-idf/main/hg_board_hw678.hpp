@@ -28,6 +28,13 @@ inline constexpr gpio_num_t kRs485Rx = GPIO_NUM_18;
 
 inline constexpr gpio_num_t kServiceButton = GPIO_NUM_21;
 
+// Canonical direct relay outputs restored from last known-good Build-2077.
+// MCP23017 relay control remains disabled for this direct-output path.
+inline constexpr gpio_num_t kRelayLight = static_cast<gpio_num_t>(1);
+inline constexpr gpio_num_t kRelayLock = static_cast<gpio_num_t>(2);
+inline constexpr gpio_num_t kRelayValve1 = static_cast<gpio_num_t>(38);
+inline constexpr gpio_num_t kRelayValve2 = static_cast<gpio_num_t>(47);
+
 inline constexpr gpio_num_t kSdCs = GPIO_NUM_39;
 inline constexpr gpio_num_t kSdSck = GPIO_NUM_40;
 inline constexpr gpio_num_t kSdMosi = GPIO_NUM_41;
@@ -41,16 +48,20 @@ inline constexpr bool is_reserved_gpio(int gpio) noexcept
 {
     switch (gpio) {
     case 0:
+    case 1:
+    case 2:
     case 3:
     case 19:
     case 20:
     case 35:
     case 36:
     case 37:
+    case 38:
     case 43:
     case 44:
     case 45:
     case 46:
+    case 47:
     case 48:
         return true;
     default:
