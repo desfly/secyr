@@ -12,6 +12,10 @@
 #include "hg_service_http.hpp"
 #include "hg_output_http.hpp"
 #include "hg_gpio_output_backend.hpp"
+#include "hg_zone_monitor.hpp"
+#include "hg_zone_http.hpp"
+#include "hg_relay_runtime.hpp"
+#include "hg_relay_http.hpp"
 #include "hg_telemetry_runtime.hpp"
 #include "hg_telemetry_session_http.hpp"
 #include "hg_access_nvs.hpp"
@@ -66,6 +70,10 @@ homeguard::idf::SystemHttp g_system_http;
 homeguard::idf::ServiceHttp g_service_http;
 homeguard::idf::OutputHttp g_output_http;
 homeguard::idf::GpioOutputBackend g_gpio_outputs;
+homeguard::idf::ZoneMonitor g_zone_monitor;
+homeguard::idf::ZoneHttp g_zone_http;
+homeguard::idf::RelayRuntime g_relays;
+homeguard::idf::RelayHttp g_relay_http;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::AccessHttp g_access_http;
 homeguard::idf::BleRemoteNvsStore g_ble_remote_store;
@@ -184,17 +192,15 @@ void restore_cloud_config()
 void initialize_system_model()
 {
     g_system_model.add_partition(1);
-    g_system_model.add_zone(1, "Zone 1", hg::ModelZoneType::Perimeter);
-    g_system_model.add_zone(2, "Zone 2", hg::ModelZoneType::Interior);
-    g_system_model.add_zone(3, "Zone 3", hg::ModelZoneType::Perimeter);
-    g_system_model.add_zone(4, "Zone 4", hg::ModelZoneType::Perimeter);
-    g_system_model.add_zone(5, "Zone 5", hg::ModelZoneType::Perimeter);
-    g_system_model.add_zone(6, "Zone 6", hg::ModelZoneType::Perimeter);
-    g_system_model.add_zone(7, "Zone 7", hg::ModelZoneType::Perimeter);
-    g_system_model.add_zone(8, "Zone 8", hg::ModelZoneType::Perimeter);
+    for (std::uint16_t id = 1; id <= 8; ++id) {
+        const std::string name = "Zone " + std::to_string(id);
+        g_system_model.add_zone(id, name, id == 1 ? hg::ModelZoneType::Perimeter : hg::ModelZoneType::Interior);
+    }
     g_system_model.add_output(1, hg::ModelOutputType::Siren);
     g_system_model.add_output(2, hg::ModelOutputType::Valve);
     g_system_model.add_output(3, hg::ModelOutputType::Valve);
+    g_system_model.add_output(4, hg::ModelOutputType::Light);
+    g_system_model.add_output(5, hg::ModelOutputType::Relay);
 }
 
 void initialize_physical_outputs()
@@ -209,7 +215,7 @@ void initialize_physical_outputs()
 esp_err_t start_http_server()
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 52;
+    config.max_uri_handlers = 56;
     config.stack_size = 8192;
     config.lru_purge_enable = true;
 
@@ -243,6 +249,11 @@ esp_err_t start_http_server()
     g_output_http.set_access_control(&g_access_control);
     error = g_output_http.register_handlers(g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus);
     if (error != ESP_OK) return rollback_http(error, "output routes");
+
+    error = g_zone_http.register_handlers(g_http_server, &g_zone_monitor, &g_access_control);
+    if (error != ESP_OK) return rollback_http(error, "zone routes");
+    error = g_relay_http.register_handlers(g_http_server, &g_relays, &g_access_control);
+    if (error != ESP_OK) return rollback_http(error, "relay routes");
 
     error = g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed);
     if (error != ESP_OK) return rollback_http(error, "access routes");
@@ -349,6 +360,14 @@ extern "C" void app_main()
     const auto hardware_error = g_hardware.initialize();
     if (hardware_error != ESP_OK) ESP_LOGE(kTag, "Hardware bootstrap failed: %s", esp_err_to_name(hardware_error));
     else ESP_LOGI(kTag, "Hardware bootstrap completed");
+
+    const auto zones_error = g_zone_monitor.start(&g_hardware.zone_adc(), &g_hardware.telemetry_adc(), &g_system_model);
+    if (zones_error != ESP_OK) ESP_LOGE(kTag, "8-zone live monitor failed: %s", esp_err_to_name(zones_error));
+    else ESP_LOGI(kTag, "8-zone live monitor started");
+
+    const auto relay_error = g_relays.start(&g_zone_monitor);
+    if (relay_error != ESP_OK) ESP_LOGE(kTag, "Direct GPIO relay runtime failed: %s", esp_err_to_name(relay_error));
+    else ESP_LOGI(kTag, "Relay runtime ready: LIGHT=GPIO1 LOCK=GPIO2 VALVE1=GPIO38 VALVE2=GPIO47");
 
     const auto http_error = start_http_server();
     if (http_error != ESP_OK) {
