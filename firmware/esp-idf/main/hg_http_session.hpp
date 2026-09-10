@@ -33,7 +33,6 @@ inline void clear_slot(std::size_t index) {
 
 inline std::string issue(std::string_view actor, homeguard::AccessRole role) {
     if (actor.empty() || actor.size() >= g_actors[0].size()) return {};
-
     std::array<std::uint8_t, 32> random{};
     esp_fill_random(random.data(), random.size());
     static constexpr char hex[] = "0123456789abcdef";
@@ -42,7 +41,6 @@ inline std::string issue(std::string_view actor, homeguard::AccessRole role) {
         raw[i * 2U] = hex[(random[i] >> 4U) & 0x0fU];
         raw[i * 2U + 1U] = hex[random[i] & 0x0fU];
     }
-
     std::scoped_lock lock(g_mutex);
     clear_slot(g_next);
     g_tokens[g_next].reset(raw);
@@ -55,7 +53,7 @@ inline std::string issue(std::string_view actor, homeguard::AccessRole role) {
 }
 
 inline bool authorized_impl(std::string_view authorization, homeguard::AccessControl& access,
-                            std::string_view expected_actor) {
+                            std::string_view expected_actor, homeguard::AccessRole* resolved_role = nullptr) {
     if (!authorization.starts_with("Bearer ")) return false;
     const auto now = esp_timer_get_time();
     std::scoped_lock lock(g_mutex);
@@ -68,7 +66,6 @@ inline bool authorized_impl(std::string_view authorization, homeguard::AccessCon
             continue;
         }
         if (!token.authorized(authorization)) continue;
-
         const std::string_view session_actor{g_actors[i].data()};
         const auto* user = access.find_user(session_actor);
         if (user == nullptr || !user->enabled || user->role != g_roles[i]) {
@@ -76,6 +73,7 @@ inline bool authorized_impl(std::string_view authorization, homeguard::AccessCon
             return false;
         }
         if (!expected_actor.empty() && session_actor != expected_actor) return false;
+        if (resolved_role != nullptr) *resolved_role = user->role;
         return true;
     }
     return false;
@@ -88,6 +86,12 @@ inline bool authorized(std::string_view authorization, homeguard::AccessControl&
 inline bool authorized_for_actor(std::string_view authorization, homeguard::AccessControl& access,
                                  std::string_view actor) {
     return !actor.empty() && authorized_impl(authorization, access, actor);
+}
+
+inline bool authorized_for_role(std::string_view authorization, homeguard::AccessControl& access,
+                                homeguard::AccessRole required_role) {
+    homeguard::AccessRole role{homeguard::AccessRole::Guest};
+    return authorized_impl(authorization, access, {}, &role) && role == required_role;
 }
 
 inline bool revoke(std::string_view authorization) {
