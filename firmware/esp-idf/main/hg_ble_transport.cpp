@@ -48,6 +48,13 @@ int rx_access(std::uint16_t, std::uint16_t, ble_gatt_access_ctxt* ctxt, void*) {
     return g_owner->accept_rx_fragment(value.data(),copied);
 }
 
+int tx_access(std::uint16_t, std::uint16_t, ble_gatt_access_ctxt*, void*) {
+    // NimBLE requires every registered characteristic to provide a non-null
+    // access callback, including notify-only values. TX is delivered only via
+    // ble_gatts_notify_custom(), so direct attribute access is rejected.
+    return BLE_ATT_ERR_UNLIKELY;
+}
+
 const ble_gatt_chr_def kCharacteristics[] = {
     {
         .uuid = &kRxUuid.u,
@@ -56,7 +63,7 @@ const ble_gatt_chr_def kCharacteristics[] = {
     },
     {
         .uuid = &kTxUuid.u,
-        .access_cb = nullptr,
+        .access_cb = tx_access,
         .flags = BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_READ_ENC,
         .val_handle = &g_tx_value_handle,
     },
@@ -120,10 +127,21 @@ esp_err_t BleTransport::start(const char* device_name) {
     if (error != ESP_OK) return error;
     ble_svc_gap_init();
     ble_svc_gatt_init();
-    if (ble_svc_gap_device_name_set(device_name) != 0) return ESP_FAIL;
+    const int name_rc = ble_svc_gap_device_name_set(device_name);
+    if (name_rc != 0) {
+        ESP_LOGE(kTag,"BLE GAP device-name registration failed: rc=%d",name_rc);
+        return ESP_FAIL;
+    }
     int rc = ble_gatts_count_cfg(kServices);
-    if (rc == 0) rc = ble_gatts_add_svcs(kServices);
-    if (rc != 0) return ESP_FAIL;
+    if (rc != 0) {
+        ESP_LOGE(kTag,"BLE GATT resource validation failed: rc=%d",rc);
+        return ESP_FAIL;
+    }
+    rc = ble_gatts_add_svcs(kServices);
+    if (rc != 0) {
+        ESP_LOGE(kTag,"BLE GATT service registration failed: rc=%d",rc);
+        return ESP_FAIL;
+    }
     ble_hs_cfg.sync_cb = stack_sync;
     ble_hs_cfg.sm_bonding = 1;
     ble_hs_cfg.sm_sc = 1;
