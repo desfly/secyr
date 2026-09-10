@@ -68,6 +68,12 @@ HomeGuard-S3 must also support BLE key fobs/remotes as a separate lightweight co
 Requirements:
 - Key-fob support coexists with the Android BLE channel; adding a remote must not remove Android BLE operation.
 - A paired/bound remote has its own identity and permission set.
+- Every bound remote is assigned to a HomeGuard user and has an admin-visible name.
+- Admin UI must show the current number of bound remotes, configured capacity, each remote name, its assigned user, and its permissions/status.
+- Admin must be able to add a remote, edit its name/assigned user/permissions, reassign it to another user, and delete it.
+- Remote-management changes must require an authorized Admin session and persist in controller storage.
+- A remote whose assigned user no longer exists or is disabled must not retain control authority; orphaned remote bindings must be rejected or removed.
+- A remote must not receive permissions exceeding the permissions of its assigned user role.
 - Supported remote actions may include: arm, disarm, lock pulse, lighting command, SOS/panic and other explicitly assigned commands.
 - Remote button actions must be mapped to the same centralized command dispatcher used by Web/Android/BLE, not to duplicate relay logic.
 - Remote commands must include replay/duplicate-event protection where the remote protocol permits it.
@@ -93,6 +99,7 @@ Requirements:
 - Web UI provides live controller/zone status.
 - 8 zones are visible and individually nameable.
 - Lock control is present and follows the 5-second lock-pulse rule.
+- Admin UI includes BLE remote management with count, user assignment, add/edit/reassign/delete controls and per-remote permissions.
 - UI status must reflect real device state, not only successful HTTP button submission.
 
 ## 8. Peripheral scope
@@ -138,6 +145,7 @@ Bluetooth work is complete only when all of these are demonstrated on real hardw
 6. A bound BLE key fob triggers only its permitted commands.
 7. An unknown/unbound BLE device cannot control the system.
 8. Android BLE and BLE key-fob support coexist without breaking Ethernet/Wi-Fi operation.
+9. Admin can see the remote count and user assignments and can add, edit/reassign and delete remotes with persistence across reboot.
 
 ---
 
