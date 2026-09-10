@@ -8,7 +8,7 @@ using httpd_handle_t = void*;
 struct httpd_req_t { void* user_ctx{}; std::size_t content_len{}; const char* mock_body{}; int method{}; const char* mock_authorization{}; const char* mock_query{}; };
 using httpd_uri_func_t = esp_err_t(*)(httpd_req_t*);
 using httpd_work_fn_t = void(*)(void*);
-enum { HTTP_GET=0, HTTP_POST=1, HTTPD_500_INTERNAL_SERVER_ERROR=500, HTTPD_WS_TYPE_TEXT=1, HTTPD_WS_TYPE_CLOSE=2, HTTPD_WS_TYPE_PING=3, HTTPD_WS_TYPE_PONG=4 };
+enum { HTTP_GET=0, HTTP_POST=1, HTTP_DELETE=2, HTTPD_500_INTERNAL_SERVER_ERROR=500, HTTPD_WS_TYPE_TEXT=1, HTTPD_WS_TYPE_CLOSE=2, HTTPD_WS_TYPE_PING=3, HTTPD_WS_TYPE_PONG=4 };
 inline constexpr std::ptrdiff_t HTTPD_RESP_USE_STRLEN=-1;
 struct httpd_uri_t { const char* uri; int method; httpd_uri_func_t handler; void* user_ctx; bool is_websocket=false; };
 struct httpd_ws_frame_t { int type{}; std::uint8_t* payload{}; std::size_t len{}; };
