@@ -28,6 +28,23 @@ void scrub_cloud_password(CloudConfig& config)
     http_util::scrub(config.password);
 }
 
+std::string json_escape(const std::string& value)
+{
+    std::string out;
+    out.reserve(value.size() + 8U);
+    for (const unsigned char ch : value) {
+        switch (ch) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: if (ch >= 0x20U) out.push_back(static_cast<char>(ch)); break;
+        }
+    }
+    return out;
+}
+
 esp_err_t send_json(httpd_req_t* request, const std::string& body)
 {
     httpd_resp_set_type(request, "application/json");
@@ -62,7 +79,7 @@ esp_err_t CloudHttp::status_get(httpd_req_t* request)
 {
     if (request == nullptr || request->user_ctx == nullptr) return ESP_ERR_INVALID_ARG;
     auto* self = static_cast<CloudHttp*>(request->user_ctx);
-    if (self->cloud_ == nullptr || self->access_control_ == nullptr) return ESP_FAIL;
+    if (self->cloud_ == nullptr || self->store_ == nullptr || self->access_control_ == nullptr) return ESP_FAIL;
     if (!request_auth::authenticated(request, *self->access_control_)) {
         return request_auth::send_login_required(request);
     }
@@ -70,11 +87,18 @@ esp_err_t CloudHttp::status_get(httpd_req_t* request)
     const bool configured = self->cloud_->configured();
     const bool connected = self->cloud_->connected();
     const char* state = connected ? "connected" : (configured ? "connecting" : "disabled");
+
+    CloudConfig persisted{};
+    std::string broker_uri;
+    if (self->store_->load(persisted) == ESP_OK) broker_uri = persisted.broker_uri;
+    scrub_cloud_password(persisted);
+
     const std::string body =
         std::string{"{\"ok\":true,\"state\":\""} + state +
         "\",\"configured\":" + (configured ? "true" : "false") +
         ",\"connected\":" + (connected ? "true" : "false") +
         ",\"deviceId\":\"" + self->cloud_->device_id() +
+        "\",\"brokerUri\":\"" + json_escape(broker_uri) +
         "\",\"connectCount\":" + std::to_string(self->cloud_->connect_count()) +
         ",\"disconnectCount\":" + std::to_string(self->cloud_->disconnect_count()) + "}";
     return send_json(request, body);
