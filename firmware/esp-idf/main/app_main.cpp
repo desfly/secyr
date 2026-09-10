@@ -17,6 +17,8 @@
 #include "hg_access_nvs.hpp"
 #include "hg_access_http.hpp"
 #include "hg_access_runtime.hpp"
+#include "hg_ble_remote_nvs.hpp"
+#include "hg_ble_remote_http.hpp"
 #include "hg_setup_ap_guard.hpp"
 #include "hg_access_time.hpp"
 #include "hg_commissioning_nvs.hpp"
@@ -26,6 +28,7 @@
 #include "nvs_config_store.hpp"
 #include "websocket_telemetry.hpp"
 #include "homeguard/access_control.hpp"
+#include "homeguard/ble_remote.hpp"
 #include "homeguard/boot_readiness.hpp"
 #include "homeguard/physical_output_runtime.hpp"
 #include "homeguard/system_model.hpp"
@@ -64,11 +67,14 @@ homeguard::idf::OutputHttp g_output_http;
 homeguard::idf::GpioOutputBackend g_gpio_outputs;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::AccessHttp g_access_http;
+homeguard::idf::BleRemoteNvsStore g_ble_remote_store;
+homeguard::idf::BleRemoteHttp g_ble_remote_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
 NvsConfigStore g_provisioning_store;
 WebsocketTelemetry g_websocket_telemetry;
 DeviceDiscoveryService g_device_discovery;
 homeguard::AccessControl g_access_control;
+hg::BleRemoteRegistry g_ble_remotes;
 hg::HardwareVerificationRecord g_hardware_verification;
 hg::CommissioningPersistentState g_commissioning_state;
 hg::BootReadinessReport g_boot_readiness;
@@ -101,6 +107,37 @@ void restore_access_control()
         return;
     }
     ESP_LOGI(kTag, "Restored %u access user(s) from NVS; bootstrap disabled", static_cast<unsigned>(g_access_control.user_count()));
+}
+
+void restore_ble_remotes()
+{
+    g_ble_remotes.clear();
+    const auto error = g_ble_remote_store.load(g_ble_remotes);
+    if (error == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(kTag, "No BLE remotes configured");
+        return;
+    }
+    if (error != ESP_OK) {
+        g_ble_remotes.clear();
+        ESP_LOGE(kTag, "BLE remote database rejected (%s); no remote authority restored", esp_err_to_name(error));
+        return;
+    }
+
+    bool pruned = false;
+    for (std::size_t index = 0; index < hg::BleRemoteRegistry::kMaxBindings; ++index) {
+        const auto* binding = g_ble_remotes.binding_at(index);
+        if (binding == nullptr) continue;
+        const auto* owner = g_access_control.find_user(binding->owner_user_id.data());
+        if (owner == nullptr || !owner->enabled) {
+            const auto identity = binding->identity;
+            (void)g_ble_remotes.unbind(identity);
+            pruned = true;
+        }
+    }
+    if (pruned && g_ble_remote_store.save(g_ble_remotes) != ESP_OK) {
+        ESP_LOGE(kTag, "Failed to persist pruning of orphaned BLE remotes");
+    }
+    ESP_LOGI(kTag, "Restored %u BLE remote(s)", static_cast<unsigned>(g_ble_remotes.count()));
 }
 
 void restore_commissioning_state()
@@ -171,7 +208,7 @@ void initialize_physical_outputs()
 esp_err_t start_http_server()
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 48;
+    config.max_uri_handlers = 52;
     config.stack_size = 8192;
     config.lru_purge_enable = true;
 
@@ -208,6 +245,8 @@ esp_err_t start_http_server()
 
     error = g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed);
     if (error != ESP_OK) return rollback_http(error, "access routes");
+    error = g_ble_remote_http.register_handlers(g_http_server, &g_ble_remotes, &g_ble_remote_store, &g_access_control);
+    if (error != ESP_OK) return rollback_http(error, "BLE remote admin routes");
     error = g_telemetry_session_http.register_handlers(g_http_server, &g_access_control, &g_websocket_telemetry);
     if (error != ESP_OK) return rollback_http(error, "telemetry session route");
 
@@ -224,9 +263,6 @@ void start_authenticated_telemetry_websocket()
 {
     if (g_http_server == nullptr) return;
 
-    // The WebSocket must exist even on controllers that were commissioned
-    // without a provisioned long-lived local API token. In that case Android
-    // authenticates through /api/v1/telemetry/session after normal login.
     std::string token;
     hg::ProvisioningPayload provisioning{};
     if (g_provisioning_store.load_provisioning(provisioning) && provisioning.valid({})) {
@@ -283,6 +319,7 @@ extern "C" void app_main()
 
     g_access_control.set_auth_clock(&homeguard::idf::access_now_ms);
     restore_access_control();
+    restore_ble_remotes();
     restore_commissioning_state();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
