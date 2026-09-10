@@ -1,0 +1,2 @@
+CI-only rebuild trigger for HomeGuard-S3 rollback snapshot 8edefa75ba9628fc12c7233c641a216b8314ff33.
+This file is on the temporary rebuild branch only and is not part of firmware runtime logic.
