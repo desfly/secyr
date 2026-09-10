@@ -51,3 +51,11 @@
   html body .status-grid{grid-template-columns:1fr!important;gap:12px!important}
   html body .status-grid article{min-height:104px!important;padding:14px!important}
 }
+
+/* Dashboard zones: two columns filled vertically: Z1-Z4 left, Z5-Z8 right. */
+@media (min-width:721px){
+  html body #zones.zones{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(4,56px);grid-auto-flow:column}
+  html body #zones .zone{height:56px;min-width:0}
+  html body #zones .zone:nth-child(-n+4){border-right:1px solid #e6e9ee}
+  html body #zones .zone:nth-child(4){border-bottom:0}
+}
