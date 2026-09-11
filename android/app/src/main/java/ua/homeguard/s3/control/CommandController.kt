@@ -2,7 +2,9 @@ package ua.homeguard.s3.control
 
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONObject
+import ua.homeguard.s3.model.AccessCapabilities
 import ua.homeguard.s3.model.AccessLifecycleState
+import ua.homeguard.s3.model.AccessRole
 import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandReply
 import ua.homeguard.s3.model.CommandType
@@ -56,33 +58,86 @@ class CommandController(
     }
 
     suspend fun login(actor: String, credential: String): AccessSession {
-        val target = endpoint.value
-        require(target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank()) { "controller offline" }
+        val normalizedActor = actor.trim()
+        require(normalizedActor.isNotBlank()) { "User ID is required" }
+        require(credential.length in 4..12 && credential.all(Char::isDigit)) { "PIN must contain 4-12 digits" }
 
         clearLocalSession()
         ble.disconnect()
-        val api = createApi(target)
-        val session = api.login(actor, credential)
-        if (target.path != ControlPath.CLOUD) {
-            localHttpSessionToken = session.sessionToken
-            localActor = session.actor
-            val telemetryToken = api.telemetrySession(session.actor)
-            settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
+        val target = endpoint.value
+        var httpFailure: Throwable? = null
 
-            val deviceId = settings.settings.value.deviceId
-            if (deviceId.isNotBlank()) {
-                runCatching {
-                    ble.connectAndAuthenticate(
-                        deviceId = deviceId,
-                        actor = session.actor,
-                        pin = credential,
-                        connectTimeoutMs = 4_000L,
-                        authTimeoutMs = 4_000L,
-                    )
+        if (target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank()) {
+            val api = createApi(target)
+            val httpSession = runCatching { api.login(normalizedActor, credential) }
+                .onFailure { httpFailure = it }
+                .getOrNull()
+            if (httpSession != null) {
+                if (target.path != ControlPath.CLOUD) {
+                    localHttpSessionToken = httpSession.sessionToken
+                    localActor = httpSession.actor
+                    val telemetryToken = api.telemetrySession(httpSession.actor)
+                    settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
+
+                    val deviceId = settings.settings.value.deviceId
+                    if (deviceId.isNotBlank()) {
+                        runCatching {
+                            ble.connectAndAuthenticate(
+                                deviceId = deviceId,
+                                actor = httpSession.actor,
+                                pin = credential,
+                                connectTimeoutMs = 4_000L,
+                                authTimeoutMs = 4_000L,
+                            )
+                        }
+                    }
                 }
+                return httpSession
             }
         }
-        return session
+
+        val deviceId = settings.settings.value.deviceId
+        require(deviceId.isNotBlank()) {
+            httpFailure?.message ?: "controller offline and BLE device id unavailable"
+        }
+        val bleReply = runCatching {
+            ble.connectAndAuthenticate(
+                deviceId = deviceId,
+                actor = normalizedActor,
+                pin = credential,
+                connectTimeoutMs = 12_000L,
+                authTimeoutMs = 8_000L,
+            )
+        }.getOrElse { bleError ->
+            val httpReason = httpFailure?.message?.takeIf { it.isNotBlank() }
+            throw IllegalStateException(
+                listOfNotNull(httpReason, bleError.message).joinToString("; ").ifBlank { "HTTP and BLE login unavailable" },
+                bleError,
+            )
+        }
+
+        // Current BLE HELLO authenticates the actor and every command is still
+        // authoritatively role-checked by the ESP before execution. Until HELLO
+        // carries the full access profile, expose only the runtime controls that
+        // have an independently enforced BLE command path; never grant admin or
+        // configuration privileges from an Android-side guess.
+        return AccessSession(
+            actor = bleReply.optString("actor", normalizedActor).ifBlank { normalizedActor },
+            name = bleReply.optString("name", normalizedActor).ifBlank { normalizedActor },
+            role = AccessRole.USER,
+            capabilities = AccessCapabilities(
+                monitor = true,
+                armHome = true,
+                armAway = true,
+                disarm = true,
+                panic = true,
+                valves = true,
+                networkConfigure = false,
+                accessManage = false,
+                serviceInvalidate = false,
+            ),
+            sessionToken = "",
+        )
     }
 
     suspend fun refreshTelemetryToken(): String {
@@ -101,7 +156,7 @@ class CommandController(
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
         val httpResult = runCatching { executeHttp(type, actor, credential) }
         val httpReply = httpResult.getOrNull()
-        if (httpReply != null && httpReply.code != "offline") return httpReply
+        if (httpReply != null && httpReply.code != "offline" && httpReply.code != "authorization_required") return httpReply
 
         if (supportsBle(type) && ble.isReady()) {
             val bleReply = runCatching { ble.execute(type) }.getOrNull()
