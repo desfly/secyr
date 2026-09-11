@@ -25,6 +25,7 @@ class BleRuntimeSession(context: Context) {
     fun state(): StateFlow<BleHomeGuardClient.State> = client.state()
     fun snapshots(): StateFlow<SystemSnapshot> = client.snapshots()
     fun commandReplies(): StateFlow<JSONObject?> = client.commandReplies()
+    fun isReady(): Boolean = client.state().value == BleHomeGuardClient.State.READY
 
     suspend fun connect(deviceId: String, timeoutMs: Long = 15_000L) {
         require(deviceId.isNotBlank()) { "BLE device id is empty" }
@@ -62,7 +63,19 @@ class BleRuntimeSession(context: Context) {
         }
     }
 
+    suspend fun connectAndAuthenticate(
+        deviceId: String,
+        actor: String,
+        pin: String,
+        connectTimeoutMs: Long = 15_000L,
+        authTimeoutMs: Long = 8_000L,
+    ) {
+        connect(deviceId, connectTimeoutMs)
+        if (!isReady()) authenticate(actor, pin, authTimeoutMs)
+    }
+
     suspend fun execute(type: CommandType, timeoutMs: Long = 8_000L): JSONObject {
+        require(isReady()) { "BLE runtime is not authenticated" }
         val queued = when (type) {
             CommandType.ARM_HOME -> client.armHome()
             CommandType.ARM_AWAY -> client.armAway()
@@ -79,6 +92,7 @@ class BleRuntimeSession(context: Context) {
         alarmActive: Boolean = false,
         timeoutMs: Long = 8_000L,
     ): JSONObject {
+        require(isReady()) { "BLE runtime is not authenticated" }
         require(outputId in 1..65535) { "Invalid output id" }
         require(client.controlOutput(outputId, active, alarmActive)) { "BLE output command could not start" }
         return awaitCommandReply(timeoutMs)
