@@ -2,6 +2,8 @@
 
 #include "hg_ble_transport.hpp"
 #include "hg_http_util.hpp"
+#include "hg_network_http.hpp"
+#include "nvs_config_store.hpp"
 #include "homeguard/access_control.hpp"
 #include "homeguard/boot_readiness.hpp"
 #include "homeguard/output_command.hpp"
@@ -9,11 +11,13 @@
 #include "homeguard/system_model.hpp"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <string>
+#include <utility>
 
 namespace homeguard::idf {
 namespace {
@@ -22,6 +26,29 @@ constexpr std::uint8_t kCommandType = 3;
 constexpr std::uint8_t kCommandReplyType = 4;
 constexpr std::uint8_t kHelloSessionType = 5;
 constexpr std::uint8_t kErrorType = 7;
+constexpr std::uint8_t kProvisioningAuthorizeType = 8;
+constexpr std::uint8_t kProvisioningApplyType = 9;
+constexpr std::uint8_t kProvisioningReplyType = 10;
+
+std::uint64_t now_ms()
+{
+    return static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+}
+
+const char* provisioning_reason(hg::ProvisioningCode code)
+{
+    switch (code) {
+        case hg::ProvisioningCode::Accepted: return "accepted";
+        case hg::ProvisioningCode::InvalidState: return "invalid_state";
+        case hg::ProvisioningCode::Expired: return "expired";
+        case hg::ProvisioningCode::InvalidProof: return "invalid_proof";
+        case hg::ProvisioningCode::LockedOut: return "locked_out";
+        case hg::ProvisioningCode::InvalidPayload: return "invalid_payload";
+        case hg::ProvisioningCode::StorageFailure: return "storage_failure";
+        case hg::ProvisioningCode::AlreadyProvisioned: return "already_provisioned";
+    }
+    return "unknown";
+}
 
 bool parse_uint16(const std::string& body, const char* key, std::uint16_t& value)
 {
@@ -45,6 +72,12 @@ bool parse_bool(const std::string& body, const char* key, bool& value)
     return false;
 }
 
+void wipe(std::string& value)
+{
+    std::fill(value.begin(), value.end(), '\0');
+    value.clear();
+}
+
 const char* arm_state_name(hg::PartitionArmState state)
 {
     switch (state) {
@@ -62,7 +95,9 @@ void BleCommandRouter::configure(
     hg::SystemModel* model,
     hg::BootReadinessReport* readiness,
     hg::PhysicalOutputRuntime* physical,
-    hg::SystemEventBus* bus)
+    hg::SystemEventBus* bus,
+    NetworkHttp* network,
+    NvsConfigStore* provisioning_store)
 {
     transport_ = transport;
     access_ = access;
@@ -70,14 +105,41 @@ void BleCommandRouter::configure(
     readiness_ = readiness;
     physical_ = physical;
     bus_ = bus;
+    network_ = network;
+    provisioning_store_ = provisioning_store;
     actor_.clear();
     authenticated_epoch_ = 0;
+    provisioning_epoch_ = 0;
+    provisioning_session_prepared_ = prepare_provisioning_session(now_ms());
 }
 
 bool BleCommandRouter::session_valid() const
 {
     return transport_ != nullptr && transport_->connected() && !actor_.empty() &&
            authenticated_epoch_ != 0U && authenticated_epoch_ == transport_->connection_epoch();
+}
+
+bool BleCommandRouter::prepare_provisioning_session(std::uint64_t current_ms)
+{
+    if (provisioning_store_ == nullptr || provisioning_store_->is_provisioned()) return false;
+
+    FactoryProvisioningIdentity identity{};
+    if (!provisioning_store_->load_factory_identity(identity)) {
+        ESP_LOGE(kTag, "Factory provisioning identity unavailable or invalid");
+        return false;
+    }
+
+    const auto code = provisioning_session_.begin(
+        identity.pairing_code,
+        identity.certificate_sha256,
+        current_ms);
+    identity.clear_private_material();
+    if (code != hg::ProvisioningCode::Accepted) {
+        ESP_LOGE(kTag, "Unable to prepare BLE provisioning session: %s", provisioning_reason(code));
+        return false;
+    }
+    ESP_LOGI(kTag, "BLE factory provisioning window prepared");
+    return true;
 }
 
 void BleCommandRouter::send(std::uint8_t type, const std::string& json) const
@@ -94,6 +156,17 @@ void BleCommandRouter::send_error(const char* reason) const
     send(kErrorType, body);
 }
 
+void BleCommandRouter::send_provisioning_reply(bool ok, const char* stage, const char* reason) const
+{
+    std::string body = std::string{"{\"ok\":"} + (ok ? "true" : "false") +
+        ",\"stage\":\"" + (stage == nullptr ? "unknown" : stage) + "\"";
+    if (reason != nullptr && reason[0] != '\0') {
+        body += std::string{",\"reason\":\""} + reason + "\"";
+    }
+    body += "}";
+    send(kProvisioningReplyType, body);
+}
+
 void BleCommandRouter::handle(std::uint8_t type, const std::string& json)
 {
     if (type == kHelloSessionType) {
@@ -104,7 +177,115 @@ void BleCommandRouter::handle(std::uint8_t type, const std::string& json)
         handle_command(json);
         return;
     }
+    if (type == kProvisioningAuthorizeType) {
+        handle_provisioning_authorize(json);
+        return;
+    }
+    if (type == kProvisioningApplyType) {
+        handle_provisioning_apply(json);
+        return;
+    }
     send_error("unsupported_message_type");
+}
+
+void BleCommandRouter::handle_provisioning_authorize(const std::string& json)
+{
+    if (transport_ == nullptr || provisioning_store_ == nullptr) {
+        send_provisioning_reply(false, "failed", "provisioning_unavailable");
+        return;
+    }
+    if (provisioning_store_->is_provisioned()) {
+        send_provisioning_reply(false, "failed", "already_provisioned");
+        return;
+    }
+
+    const auto epoch = transport_->connection_epoch();
+    const auto current_ms = now_ms();
+    const auto status = provisioning_session_.status(current_ms);
+    if (!provisioning_session_prepared_ ||
+        ((status.state == hg::ProvisioningState::Authorized || status.state == hg::ProvisioningState::Applying) &&
+         provisioning_epoch_ != epoch)) {
+        provisioning_session_.abort();
+        provisioning_session_prepared_ = prepare_provisioning_session(current_ms);
+    }
+    if (!provisioning_session_prepared_) {
+        send_provisioning_reply(false, "failed", "factory_identity_unavailable");
+        return;
+    }
+
+    std::string pairing_code;
+    std::string certificate_sha256;
+    if (!http_util::parse_json_string(json, "pairing_code", pairing_code) ||
+        !http_util::parse_json_string(json, "certificate_sha256", certificate_sha256)) {
+        wipe(pairing_code);
+        send_provisioning_reply(false, "failed", "invalid_authorization_payload");
+        return;
+    }
+
+    const auto code = provisioning_session_.authorize(pairing_code, certificate_sha256, current_ms);
+    wipe(pairing_code);
+    wipe(certificate_sha256);
+    if (code != hg::ProvisioningCode::Accepted) {
+        send_provisioning_reply(false, "failed", provisioning_reason(code));
+        return;
+    }
+
+    provisioning_epoch_ = epoch;
+    send_provisioning_reply(true, "authorized");
+    ESP_LOGI(kTag, "BLE factory provisioning proof accepted for epoch=%lu",
+             static_cast<unsigned long>(provisioning_epoch_));
+}
+
+void BleCommandRouter::handle_provisioning_apply(const std::string& json)
+{
+    if (transport_ == nullptr || network_ == nullptr || provisioning_store_ == nullptr ||
+        provisioning_store_->is_provisioned()) {
+        send_provisioning_reply(false, "failed",
+            provisioning_store_ != nullptr && provisioning_store_->is_provisioned()
+                ? "already_provisioned" : "provisioning_unavailable");
+        return;
+    }
+    if (provisioning_epoch_ == 0U || provisioning_epoch_ != transport_->connection_epoch()) {
+        send_provisioning_reply(false, "failed", "provisioning_authorization_required");
+        return;
+    }
+
+    hg::ProvisioningPayload payload{};
+    if (!http_util::parse_json_string(json, "wifi_ssid", payload.wifi_ssid) ||
+        !http_util::parse_json_string(json, "wifi_password", payload.wifi_password) ||
+        !http_util::parse_json_string(json, "local_api_token", payload.local_api_token)) {
+        payload.clear_secrets();
+        send_provisioning_reply(false, "failed", "invalid_payload");
+        return;
+    }
+    (void)http_util::parse_json_string(json, "owner_label", payload.owner_label);
+    (void)http_util::parse_json_string(json, "cloud_endpoint", payload.cloud_endpoint);
+    (void)http_util::parse_json_string(json, "cloud_token", payload.cloud_token);
+
+    const auto current_ms = now_ms();
+    auto code = provisioning_session_.submit(std::move(payload), current_ms);
+    if (code != hg::ProvisioningCode::Accepted || !provisioning_session_.pending()) {
+        send_provisioning_reply(false, "failed", provisioning_reason(code));
+        return;
+    }
+
+    const auto& pending = *provisioning_session_.pending();
+    const bool provisioning_saved = provisioning_store_->save_provisioning(pending);
+    const bool wifi_handover_started = provisioning_saved &&
+        network_->provision_station(pending.wifi_ssid, pending.wifi_password);
+    const bool storage_ok = provisioning_saved && wifi_handover_started;
+
+    code = provisioning_session_.commit(storage_ok, now_ms());
+    provisioning_epoch_ = 0;
+    provisioning_session_prepared_ = false;
+    if (code != hg::ProvisioningCode::Accepted) {
+        send_provisioning_reply(false, "failed", provisioning_reason(code));
+        ESP_LOGE(kTag, "BLE provisioning commit failed: %s", provisioning_reason(code));
+        return;
+    }
+
+    send_provisioning_reply(true, "applied");
+    ESP_LOGI(kTag, "BLE factory provisioning committed; Wi-Fi STA handover started");
 }
 
 void BleCommandRouter::handle_hello(const std::string& json)
@@ -118,14 +299,13 @@ void BleCommandRouter::handle_hello(const std::string& json)
     std::string pin;
     if (!http_util::parse_json_string(json, "actor", actor) || actor.empty() ||
         !http_util::parse_json_string(json, "pin", pin) || pin.empty()) {
-        std::fill(pin.begin(), pin.end(), '\0');
+        wipe(pin);
         send_error("invalid_session_hello");
         return;
     }
 
     const auto decision = access_->authenticate(actor, pin);
-    std::fill(pin.begin(), pin.end(), '\0');
-    pin.clear();
+    wipe(pin);
     if (decision != homeguard::AuditDecision::Allowed) {
         actor_.clear();
         authenticated_epoch_ = 0;
