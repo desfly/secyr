@@ -34,6 +34,12 @@ inline bool authenticated(httpd_req_t* request, homeguard::AccessControl& access
     return authenticate(request, access) == homeguard::AuditDecision::Allowed;
 }
 
+inline bool authenticated_admin(httpd_req_t* request, homeguard::AccessControl& access) {
+    std::string authorization;
+    if (!read_header(request, authorization)) return false;
+    return http_session::authorized_for_role(authorization, access, homeguard::AccessRole::Admin);
+}
+
 inline bool authenticated_actor(httpd_req_t* request, homeguard::AccessControl& access,
                                 std::string_view actor) {
     std::string authorization;
@@ -47,6 +53,13 @@ inline esp_err_t send_login_required(httpd_req_t* request) {
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     httpd_resp_set_hdr(request, "WWW-Authenticate", "Bearer realm=\"homeguard\"");
     return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"login_required\"}", HTTPD_RESP_USE_STRLEN);
+}
+
+inline esp_err_t send_admin_required(httpd_req_t* request) {
+    httpd_resp_set_status(request, "403 Forbidden");
+    httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    return httpd_resp_send(request, "{\"ok\":false,\"reason\":\"admin_required\"}", HTTPD_RESP_USE_STRLEN);
 }
 
 }  // namespace homeguard::idf::request_auth
