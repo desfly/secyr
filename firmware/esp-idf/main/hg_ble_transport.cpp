@@ -187,6 +187,20 @@ esp_err_t BleTransport::advertise() {
     fields.num_uuids128=1;
     fields.uuids128_is_complete=1;
     if (ble_gap_adv_set_fields(&fields) != 0) return ESP_FAIL;
+
+    // Keep the 128-bit service UUID in the primary advertisement and put the
+    // human/device identity in the scan response. This fits the legacy 31-byte
+    // advertising limit and lets Android select the exact controller encoded
+    // by the QR device id instead of taking the first nearby HomeGuard unit.
+    ble_hs_adv_fields response{};
+    const char* name = ble_svc_gap_device_name();
+    if (name != nullptr && name[0] != '\0') {
+        response.name = reinterpret_cast<const std::uint8_t*>(name);
+        response.name_len = static_cast<std::uint8_t>(std::min<std::size_t>(std::strlen(name), 29U));
+        response.name_is_complete = response.name_len == std::strlen(name);
+        if (ble_gap_adv_rsp_set_fields(&response) != 0) return ESP_FAIL;
+    }
+
     ble_gap_adv_params params{};
     params.conn_mode=BLE_GAP_CONN_MODE_UND;
     params.disc_mode=BLE_GAP_DISC_MODE_GEN;
