@@ -148,6 +148,10 @@ esp_err_t BleTransport::publish_telemetry(const hg::TelemetryFrame& frame) {
     return notify_message(kTelemetryType,hg::telemetry_json(frame));
 }
 
+esp_err_t BleTransport::send_message(std::uint8_t type, const std::string& payload) {
+    return notify_message(type, payload);
+}
+
 std::uint8_t* BleTransport::own_address_type_storage() {
     return &own_address_type_;
 }
