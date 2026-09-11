@@ -11,6 +11,10 @@ extern "C" {
 typedef struct esp_timer_mock* esp_timer_handle_t;
 typedef void (*esp_timer_cb_t)(void* arg);
 
+enum {
+    ESP_TIMER_TASK = 0,
+};
+
 typedef struct {
     esp_timer_cb_t callback;
     void* arg;
