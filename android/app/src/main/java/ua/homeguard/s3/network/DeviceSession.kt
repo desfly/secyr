@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceEndpoint
+import ua.homeguard.s3.network.ble.BleRuntimeRegistry
 import ua.homeguard.s3.network.cloud.CloudRuntime
 import ua.homeguard.s3.network.mqtt.MqttConnectionConfig
 import ua.homeguard.s3.network.mqtt.MqttRuntime
@@ -27,10 +28,12 @@ class DeviceSession(
     }
 
     private val remoteTransports = RemoteTransportRuntime(scope, endpointProvider, telemetry)
+    private val ble = BleRuntimeRegistry.get(settings.appContext)
     private var job: Job? = null
     private var authorizationJob: Job? = null
     private var reconnectJob: Job? = null
     private var ticketRefreshJob: Job? = null
+    private var bleTelemetryJob: Job? = null
     @Volatile private var activeTarget: SessionTarget? = null
 
     fun cloudState(): StateFlow<CloudRuntime.State> = remoteTransports.cloudState()
@@ -78,16 +81,24 @@ class DeviceSession(
                 }
             }
         }
+
+        bleTelemetryJob = scope.launch {
+            ble.snapshots().collect { snapshot ->
+                if (ble.isReady()) telemetry.acceptFallbackSnapshot(snapshot)
+            }
+        }
     }
 
     fun stop() {
         activeTarget = null
         reconnectJob?.cancel()
         ticketRefreshJob?.cancel()
+        bleTelemetryJob?.cancel()
         job?.cancel()
         authorizationJob?.cancel()
         reconnectJob = null
         ticketRefreshJob = null
+        bleTelemetryJob = null
         job = null
         authorizationJob = null
         remoteTransports.stop()
