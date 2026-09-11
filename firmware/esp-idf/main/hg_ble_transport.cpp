@@ -144,6 +144,10 @@ bool BleTransport::connected() const {
     return connection_handle_ != BLE_HS_CONN_HANDLE_NONE && notify_enabled_;
 }
 
+bool BleTransport::active_connection() {
+    return g_owner != nullptr && g_owner->connected();
+}
+
 esp_err_t BleTransport::publish_telemetry(const hg::TelemetryFrame& frame) {
     return notify_message(kTelemetryType,hg::telemetry_json(frame));
 }
