@@ -21,14 +21,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.SSLSocketFactory
 
-/**
- * Minimal MQTT 3.1.1 runtime used by HomeGuard Android.
- *
- * It deliberately implements only what HomeGuard needs: TLS/plain TCP connect,
- * username/password authentication, QoS0/1 publish, QoS1 subscribe, retained
- * availability, heartbeat/events/responses and reconnect. No Android Service and
- * no third-party broker SDK are required.
- */
+/** Minimal MQTT 3.1.1 runtime used by HomeGuard Android. */
 class MqttRuntimeClient(private val scope: CoroutineScope) {
     enum class State { DISABLED, CONNECTING, CONNECTED, OFFLINE, ERROR }
 
@@ -122,8 +115,8 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
                 availability.value = "unknown"
                 backoffMs = 1_000L
                 readLoop(cfg)
-            } catch (_: kotlinx.coroutines.CancellationException) {
-                throw _
+            } catch (cancel: kotlinx.coroutines.CancellationException) {
+                throw cancel
             } catch (_: Throwable) {
                 state.value = State.OFFLINE
             } finally {
@@ -142,11 +135,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         val secure = uri.scheme.equals("mqtts", true) || uri.scheme.equals("ssl", true)
         val port = if (uri.port > 0) uri.port else if (secure) 8883 else 1883
         val host = requireNotNull(uri.host) { "MQTT host missing" }
-        val raw = if (secure) {
-            SSLSocketFactory.getDefault().createSocket(host, port)
-        } else {
-            Socket(host, port)
-        }
+        val raw = if (secure) SSLSocketFactory.getDefault().createSocket(host, port) else Socket(host, port)
         raw.tcpNoDelay = true
         raw.soTimeout = 90_000
         socket = raw
@@ -155,9 +144,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
 
         writeConnect(cfg)
         val packet = readPacket(input)
-        check(packet.type == 2 && packet.payload.size >= 2 && packet.payload[1].toInt() == 0) {
-            "MQTT CONNACK rejected"
-        }
+        check(packet.type == 2 && packet.payload.size >= 2 && packet.payload[1].toInt() == 0) { "MQTT CONNACK rejected" }
         subscribe(input, topic(cfg, "availability"))
         subscribe(input, topic(cfg, "heartbeat"))
         subscribe(input, topic(cfg, "events"))
@@ -255,7 +242,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         val variable = ArrayList<Byte>()
         appendUtf8(variable, "MQTT")
         variable += 4
-        var flags = 0x02 // clean session
+        var flags = 0x02
         if (cfg.username.isNotEmpty()) flags = flags or 0x80
         if (cfg.password.isNotEmpty()) flags = flags or 0x40
         variable += flags.toByte()
@@ -315,13 +302,11 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
     }
 
     private fun nextPacketId(): Int = packetIds.updateAndGet { if (it >= 65535) 1 else it + 1 }
-
     private fun topic(cfg: Config, leaf: String): String = "homeguard/v1/devices/${cfg.deviceId}/$leaf"
 
     private fun normalizeUri(raw: String): URI {
         val trimmed = raw.trim()
-        val withScheme = if ("://" in trimmed) trimmed else "mqtts://$trimmed"
-        return URI(withScheme)
+        return URI(if ("://" in trimmed) trimmed else "mqtts://$trimmed")
     }
 
     private fun appendUtf8(out: MutableList<Byte>, value: String) {
