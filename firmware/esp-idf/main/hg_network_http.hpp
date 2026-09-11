@@ -20,9 +20,12 @@ public:
 
     // Factory commissioning entry point used by the authenticated BLE
     // provisioning path. Validation and encrypted provisioning persistence are
-    // performed before this is called; this method stores the same station
-    // credentials used by the normal runtime and starts the handover.
-    bool provision_station(const std::string& ssid, const std::string& password);
+    // performed before this is called; this stores the same station record the
+    // normal HTTP configuration path uses and starts the STA handover.
+    bool provision_station(const std::string& ssid, const std::string& password)
+    {
+        return apply_sta(ssid, password, true);
+    }
 
 private:
     enum class StaState : std::uint8_t {
