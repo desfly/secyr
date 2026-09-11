@@ -62,7 +62,7 @@ if '.put("credential"' in factory:
 
 require(JAVA / "ui" / "screens" / "AccessGateScreen.kt", [
     "R.drawable.bruce_launcher", "SETUP_REQUIRED", "LOGIN_REQUIRED",
-    "Сканувати Wi-Fi", "Створити Admin і закрити setup", "Увійдіть",
+    "Сканувати Wi-Fi", "Створити Admin і закрити setup", "Увійти",
 ])
 require(JAVA / "MainActivity.kt", [
     "currentAccessSession == null -> AccessGateScreen(",
