@@ -39,6 +39,17 @@ class TelemetrySocket {
 
     fun clearEvents() { eventState.value = emptyList() }
 
+    /**
+     * Feed an authenticated fallback transport snapshot into the same UI stream.
+     * A healthy WebSocket always wins; BLE/MQTT snapshots are accepted only when
+     * the primary WSS channel is not currently connected.
+     */
+    fun acceptFallbackSnapshot(snapshot: SystemSnapshot) {
+        if (connectionState.value != TelemetryConnectionState.CONNECTED) {
+            state.value = snapshot
+        }
+    }
+
     fun connect(url: String, token: String, certificateSha256: String = "") {
         disconnect()
         if (url.isBlank()) return
