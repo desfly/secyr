@@ -18,6 +18,7 @@ public:
     esp_err_t publish_telemetry(const hg::TelemetryFrame& frame);
     esp_err_t send_message(std::uint8_t type, const std::string& payload);
     bool connected() const;
+    static bool active_connection();
     std::uint32_t connection_epoch() const { return connection_epoch_; }
 
     esp_err_t advertise();
