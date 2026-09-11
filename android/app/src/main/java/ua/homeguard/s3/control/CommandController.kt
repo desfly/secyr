@@ -12,7 +12,7 @@ import ua.homeguard.s3.model.DeviceEndpoint
 import ua.homeguard.s3.network.HttpDeviceApi
 import ua.homeguard.s3.network.LocalTelemetryTicketBroker
 import ua.homeguard.s3.network.ble.BleHomeGuardClient
-import ua.homeguard.s3.network.ble.BleRuntimeSession
+import ua.homeguard.s3.network.ble.BleRuntimeRegistry
 import ua.homeguard.s3.storage.SettingsStore
 import java.util.concurrent.atomic.AtomicLong
 
@@ -21,7 +21,7 @@ class CommandController(
     private val settings: SettingsStore,
 ) {
     private val requestIds = AtomicLong(System.currentTimeMillis())
-    private val ble = BleRuntimeSession(settings.appContext)
+    private val ble = BleRuntimeRegistry.get(settings.appContext)
     @Volatile private var localHttpSessionToken: String = ""
     @Volatile private var localActor: String = ""
 
