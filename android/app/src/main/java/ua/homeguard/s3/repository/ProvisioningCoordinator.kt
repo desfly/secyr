@@ -38,14 +38,14 @@ class ProvisioningCoordinator(
         runCatching { ProvisioningQrParser.parse(raw) }
             .onSuccess {
                 mutableState.value = ProvisioningUiState(
-                    ProvisioningPhase.QR_READY,
-                    it,
-                    "QR перевірено: ${it.deviceId}"
+                    phase = ProvisioningPhase.QR_READY,
+                    qr = it,
+                    message = "QR перевірено: ${it.deviceId}"
                 )
             }
             .onFailure {
                 mutableState.value = ProvisioningUiState(
-                    ProvisioningPhase.ERROR,
+                    phase = ProvisioningPhase.ERROR,
                     error = it.message.orEmpty(),
                     message = "QR відхилено"
                 )
