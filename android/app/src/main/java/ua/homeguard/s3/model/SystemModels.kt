@@ -1,6 +1,6 @@
 package ua.homeguard.s3.model
 
-enum class Transport { NONE, ETHERNET, WIFI_STA, EMERGENCY_AP }
+enum class Transport { NONE, ETHERNET, WIFI_STA, EMERGENCY_AP, BLE }
 enum class HealthState { UNKNOWN, OK, DEGRADED, FAILED }
 enum class SystemMode { DISARMED, ARMED_HOME, ARMED_AWAY, ALARM, MAINTENANCE }
 
