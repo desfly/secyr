@@ -35,12 +35,21 @@ for forbidden in (
     if forbidden in http_api:
         errors.append(f"HttpDeviceApi local runtime still uses acting PIN after login: {forbidden}")
 
-require(JAVA / "control" / "CommandController.kt", [
+controller_path = JAVA / "control" / "CommandController.kt"
+require(controller_path, [
     "localHttpSessionToken", "suspend fun accessState()", "fun logout()",
     "if (localRuntime) localHttpSessionToken",
-    "api.telemetrySession(session.actor)",
     'credential = if (target.path == ControlPath.CLOUD) credential else ""',
 ])
+controller = controller_path.read_text(encoding="utf-8")
+if not any(snippet in controller for snippet in (
+    "api.telemetrySession(session.actor)",
+    "api.telemetrySession(httpSession.actor)",
+)):
+    errors.append(
+        f"{controller_path.relative_to(ROOT)} missing Android access contract: authenticated local telemetry session"
+    )
+
 require(JAVA / "network" / "FactoryResetClient.kt", [
     "private val sessionToken: String",
     'header("Authorization", "Bearer $sessionToken")',
@@ -53,7 +62,7 @@ if '.put("credential"' in factory:
 
 require(JAVA / "ui" / "screens" / "AccessGateScreen.kt", [
     "R.drawable.bruce_launcher", "SETUP_REQUIRED", "LOGIN_REQUIRED",
-    "Сканувати Wi-Fi", "Створити Admin і закрити setup", "Увійти",
+    "Сканувати Wi-Fi", "Створити Admin і закрити setup", "Увійдіть",
 ])
 require(JAVA / "MainActivity.kt", [
     "currentAccessSession == null -> AccessGateScreen(",
