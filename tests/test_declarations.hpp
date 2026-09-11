@@ -9,6 +9,7 @@ void test_access_runtime();
 void test_output_safety();
 void test_readiness();
 void test_runtime_support();
+void test_ble_remote();
 void test_build0009();
 void test_build0032();
 void test_build0038();
