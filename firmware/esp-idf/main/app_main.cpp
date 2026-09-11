@@ -22,6 +22,7 @@
 #include "hg_commissioning_nvs.hpp"
 #include "hg_reset_sequence.hpp"
 #include "hg_nvs_recovery.hpp"
+#include "hg_ble_transport.hpp"
 #include "device_discovery.hpp"
 #include "nvs_config_store.hpp"
 #include "websocket_telemetry.hpp"
@@ -46,6 +47,7 @@ namespace {
 
 constexpr const char* kTag = "homeguard_main";
 constexpr std::uint16_t kLocalApiPort = 80;
+constexpr std::uint8_t kBleCommandType = 3;
 
 homeguard::idf::HardwareBootstrap g_hardware;
 homeguard::idf::TelemetryRuntime g_telemetry;
@@ -65,6 +67,7 @@ homeguard::idf::GpioOutputBackend g_gpio_outputs;
 homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::AccessHttp g_access_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
+homeguard::idf::BleTransport g_ble_transport;
 NvsConfigStore g_provisioning_store;
 WebsocketTelemetry g_websocket_telemetry;
 DeviceDiscoveryService g_device_discovery;
@@ -223,10 +226,6 @@ esp_err_t start_http_server()
 void start_authenticated_telemetry_websocket()
 {
     if (g_http_server == nullptr) return;
-
-    // The WebSocket must exist even on controllers that were commissioned
-    // without a provisioned long-lived local API token. In that case Android
-    // authenticates through /api/v1/telemetry/session after normal login.
     std::string token;
     hg::ProvisioningPayload provisioning{};
     if (g_provisioning_store.load_provisioning(provisioning) && provisioning.valid({})) {
@@ -268,6 +267,32 @@ void start_device_discovery()
     ESP_LOGI(kTag, "LAN discovery responder ready: UDP/45678 -> http://%s.local:%u", hostname.c_str(), kLocalApiPort);
 }
 
+void on_ble_message(std::uint8_t type, const std::string& json, void*)
+{
+    if (type != kBleCommandType) {
+        ESP_LOGW(kTag, "Ignoring unsupported BLE message type=%u", static_cast<unsigned>(type));
+        return;
+    }
+    ESP_LOGI(kTag, "BLE command received (%u bytes)", static_cast<unsigned>(json.size()));
+    // Command routing is fail-closed until the authenticated BLE command router
+    // is attached. This keeps transport bring-up safe while preserving the
+    // on-wire COMMAND contract for the Android client.
+}
+
+void start_ble_transport()
+{
+    std::string device_name = "HomeGuard-S3";
+    if (g_cloud_link.device_id() != nullptr && g_cloud_link.device_id()[0] != '\0') {
+        std::string id = g_cloud_link.device_id();
+        if (id.size() > 6U) id.erase(0, id.size() - 6U);
+        device_name += "-" + id;
+    }
+    g_ble_transport.set_message_handler(&on_ble_message, nullptr);
+    const auto error = g_ble_transport.start(device_name.c_str());
+    if (error != ESP_OK) ESP_LOGE(kTag, "BLE transport failed: %s", esp_err_to_name(error));
+    else ESP_LOGI(kTag, "BLE transport ready as Android peripheral / key-fob central foundation");
+}
+
 }  // namespace
 
 extern "C" void app_main()
@@ -307,6 +332,7 @@ extern "C" void app_main()
     g_cloud_link.set_command_runtime(&g_system_model, &g_system_bus, &g_access_control);
     if (cloud_identity_error == ESP_OK) restore_cloud_config();
     initialize_physical_outputs();
+    start_ble_transport();
 
     const auto hardware_error = g_hardware.initialize();
     if (hardware_error != ESP_OK) ESP_LOGE(kTag, "Hardware bootstrap failed: %s", esp_err_to_name(hardware_error));
@@ -320,7 +346,7 @@ extern "C" void app_main()
         if (cloud_identity_error == ESP_OK) start_device_discovery();
     }
 
-    const auto telemetry_error = g_telemetry.start(&g_hardware, &g_websocket_telemetry, &g_system_model);
+    const auto telemetry_error = g_telemetry.start(&g_hardware, &g_websocket_telemetry, &g_system_model, &g_ble_transport);
     if (telemetry_error != ESP_OK) ESP_LOGE(kTag, "Telemetry task failed: %s", esp_err_to_name(telemetry_error));
 
     const auto build = homeguard::idf::current_build_info();

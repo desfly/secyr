@@ -1,5 +1,6 @@
 #include "hg_telemetry_runtime.hpp"
 #include "hg_hardware_bootstrap.hpp"
+#include "hg_ble_transport.hpp"
 #include "websocket_telemetry.hpp"
 #include "homeguard/system_model.hpp"
 #include "homeguard/hardware_calibration.hpp"
@@ -58,9 +59,7 @@ hg::ZoneState physical_zone_state(float millivolts)
     if (millivolts >= calibration.normal_min_mv && millivolts <= calibration.normal_max_mv) {
         return hg::ZoneState::Normal;
     }
-    return millivolts < calibration.normal_min_mv
-        ? hg::ZoneState::Short
-        : hg::ZoneState::Open;
+    return millivolts < calibration.normal_min_mv ? hg::ZoneState::Short : hg::ZoneState::Open;
 }
 
 void sample_zone_adc(Ads1115& adc, std::size_t first_zone, std::array<hg::ZoneState, 8>& zones)
@@ -68,15 +67,10 @@ void sample_zone_adc(Ads1115& adc, std::size_t first_zone, std::array<hg::ZoneSt
     for (std::size_t channel = 0; channel < 4; ++channel) {
         const auto zone_index = first_zone + channel;
         if (zone_index >= zones.size()) break;
-        if (!adc.ready()) {
-            zones[zone_index] = hg::ZoneState::Disabled;
-            continue;
-        }
+        if (!adc.ready()) { zones[zone_index] = hg::ZoneState::Disabled; continue; }
         float millivolts = 0.0F;
         const auto error = adc.read_single_ended_mv(static_cast<std::uint8_t>(channel), &millivolts);
-        zones[zone_index] = error == ESP_OK
-            ? physical_zone_state(millivolts)
-            : hg::ZoneState::Disabled;
+        zones[zone_index] = error == ESP_OK ? physical_zone_state(millivolts) : hg::ZoneState::Disabled;
     }
 }
 
@@ -86,36 +80,20 @@ std::uint64_t rtc_epoch(Ds3231& rtc, bool& valid)
     valid = rtc.read_time(&value) == ESP_OK;
     if (!valid) return 0;
     const auto epoch = std::mktime(&value);
-    if (epoch < 0) {
-        valid = false;
-        return 0;
-    }
+    if (epoch < 0) { valid = false; return 0; }
     return static_cast<std::uint64_t>(epoch);
 }
 
 }  // namespace
 
-esp_err_t TelemetryRuntime::start(
-    HardwareBootstrap* hardware,
-    WebsocketTelemetry* websocket,
-    const hg::SystemModel* system_model)
+esp_err_t TelemetryRuntime::start(HardwareBootstrap* hardware, WebsocketTelemetry* websocket, const hg::SystemModel* system_model, BleTransport* ble_transport)
 {
-    if (hardware == nullptr || websocket == nullptr || system_model == nullptr) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
+    if (hardware == nullptr || websocket == nullptr || system_model == nullptr) return ESP_ERR_INVALID_ARG;
     hardware_ = hardware;
     websocket_ = websocket;
     system_model_ = system_model;
-
-    const auto result = xTaskCreate(
-        &TelemetryRuntime::task_entry,
-        "hg_telemetry",
-        7168,
-        this,
-        6,
-        nullptr);
-
+    ble_transport_ = ble_transport;
+    const auto result = xTaskCreate(&TelemetryRuntime::task_entry, "hg_telemetry", 7168, this, 6, nullptr);
     return result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
@@ -146,40 +124,26 @@ void TelemetryRuntime::run()
         wifi_ap_record_t wifi_ap{};
         const bool wifi_connected = esp_wifi_sta_get_ap_info(&wifi_ap) == ESP_OK;
         const auto ethernet_status = hardware_->ethernet().status();
-        const auto transport = ethernet_status.link_up && ethernet_status.has_ip
-            ? hg::Transport::Ethernet
-            : (wifi_connected ? hg::Transport::WifiSta : hg::Transport::EmergencyAp);
-        health_.set(hg::Component::Wifi,
-                    wifi_connected ? hg::HealthState::Ok : hg::HealthState::Degraded,
-                    now_ms);
+        const auto transport = ethernet_status.link_up && ethernet_status.has_ip ? hg::Transport::Ethernet : (wifi_connected ? hg::Transport::WifiSta : hg::Transport::EmergencyAp);
+        health_.set(hg::Component::Wifi, wifi_connected ? hg::HealthState::Ok : hg::HealthState::Degraded, now_ms);
 
-        // Canonical physical mapping:
-        // ADS1115 #1 @0x48 A0..A3 -> zones 1..4
-        // ADS1115 #2 @0x49 A0..A3 -> zones 5..8
         std::array<hg::ZoneState, 8> zones{};
         zones.fill(hg::ZoneState::Disabled);
         sample_zone_adc(hardware_->zone_adc(), 0, zones);
         sample_zone_adc(hardware_->telemetry_adc(), 4, zones);
 
-        // Keep the first two channels of ADS1115 #2 available as raw analog mV
-        // for diagnostics until a dedicated pressure mapping is configured.
         std::array<hg::PressureState, 2> pressures{};
         std::array<float, 2> pressure_values{};
         std::array<bool, 2> pressure_valid{};
         auto& analog_adc = hardware_->telemetry_adc();
         for (std::size_t index = 0; index < pressures.size(); ++index) {
-            if (!analog_adc.ready()) {
-                pressures[index] = hg::PressureState::Disabled;
-                continue;
-            }
+            if (!analog_adc.ready()) { pressures[index] = hg::PressureState::Disabled; continue; }
             float millivolts = 0.0F;
             if (analog_adc.read_single_ended_mv(static_cast<std::uint8_t>(index), &millivolts) == ESP_OK) {
                 pressure_values[index] = millivolts;
                 pressure_valid[index] = true;
                 pressures[index] = hg::PressureState::Normal;
-            } else {
-                pressures[index] = hg::PressureState::SensorFault;
-            }
+            } else pressures[index] = hg::PressureState::SensorFault;
         }
 
         std::array<float, 8> temperatures{};
@@ -188,9 +152,7 @@ void TelemetryRuntime::run()
         auto& one_wire = hardware_->one_wire();
         if (one_wire.ready()) {
             if (one_wire.device_count() == 0U) (void)one_wire.discover();
-            if (one_wire.device_count() > 0U && one_wire.convert_all() == ESP_OK) {
-                (void)one_wire.read_all();
-            }
+            if (one_wire.device_count() > 0U && one_wire.convert_all() == ESP_OK) (void)one_wire.read_all();
             const auto count = std::min<std::size_t>(one_wire.device_count(), temperatures.size());
             temperature_count = static_cast<std::uint8_t>(count);
             const auto* devices = one_wire.devices();
@@ -202,48 +164,29 @@ void TelemetryRuntime::run()
 
         Ina226Reading battery{};
         auto& battery_monitor = hardware_->battery_monitor();
-        const bool battery_valid =
-            battery_monitor.ready() && battery_monitor.read(&battery) == ESP_OK;
+        const bool battery_valid = battery_monitor.ready() && battery_monitor.read(&battery) == ESP_OK;
 
-        const auto frame = builder_.build(
-            now_ms,
-            epoch,
-            system_mode(*system_model_),
-            transport,
-            zones,
-            pressures,
-            health_,
-            temperatures,
-            temperature_valid,
-            temperature_count,
-            battery.bus_voltage_v,
-            battery.current_a,
-            battery.power_w,
-            battery_valid,
-            pressure_values,
-            pressure_valid);
+        const auto frame = builder_.build(now_ms, epoch, system_mode(*system_model_), transport, zones, pressures, health_, temperatures, temperature_valid, temperature_count, battery.bus_voltage_v, battery.current_a, battery.power_w, battery_valid, pressure_values, pressure_valid);
 
         websocket_->publish(frame);
-
-        if ((++cycles % 60U) == 0U) {
-            hardware_->storage().refresh_space();
+        if (ble_transport_ != nullptr && ble_transport_->connected()) {
+            const auto ble_error = ble_transport_->publish_telemetry(frame);
+            if (ble_error != ESP_OK) ESP_LOGW(kTag, "BLE telemetry publish failed: %s", esp_err_to_name(ble_error));
         }
 
+        if ((++cycles % 60U) == 0U) hardware_->storage().refresh_space();
+
         ESP_LOGD(kTag,
-                 "telemetry seq=%llu transport=%.*s zones=[%u,%u,%u,%u,%u,%u,%u,%u] temperatures=%u battery=%s",
+                 "telemetry seq=%llu transport=%.*s zones=[%u,%u,%u,%u,%u,%u,%u,%u] temperatures=%u battery=%s ble=%s",
                  static_cast<unsigned long long>(frame.sequence),
                  static_cast<int>(hg::to_string(frame.transport).size()),
                  hg::to_string(frame.transport).data(),
-                 static_cast<unsigned>(frame.zones[0]),
-                 static_cast<unsigned>(frame.zones[1]),
-                 static_cast<unsigned>(frame.zones[2]),
-                 static_cast<unsigned>(frame.zones[3]),
-                 static_cast<unsigned>(frame.zones[4]),
-                 static_cast<unsigned>(frame.zones[5]),
-                 static_cast<unsigned>(frame.zones[6]),
-                 static_cast<unsigned>(frame.zones[7]),
-                 static_cast<unsigned>(frame.temperature_count),
-                 frame.battery_valid ? "ok" : "fault");
+                 static_cast<unsigned>(frame.zones[0]), static_cast<unsigned>(frame.zones[1]),
+                 static_cast<unsigned>(frame.zones[2]), static_cast<unsigned>(frame.zones[3]),
+                 static_cast<unsigned>(frame.zones[4]), static_cast<unsigned>(frame.zones[5]),
+                 static_cast<unsigned>(frame.zones[6]), static_cast<unsigned>(frame.zones[7]),
+                 static_cast<unsigned>(frame.temperature_count), frame.battery_valid ? "ok" : "fault",
+                 ble_transport_ != nullptr && ble_transport_->connected() ? "connected" : "offline");
 
         vTaskDelay(kTelemetryPeriod);
     }

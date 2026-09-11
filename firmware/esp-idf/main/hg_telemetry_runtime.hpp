@@ -12,13 +12,15 @@ class WebsocketTelemetry;
 namespace homeguard::idf {
 
 class HardwareBootstrap;
+class BleTransport;
 
 class TelemetryRuntime {
 public:
     esp_err_t start(
         HardwareBootstrap* hardware,
         WebsocketTelemetry* websocket,
-        const hg::SystemModel* system_model);
+        const hg::SystemModel* system_model,
+        BleTransport* ble_transport = nullptr);
 
 private:
     static void task_entry(void* context);
@@ -27,6 +29,7 @@ private:
     HardwareBootstrap* hardware_{nullptr};
     WebsocketTelemetry* websocket_{nullptr};
     const hg::SystemModel* system_model_{nullptr};
+    BleTransport* ble_transport_{nullptr};
     hg::TelemetryBuilder builder_{};
     hg::HealthMonitor health_{};
 };
