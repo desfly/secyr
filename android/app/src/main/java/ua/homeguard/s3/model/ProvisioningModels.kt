@@ -18,13 +18,27 @@ data class ProvisioningForm(
     val cloudClaimToken: String = ""
 )
 
+enum class ProvisioningTransport { BLE, SETUP_AP }
+
 enum class ProvisioningPhase {
-    IDLE, QR_READY, CONNECTING_SETUP_AP, AUTHORIZING, APPLYING, WAITING_FOR_RESTART, DISCOVERING_LOCAL, COMPLETE, ERROR
+    IDLE,
+    QR_READY,
+    CONNECTING_BLE,
+    AUTHORIZING_BLE,
+    APPLYING_BLE,
+    CONNECTING_SETUP_AP,
+    AUTHORIZING,
+    APPLYING,
+    WAITING_FOR_RESTART,
+    DISCOVERING_LOCAL,
+    COMPLETE,
+    ERROR
 }
 
 data class ProvisioningUiState(
     val phase: ProvisioningPhase = ProvisioningPhase.IDLE,
     val qr: ProvisioningQrData? = null,
+    val transport: ProvisioningTransport? = null,
     val message: String = "Відскануйте QR-код HomeGuard-S3",
     val error: String = "",
     val localUrl: String = ""
