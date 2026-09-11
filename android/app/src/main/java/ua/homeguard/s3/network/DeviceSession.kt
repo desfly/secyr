@@ -3,18 +3,22 @@ package ua.homeguard.s3.network
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceEndpoint
+import ua.homeguard.s3.network.cloud.CloudRuntime
+import ua.homeguard.s3.network.mqtt.MqttConnectionConfig
+import ua.homeguard.s3.network.mqtt.MqttRuntime
 import ua.homeguard.s3.storage.RegisteredDeviceStore
 import ua.homeguard.s3.storage.SettingsStore
 
 class DeviceSession(
     private val scope: CoroutineScope,
-    private val endpointProvider: kotlinx.coroutines.flow.StateFlow<DeviceEndpoint>,
+    private val endpointProvider: StateFlow<DeviceEndpoint>,
     private val settings: SettingsStore,
     private val telemetry: TelemetrySocket
 ) {
@@ -22,14 +26,22 @@ class DeviceSession(
         private const val RECONNECT_DELAY_MS = 2_000L
     }
 
+    private val remoteTransports = RemoteTransportRuntime(scope, endpointProvider, telemetry)
     private var job: Job? = null
     private var authorizationJob: Job? = null
     private var reconnectJob: Job? = null
     private var ticketRefreshJob: Job? = null
     @Volatile private var activeTarget: SessionTarget? = null
 
+    fun cloudState(): StateFlow<CloudRuntime.State> = remoteTransports.cloudState()
+    fun mqttState(): StateFlow<MqttRuntime.State> = remoteTransports.mqttState()
+    fun remoteStatuses(): List<TransportStatus> = remoteTransports.transportStatuses()
+    fun configureMqtt(config: MqttConnectionConfig, credential: String = "") =
+        remoteTransports.configureMqtt(config, credential)
+
     fun start() {
         if (job != null) return
+        remoteTransports.start()
         job = scope.launch {
             combine(endpointProvider, settings.settings) { endpoint, appSettings ->
                 when (endpoint.path) {
@@ -78,6 +90,7 @@ class DeviceSession(
         ticketRefreshJob = null
         job = null
         authorizationJob = null
+        remoteTransports.stop()
         telemetry.disconnect()
     }
 
