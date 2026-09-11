@@ -6,8 +6,9 @@ import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.provisioning.SecureTokenStore
 
 class SettingsStore(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences("homeguard_settings", Context.MODE_PRIVATE)
-    private val secure = SecureTokenStore(context)
+    internal val appContext: Context = context.applicationContext
+    private val preferences = appContext.getSharedPreferences("homeguard_settings", Context.MODE_PRIVATE)
+    private val secure = SecureTokenStore(appContext)
     val settings = MutableStateFlow(load())
 
     suspend fun update(value: AppSettings) {
