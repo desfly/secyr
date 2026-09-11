@@ -158,9 +158,11 @@ std::uint8_t* BleTransport::own_address_type_storage() {
 
 void BleTransport::on_connected(std::uint16_t handle) {
     connection_handle_=handle;
+    ++connection_epoch_;
+    if (connection_epoch_ == 0U) ++connection_epoch_;
     notify_enabled_=false;
     reset_rx();
-    ESP_LOGI(kTag,"Android BLE link connected; handle=%u",handle);
+    ESP_LOGI(kTag,"Android BLE link connected; handle=%u epoch=%lu",handle,static_cast<unsigned long>(connection_epoch_));
 }
 
 void BleTransport::on_disconnected() {
