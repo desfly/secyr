@@ -281,7 +281,9 @@ void start_ble_transport()
         &g_system_model,
         &g_boot_readiness,
         &g_physical_outputs,
-        &g_system_bus);
+        &g_system_bus,
+        &g_network_http,
+        &g_provisioning_store);
 
     std::string device_name = "HomeGuard-S3";
     if (g_cloud_link.device_id() != nullptr && g_cloud_link.device_id()[0] != '\0') {
