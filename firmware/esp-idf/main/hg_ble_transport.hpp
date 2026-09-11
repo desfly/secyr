@@ -18,6 +18,7 @@ public:
     esp_err_t publish_telemetry(const hg::TelemetryFrame& frame);
     esp_err_t send_message(std::uint8_t type, const std::string& payload);
     bool connected() const;
+    std::uint32_t connection_epoch() const { return connection_epoch_; }
 
     esp_err_t advertise();
     int accept_rx_fragment(const std::uint8_t* data, std::size_t size);
@@ -32,6 +33,7 @@ private:
 
     std::uint16_t connection_handle_{0xffff};
     std::uint16_t next_message_id_{1};
+    std::uint32_t connection_epoch_{0};
     std::uint8_t own_address_type_{0};
     bool notify_enabled_{false};
 
