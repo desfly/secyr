@@ -21,11 +21,14 @@ import java.util.ArrayDeque
 import java.util.UUID
 
 class BleHomeGuardClient(private val context: Context) {
-    enum class State { IDLE, CONNECTING, DISCOVERING, SUBSCRIBING, CONNECTED, OFFLINE, ERROR }
+    enum class State { IDLE, CONNECTING, DISCOVERING, SUBSCRIBING, CONNECTED, AUTHENTICATING, READY, OFFLINE, ERROR }
 
     private val decoder = BleFrameCodec.Decoder()
     private val stateFlow = MutableStateFlow(State.IDLE)
     private val snapshotFlow = MutableStateFlow(SystemSnapshot())
+    private val commandReplyFlow = MutableStateFlow<JSONObject?>(null)
+    private val sessionReplyFlow = MutableStateFlow<JSONObject?>(null)
+    private val errorFlow = MutableStateFlow<JSONObject?>(null)
     private val writeQueue = ArrayDeque<ByteArray>()
     private var writeInFlight = false
     private var gatt: BluetoothGatt? = null
@@ -33,9 +36,13 @@ class BleHomeGuardClient(private val context: Context) {
     private var tx: BluetoothGattCharacteristic? = null
     private var mtu = 23
     private var nextMessageId = 1
+    private var sessionActor: String? = null
 
     fun state(): StateFlow<State> = stateFlow.asStateFlow()
     fun snapshots(): StateFlow<SystemSnapshot> = snapshotFlow.asStateFlow()
+    fun commandReplies(): StateFlow<JSONObject?> = commandReplyFlow.asStateFlow()
+    fun sessionReplies(): StateFlow<JSONObject?> = sessionReplyFlow.asStateFlow()
+    fun errors(): StateFlow<JSONObject?> = errorFlow.asStateFlow()
 
     companion object {
         private val CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
@@ -54,13 +61,52 @@ class BleHomeGuardClient(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun disconnect() {
         gatt?.disconnect(); gatt?.close(); gatt = null
-        rx = null; tx = null; mtu = 23; decoder.reset()
+        rx = null; tx = null; mtu = 23; decoder.reset(); sessionActor = null
         synchronized(writeQueue) { writeQueue.clear(); writeInFlight = false }
-        snapshotFlow.value = SystemSnapshot(); stateFlow.value = State.IDLE
+        snapshotFlow.value = SystemSnapshot()
+        commandReplyFlow.value = null
+        sessionReplyFlow.value = null
+        errorFlow.value = null
+        stateFlow.value = State.IDLE
     }
 
+    fun authenticate(actor: String, pin: String): Boolean {
+        if (stateFlow.value != State.CONNECTED && stateFlow.value != State.READY) return false
+        sessionActor = null
+        sessionReplyFlow.value = null
+        stateFlow.value = State.AUTHENTICATING
+        return sendJson(
+            HomeGuardBleContract.Type.HELLO_SESSION,
+            JSONObject().put("actor", actor).put("pin", pin)
+        )
+    }
+
+    fun sendCommand(command: String, arguments: JSONObject = JSONObject()): Boolean {
+        val actor = sessionActor ?: return false
+        if (stateFlow.value != State.READY) return false
+        val payload = JSONObject(arguments.toString())
+            .put("actor", actor)
+            .put("command", command)
+        commandReplyFlow.value = null
+        return sendJson(HomeGuardBleContract.Type.COMMAND, payload)
+    }
+
+    fun controlOutput(outputId: Int, active: Boolean, alarmActive: Boolean = false): Boolean =
+        sendCommand(
+            "output.control",
+            JSONObject()
+                .put("outputId", outputId)
+                .put("active", active)
+                .put("alarmActive", alarmActive)
+        )
+
+    fun armAway(): Boolean = sendCommand("security.arm_away")
+    fun armHome(): Boolean = sendCommand("security.arm_home")
+    fun disarm(): Boolean = sendCommand("security.disarm")
+    fun panic(): Boolean = sendCommand("security.panic")
+
     fun sendJson(type: Int, json: JSONObject): Boolean {
-        if (gatt == null || rx == null || stateFlow.value != State.CONNECTED) return false
+        if (gatt == null || rx == null || stateFlow.value == State.IDLE || stateFlow.value == State.OFFLINE || stateFlow.value == State.ERROR) return false
         val id = nextMessageId++ and 0xffff
         val frames = BleFrameCodec.encode(type, id, json.toString().toByteArray(Charsets.UTF_8), mtu)
         synchronized(writeQueue) {
@@ -77,7 +123,8 @@ class BleHomeGuardClient(private val context: Context) {
             if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
                 stateFlow.value = State.DISCOVERING; g.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                rx = null; tx = null; decoder.reset(); synchronized(writeQueue) { writeQueue.clear(); writeInFlight = false }
+                rx = null; tx = null; decoder.reset(); sessionActor = null
+                synchronized(writeQueue) { writeQueue.clear(); writeInFlight = false }
                 snapshotFlow.value = SystemSnapshot(); stateFlow.value = State.OFFLINE
             } else if (status != BluetoothGatt.GATT_SUCCESS) stateFlow.value = State.ERROR
         }
@@ -147,11 +194,39 @@ class BleHomeGuardClient(private val context: Context) {
     }
 
     private fun accept(frame: ByteArray) {
-        val message = runCatching { decoder.accept(frame) }.getOrElse { decoder.reset(); stateFlow.value = State.ERROR; return }
-        if (message?.type != HomeGuardBleContract.Type.TELEMETRY) return
-        runCatching {
-            val parsed = JsonParsers.snapshot(JSONObject(message.payload.toString(Charsets.UTF_8)))
-            snapshotFlow.value = parsed.copy(transport = Transport.BLE)
-        }.onFailure { stateFlow.value = State.ERROR }
+        val message = runCatching { decoder.accept(frame) }.getOrElse {
+            decoder.reset(); stateFlow.value = State.ERROR; return
+        } ?: return
+
+        val json = runCatching { JSONObject(message.payload.toString(Charsets.UTF_8)) }.getOrElse {
+            stateFlow.value = State.ERROR; return
+        }
+
+        when (message.type) {
+            HomeGuardBleContract.Type.TELEMETRY -> runCatching {
+                val parsed = JsonParsers.snapshot(json)
+                snapshotFlow.value = parsed.copy(transport = Transport.BLE)
+            }.onFailure { stateFlow.value = State.ERROR }
+
+            HomeGuardBleContract.Type.HELLO_SESSION -> {
+                sessionReplyFlow.value = json
+                if (json.optBoolean("ok", false)) {
+                    sessionActor = json.optString("actor").takeIf { it.isNotBlank() } ?: sessionActor
+                    stateFlow.value = State.READY
+                } else {
+                    sessionActor = null
+                    stateFlow.value = State.CONNECTED
+                }
+            }
+
+            HomeGuardBleContract.Type.COMMAND_REPLY -> commandReplyFlow.value = json
+            HomeGuardBleContract.Type.ERROR -> {
+                errorFlow.value = json
+                if (json.optString("reason") == "ble_session_required") {
+                    sessionActor = null
+                    stateFlow.value = State.CONNECTED
+                }
+            }
+        }
     }
 }
