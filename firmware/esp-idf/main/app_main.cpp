@@ -23,6 +23,7 @@
 #include "hg_reset_sequence.hpp"
 #include "hg_nvs_recovery.hpp"
 #include "hg_ble_transport.hpp"
+#include "hg_ble_command_router.hpp"
 #include "device_discovery.hpp"
 #include "nvs_config_store.hpp"
 #include "websocket_telemetry.hpp"
@@ -47,7 +48,6 @@ namespace {
 
 constexpr const char* kTag = "homeguard_main";
 constexpr std::uint16_t kLocalApiPort = 80;
-constexpr std::uint8_t kBleCommandType = 3;
 
 homeguard::idf::HardwareBootstrap g_hardware;
 homeguard::idf::TelemetryRuntime g_telemetry;
@@ -68,6 +68,7 @@ homeguard::idf::AccessNvsStore g_access_store;
 homeguard::idf::AccessHttp g_access_http;
 homeguard::idf::CommissioningNvsStore g_commissioning_store;
 homeguard::idf::BleTransport g_ble_transport;
+homeguard::idf::BleCommandRouter g_ble_commands;
 NvsConfigStore g_provisioning_store;
 WebsocketTelemetry g_websocket_telemetry;
 DeviceDiscoveryService g_device_discovery;
@@ -269,18 +270,19 @@ void start_device_discovery()
 
 void on_ble_message(std::uint8_t type, const std::string& json, void*)
 {
-    if (type != kBleCommandType) {
-        ESP_LOGW(kTag, "Ignoring unsupported BLE message type=%u", static_cast<unsigned>(type));
-        return;
-    }
-    ESP_LOGI(kTag, "BLE command received (%u bytes)", static_cast<unsigned>(json.size()));
-    // Command routing is fail-closed until the authenticated BLE command router
-    // is attached. This keeps transport bring-up safe while preserving the
-    // on-wire COMMAND contract for the Android client.
+    g_ble_commands.handle(type, json);
 }
 
 void start_ble_transport()
 {
+    g_ble_commands.configure(
+        &g_ble_transport,
+        &g_access_control,
+        &g_system_model,
+        &g_boot_readiness,
+        &g_physical_outputs,
+        &g_system_bus);
+
     std::string device_name = "HomeGuard-S3";
     if (g_cloud_link.device_id() != nullptr && g_cloud_link.device_id()[0] != '\0') {
         std::string id = g_cloud_link.device_id();
@@ -290,7 +292,7 @@ void start_ble_transport()
     g_ble_transport.set_message_handler(&on_ble_message, nullptr);
     const auto error = g_ble_transport.start(device_name.c_str());
     if (error != ESP_OK) ESP_LOGE(kTag, "BLE transport failed: %s", esp_err_to_name(error));
-    else ESP_LOGI(kTag, "BLE transport ready as Android peripheral / key-fob central foundation");
+    else ESP_LOGI(kTag, "BLE transport ready: Android control peripheral and bonded key-fob central base");
 }
 
 }  // namespace
