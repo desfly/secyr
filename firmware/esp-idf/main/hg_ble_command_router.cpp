@@ -14,9 +14,11 @@
 #include "esp_timer.h"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace homeguard::idf {
@@ -86,6 +88,47 @@ const char* arm_state_name(hg::PartitionArmState state)
         case hg::PartitionArmState::Alarm: return "alarm";
         default: return "disarmed";
     }
+}
+
+std::string json_escape(std::string_view value)
+{
+    std::string out;
+    out.reserve(value.size() + 8U);
+    for (const char ch : value) {
+        switch (ch) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(ch) >= 0x20U) out.push_back(ch);
+                break;
+        }
+    }
+    return out;
+}
+
+template <std::size_t N>
+std::string_view text_view(const std::array<char, N>& value)
+{
+    const auto end = std::find(value.begin(), value.end(), '\0');
+    return {value.data(), static_cast<std::size_t>(end - value.begin())};
+}
+
+std::string capabilities_json(const homeguard::AccessControl& access, homeguard::AccessRole role)
+{
+    const auto allowed = [&](std::string_view command) {
+        return access.role_allows(role, command) ? "true" : "false";
+    };
+    return std::string{"{\"monitor\":true,\"armHome\":"} + allowed("security.arm_home") +
+           ",\"armAway\":" + allowed("security.arm_away") +
+           ",\"disarm\":" + allowed("security.disarm") +
+           ",\"panic\":" + allowed("security.panic") +
+           ",\"valves\":" + allowed("valve.open") +
+           ",\"networkConfigure\":" + allowed("network.configure") +
+           ",\"accessManage\":" + allowed("access.manage") +
+           ",\"serviceInvalidate\":" + allowed("system.service.invalidate") + "}";
 }
 }
 
@@ -315,11 +358,23 @@ void BleCommandRouter::handle_hello(const std::string& json)
         return;
     }
 
+    const auto* user = access_->find_user(actor);
+    if (user == nullptr || !user->enabled) {
+        actor_.clear();
+        authenticated_epoch_ = 0;
+        send(kHelloSessionType, "{\"ok\":false,\"reason\":\"user_unavailable\"}");
+        return;
+    }
+
     actor_ = actor;
     authenticated_epoch_ = transport_->connection_epoch();
-    send(kHelloSessionType, "{\"ok\":true,\"state\":\"authenticated\"}");
-    ESP_LOGI(kTag, "BLE session authenticated for actor=%s epoch=%lu",
-             actor_.c_str(), static_cast<unsigned long>(authenticated_epoch_));
+    const std::string body = std::string{"{\"ok\":true,\"state\":\"authenticated\",\"actor\":\""} +
+        json_escape(actor_) + "\",\"name\":\"" + json_escape(text_view(user->name)) +
+        "\",\"role\":\"" + homeguard::to_string(user->role) +
+        "\",\"capabilities\":" + capabilities_json(*access_, user->role) + "}";
+    send(kHelloSessionType, body);
+    ESP_LOGI(kTag, "BLE session authenticated for actor=%s role=%s epoch=%lu",
+             actor_.c_str(), homeguard::to_string(user->role), static_cast<unsigned long>(authenticated_epoch_));
 }
 
 void BleCommandRouter::handle_command(const std::string& json)
