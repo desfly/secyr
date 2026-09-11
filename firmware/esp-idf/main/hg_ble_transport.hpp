@@ -16,6 +16,7 @@ public:
     esp_err_t start(const char* device_name);
     void set_message_handler(MessageHandler handler, void* context);
     esp_err_t publish_telemetry(const hg::TelemetryFrame& frame);
+    esp_err_t send_message(std::uint8_t type, const std::string& payload);
     bool connected() const;
 
     esp_err_t advertise();
