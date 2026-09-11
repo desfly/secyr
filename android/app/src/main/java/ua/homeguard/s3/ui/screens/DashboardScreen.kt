@@ -1,12 +1,16 @@
 package ua.homeguard.s3.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -22,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -32,8 +37,10 @@ import ua.homeguard.s3.events.EventLogFilter
 import ua.homeguard.s3.events.EventLogFilterEngine
 import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
+import ua.homeguard.s3.model.RelayControlState
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.model.ZoneStatus
 import ua.homeguard.s3.ui.components.MaintenancePanel
 
 @Composable
@@ -43,6 +50,7 @@ fun DashboardScreen(
     route: String,
     deviceId: String,
     snapshot: SystemSnapshot,
+    relayState: RelayControlState,
     events: List<SystemEventRecord>,
     diagnostics: SystemDiagnostics,
     backupStatus: String,
@@ -68,6 +76,8 @@ fun DashboardScreen(
     onExportSettings: () -> Unit,
     onImportSettings: () -> Unit,
     onFactoryReset: () -> Unit,
+    onLightToggle: (Boolean) -> Unit,
+    onLockPulse: () -> Unit,
     onCommand: (CommandType) -> Unit,
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
@@ -78,11 +88,9 @@ fun DashboardScreen(
     var eventQuery by remember { mutableStateOf("") }
     var eventSourceText by remember { mutableStateOf("") }
     var pinVisible by remember { mutableStateOf(false) }
-    var zonesExpanded by remember { mutableStateOf(false) }
     val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12 && operatorPin.all(Char::isDigit)
     val authenticated = accessSession != null
     val adminAuthenticated = accessSession?.role?.name == "ADMIN"
-    val canMonitorZones = accessSession?.capabilities?.monitor == true
     val canCommand: (CommandType) -> Boolean = { command -> accessSession?.allows(command) == true }
     val sourceFilter = eventSourceText.trim().toIntOrNull()
     val filteredEvents = EventLogFilterEngine.apply(events, EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter))
@@ -160,40 +168,26 @@ fun DashboardScreen(
 
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        enabled = canMonitorZones,
-                        onClick = { zonesExpanded = !zonesExpanded },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(if (zonesExpanded) "Зони · моніторинг ▲" else "Зони · моніторинг ▼")
-                    }
-                    if (!canMonitorZones) {
-                        Text("Моніторинг зон доступний після входу з правом monitor.", style = MaterialTheme.typography.bodySmall)
-                    } else if (zonesExpanded) {
-                        if (snapshot.zones.isEmpty()) {
-                            Text("Очікування живих даних зон…", style = MaterialTheme.typography.bodySmall)
-                        } else {
-                            snapshot.zones.chunked(2).forEach { pair ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    pair.forEach { zone ->
-                                        Card(modifier = Modifier.weight(1f)) {
-                                            Column(modifier = Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                                Text(zone.name, style = MaterialTheme.typography.titleSmall)
-                                                Text(zone.state.uppercase(), style = MaterialTheme.typography.bodyMedium)
-                                                Text(if (zone.enabled) "Активна" else "Вимкнена", style = MaterialTheme.typography.bodySmall)
-                                            }
-                                        }
-                                    }
-                                    if (pair.size == 1) {
-                                        Column(modifier = Modifier.weight(1f)) { }
-                                    }
-                                }
-                            }
-                        }
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Статус охорони", style = MaterialTheme.typography.titleMedium)
+                    StatusRow("Режим", securityModeLabel(snapshot.mode.name))
+                    StatusRow("Стан системи", snapshot.health.name)
+                    StatusRow("Транспорт", snapshot.transport.name)
+                    Text("Телеметрія #${snapshot.sequence}", style = MaterialTheme.typography.bodySmall)
+                    Text("Uptime: ${snapshot.uptimeMs} ms", style = MaterialTheme.typography.bodySmall)
+                    Text("Команда: $commandStatus", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Зони", style = MaterialTheme.typography.titleMedium)
+                    if (snapshot.zones.isEmpty()) {
+                        Text("Очікування живих даних зон…", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        snapshot.zones.sortedBy { it.index }.forEach { zone -> ZoneStatusRow(zone) }
                     }
                 }
             }
@@ -263,20 +257,6 @@ fun DashboardScreen(
 
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Система", style = MaterialTheme.typography.titleMedium)
-                    StatusRow("Режим", snapshot.mode.name)
-                    StatusRow("Стан", snapshot.health.name)
-                    StatusRow("Транспорт", snapshot.transport.name)
-                    Text("Телеметрія #${snapshot.sequence}", style = MaterialTheme.typography.bodySmall)
-                    Text("Uptime: ${snapshot.uptimeMs} ms", style = MaterialTheme.typography.bodySmall)
-                    Text("Команда: $commandStatus", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Сповіщення", style = MaterialTheme.typography.titleMedium)
                     NotificationSwitchRow("Критичні", "Тривога, tamper, батарея, offline", criticalNotificationsEnabled, onCheckedChange = onCriticalNotificationsChange)
@@ -290,6 +270,43 @@ fun DashboardScreen(
             Text("Керування", style = MaterialTheme.typography.titleMedium)
             if (!authenticated) Text("Увійдіть, щоб активувати дозволені команди", style = MaterialTheme.typography.bodySmall)
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val relayEnabled = adminAuthenticated && relayState.available
+                val lightLabel = when {
+                    !relayState.available -> "◌ Освітлення · НЕМАЄ ДАНИХ"
+                    relayState.lightActive && relayState.lightAutomatic && !relayState.lightManual -> "● Освітлення · АВТО ON"
+                    relayState.lightActive && relayState.lightManual -> "● Освітлення · РУЧНЕ ON"
+                    relayState.lightActive -> "● Освітлення · ON"
+                    else -> "○ Освітлення · OFF"
+                }
+                if (relayState.lightActive) {
+                    Button(
+                        enabled = relayEnabled,
+                        onClick = { onLightToggle(!relayState.lightManual) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(lightLabel) }
+                } else {
+                    OutlinedButton(
+                        enabled = relayEnabled,
+                        onClick = { onLightToggle(true) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(lightLabel) }
+                }
+                if (relayState.lightAutomatic) {
+                    Text("Автоматика Z1/Z2 активна; ручне OFF не перериває поточний 60-секундний цикл.", style = MaterialTheme.typography.bodySmall)
+                }
+
+                val lockSeconds = (relayState.lockRemainingMs + 999) / 1000
+                val lockLabel = when {
+                    !relayState.available -> "◌ Замок · НЕМАЄ ДАНИХ"
+                    relayState.lockActive -> "● Замок · ON · ${lockSeconds} с"
+                    else -> "○ Замок · OFF"
+                }
+                if (relayState.lockActive) {
+                    Button(enabled = relayEnabled, onClick = onLockPulse, modifier = Modifier.fillMaxWidth()) { Text(lockLabel) }
+                } else {
+                    OutlinedButton(enabled = relayEnabled, onClick = onLockPulse, modifier = Modifier.fillMaxWidth()) { Text(lockLabel) }
+                }
+
                 Button(enabled = canCommand(CommandType.ARM_HOME), onClick = { onCommand(CommandType.ARM_HOME) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: дім") }
                 Button(enabled = canCommand(CommandType.ARM_AWAY), onClick = { onCommand(CommandType.ARM_AWAY) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: повна") }
                 OutlinedButton(enabled = canCommand(CommandType.DISARM), onClick = { pendingDangerousCommand = CommandType.DISARM }, modifier = Modifier.fillMaxWidth()) { Text("Зняти з охорони") }
@@ -369,6 +386,45 @@ fun DashboardScreen(
             }
         }
     }
+}
+
+@Composable
+private fun ZoneStatusRow(zone: ZoneStatus) {
+    val normalized = zone.state.trim().lowercase()
+    val label = when {
+        !zone.enabled -> "НЕМАЄ ДАНИХ"
+        normalized == "normal" -> "НОРМА"
+        normalized == "short" -> "КЗ"
+        normalized == "open" -> "ОБРИВ"
+        normalized == "tamper" -> "ТРИВОГА"
+        normalized == "disabled" -> "ВИМКНЕНО"
+        else -> normalized.uppercase().ifBlank { "НЕВІДОМО" }
+    }
+    val color = when {
+        !zone.enabled -> MaterialTheme.colorScheme.error
+        normalized == "normal" -> Color(0xFF2E7D32)
+        normalized == "short" -> Color(0xFFFFB300)
+        normalized == "open" || normalized == "tamper" -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.outline
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(modifier = Modifier.size(12.dp).background(color, CircleShape))
+        Text("Z${zone.index + 1}", style = MaterialTheme.typography.bodyMedium)
+        Text(zone.name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+private fun securityModeLabel(mode: String): String = when (mode) {
+    "DISARMED" -> "ЗНЯТО"
+    "ARMED_HOME" -> "ОХОРОНА: ДІМ"
+    "ARMED_AWAY" -> "ОХОРОНА: ПОВНА"
+    "ALARM" -> "ТРИВОГА"
+    "MAINTENANCE" -> "СЕРВІС"
+    else -> mode
 }
 
 @Composable

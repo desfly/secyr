@@ -20,11 +20,9 @@ struct WebsocketTelemetry::BroadcastWork {
 };
 
 bool WebsocketTelemetry::begin(void* server_handle, std::string_view local_api_token) {
-    if (server_ || !server_handle) return false;
-    if (!local_api_token.empty() && local_api_token.size() < 32U) return false;
+    if (server_ || !server_handle || local_api_token.size() < 32U) return false;
     server_ = server_handle;
-    if (local_api_token.empty()) token_.clear();
-    else token_.reset(local_api_token);
+    token_.reset(local_api_token);
     httpd_uri_t uri{};
     uri.uri = "/ws/telemetry";
     uri.method = HTTP_GET;
@@ -35,8 +33,7 @@ bool WebsocketTelemetry::begin(void* server_handle, std::string_view local_api_t
         stop();
         return false;
     }
-    ESP_LOGI(tag, "authenticated telemetry websocket registered (%s)",
-             local_api_token.empty() ? "session-token only" : "local API + session tokens");
+    ESP_LOGI(tag, "authenticated telemetry websocket registered");
     return true;
 }
 
@@ -89,9 +86,8 @@ bool WebsocketTelemetry::authorize(httpd_req_t* request) {
             continue;
         }
         if (session.authorized(authorization)) {
-            // Session tokens are short-lived handshake tickets. Consume them
-            // after one successful upgrade; Android requests a fresh ticket
-            // from its authenticated HTTP session when reconnecting.
+            // Session tokens are handshake tickets, not reusable bearer tokens.
+            // Consume after the first successful WebSocket upgrade.
             session.clear();
             session_token_issued_us_[i] = 0;
             return true;

@@ -41,23 +41,6 @@ import ua.homeguard.s3.model.AccessLifecycleState
 
 data class SetupWifiChoice(val ssid: String, val rssi: Int)
 
-private val AccessFieldAccent = Color(0xFF9C7BEF)
-private val AccessFieldBorder = Color(0xFFB8A7E8)
-
-@Composable
-private fun accessFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor = Color.White,
-    unfocusedTextColor = Color.White,
-    disabledTextColor = Color(0xFFBFC7D1),
-    cursorColor = AccessFieldAccent,
-    focusedBorderColor = AccessFieldAccent,
-    unfocusedBorderColor = AccessFieldBorder,
-    focusedLabelColor = AccessFieldAccent,
-    unfocusedLabelColor = Color(0xFFE2D9FA),
-    focusedPlaceholderColor = Color(0xFFCCD2DA),
-    unfocusedPlaceholderColor = Color(0xFFCCD2DA),
-)
-
 @Composable
 fun AccessGateScreen(
     state: AccessLifecycleState,
@@ -74,10 +57,26 @@ fun AccessGateScreen(
     var actor by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
-    var pinVisible by remember { mutableStateOf(false) }
     var wifiSsid by remember { mutableStateOf("") }
     var wifiPassword by remember { mutableStateOf("") }
+    var pinVisible by remember { mutableStateOf(false) }
     var wifiPasswordVisible by remember { mutableStateOf(false) }
+
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedTextColor = Color.White,
+        unfocusedTextColor = Color.White,
+        disabledTextColor = Color.White.copy(alpha = 0.55f),
+        cursorColor = Color.White,
+        focusedLabelColor = Color(0xFFC4A7FF),
+        unfocusedLabelColor = Color(0xFFCBD5E1),
+        disabledLabelColor = Color(0xFF94A3B8),
+        focusedBorderColor = Color(0xFF8B5CF6),
+        unfocusedBorderColor = Color(0xFF94A3B8),
+        disabledBorderColor = Color(0xFF64748B),
+        focusedTrailingIconColor = Color.White,
+        unfocusedTrailingIconColor = Color.White,
+        disabledTrailingIconColor = Color(0xFF94A3B8),
+    )
 
     Box(
         modifier = Modifier
@@ -140,7 +139,7 @@ fun AccessGateScreen(
                             onValueChange = { wifiSsid = it.take(32) },
                             label = { Text("SSID") },
                             singleLine = true,
-                            colors = accessFieldColors(),
+                            colors = fieldColors,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedTextField(
@@ -150,11 +149,11 @@ fun AccessGateScreen(
                             visualTransformation = if (wifiPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             trailingIcon = {
                                 IconButton(onClick = { wifiPasswordVisible = !wifiPasswordVisible }) {
-                                    Text(if (wifiPasswordVisible) "🙈" else "👁", color = Color.White)
+                                    Text(if (wifiPasswordVisible) "◉" else "👁", color = Color.White)
                                 }
                             },
                             singleLine = true,
-                            colors = accessFieldColors(),
+                            colors = fieldColors,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedButton(
@@ -170,7 +169,7 @@ fun AccessGateScreen(
                             onValueChange = { actor = it.take(23) },
                             label = { Text("ID адміністратора") },
                             singleLine = true,
-                            colors = accessFieldColors(),
+                            colors = fieldColors,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedTextField(
@@ -178,7 +177,7 @@ fun AccessGateScreen(
                             onValueChange = { name = it.take(31) },
                             label = { Text("Ім'я") },
                             singleLine = true,
-                            colors = accessFieldColors(),
+                            colors = fieldColors,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedTextField(
@@ -189,11 +188,11 @@ fun AccessGateScreen(
                             visualTransformation = if (pinVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             trailingIcon = {
                                 IconButton(onClick = { pinVisible = !pinVisible }) {
-                                    Text(if (pinVisible) "🙈" else "👁", color = Color.White)
+                                    Text(if (pinVisible) "◉" else "👁", color = Color.White)
                                 }
                             },
                             singleLine = true,
-                            colors = accessFieldColors(),
+                            colors = fieldColors,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Button(
@@ -210,7 +209,7 @@ fun AccessGateScreen(
                             onValueChange = { actor = it.take(23) },
                             label = { Text("Користувач") },
                             singleLine = true,
-                            colors = accessFieldColors(),
+                            colors = fieldColors,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedTextField(
@@ -221,11 +220,11 @@ fun AccessGateScreen(
                             visualTransformation = if (pinVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             trailingIcon = {
                                 IconButton(onClick = { pinVisible = !pinVisible }) {
-                                    Text(if (pinVisible) "🙈" else "👁", color = Color.White)
+                                    Text(if (pinVisible) "◉" else "👁", color = Color.White)
                                 }
                             },
                             singleLine = true,
-                            colors = accessFieldColors(),
+                            colors = fieldColors,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Button(

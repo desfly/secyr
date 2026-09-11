@@ -32,7 +32,4 @@ These rules are mandatory for all future work on the project.
    - `HW PASS` — user/hardware confirms correct behavior.
    - `FIXED` — only after `HW PASS`.
 
-9. **PROJECT-META.md is canonical.**
-   Before changing firmware, Android, Web UI, transports or hardware behavior, check `PROJECT-META.md`. Its requirements — including the full Android ↔ ESP32-S3 BLE channel and the separate BLE key-fob channel — must not be silently removed, weakened or bypassed. Any intentional change to project goals must be explicit and committed to Git.
-
 These rules exist because repeated premature declarations and substitutions wasted test time. They are part of the project process, not optional guidance.

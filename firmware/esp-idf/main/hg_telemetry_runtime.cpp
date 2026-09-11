@@ -2,7 +2,6 @@
 #include "hg_hardware_bootstrap.hpp"
 #include "websocket_telemetry.hpp"
 #include "homeguard/system_model.hpp"
-#include "homeguard/hardware_calibration.hpp"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -50,33 +49,20 @@ hg::SystemMode system_mode(const hg::SystemModel& model)
     }
 }
 
-hg::ZoneState physical_zone_state(float millivolts)
+hg::ZoneState zone_state(const hg::ZoneRecord& zone)
 {
-    const homeguard::ZoneCalibration calibration{};
-    if (millivolts <= calibration.short_max_mv) return hg::ZoneState::Short;
-    if (millivolts >= calibration.open_min_mv) return hg::ZoneState::Open;
-    if (millivolts >= calibration.normal_min_mv && millivolts <= calibration.normal_max_mv) {
-        return hg::ZoneState::Normal;
+    if (!zone.enabled || zone.bypassed || zone.state == hg::ModelZoneState::Bypassed) {
+        return hg::ZoneState::Disabled;
     }
-    return millivolts < calibration.normal_min_mv
-        ? hg::ZoneState::Short
-        : hg::ZoneState::Open;
-}
-
-void sample_zone_adc(Ads1115& adc, std::size_t first_zone, std::array<hg::ZoneState, 8>& zones)
-{
-    for (std::size_t channel = 0; channel < 4; ++channel) {
-        const auto zone_index = first_zone + channel;
-        if (zone_index >= zones.size()) break;
-        if (!adc.ready()) {
-            zones[zone_index] = hg::ZoneState::Disabled;
-            continue;
-        }
-        float millivolts = 0.0F;
-        const auto error = adc.read_single_ended_mv(static_cast<std::uint8_t>(channel), &millivolts);
-        zones[zone_index] = error == ESP_OK
-            ? physical_zone_state(millivolts)
-            : hg::ZoneState::Disabled;
+    switch (zone.state) {
+        case hg::ModelZoneState::Tamper:
+            return hg::ZoneState::Tamper;
+        case hg::ModelZoneState::Open:
+        case hg::ModelZoneState::Alarm:
+        case hg::ModelZoneState::Fault:
+            return hg::ZoneState::Open;
+        default:
+            return hg::ZoneState::Normal;
     }
 }
 
@@ -153,16 +139,18 @@ void TelemetryRuntime::run()
                     wifi_connected ? hg::HealthState::Ok : hg::HealthState::Degraded,
                     now_ms);
 
-        // Canonical physical mapping:
-        // ADS1115 #1 @0x48 A0..A3 -> zones 1..4
-        // ADS1115 #2 @0x49 A0..A3 -> zones 5..8
-        std::array<hg::ZoneState, 8> zones{};
+        std::array<hg::ZoneState, 5> zones{};
         zones.fill(hg::ZoneState::Disabled);
-        sample_zone_adc(hardware_->zone_adc(), 0, zones);
-        sample_zone_adc(hardware_->telemetry_adc(), 4, zones);
+        const auto zone_count = std::min<std::size_t>(zones.size(), system_model_->zone_count());
+        for (std::size_t index = 0; index < zone_count; ++index) {
+            if (const auto* zone = system_model_->zone_at(index); zone != nullptr) {
+                zones[index] = zone_state(*zone);
+            }
+        }
 
-        // Keep the first two channels of ADS1115 #2 available as raw analog mV
-        // for diagnostics until a dedicated pressure mapping is configured.
+        // The telemetry ADS1115 is sampled directly. Until a pressure-sensor
+        // transfer function is configured, values are intentionally carried as
+        // millivolts rather than being mislabeled as bar/kPa.
         std::array<hg::PressureState, 2> pressures{};
         std::array<float, 2> pressure_values{};
         std::array<bool, 2> pressure_valid{};
@@ -230,18 +218,12 @@ void TelemetryRuntime::run()
         }
 
         ESP_LOGD(kTag,
-                 "telemetry seq=%llu transport=%.*s zones=[%u,%u,%u,%u,%u,%u,%u,%u] temperatures=%u battery=%s",
+                 "telemetry seq=%llu transport=%.*s analog0=%.1fmV analog1=%.1fmV temperatures=%u battery=%s",
                  static_cast<unsigned long long>(frame.sequence),
                  static_cast<int>(hg::to_string(frame.transport).size()),
                  hg::to_string(frame.transport).data(),
-                 static_cast<unsigned>(frame.zones[0]),
-                 static_cast<unsigned>(frame.zones[1]),
-                 static_cast<unsigned>(frame.zones[2]),
-                 static_cast<unsigned>(frame.zones[3]),
-                 static_cast<unsigned>(frame.zones[4]),
-                 static_cast<unsigned>(frame.zones[5]),
-                 static_cast<unsigned>(frame.zones[6]),
-                 static_cast<unsigned>(frame.zones[7]),
+                 frame.pressure_values[0],
+                 frame.pressure_values[1],
                  static_cast<unsigned>(frame.temperature_count),
                  frame.battery_valid ? "ok" : "fault");
 
