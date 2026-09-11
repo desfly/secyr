@@ -33,6 +33,7 @@ add_library(homeguard_core
     src/access_control.cpp
     src/access_store.cpp
     src/access_lifecycle.cpp
+    src/ble_remote.cpp
     src/health_monitor.cpp
     src/telemetry.cpp
 )
@@ -50,6 +51,7 @@ add_executable(homeguard_tests
     ../tests/test_output_safety.cpp
     ../tests/test_readiness.cpp
     ../tests/test_runtime_support.cpp
+    ../tests/test_ble_remote.cpp
     ../tests/test_build0009.cpp
     ../tests/test_build0032.cpp
     ../tests/test_build0038.cpp
