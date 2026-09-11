@@ -14,8 +14,10 @@ import kotlinx.coroutines.withTimeout
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.ProvisioningForm
 import ua.homeguard.s3.model.ProvisioningPhase
+import ua.homeguard.s3.model.ProvisioningTransport
 import ua.homeguard.s3.model.ProvisioningUiState
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
+import ua.homeguard.s3.provisioning.BleProvisioningClient
 import ua.homeguard.s3.provisioning.PinnedProvisioningApi
 import ua.homeguard.s3.provisioning.ProvisioningHandoff
 import ua.homeguard.s3.provisioning.ProvisioningQrParser
@@ -31,6 +33,7 @@ class ProvisioningCoordinator(
     private val scope: CoroutineScope
 ) {
     private val connector = SetupNetworkConnector(context)
+    private val ble = BleProvisioningClient(context)
     private val mutableState = MutableStateFlow(ProvisioningUiState())
     val state: StateFlow<ProvisioningUiState> = mutableState
 
@@ -61,40 +64,77 @@ class ProvisioningCoordinator(
                 val localApiToken = randomToken()
                 val handoff = ProvisioningHandoff(qr.deviceId, 60_000L)
 
-                mutableState.value = mutableState.value.copy(
-                    phase = ProvisioningPhase.CONNECTING_SETUP_AP,
-                    message = "Підключення до ${qr.setupSsid}",
-                    error = ""
-                )
-                connector.connect(qr.setupSsid, qr.setupPassword).use {
-                    val api = PinnedProvisioningApi(qr)
+                val provisionedOverBle = if (ble.isAvailable()) {
                     mutableState.value = mutableState.value.copy(
-                        phase = ProvisioningPhase.AUTHORIZING,
-                        message = "Перевірка одноразового коду"
+                        phase = ProvisioningPhase.CONNECTING_BLE,
+                        transport = ProvisioningTransport.BLE,
+                        message = "Пошук HomeGuard-S3 по Bluetooth",
+                        error = ""
                     )
-                    api.authorize()
-                    mutableState.value = mutableState.value.copy(
-                        phase = ProvisioningPhase.APPLYING,
-                        message = "Передавання налаштувань через HTTPS"
-                    )
-                    api.apply(form, localApiToken)
-                    settings.update(
-                        AppSettings(
-                            deviceId = qr.deviceId,
-                            apiToken = localApiToken,
-                            autoReconnect = true,
-                            remoteAccessEnabled = form.cloudEndpoint.isNotBlank(),
-                            cloudBaseUrl = "",
-                            lastKnownLocalUrl = "",
-                            localCertificateSha256 = qr.certificateSha256
+                    val result = runCatching {
+                        mutableState.value = mutableState.value.copy(
+                            phase = ProvisioningPhase.AUTHORIZING_BLE,
+                            message = "Захищене BLE-підключення та перевірка QR"
                         )
-                    )
+                        ble.provision(qr, form, localApiToken)
+                    }
+                    if (result.isSuccess) {
+                        mutableState.value = mutableState.value.copy(
+                            phase = ProvisioningPhase.APPLYING_BLE,
+                            message = "Налаштування передано контролеру через Bluetooth"
+                        )
+                        true
+                    } else {
+                        val message = result.exceptionOrNull()?.message.orEmpty()
+                        if (message.startsWith("BLE authorization failed") ||
+                            message.startsWith("BLE provisioning failed")) {
+                            throw result.exceptionOrNull() ?: IllegalStateException(message)
+                        }
+                        false
+                    }
+                } else {
+                    false
                 }
+
+                if (!provisionedOverBle) {
+                    mutableState.value = mutableState.value.copy(
+                        phase = ProvisioningPhase.CONNECTING_SETUP_AP,
+                        transport = ProvisioningTransport.SETUP_AP,
+                        message = "Bluetooth недоступний — підключення до ${qr.setupSsid}",
+                        error = ""
+                    )
+                    connector.connect(qr.setupSsid, qr.setupPassword).use {
+                        val api = PinnedProvisioningApi(qr)
+                        mutableState.value = mutableState.value.copy(
+                            phase = ProvisioningPhase.AUTHORIZING,
+                            message = "Перевірка одноразового коду"
+                        )
+                        api.authorize()
+                        mutableState.value = mutableState.value.copy(
+                            phase = ProvisioningPhase.APPLYING,
+                            message = "Передавання налаштувань через HTTPS"
+                        )
+                        api.apply(form, localApiToken)
+                    }
+                }
+
+                settings.update(
+                    AppSettings(
+                        deviceId = qr.deviceId,
+                        apiToken = localApiToken,
+                        autoReconnect = true,
+                        remoteAccessEnabled = form.cloudEndpoint.isNotBlank(),
+                        cloudBaseUrl = "",
+                        lastKnownLocalUrl = "",
+                        localCertificateSha256 = qr.certificateSha256
+                    )
+                )
+                ble.close()
 
                 handoff.applyAccepted(System.currentTimeMillis())
                 mutableState.value = mutableState.value.copy(
                     phase = ProvisioningPhase.WAITING_FOR_RESTART,
-                    message = "Контролер перезапускається у режимі домашньої Wi-Fi мережі"
+                    message = "Контролер переходить у домашню Wi-Fi мережу"
                 )
                 delay(1_500L)
                 handoff.beginDiscovery(System.currentTimeMillis())
@@ -127,6 +167,7 @@ class ProvisioningCoordinator(
                     )
                 }
             }.onFailure {
+                ble.close()
                 mutableState.value = mutableState.value.copy(
                     phase = ProvisioningPhase.ERROR,
                     message = "Налаштування не завершено",
