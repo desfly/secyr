@@ -4,9 +4,11 @@
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_timer.h"
 #include "homeguard/access_control.hpp"
 #include "homeguard/system_model.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -18,6 +20,7 @@ namespace homeguard::idf {
 namespace {
 constexpr const char* kTag = "hg_cloud";
 constexpr const char* kPrefix = "homeguard/v1/devices";
+constexpr std::uint64_t kHeartbeatPeriodUs = 60ULL * 1000ULL * 1000ULL;
 
 bool parse_json_string(const std::string& body, const char* key, std::string& value)
 {
@@ -76,6 +79,44 @@ const char* arm_state_name(hg::PartitionArmState state)
         default: return "disarmed";
     }
 }
+
+const char* event_name(hg::SystemEventType type)
+{
+    switch (type) {
+        case hg::SystemEventType::ZoneOpen: return "zone_open";
+        case hg::SystemEventType::ZoneClosed: return "zone_closed";
+        case hg::SystemEventType::Alarm: return "alarm";
+        case hg::SystemEventType::Tamper: return "tamper";
+        case hg::SystemEventType::SensorOffline: return "sensor_offline";
+        case hg::SystemEventType::BatteryLow: return "battery_low";
+        case hg::SystemEventType::OutputOn: return "output_on";
+        case hg::SystemEventType::OutputOff: return "output_off";
+        case hg::SystemEventType::Armed: return "armed";
+        case hg::SystemEventType::Disarmed: return "disarmed";
+        case hg::SystemEventType::ConfigChanged: return "config_changed";
+    }
+    return "unknown";
+}
+
+bool should_publish_event(hg::SystemEventType type)
+{
+    switch (type) {
+        case hg::SystemEventType::ZoneOpen:
+        case hg::SystemEventType::ZoneClosed:
+        case hg::SystemEventType::Alarm:
+        case hg::SystemEventType::Tamper:
+        case hg::SystemEventType::SensorOffline:
+        case hg::SystemEventType::BatteryLow:
+        case hg::SystemEventType::OutputOn:
+        case hg::SystemEventType::OutputOff:
+        case hg::SystemEventType::Armed:
+        case hg::SystemEventType::Disarmed:
+            return true;
+        case hg::SystemEventType::ConfigChanged:
+            return false;
+    }
+    return false;
+}
 }
 
 void CloudLink::set_command_runtime(
@@ -86,6 +127,10 @@ void CloudLink::set_command_runtime(
     model_ = model;
     bus_ = bus;
     access_control_ = access_control;
+    if (bus_ != nullptr && !event_bus_subscribed_) {
+        event_bus_subscribed_ = bus_->subscribe(&CloudLink::system_event_handler, this);
+        if (!event_bus_subscribed_) ESP_LOGE(kTag, "Cloud event subscription failed");
+    }
 }
 
 void CloudLink::make_device_id()
@@ -104,6 +149,8 @@ void CloudLink::make_topics()
 {
     std::snprintf(state_topic_.data(), state_topic_.size(), "%s/%s/state", kPrefix, device_id_.data());
     std::snprintf(availability_topic_.data(), availability_topic_.size(), "%s/%s/availability", kPrefix, device_id_.data());
+    std::snprintf(heartbeat_topic_.data(), heartbeat_topic_.size(), "%s/%s/heartbeat", kPrefix, device_id_.data());
+    std::snprintf(event_topic_.data(), event_topic_.size(), "%s/%s/events", kPrefix, device_id_.data());
     std::snprintf(command_topic_.data(), command_topic_.size(), "%s/%s/commands", kPrefix, device_id_.data());
     std::snprintf(response_topic_.data(), response_topic_.size(), "%s/%s/responses", kPrefix, device_id_.data());
 }
@@ -167,12 +214,13 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
     }
 
     configured_ = true;
-    ESP_LOGI(kTag, "Cloud link started: device=%s broker=%s", device_id_.data(), broker_uri);
+    ESP_LOGI(kTag, "Cloud link started in low-traffic mode: device=%s broker=%s heartbeat=60s", device_id_.data(), broker_uri);
     return ESP_OK;
 }
 
 void CloudLink::stop()
 {
+    stop_heartbeat_timer();
     if (client_ == nullptr) {
         connected_ = false;
         configured_ = false;
@@ -191,6 +239,76 @@ void CloudLink::publish_online(bool online)
     if (client_ == nullptr) return;
     const char* value = online ? "online" : "offline";
     (void)esp_mqtt_client_publish(client_, availability_topic_.data(), value, 0, 1, 1);
+}
+
+void CloudLink::publish_heartbeat()
+{
+    if (client_ == nullptr || !connected_) return;
+    const auto up_seconds = static_cast<unsigned long long>(esp_timer_get_time() / 1000000LL);
+    const auto sequence = static_cast<unsigned long long>(++heartbeat_sequence_);
+    char payload[96]{};
+    const int length = std::snprintf(payload, sizeof(payload),
+        "{\"seq\":%llu,\"up\":%llu,\"online\":true}", sequence, up_seconds);
+    if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(payload)) return;
+    (void)esp_mqtt_client_publish(client_, heartbeat_topic_.data(), payload, length, 0, 0);
+}
+
+void CloudLink::start_heartbeat_timer()
+{
+    if (heartbeat_timer_ == nullptr) {
+        const esp_timer_create_args_t args = {
+            .callback = &CloudLink::heartbeat_timer_handler,
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "hg_mqtt_hb",
+            .skip_unhandled_events = true,
+        };
+        if (esp_timer_create(&args, &heartbeat_timer_) != ESP_OK) {
+            heartbeat_timer_ = nullptr;
+            ESP_LOGE(kTag, "MQTT heartbeat timer create failed");
+            return;
+        }
+    }
+    if (!esp_timer_is_active(heartbeat_timer_)) {
+        if (esp_timer_start_periodic(heartbeat_timer_, kHeartbeatPeriodUs) != ESP_OK) {
+            ESP_LOGE(kTag, "MQTT heartbeat timer start failed");
+        }
+    }
+}
+
+void CloudLink::stop_heartbeat_timer()
+{
+    if (heartbeat_timer_ == nullptr) return;
+    if (esp_timer_is_active(heartbeat_timer_)) (void)esp_timer_stop(heartbeat_timer_);
+    (void)esp_timer_delete(heartbeat_timer_);
+    heartbeat_timer_ = nullptr;
+}
+
+void CloudLink::heartbeat_timer_handler(void* context)
+{
+    auto* self = static_cast<CloudLink*>(context);
+    if (self != nullptr) self->publish_heartbeat();
+}
+
+void CloudLink::system_event_handler(const hg::SystemEvent& event, void* context)
+{
+    auto* self = static_cast<CloudLink*>(context);
+    if (self != nullptr) self->publish_system_event(event);
+}
+
+void CloudLink::publish_system_event(const hg::SystemEvent& event)
+{
+    if (client_ == nullptr || !connected_ || !should_publish_event(event.type)) return;
+    char payload[176]{};
+    const int length = std::snprintf(payload, sizeof(payload),
+        "{\"event\":\"%s\",\"source\":%u,\"value\":%ld,\"ts\":%llu,\"seq\":%llu}",
+        event_name(event.type),
+        static_cast<unsigned>(event.source_id),
+        static_cast<long>(event.value),
+        static_cast<unsigned long long>(event.timestamp_ms),
+        static_cast<unsigned long long>(event.sequence));
+    if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(payload)) return;
+    (void)esp_mqtt_client_publish(client_, event_topic_.data(), payload, length, 1, 0);
 }
 
 esp_err_t CloudLink::publish_state(const char* json, int qos, bool retain)
@@ -270,8 +388,10 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             connected_ = true;
             ++connect_count_;
             publish_online(true);
+            publish_heartbeat();
+            start_heartbeat_timer();
             (void)esp_mqtt_client_subscribe(client_, command_topic_.data(), 1);
-            ESP_LOGI(kTag, "Cloud connected; commands=%s responses=%s", command_topic_.data(), response_topic_.data());
+            ESP_LOGI(kTag, "Cloud connected; low-traffic heartbeat=60s events=%s", event_topic_.data());
             break;
         case MQTT_EVENT_DISCONNECTED:
             connected_ = false;
