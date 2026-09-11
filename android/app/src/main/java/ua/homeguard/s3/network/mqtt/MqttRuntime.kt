@@ -18,6 +18,10 @@ class MqttRuntime(
     private val scope: CoroutineScope,
     private val client: MqttRuntimeClient,
 ) {
+    companion object {
+        private const val HEARTBEAT_TIMEOUT_MS = 185_000L
+    }
+
     enum class State { DISABLED, CONNECTING, CONNECTED, OFFLINE }
 
     private val state = MutableStateFlow(State.DISABLED)
@@ -32,15 +36,16 @@ class MqttRuntime(
         if (job != null) return
         job = scope.launch {
             while (isActive) {
+                val heartbeat = client.lastHeartbeatAtMs().value
+                if (heartbeat > 0L) lastSeenAtMs.value = heartbeat
+                val heartbeatFresh = heartbeat == 0L || System.currentTimeMillis() - heartbeat <= HEARTBEAT_TIMEOUT_MS
                 state.value = when (client.state().value) {
-                    MqttRuntimeClient.State.CONNECTED -> State.CONNECTED
+                    MqttRuntimeClient.State.CONNECTED -> if (heartbeatFresh) State.CONNECTED else State.OFFLINE
                     MqttRuntimeClient.State.CONNECTING -> State.CONNECTING
                     MqttRuntimeClient.State.OFFLINE,
                     MqttRuntimeClient.State.ERROR -> State.OFFLINE
                     MqttRuntimeClient.State.DISABLED -> State.DISABLED
                 }
-                val heartbeat = client.lastHeartbeatAtMs().value
-                if (heartbeat > 0L) lastSeenAtMs.value = heartbeat
                 delay(500L)
             }
         }
