@@ -20,5 +20,12 @@ object HomeGuardBleContract {
         const val HELLO_SESSION = 5
         const val REMOTE_EVENT = 6
         const val ERROR = 7
+
+        // Factory commissioning path. These messages are intentionally separate
+        // from the authenticated runtime command channel so a fresh device can
+        // be provisioned before an Admin user/PIN exists.
+        const val PROVISIONING_AUTHORIZE = 8
+        const val PROVISIONING_APPLY = 9
+        const val PROVISIONING_REPLY = 10
     }
 }
