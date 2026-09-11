@@ -47,7 +47,7 @@ class BleRuntimeSession(context: Context) {
         }
     }
 
-    suspend fun authenticate(actor: String, pin: String, timeoutMs: Long = 8_000L) {
+    suspend fun authenticate(actor: String, pin: String, timeoutMs: Long = 8_000L): JSONObject {
         require(actor.isNotBlank()) { "BLE actor is empty" }
         require(pin.length in 4..12 && pin.all(Char::isDigit)) { "Invalid BLE PIN" }
         require(client.authenticate(actor, pin)) { "BLE authentication could not start" }
@@ -61,6 +61,7 @@ class BleRuntimeSession(context: Context) {
         withTimeout(timeoutMs) {
             client.state().filter { it == BleHomeGuardClient.State.READY }.first()
         }
+        return reply
     }
 
     suspend fun connectAndAuthenticate(
@@ -69,9 +70,16 @@ class BleRuntimeSession(context: Context) {
         pin: String,
         connectTimeoutMs: Long = 15_000L,
         authTimeoutMs: Long = 8_000L,
-    ) {
+    ): JSONObject {
         connect(deviceId, connectTimeoutMs)
-        if (!isReady()) authenticate(actor, pin, authTimeoutMs)
+        if (isReady()) {
+            return JSONObject()
+                .put("ok", true)
+                .put("state", "authenticated")
+                .put("actor", actor.trim())
+                .put("transport", "ble")
+        }
+        return authenticate(actor, pin, authTimeoutMs)
     }
 
     suspend fun execute(type: CommandType, timeoutMs: Long = 8_000L): JSONObject {
