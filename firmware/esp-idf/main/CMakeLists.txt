@@ -16,6 +16,7 @@ idf_component_register(
         "app_main.cpp"
         "hg_ble_transport.cpp"
         "hg_ble_remote_nvs.cpp"
+        "hg_ble_remote_http.cpp"
         "hg_web_http.cpp"
         "hg_network_http.cpp"
         "hg_lan_http.cpp"
