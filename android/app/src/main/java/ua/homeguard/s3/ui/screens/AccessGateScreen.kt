@@ -1,5 +1,10 @@
 package ua.homeguard.s3.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -31,11 +36,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import ua.homeguard.s3.R
 import ua.homeguard.s3.model.AccessLifecycleState
 
@@ -43,6 +50,12 @@ data class SetupWifiChoice(val ssid: String, val rssi: Int)
 
 private val AccessFieldAccent = Color(0xFF9C7BEF)
 private val AccessFieldBorder = Color(0xFFB8A7E8)
+
+private fun requiredBleRuntimePermissions(): List<String> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+} else {
+    emptyList()
+}
 
 @Composable
 private fun accessFieldColors() = OutlinedTextFieldDefaults.colors(
@@ -71,6 +84,7 @@ fun AccessGateScreen(
     onLogin: (String, String) -> Unit,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
     var actor by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
@@ -78,6 +92,32 @@ fun AccessGateScreen(
     var wifiSsid by remember { mutableStateOf("") }
     var wifiPassword by remember { mutableStateOf("") }
     var wifiPasswordVisible by remember { mutableStateOf(false) }
+    var pendingBleLogin by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    val blePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        val pending = pendingBleLogin
+        pendingBleLogin = null
+        val granted = requiredBleRuntimePermissions().all { permission ->
+            result[permission] == true ||
+                ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+        }
+        if (granted && pending != null) onLogin(pending.first, pending.second)
+    }
+
+    fun submitLoginWithBlePermissions() {
+        val normalizedActor = actor.trim()
+        val missing = requiredBleRuntimePermissions().filter { permission ->
+            ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            onLogin(normalizedActor, pin)
+        } else {
+            pendingBleLogin = normalizedActor to pin
+            blePermissionLauncher.launch(missing.toTypedArray())
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -229,7 +269,7 @@ fun AccessGateScreen(
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Button(
-                            onClick = { onLogin(actor.trim(), pin) },
+                            onClick = ::submitLoginWithBlePermissions,
                             enabled = !busy && actor.isNotBlank() && pin.length in 4..12,
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text("Увійти") }
