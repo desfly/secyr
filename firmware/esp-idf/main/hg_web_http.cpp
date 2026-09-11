@@ -205,6 +205,107 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
   window.addEventListener("hashchange", applyEmbeddedView);
   applyEmbeddedView();
 })();
+
+;(() => {
+  let timer = 0;
+
+  const label = (ok, pending = false) => pending ? "ПІДКЛЮЧЕННЯ" : (ok ? "ОНЛАЙН" : "ОФЛАЙН");
+  const badge = (ok, pending = false) => {
+    const text = label(ok, pending);
+    const bg = pending ? "#fff4cc" : (ok ? "#dcf8e8" : "#ffe3e3");
+    const fg = pending ? "#8a6500" : (ok ? "#157347" : "#b42318");
+    return `<strong style="display:inline-block;min-width:104px;padding:5px 9px;border-radius:999px;text-align:center;background:${bg};color:${fg}">${text}</strong>`;
+  };
+
+  function removeModule() {
+    document.getElementById("adminConnectivityCard")?.remove();
+    const wifi = document.getElementById("networkCard");
+    const cloud = document.getElementById("cloudCard");
+    if (wifi) wifi.hidden = false;
+    if (cloud) cloud.hidden = false;
+    if (timer) { clearInterval(timer); timer = 0; }
+  }
+
+  function ensureModule() {
+    if (window.HomeGuardAuth?.role?.() !== "admin") { removeModule(); return null; }
+    const grid = document.querySelector(".status-grid");
+    if (!grid) return null;
+    let card = document.getElementById("adminConnectivityCard");
+    if (!card) {
+      document.getElementById("networkCard")?.setAttribute("hidden", "");
+      document.getElementById("cloudCard")?.setAttribute("hidden", "");
+      card = document.createElement("article");
+      card.id = "adminConnectivityCard";
+      card.style.cssText = "grid-column:span 2;display:block;min-height:0;padding:16px 18px";
+      card.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px">
+          <div><span style="font-size:13px;color:#66758b">Admin</span><strong style="display:block;font-size:18px">Зв'язок</strong></div>
+          <small id="adminConnectivityUpdated">—</small>
+        </div>
+        <div style="display:grid;grid-template-columns:minmax(120px,1fr) 130px minmax(120px,1fr);gap:0;border:1px solid #d7deea;border-radius:10px;overflow:hidden">
+          <div style="padding:8px 10px;background:#f5f7fa;font-weight:700">Канал</div><div style="padding:8px 10px;background:#f5f7fa;font-weight:700">Стан</div><div style="padding:8px 10px;background:#f5f7fa;font-weight:700">IP / адреса</div>
+          <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Wi‑Fi</div><div id="commWifiState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commWifiIp" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+          <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Ethernet W5500</div><div id="commEthState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commEthIp" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+          <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Bluetooth BLE</div><div id="commBleState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commBleIp" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+          <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Cloud MQTT</div><div id="commCloudState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commCloudIp" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+        </div>`;
+      grid.appendChild(card);
+    }
+    return card;
+  }
+
+  async function getJson(path) {
+    const response = await fetch(path, {cache:"no-store"});
+    const text = await response.text();
+    let body = {};
+    try { body = text ? JSON.parse(text) : {}; } catch (_) {}
+    if (!response.ok || body.ok === false) throw new Error(body.reason || String(response.status));
+    return body;
+  }
+
+  async function refreshConnectivity() {
+    if (window.HomeGuardAuth?.role?.() !== "admin") { removeModule(); return; }
+    if (!ensureModule()) return;
+    try {
+      const [wifi, local, cloud] = await Promise.all([
+        getJson("/api/v1/network/status"),
+        getJson("/api/v1/connectivity/status"),
+        getJson("/api/v1/cloud/status")
+      ]);
+      const wifiConnected = wifi?.state === "connected";
+      const wifiPending = wifi?.state === "connecting";
+      document.getElementById("commWifiState").innerHTML = badge(wifiConnected, wifiPending);
+      document.getElementById("commWifiIp").textContent = wifi?.ip || "—";
+
+      const ethConnected = local?.ethernet?.linkUp === true && local?.ethernet?.hasIp === true;
+      document.getElementById("commEthState").innerHTML = badge(ethConnected, local?.ethernet?.initialized === true && !ethConnected);
+      document.getElementById("commEthIp").textContent = local?.ethernet?.ip || "—";
+
+      const bleConnected = local?.ble?.connected === true;
+      document.getElementById("commBleState").innerHTML = badge(bleConnected, false);
+      document.getElementById("commBleIp").textContent = "—";
+
+      const cloudConnected = cloud?.connected === true;
+      const cloudPending = cloud?.configured === true && !cloudConnected;
+      document.getElementById("commCloudState").innerHTML = badge(cloudConnected, cloudPending);
+      document.getElementById("commCloudIp").textContent = cloud?.deviceId || "—";
+
+      document.getElementById("adminConnectivityUpdated").textContent = `Оновлено ${new Date().toLocaleTimeString("uk-UA")}`;
+    } catch (error) {
+      const updated = document.getElementById("adminConnectivityUpdated");
+      if (updated) updated.textContent = `Помилка: ${error.message}`;
+    }
+  }
+
+  const boot = setInterval(() => {
+    if (!window.HomeGuardAuth?.authenticated?.()) return;
+    clearInterval(boot);
+    if (window.HomeGuardAuth.role() !== "admin") { removeModule(); return; }
+    ensureModule();
+    refreshConnectivity();
+    timer = setInterval(refreshConnectivity, 5000);
+  }, 250);
+})();
 )JS";
 
     return send_text_with_suffix(
