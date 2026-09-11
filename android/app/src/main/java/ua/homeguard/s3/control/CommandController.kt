@@ -66,13 +66,9 @@ class CommandController(
         if (target.path != ControlPath.CLOUD) {
             localHttpSessionToken = session.sessionToken
             localActor = session.actor
-            // Keep this call explicit: login establishes the HTTP Bearer session,
-            // then obtains the first single-use WebSocket handshake ticket.
             val telemetryToken = api.telemetrySession(session.actor)
             settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
 
-            // Establish BLE while the one-time UI PIN is still available. BLE failure
-            // is deliberately non-fatal: the HTTP/WSS local channel remains usable.
             val deviceId = settings.settings.value.deviceId
             if (deviceId.isNotBlank()) {
                 runCatching {
@@ -109,20 +105,26 @@ class CommandController(
 
         if (supportsBle(type) && ble.isReady()) {
             val bleReply = runCatching { ble.execute(type) }.getOrNull()
-            if (bleReply != null) {
-                return CommandReply(
-                    accepted = bleReply.optBoolean("ok", false),
-                    duplicate = bleReply.optBoolean("duplicate", false),
-                    code = bleReply.optString("code").ifBlank {
-                        bleReply.optString("reason").ifBlank {
-                            if (bleReply.optBoolean("ok", false)) "ok_ble" else "rejected_ble"
-                        }
-                    },
-                )
-            }
+            if (bleReply != null) return mapBleReply(bleReply)
         }
 
         return httpReply ?: CommandReply(accepted = false, code = "offline")
+    }
+
+    suspend fun panicOverBle(): CommandReply {
+        if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
+        return runCatching { mapBleReply(ble.panic()) }
+            .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
+    }
+
+    suspend fun controlOutputOverBle(
+        outputId: Int,
+        active: Boolean,
+        alarmActive: Boolean = false,
+    ): CommandReply {
+        if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
+        return runCatching { mapBleReply(ble.controlOutput(outputId, active, alarmActive)) }
+            .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
     }
 
     private suspend fun executeHttp(type: CommandType, actor: String, credential: String): CommandReply {
@@ -146,6 +148,18 @@ class CommandController(
         )
         return api.command(command)
     }
+
+    private fun mapBleReply(bleReply: JSONObject): CommandReply = CommandReply(
+        accepted = bleReply.optBoolean("ok", false),
+        duplicate = bleReply.optBoolean("duplicate", false),
+        code = bleReply.optString("code").ifBlank {
+            bleReply.optString("reason").ifBlank {
+                bleReply.optString("status").ifBlank {
+                    if (bleReply.optBoolean("ok", false)) "ok_ble" else "rejected_ble"
+                }
+            }
+        },
+    )
 
     private suspend fun issueFreshTelemetryTicket(target: DeviceEndpoint): String {
         val token = createApi(target).telemetrySession(localActor)
