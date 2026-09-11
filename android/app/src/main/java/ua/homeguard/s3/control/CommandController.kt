@@ -116,28 +116,7 @@ class CommandController(
             )
         }
 
-        // Current BLE HELLO authenticates the actor and every command is still
-        // authoritatively role-checked by the ESP before execution. Until HELLO
-        // carries the full access profile, expose only the runtime controls that
-        // have an independently enforced BLE command path; never grant admin or
-        // configuration privileges from an Android-side guess.
-        return AccessSession(
-            actor = bleReply.optString("actor", normalizedActor).ifBlank { normalizedActor },
-            name = bleReply.optString("name", normalizedActor).ifBlank { normalizedActor },
-            role = AccessRole.USER,
-            capabilities = AccessCapabilities(
-                monitor = true,
-                armHome = true,
-                armAway = true,
-                disarm = true,
-                panic = true,
-                valves = true,
-                networkConfigure = false,
-                accessManage = false,
-                serviceInvalidate = false,
-            ),
-            sessionToken = "",
-        )
+        return parseBleAccessSession(bleReply, normalizedActor)
     }
 
     suspend fun refreshTelemetryToken(): String {
@@ -202,6 +181,47 @@ class CommandController(
             credential = if (target.path == ControlPath.CLOUD) credential else "",
         )
         return api.command(command)
+    }
+
+    private fun parseBleAccessSession(reply: JSONObject, fallbackActor: String): AccessSession {
+        val role = when (reply.optString("role", "user").lowercase()) {
+            "admin" -> AccessRole.ADMIN
+            "guest" -> AccessRole.GUEST
+            else -> AccessRole.USER
+        }
+        val raw = reply.optJSONObject("capabilities")
+        val capabilities = if (raw != null) {
+            AccessCapabilities(
+                monitor = raw.optBoolean("monitor", true),
+                armHome = raw.optBoolean("armHome", false),
+                armAway = raw.optBoolean("armAway", false),
+                disarm = raw.optBoolean("disarm", false),
+                panic = raw.optBoolean("panic", false),
+                valves = raw.optBoolean("valves", false),
+                networkConfigure = raw.optBoolean("networkConfigure", false),
+                accessManage = raw.optBoolean("accessManage", false),
+                serviceInvalidate = raw.optBoolean("serviceInvalidate", false),
+            )
+        } else {
+            AccessCapabilities(
+                monitor = true,
+                armHome = role != AccessRole.GUEST,
+                armAway = role != AccessRole.GUEST,
+                disarm = role != AccessRole.GUEST,
+                panic = role != AccessRole.GUEST,
+                valves = role != AccessRole.GUEST,
+                networkConfigure = role == AccessRole.ADMIN,
+                accessManage = role == AccessRole.ADMIN,
+                serviceInvalidate = role == AccessRole.ADMIN,
+            )
+        }
+        return AccessSession(
+            actor = reply.optString("actor", fallbackActor).ifBlank { fallbackActor },
+            name = reply.optString("name", fallbackActor).ifBlank { fallbackActor },
+            role = role,
+            capabilities = capabilities,
+            sessionToken = "",
+        )
     }
 
     private fun mapBleReply(bleReply: JSONObject): CommandReply = CommandReply(
