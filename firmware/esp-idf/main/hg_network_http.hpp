@@ -18,6 +18,12 @@ public:
     [[nodiscard]] AccessControl* access_control() const noexcept { return access_; }
     esp_err_t register_handlers(httpd_handle_t server);
 
+    // Factory commissioning entry point used by the authenticated BLE
+    // provisioning path. Validation and encrypted provisioning persistence are
+    // performed before this is called; this method stores the same station
+    // credentials used by the normal runtime and starts the handover.
+    bool provision_station(const std::string& ssid, const std::string& password);
+
 private:
     enum class StaState : std::uint8_t {
         Idle,
