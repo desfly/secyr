@@ -43,6 +43,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
 
     @Volatile private var config: Config? = null
     @Volatile private var socket: Socket? = null
+    @Volatile private var input: BufferedInputStream? = null
     @Volatile private var output: BufferedOutputStream? = null
     private var worker: Job? = null
 
@@ -66,6 +67,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         worker = null
         runCatching { socket?.close() }
         socket = null
+        input = null
         output = null
         pendingResponses.values.forEach { it.cancel() }
         pendingResponses.clear()
@@ -122,6 +124,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
             } finally {
                 runCatching { socket?.close() }
                 socket = null
+                input = null
                 output = null
             }
             if (config != cfg) break
@@ -139,27 +142,28 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         raw.tcpNoDelay = true
         raw.soTimeout = 90_000
         socket = raw
-        val input = BufferedInputStream(raw.getInputStream())
+        val sessionInput = BufferedInputStream(raw.getInputStream())
+        input = sessionInput
         output = BufferedOutputStream(raw.getOutputStream())
 
         writeConnect(cfg)
-        val packet = readPacket(input)
+        val packet = readPacket(sessionInput)
         check(packet.type == 2 && packet.payload.size >= 2 && packet.payload[1].toInt() == 0) { "MQTT CONNACK rejected" }
-        subscribe(input, topic(cfg, "availability"))
-        subscribe(input, topic(cfg, "heartbeat"))
-        subscribe(input, topic(cfg, "events"))
-        subscribe(input, topic(cfg, "responses"))
+        subscribe(sessionInput, topic(cfg, "availability"))
+        subscribe(sessionInput, topic(cfg, "heartbeat"))
+        subscribe(sessionInput, topic(cfg, "events"))
+        subscribe(sessionInput, topic(cfg, "responses"))
     }
 
     private fun readLoop(cfg: Config) {
-        val input = BufferedInputStream(checkNotNull(socket).getInputStream())
+        val sessionInput = checkNotNull(input) { "MQTT input stream missing" }
         var lastPingAt = System.currentTimeMillis()
         while (worker?.isActive == true && config == cfg) {
             if (System.currentTimeMillis() - lastPingAt >= 30_000L) {
                 writeRaw(byteArrayOf(0xC0.toByte(), 0x00))
                 lastPingAt = System.currentTimeMillis()
             }
-            val packet = readPacket(input)
+            val packet = readPacket(sessionInput)
             when (packet.type) {
                 3 -> handlePublish(cfg, packet.flags, packet.payload)
                 13 -> Unit
