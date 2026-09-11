@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
+import ua.homeguard.s3.model.ProvisioningForm
+import ua.homeguard.s3.model.ProvisioningQrData
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.model.Transport
 import ua.homeguard.s3.network.JsonParsers
@@ -21,13 +23,17 @@ import java.util.ArrayDeque
 import java.util.UUID
 
 class BleHomeGuardClient(private val context: Context) {
-    enum class State { IDLE, CONNECTING, DISCOVERING, SUBSCRIBING, CONNECTED, AUTHENTICATING, READY, OFFLINE, ERROR }
+    enum class State {
+        IDLE, CONNECTING, DISCOVERING, SUBSCRIBING, CONNECTED,
+        AUTHENTICATING, PROVISIONING, READY, OFFLINE, ERROR
+    }
 
     private val decoder = BleFrameCodec.Decoder()
     private val stateFlow = MutableStateFlow(State.IDLE)
     private val snapshotFlow = MutableStateFlow(SystemSnapshot())
     private val commandReplyFlow = MutableStateFlow<JSONObject?>(null)
     private val sessionReplyFlow = MutableStateFlow<JSONObject?>(null)
+    private val provisioningReplyFlow = MutableStateFlow<JSONObject?>(null)
     private val errorFlow = MutableStateFlow<JSONObject?>(null)
     private val writeQueue = ArrayDeque<ByteArray>()
     private var writeInFlight = false
@@ -43,6 +49,7 @@ class BleHomeGuardClient(private val context: Context) {
     fun snapshots(): StateFlow<SystemSnapshot> = snapshotFlow.asStateFlow()
     fun commandReplies(): StateFlow<JSONObject?> = commandReplyFlow.asStateFlow()
     fun sessionReplies(): StateFlow<JSONObject?> = sessionReplyFlow.asStateFlow()
+    fun provisioningReplies(): StateFlow<JSONObject?> = provisioningReplyFlow.asStateFlow()
     fun errors(): StateFlow<JSONObject?> = errorFlow.asStateFlow()
 
     companion object {
@@ -67,6 +74,7 @@ class BleHomeGuardClient(private val context: Context) {
         snapshotFlow.value = SystemSnapshot()
         commandReplyFlow.value = null
         sessionReplyFlow.value = null
+        provisioningReplyFlow.value = null
         errorFlow.value = null
         stateFlow.value = State.IDLE
     }
@@ -86,6 +94,42 @@ class BleHomeGuardClient(private val context: Context) {
             stateFlow.value = State.CONNECTED
         }
         return queued
+    }
+
+    /**
+     * Starts factory commissioning over BLE. This deliberately does not use an
+     * Admin PIN: a new/reset panel may not have an owner yet. The proof is the
+     * same QR pairing code + certificate fingerprint used by HTTPS provisioning.
+     */
+    fun authorizeProvisioning(qr: ProvisioningQrData): Boolean {
+        if (stateFlow.value != State.CONNECTED && stateFlow.value != State.PROVISIONING) return false
+        provisioningReplyFlow.value = null
+        stateFlow.value = State.PROVISIONING
+        val queued = sendJson(
+            HomeGuardBleContract.Type.PROVISIONING_AUTHORIZE,
+            JSONObject()
+                .put("pairing_code", qr.pairingCode)
+                .put("certificate_sha256", qr.certificateSha256)
+                .put("device_id", qr.deviceId)
+        )
+        if (!queued) stateFlow.value = State.CONNECTED
+        return queued
+    }
+
+    /** Sends Wi-Fi/cloud ownership data only after a successful provisioning proof. */
+    fun applyProvisioning(form: ProvisioningForm, localApiToken: String): Boolean {
+        if (stateFlow.value != State.PROVISIONING) return false
+        provisioningReplyFlow.value = null
+        return sendJson(
+            HomeGuardBleContract.Type.PROVISIONING_APPLY,
+            JSONObject()
+                .put("wifi_ssid", form.wifiSsid)
+                .put("wifi_password", form.wifiPassword)
+                .put("owner_label", form.ownerLabel)
+                .put("cloud_endpoint", form.cloudEndpoint)
+                .put("cloud_token", form.cloudClaimToken)
+                .put("local_api_token", localApiToken)
+        )
     }
 
     fun sendCommand(command: String, arguments: JSONObject = JSONObject()): Boolean {
@@ -225,6 +269,19 @@ class BleHomeGuardClient(private val context: Context) {
                     sessionActor = null
                     pendingActor = null
                     stateFlow.value = State.CONNECTED
+                }
+            }
+
+            HomeGuardBleContract.Type.PROVISIONING_REPLY -> {
+                provisioningReplyFlow.value = json
+                // Authorization keeps the link in provisioning mode so the next
+                // packet can carry the configuration. A completed/failed apply
+                // returns control to the normal connected state; the ESP may then
+                // restart or associate to the supplied Wi-Fi network.
+                when (json.optString("stage")) {
+                    "authorized" -> stateFlow.value = State.PROVISIONING
+                    "applied", "failed" -> stateFlow.value = State.CONNECTED
+                    else -> if (!json.optBoolean("ok", false)) stateFlow.value = State.CONNECTED
                 }
             }
 
