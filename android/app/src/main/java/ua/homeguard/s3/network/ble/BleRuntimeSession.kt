@@ -86,6 +86,23 @@ class BleRuntimeSession(context: Context) {
         return awaitCommandReply(timeoutMs)
     }
 
+    suspend fun panic(timeoutMs: Long = 8_000L): JSONObject {
+        require(isReady()) { "BLE runtime is not authenticated" }
+        require(client.panic()) { "BLE panic command could not start" }
+        return awaitCommandReply(timeoutMs)
+    }
+
+    suspend fun sendCommand(
+        command: String,
+        arguments: JSONObject = JSONObject(),
+        timeoutMs: Long = 8_000L,
+    ): JSONObject {
+        require(isReady()) { "BLE runtime is not authenticated" }
+        require(command.isNotBlank()) { "BLE command is empty" }
+        require(client.sendCommand(command, arguments)) { "BLE command could not start" }
+        return awaitCommandReply(timeoutMs)
+    }
+
     suspend fun controlOutput(
         outputId: Int,
         active: Boolean,
