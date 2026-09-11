@@ -36,6 +36,7 @@ add_library(homeguard_core
     src/health_monitor.cpp
     src/telemetry.cpp
     src/ble_remote.cpp
+    src/security_command.cpp
 )
 target_include_directories(homeguard_core PUBLIC include)
 

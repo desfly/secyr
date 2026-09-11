@@ -9,6 +9,7 @@ set(HG_CORE_SRCS
     "../../../src/event_log.cpp"
     "../../../src/access_control.cpp"
     "../../../src/ble_remote.cpp"
+    "../../../src/security_command.cpp"
     "../../../src/health_monitor.cpp"
     "../../../src/telemetry.cpp"
 )
