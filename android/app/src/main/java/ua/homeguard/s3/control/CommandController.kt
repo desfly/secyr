@@ -11,6 +11,8 @@ import ua.homeguard.s3.model.DeviceCommand
 import ua.homeguard.s3.model.DeviceEndpoint
 import ua.homeguard.s3.network.HttpDeviceApi
 import ua.homeguard.s3.network.LocalTelemetryTicketBroker
+import ua.homeguard.s3.network.ble.BleHomeGuardClient
+import ua.homeguard.s3.network.ble.BleRuntimeSession
 import ua.homeguard.s3.storage.SettingsStore
 import java.util.concurrent.atomic.AtomicLong
 
@@ -19,12 +21,15 @@ class CommandController(
     private val settings: SettingsStore,
 ) {
     private val requestIds = AtomicLong(System.currentTimeMillis())
+    private val ble = BleRuntimeSession(settings.appContext)
     @Volatile private var localHttpSessionToken: String = ""
     @Volatile private var localActor: String = ""
 
     init {
         LocalTelemetryTicketBroker.install { refreshTelemetryToken() }
     }
+
+    fun bleState(): StateFlow<BleHomeGuardClient.State> = ble.state()
 
     suspend fun accessState(): AccessLifecycleState {
         val target = localTarget()
@@ -55,6 +60,7 @@ class CommandController(
         require(target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank()) { "controller offline" }
 
         clearLocalSession()
+        ble.disconnect()
         val api = createApi(target)
         val session = api.login(actor, credential)
         if (target.path != ControlPath.CLOUD) {
@@ -64,6 +70,21 @@ class CommandController(
             // then obtains the first single-use WebSocket handshake ticket.
             val telemetryToken = api.telemetrySession(session.actor)
             settings.update(settings.settings.value.copy(telemetryToken = telemetryToken))
+
+            // Establish BLE while the one-time UI PIN is still available. BLE failure
+            // is deliberately non-fatal: the HTTP/WSS local channel remains usable.
+            val deviceId = settings.settings.value.deviceId
+            if (deviceId.isNotBlank()) {
+                runCatching {
+                    ble.connectAndAuthenticate(
+                        deviceId = deviceId,
+                        actor = session.actor,
+                        pin = credential,
+                        connectTimeoutMs = 4_000L,
+                        authTimeoutMs = 4_000L,
+                    )
+                }
+            }
         }
         return session
     }
@@ -78,9 +99,33 @@ class CommandController(
 
     fun logout() {
         clearLocalSession()
+        ble.disconnect()
     }
 
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
+        val httpResult = runCatching { executeHttp(type, actor, credential) }
+        val httpReply = httpResult.getOrNull()
+        if (httpReply != null && httpReply.code != "offline") return httpReply
+
+        if (supportsBle(type) && ble.isReady()) {
+            val bleReply = runCatching { ble.execute(type) }.getOrNull()
+            if (bleReply != null) {
+                return CommandReply(
+                    accepted = bleReply.optBoolean("ok", false),
+                    duplicate = bleReply.optBoolean("duplicate", false),
+                    code = bleReply.optString("code").ifBlank {
+                        bleReply.optString("reason").ifBlank {
+                            if (bleReply.optBoolean("ok", false)) "ok_ble" else "rejected_ble"
+                        }
+                    },
+                )
+            }
+        }
+
+        return httpReply ?: CommandReply(accepted = false, code = "offline")
+    }
+
+    private suspend fun executeHttp(type: CommandType, actor: String, credential: String): CommandReply {
         val target = endpoint.value
         val appSettings = settings.settings.value
         if (target.path == ControlPath.OFFLINE || target.apiBaseUrl.isBlank()) return CommandReply(accepted = false, code = "offline")
@@ -130,6 +175,14 @@ class CommandController(
             certificatePin = pin,
             runtimeV1 = localRuntime,
         )
+    }
+
+    private fun supportsBle(type: CommandType): Boolean = when (type) {
+        CommandType.ARM_HOME,
+        CommandType.ARM_AWAY,
+        CommandType.DISARM,
+        -> true
+        else -> false
     }
 
     private fun requiresChallenge(type: CommandType): Boolean = when (type) {
