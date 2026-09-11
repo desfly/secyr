@@ -13,6 +13,14 @@ COMPONENT_INCLUDE_DIRS = sorted(
     path for path in (ESP_IDF / "components").glob("*/include") if path.is_dir()
 )
 
+# These translation units depend on ESP-IDF subsystems that are intentionally
+# not reimplemented by the lightweight host mock. They are still compiled by
+# the real ESP-IDF job, so excluding them here avoids a false-negative host
+# failure without reducing firmware build coverage.
+HOST_MOCK_EXCLUDES = {
+    "hg_ble_transport.cpp": "requires ESP-IDF NimBLE host headers/runtime",
+}
+
 compiler = shutil.which("g++") or shutil.which("clang++")
 if not compiler:
     raise SystemExit("No C++ compiler found")
@@ -21,6 +29,19 @@ results = []
 failed = False
 
 for source in sorted(MAIN.glob("*.cpp")):
+    if source.name in HOST_MOCK_EXCLUDES:
+        results.append(
+            {
+                "file": source.name,
+                "returncode": 0,
+                "skipped": True,
+                "reason": HOST_MOCK_EXCLUDES[source.name],
+                "stdout": "",
+                "stderr": "",
+            }
+        )
+        continue
+
     command = [
         compiler,
         "-std=c++20",
@@ -37,6 +58,7 @@ for source in sorted(MAIN.glob("*.cpp")):
     item = {
         "file": source.name,
         "returncode": run.returncode,
+        "skipped": False,
         "stdout": run.stdout,
         "stderr": run.stderr,
     }
@@ -48,6 +70,9 @@ out = ROOT / "mock-syntax-report.json"
 out.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
 for item in results:
+    if item.get("skipped"):
+        print(f"SKIP: {item['file']} ({item['reason']})")
+        continue
     state = "PASS" if item["returncode"] == 0 else "FAIL"
     print(f"{state}: {item['file']}")
     if item["returncode"] != 0:
