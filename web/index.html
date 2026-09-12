@@ -219,5 +219,126 @@
   new MutationObserver(() => { if (handoverPending) setAdminLocked(true); }).observe(document.body, {childList:true, subtree:true});
 })();
 </script>
+<script>
+(() => {
+  const style = document.createElement('style');
+  style.id = 'hg-dashboard-compact-fix-20260912';
+  style.textContent = `
+    @media (min-width:1101px){
+      .shell{grid-template-columns:220px minmax(0,1fr)}
+      .sidebar{padding:10px 7px 10px}
+      .brand{height:40px}.brand h1{font-size:26px}
+      .bruce{height:150px;margin:0 14px 6px}
+      nav{gap:1px}nav a{height:31px;padding:0 13px;gap:10px;font-size:14px}
+      .nav-group-label{padding:6px 12px 3px;font-size:12px}
+      .side-foot{padding:11px 14px;gap:5px}.side-foot b,.side-foot small{font-size:12px}
+      header{height:82px;padding:14px 28px}header h2{font-size:28px;margin-bottom:4px}header p{font-size:14px}
+      .header-status{gap:16px}.clock span{font-size:14px}.online{padding:10px 14px}
+      main{padding:16px 24px 20px}
+      .status-grid{gap:12px}.status-grid article{min-height:96px;padding:14px;gap:12px}
+      .round{width:52px;height:52px;flex:0 0 52px;font-size:26px}.status-grid span{font-size:14px}.status-grid strong{font-size:20px}.status-grid small{font-size:13px}
+      .two-col{margin-top:12px;gap:12px;align-items:start}.panel{min-height:0;padding:14px}.panel h3{margin-bottom:10px;font-size:18px}
+      #operatorId,#operatorPin{padding:7px!important;margin-top:4px!important}
+      .quick{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.quick button{height:82px;gap:3px;border-radius:9px}.quick button b{font-size:28px}.quick button strong{font-size:14px}.quick button small{font-size:12px}
+      #zones-section .zones{display:grid;grid-template-rows:repeat(4,42px);grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}
+      #zones-section .zone{height:42px;padding:0 12px;font-size:13px;border-bottom:1px solid #e6e9ee}
+      #zones-section .zone:nth-child(n+5){border-left:1px solid #e6e9ee}
+      .events>div{height:36px;grid-template-columns:14px 72px 1fr 100px;font-size:13px}.history{padding-top:10px;font-size:13px}
+      .io{padding-top:8px;gap:8px}.io>div{gap:5px;font-size:13px}.io b{font-size:25px}.io hr{height:78px}
+    }
+    @media (min-width:1400px){.quick{grid-template-columns:repeat(6,minmax(0,1fr))}}
+  `;
+  document.head.appendChild(style);
+
+  const quick = document.querySelector('.quick');
+  if (!quick || document.querySelector('#quickLight')) return;
+  quick.insertAdjacentHTML('beforeend', `
+    <button id="quickLight" type="button"><b class="orange-text">☀</b><strong>Світло</strong><small>Увімк./Вимк.</small></button>
+    <button id="quickLock" type="button"><b class="blue-text">⌑</b><strong>Замок</strong><small>Відкрити на 5 с</small></button>`);
+
+  let toastTimer = 0;
+  let lockPulseActive = false;
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const toast = message => {
+    const node = document.querySelector('#toast');
+    if (!node) return;
+    node.textContent = message;
+    node.hidden = false;
+    window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => { node.hidden = true; }, 2800);
+  };
+  const credentials = () => ({
+    actor: document.querySelector('#operatorId')?.value.trim() || '',
+    credential: document.querySelector('#operatorPin')?.value || ''
+  });
+  const requireCredentials = () => {
+    const value = credentials();
+    if (!value.actor || !/^\d{4,12}$/.test(value.credential)) {
+      toast('Введіть ID користувача та PIN 4–12 цифр');
+      return null;
+    }
+    return value;
+  };
+  const json = async (path, options = {}) => {
+    const response = await fetch(path, {cache:'no-store', headers:{'Content-Type':'application/json', ...(options.headers || {})}, ...options});
+    const text = await response.text();
+    let body = {};
+    try { body = text ? JSON.parse(text) : {}; } catch (_) {}
+    if (!response.ok || body.ok === false) throw new Error(body.reason || body.status || `HTTP ${response.status}`);
+    return body;
+  };
+  const setOutput = async (outputId, active, auth) => json('/api/v1/system/output-command', {
+    method:'POST',
+    body:JSON.stringify({outputId, active, actor:auth.actor, credential:auth.credential})
+  });
+  const refreshOutputs = async () => {
+    try { await window.HomeGuardUiRuntime?.refresh?.(); } catch (_) {}
+  };
+
+  document.querySelector('#quickLight').addEventListener('click', async event => {
+    const auth = requireCredentials();
+    if (!auth) return;
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const state = await json('/api/v1/system/outputs');
+      const light = Array.isArray(state.outputs) ? state.outputs.find(item => Number(item.id) === 4) : null;
+      if (!light) throw new Error('вихід світла №4 не знайдено');
+      const next = light.active !== true;
+      await setOutput(4, next, auth);
+      toast(next ? 'Світло увімкнено' : 'Світло вимкнено');
+      await refreshOutputs();
+    } catch (error) {
+      toast(`Помилка світла: ${error.message}`);
+    } finally {
+      document.querySelector('#operatorPin').value = '';
+      button.disabled = false;
+    }
+  });
+
+  document.querySelector('#quickLock').addEventListener('click', async event => {
+    const auth = requireCredentials();
+    if (!auth || lockPulseActive) return;
+    const button = event.currentTarget;
+    lockPulseActive = true;
+    button.disabled = true;
+    try {
+      await setOutput(5, true, auth);
+      toast('Замок відкрито на 5 секунд');
+      await delay(5000);
+      await setOutput(5, false, auth);
+      toast('Замок закрито');
+      await refreshOutputs();
+    } catch (error) {
+      try { await setOutput(5, false, auth); } catch (_) {}
+      toast(`Помилка замка: ${error.message}`);
+    } finally {
+      document.querySelector('#operatorPin').value = '';
+      lockPulseActive = false;
+      button.disabled = false;
+    }
+  });
+})();
+</script>
 </body>
 </html>
