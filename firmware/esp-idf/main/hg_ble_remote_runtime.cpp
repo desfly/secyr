@@ -5,7 +5,9 @@
 #include "homeguard/system_model.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <iterator>
 
 namespace homeguard::idf {
 namespace {
