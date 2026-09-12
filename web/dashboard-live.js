@@ -10,6 +10,7 @@
     outputTimer: 0,
     analogTimer: 0,
     authTimer: 0,
+    connectivityTimer: 0,
     lockBusy: false,
     commandBusy: false,
   };
@@ -71,6 +72,127 @@
     if (authPanel && operatorPin && authPanel.contains(operatorPin)) {
       authPanel.hidden = true;
       authPanel.style.setProperty("display", "none", "important");
+    }
+  }
+
+  function connectivityBadge(online, pending = false) {
+    const text = pending ? "ПІДКЛЮЧЕННЯ" : (online ? "ОНЛАЙН" : "ОФЛАЙН");
+    const background = pending ? "#fff4cc" : (online ? "#dcf8e8" : "#ffe3e3");
+    const foreground = pending ? "#8a6500" : (online ? "#157347" : "#b42318");
+    return `<strong style="display:inline-block;min-width:104px;padding:5px 9px;border-radius:999px;text-align:center;background:${background};color:${foreground}">${text}</strong>`;
+  }
+
+  function restoreStandaloneConnectivityCards() {
+    const wifi = document.getElementById("networkCard");
+    const cloud = document.getElementById("cloudCard");
+    if (wifi) {
+      wifi.hidden = false;
+      wifi.style.removeProperty("display");
+    }
+    if (cloud) {
+      cloud.hidden = false;
+      cloud.style.removeProperty("display");
+    }
+  }
+
+  function removeAdminConnectivityCard() {
+    document.getElementById("adminConnectivityCard")?.remove();
+    restoreStandaloneConnectivityCards();
+    if (live.connectivityTimer) {
+      window.clearInterval(live.connectivityTimer);
+      live.connectivityTimer = 0;
+    }
+  }
+
+  function ensureAdminConnectivityCard() {
+    if (!window.HomeGuardAuth?.authenticated?.() || window.HomeGuardAuth?.role?.() !== "admin") {
+      removeAdminConnectivityCard();
+      return null;
+    }
+
+    const grid = document.querySelector(".status-grid");
+    if (!grid) return null;
+
+    const wifi = document.getElementById("networkCard");
+    const cloud = document.getElementById("cloudCard");
+    if (wifi) {
+      wifi.hidden = true;
+      wifi.style.setProperty("display", "none", "important");
+    }
+    if (cloud) {
+      cloud.hidden = true;
+      cloud.style.setProperty("display", "none", "important");
+    }
+
+    let card = document.getElementById("adminConnectivityCard");
+    if (card) return card;
+
+    card = document.createElement("article");
+    card.id = "adminConnectivityCard";
+    card.style.cssText = "grid-column:span 2;display:block;min-height:0;padding:16px 18px";
+    card.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px">
+        <div><span style="font-size:13px;color:#66758b">Admin</span><strong style="display:block;font-size:18px">Зв'язок</strong></div>
+        <small id="adminConnectivityUpdated">—</small>
+      </div>
+      <div style="display:grid;grid-template-columns:minmax(120px,1fr) 130px minmax(120px,1fr);gap:0;border:1px solid #d7deea;border-radius:10px;overflow:hidden">
+        <div style="padding:8px 10px;background:#f5f7fa;font-weight:700">Канал</div><div style="padding:8px 10px;background:#f5f7fa;font-weight:700">Стан</div><div style="padding:8px 10px;background:#f5f7fa;font-weight:700">IP / адреса</div>
+        <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Wi-Fi</div><div id="commWifiState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commWifiAddr" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+        <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Ethernet W5500</div><div id="commEthState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commEthAddr" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+        <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Bluetooth BLE</div><div id="commBleState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commBleAddr" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+        <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Cloud MQTT</div><div id="commCloudState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commCloudAddr" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+      </div>`;
+    grid.appendChild(card);
+    return card;
+  }
+
+  async function refreshAdminConnectivity() {
+    if (!window.HomeGuardAuth?.authenticated?.() || window.HomeGuardAuth?.role?.() !== "admin") {
+      removeAdminConnectivityCard();
+      return;
+    }
+    if (!ensureAdminConnectivityCard()) return;
+
+    try {
+      const [wifi, local, cloud] = await Promise.all([
+        api("/api/v1/network/status"),
+        api("/api/v1/connectivity/status"),
+        api("/api/v1/cloud/status")
+      ]);
+
+      const wifiOnline = wifi?.state === "connected" || local?.wifi?.online === true;
+      const wifiPending = wifi?.state === "connecting";
+      const ethOnline = local?.ethernet?.online === true ||
+        (local?.ethernet?.linkUp === true && local?.ethernet?.hasIp === true);
+      const ethPending = local?.ethernet?.initialized === true && !ethOnline;
+      const bleOnline = local?.ble?.linkConnected === true || local?.ble?.connected === true;
+      const cloudOnline = cloud?.connected === true;
+      const cloudPending = cloud?.configured === true && !cloudOnline;
+
+      const wifiState = document.getElementById("commWifiState");
+      const ethState = document.getElementById("commEthState");
+      const bleState = document.getElementById("commBleState");
+      const cloudState = document.getElementById("commCloudState");
+      if (wifiState) wifiState.innerHTML = connectivityBadge(wifiOnline, wifiPending);
+      if (ethState) ethState.innerHTML = connectivityBadge(ethOnline, ethPending);
+      if (bleState) bleState.innerHTML = connectivityBadge(bleOnline, false);
+      if (cloudState) cloudState.innerHTML = connectivityBadge(cloudOnline, cloudPending);
+
+      const wifiAddr = document.getElementById("commWifiAddr");
+      const ethAddr = document.getElementById("commEthAddr");
+      const bleAddr = document.getElementById("commBleAddr");
+      const cloudAddr = document.getElementById("commCloudAddr");
+      if (wifiAddr) wifiAddr.textContent = local?.wifi?.ip || wifi?.ip || "—";
+      if (ethAddr) ethAddr.textContent = local?.ethernet?.ip || "—";
+      if (bleAddr) bleAddr.textContent = "—";
+      if (cloudAddr) cloudAddr.textContent = cloud?.deviceId || "—";
+
+      const updated = document.getElementById("adminConnectivityUpdated");
+      if (updated) updated.textContent = `Оновлено ${new Date().toLocaleTimeString("uk-UA")}`;
+      matchConnectivityHeight();
+    } catch (error) {
+      const updated = document.getElementById("adminConnectivityUpdated");
+      if (updated) updated.textContent = `Помилка: ${error.message}`;
     }
   }
 
@@ -304,14 +426,22 @@
       live.authTimer = 0;
       refreshOutputs();
       refreshAnalogZones();
+      ensureAdminConnectivityCard();
+      refreshAdminConnectivity();
       if (!live.outputTimer) live.outputTimer = window.setInterval(refreshOutputs, 1000);
       if (!live.analogTimer) live.analogTimer = window.setInterval(refreshAnalogZones, 1000);
+      if (window.HomeGuardAuth?.role?.() === "admin" && !live.connectivityTimer) {
+        live.connectivityTimer = window.setInterval(refreshAdminConnectivity, 5000);
+      }
     }, 200);
   }
 
   ensureSessionQuickControls();
   const observer = new MutationObserver(() => {
     ensureSessionQuickControls();
+    if (window.HomeGuardAuth?.authenticated?.() && window.HomeGuardAuth?.role?.() === "admin") {
+      ensureAdminConnectivityCard();
+    }
     matchConnectivityHeight();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
@@ -325,5 +455,6 @@
     outputs: () => Object.fromEntries(live.outputs),
     refreshAnalogZones,
     refreshOutputs,
+    refreshAdminConnectivity,
   };
 })();
