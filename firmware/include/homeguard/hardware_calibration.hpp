@@ -10,8 +10,11 @@ struct ZoneCalibration {
     float low_alarm_min_mv{550.0F};
     float low_alarm_max_mv{1100.0F};
     float normal_min_mv{1250.0F};
-    float normal_max_mv{1950.0F};
-    float high_alarm_min_mv{2000.0F};
+    // Bench measurement for a known-normal zone is about 1.97 V. Keep enough
+    // margin above that real value so ADC tolerance/rounding does not turn a
+    // normal loop into OPEN.
+    float normal_max_mv{2050.0F};
+    float high_alarm_min_mv{2100.0F};
     float high_alarm_max_mv{2550.0F};
     float open_min_mv{2950.0F};
 };
