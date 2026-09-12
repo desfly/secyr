@@ -144,15 +144,35 @@ class BleRuntimeSession(context: Context) {
 
     suspend fun execute(type: CommandType, timeoutMs: Long = 8_000L): JSONObject {
         require(isReady()) { "BLE runtime is not authenticated" }
-        val command = when (type) {
-            CommandType.ARM_HOME -> "security.arm_home"
-            CommandType.ARM_AWAY -> "security.arm_away"
-            CommandType.DISARM -> "security.disarm"
+        return when (type) {
+            CommandType.ARM_HOME -> executeNamedCommand("security.arm_home", type, timeoutMs)
+            CommandType.ARM_AWAY -> executeNamedCommand("security.arm_away", type, timeoutMs)
+            CommandType.DISARM -> executeNamedCommand("security.disarm", type, timeoutMs)
+            CommandType.OPEN_VALVES -> executeValves(active = true, timeoutMs = timeoutMs)
+            CommandType.CLOSE_VALVES -> executeValves(active = false, timeoutMs = timeoutMs)
             else -> throw IllegalArgumentException("Command $type is not available over BLE runtime yet")
         }
+    }
+
+    private suspend fun executeNamedCommand(command: String, type: CommandType, timeoutMs: Long): JSONObject {
         requireAllowed(command)
         require(client.sendCommand(command)) { "Command $type could not start over BLE" }
         return awaitCommandReply(timeoutMs)
+    }
+
+    private suspend fun executeValves(active: Boolean, timeoutMs: Long): JSONObject {
+        requireAllowed(if (active) "valve.open" else "valve.close")
+        var lastReply = JSONObject().put("ok", true).put("status", "accepted")
+        // Keep BLE valve semantics identical to runtime HTTP: valve outputs are 2 and 3.
+        for (outputId in 2..3) {
+            require(client.controlOutput(outputId, active, false)) {
+                "BLE valve output $outputId command could not start"
+            }
+            val reply = awaitCommandReply(timeoutMs)
+            if (!reply.optBoolean("ok", false)) return reply
+            lastReply = reply
+        }
+        return lastReply
     }
 
     suspend fun panic(timeoutMs: Long = 8_000L): JSONObject {
