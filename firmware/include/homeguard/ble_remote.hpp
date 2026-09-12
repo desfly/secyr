@@ -74,8 +74,11 @@ public:
         bool replay_counter_required = true);
     bool unbind(const BleRemoteIdentity& identity);
     bool set_enabled(const BleRemoteIdentity& identity, bool enabled);
+    void clear();
     [[nodiscard]] BleRemoteBinding* find(const BleRemoteIdentity& identity);
     [[nodiscard]] const BleRemoteBinding* find(const BleRemoteIdentity& identity) const;
+    [[nodiscard]] BleRemoteBinding* binding_at(std::size_t index);
+    [[nodiscard]] const BleRemoteBinding* binding_at(std::size_t index) const;
     [[nodiscard]] std::size_t size() const { return size_; }
 
     BleRemoteResult accept(const BleRemoteEvent& event);
