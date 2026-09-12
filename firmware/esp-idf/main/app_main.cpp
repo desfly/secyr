@@ -23,6 +23,7 @@
 #include "hg_reset_sequence.hpp"
 #include "hg_nvs_recovery.hpp"
 #include "hg_ble_transport.hpp"
+#include "hg_ble_runtime_status.hpp"
 #include "hg_ble_command_router.hpp"
 #include "device_discovery.hpp"
 #include "nvs_config_store.hpp"
@@ -295,6 +296,7 @@ void start_ble_transport()
     }
     g_ble_transport.set_message_handler(&on_ble_message, nullptr);
     const auto error = g_ble_transport.start(device_name.c_str());
+    homeguard::idf::ble_runtime_status::set_ready(error == ESP_OK);
     if (error != ESP_OK) ESP_LOGE(kTag, "BLE transport failed: %s", esp_err_to_name(error));
     else ESP_LOGI(kTag, "BLE transport ready: Android control peripheral and bonded key-fob central base");
 }
