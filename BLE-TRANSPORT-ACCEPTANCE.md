@@ -1,0 +1,1 @@
+BLE is accepted only when Android can control and receive telemetry from HomeGuard-S3 with Wi-Fi, W5500 Ethernet, and Cloud MQTT unavailable.
