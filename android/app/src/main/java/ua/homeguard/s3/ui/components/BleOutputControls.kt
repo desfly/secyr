@@ -13,12 +13,51 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import ua.homeguard.s3.network.ble.BleRuntimeRegistry
+
+@Composable
+fun BleOutputControlsRuntime() {
+    val context = LocalContext.current
+    val ble = remember(context) { BleRuntimeRegistry.get(context.applicationContext) }
+    val access by ble.access().collectAsState()
+    val scope = rememberCoroutineScope()
+    var status by remember { mutableStateOf("Готово") }
+
+    fun run(label: String, block: suspend () -> org.json.JSONObject) {
+        scope.launch {
+            status = "$label…"
+            status = runCatching { block() }.fold(
+                onSuccess = { reply ->
+                    if (reply.optBoolean("ok", false)) "$label: OK"
+                    else "$label: ${reply.optString("reason", reply.optString("status", "відхилено"))}"
+                },
+                onFailure = { error -> "$label: ${error.message ?: "помилка"}" },
+            )
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        BleOutputControls(
+            enabled = access.authenticated,
+            valvesEnabled = access.authenticated && access.valves,
+            onLightChange = { active -> run(if (active) "Світло ON" else "Світло OFF") { ble.setLight(active) } },
+            onValve1Change = { active -> run(if (active) "Кран 1 ON" else "Кран 1 OFF") { ble.setValve1(active) } },
+            onValve2Change = { active -> run(if (active) "Кран 2 ON" else "Кран 2 OFF") { ble.setValve2(active) } },
+            onLockPulse = { run("Замок 5 с") { ble.pulseLock() } },
+        )
+        Text(status, style = MaterialTheme.typography.bodySmall)
+    }
+}
 
 @Composable
 fun BleOutputControls(
