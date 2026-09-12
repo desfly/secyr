@@ -161,6 +161,30 @@ class CommandController(
             .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
     }
 
+    suspend fun setLightOverBle(active: Boolean): CommandReply {
+        if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
+        return runCatching { mapBleReply(ble.setLight(active)) }
+            .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
+    }
+
+    suspend fun setValve1OverBle(active: Boolean): CommandReply {
+        if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
+        return runCatching { mapBleReply(ble.setValve1(active)) }
+            .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
+    }
+
+    suspend fun setValve2OverBle(active: Boolean): CommandReply {
+        if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
+        return runCatching { mapBleReply(ble.setValve2(active)) }
+            .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
+    }
+
+    suspend fun pulseLockOverBle(): CommandReply {
+        if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
+        return runCatching { mapBleReply(ble.pulseLock()) }
+            .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
+    }
+
     private suspend fun executeHttp(type: CommandType, actor: String, credential: String): CommandReply {
         val target = endpoint.value
         val appSettings = settings.settings.value
