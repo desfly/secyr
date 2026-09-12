@@ -137,10 +137,12 @@ esp_err_t InfrastructureHttp::connectivity_get(httpd_req_t* request)
         ? std::string(reinterpret_cast<const char*>(wifi_ap.ssid), ssid_length)
         : std::string{};
 
-    const bool ble_connected = BleTransport::active_connection();
+    const bool ble_link_connected = BleTransport::active_connection();
+    const bool ble_notifications = BleTransport::active_notifications();
+    const auto ble_epoch = BleTransport::active_connection_epoch();
     const char* preferred = ethernet_online ? "ethernet" :
                             wifi_online ? "wifi" :
-                            ble_connected ? "ble" : "offline";
+                            ble_link_connected ? "ble" : "offline";
 
     std::ostringstream output;
     output << "{\"ok\":true,\"preferred\":\"" << preferred << "\",";
@@ -157,8 +159,11 @@ esp_err_t InfrastructureHttp::connectivity_get(httpd_req_t* request)
     output << "\"ip\":\"" << json_escape(wifi_ip.c_str()) << "\",";
     output << "\"rssi\":" << (wifi_connected ? static_cast<int>(wifi_ap.rssi) : 0) << "},";
     output << "\"ble\":{";
-    output << "\"online\":" << (ble_connected ? "true" : "false") << ",";
-    output << "\"connected\":" << (ble_connected ? "true" : "false") << ",";
+    output << "\"online\":" << (ble_link_connected ? "true" : "false") << ",";
+    output << "\"connected\":" << (ble_link_connected ? "true" : "false") << ",";
+    output << "\"linkConnected\":" << (ble_link_connected ? "true" : "false") << ",";
+    output << "\"notificationsEnabled\":" << (ble_notifications ? "true" : "false") << ",";
+    output << "\"connectionEpoch\":" << ble_epoch << ",";
     output << "\"ip\":\"—\"}}";
 
     const auto body = output.str();
