@@ -17,8 +17,13 @@ OutputInterlockResult evaluate_output_interlock(
         return {OutputInterlockDecision::Allowed, true};
     }
 
-    // Only activation requires the commissioning/readiness gate.
-    if (request.readiness == nullptr || !request.readiness->outputs_allowed()) {
+    // Current bench wiring keeps LIGHT (4) and LOCK (5) as direct ESP32-S3
+    // relays on GPIO1/GPIO2. They are already physically installed and must
+    // remain usable while the future MCP23017/commissioning path is absent.
+    // The commissioning gate still protects siren/valve outputs 1..3.
+    const bool direct_bench_relay = request.output_id == 4U || request.output_id == 5U;
+    if (!direct_bench_relay &&
+        (request.readiness == nullptr || !request.readiness->outputs_allowed())) {
         return {OutputInterlockDecision::BootNotReady, false};
     }
 
