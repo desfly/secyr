@@ -1,0 +1,1 @@
+User requirement: Bluetooth must be a full and independent HomeGuard communication channel, not a secondary status indicator and not dependent on LAN/cloud availability.
