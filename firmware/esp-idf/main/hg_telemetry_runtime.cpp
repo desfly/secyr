@@ -74,6 +74,38 @@ void sample_zone_adc(Ads1115& adc, std::size_t first_zone, std::array<hg::ZoneSt
     }
 }
 
+void sync_zone_model(hg::SystemModel& model,
+                     const std::array<hg::ZoneState, 8>& zones,
+                     std::uint64_t now_ms)
+{
+    for (std::size_t index = 0; index < zones.size(); ++index) {
+        hg::ModelZoneState state{};
+        switch (zones[index]) {
+            case hg::ZoneState::Normal:
+                state = hg::ModelZoneState::Normal;
+                break;
+            case hg::ZoneState::Open:
+                state = hg::ModelZoneState::Open;
+                break;
+            case hg::ZoneState::Short:
+                // The public system API already exposes ModelZoneState::Fault.
+                // For EOL zones this value is the physical short-circuit state;
+                // the Web UI renders it explicitly as "КЗ".
+                state = hg::ModelZoneState::Fault;
+                break;
+            case hg::ZoneState::Tamper:
+                state = hg::ModelZoneState::Tamper;
+                break;
+            case hg::ZoneState::Disabled:
+            default:
+                // Do not overwrite the last known physical state on a transient
+                // ADC read failure. Hardware health separately reports the fault.
+                continue;
+        }
+        (void)model.set_zone_state(static_cast<std::uint16_t>(index + 1U), state, now_ms);
+    }
+}
+
 std::uint64_t rtc_epoch(Ds3231& rtc, bool& valid)
 {
     std::tm value{};
@@ -86,7 +118,7 @@ std::uint64_t rtc_epoch(Ds3231& rtc, bool& valid)
 
 }  // namespace
 
-esp_err_t TelemetryRuntime::start(HardwareBootstrap* hardware, WebsocketTelemetry* websocket, const hg::SystemModel* system_model, BleTransport* ble_transport)
+esp_err_t TelemetryRuntime::start(HardwareBootstrap* hardware, WebsocketTelemetry* websocket, hg::SystemModel* system_model, BleTransport* ble_transport)
 {
     if (hardware == nullptr || websocket == nullptr || system_model == nullptr) return ESP_ERR_INVALID_ARG;
     hardware_ = hardware;
@@ -131,6 +163,7 @@ void TelemetryRuntime::run()
         zones.fill(hg::ZoneState::Disabled);
         sample_zone_adc(hardware_->zone_adc(), 0, zones);
         sample_zone_adc(hardware_->telemetry_adc(), 4, zones);
+        sync_zone_model(*system_model_, zones, now_ms);
 
         std::array<hg::PressureState, 2> pressures{};
         std::array<float, 2> pressure_values{};
