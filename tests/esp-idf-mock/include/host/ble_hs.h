@@ -22,6 +22,11 @@ struct ble_uuid128_t {
 
 #define BLE_UUID128_INIT(...) { { 128 }, { __VA_ARGS__ } }
 
+struct ble_addr_t {
+    std::uint8_t type{0};
+    std::uint8_t val[6]{};
+};
+
 struct ble_gatt_access_ctxt {
     int op{0};
     os_mbuf* om{nullptr};
@@ -47,6 +52,11 @@ struct ble_gap_event {
     struct { int status{0}; std::uint16_t conn_handle{0}; } connect{};
     struct { int reason{0}; } disconnect{};
     struct { std::uint16_t attr_handle{0}; int cur_notify{0}; } subscribe{};
+    struct {
+        ble_addr_t addr{};
+        const std::uint8_t* data{nullptr};
+        std::uint8_t length_data{0};
+    } disc{};
 };
 
 using ble_gap_event_fn = int (*)(ble_gap_event*, void*);
@@ -56,11 +66,18 @@ struct ble_hs_adv_fields {
     ble_uuid128_t* uuids128{nullptr};
     std::uint8_t num_uuids128{0};
     std::uint8_t uuids128_is_complete{0};
+    const std::uint8_t* mfg_data{nullptr};
+    std::uint8_t mfg_data_len{0};
 };
 
 struct ble_gap_adv_params {
     std::uint8_t conn_mode{0};
     std::uint8_t disc_mode{0};
+};
+
+struct ble_gap_disc_params {
+    std::uint8_t passive{0};
+    std::uint8_t filter_duplicates{0};
 };
 
 struct ble_hs_cfg_t {
@@ -87,6 +104,8 @@ constexpr int BLE_GAP_EVENT_CONNECT = 1;
 constexpr int BLE_GAP_EVENT_DISCONNECT = 2;
 constexpr int BLE_GAP_EVENT_ADV_COMPLETE = 3;
 constexpr int BLE_GAP_EVENT_SUBSCRIBE = 4;
+constexpr int BLE_GAP_EVENT_DISC = 5;
+constexpr int BLE_GAP_EVENT_DISC_COMPLETE = 6;
 constexpr std::uint8_t BLE_HS_ADV_F_DISC_GEN = 0x02;
 constexpr std::uint8_t BLE_HS_ADV_F_BREDR_UNSUP = 0x04;
 constexpr std::uint8_t BLE_GAP_CONN_MODE_UND = 1;
@@ -117,5 +136,12 @@ inline std::uint16_t ble_att_mtu(std::uint16_t) { return 247; }
 inline int ble_hs_id_infer_auto(int, std::uint8_t* out_addr_type) { if (out_addr_type) *out_addr_type = 0; return 0; }
 inline int ble_gap_adv_set_fields(const ble_hs_adv_fields*) { return 0; }
 inline int ble_gap_adv_start(std::uint8_t, const void*, std::int32_t, const ble_gap_adv_params*, ble_gap_event_fn, void*) { return 0; }
+inline int ble_gap_disc(std::uint8_t, std::int32_t, const ble_gap_disc_params*, ble_gap_event_fn, void*) { return 0; }
+inline int ble_hs_adv_parse_fields(ble_hs_adv_fields* fields, const std::uint8_t* data, std::uint8_t length) {
+    if (!fields) return -1;
+    fields->mfg_data = data;
+    fields->mfg_data_len = length;
+    return 0;
+}
 
 extern "C" inline void ble_store_config_init(void) {}
