@@ -1,0 +1,1 @@
+BLE must operate as an independent HomeGuard transport for command and telemetry paths, not merely as a provisioning helper or connectivity indicator.
