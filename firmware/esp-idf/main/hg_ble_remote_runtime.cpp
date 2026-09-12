@@ -4,6 +4,11 @@
 #include "homeguard/physical_output_runtime.hpp"
 #include "homeguard/system_model.hpp"
 
+#include "esp_log.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -11,6 +16,7 @@
 
 namespace homeguard::idf {
 namespace {
+constexpr const char* kTag = "hg_ble_remote";
 constexpr std::uint16_t kPartitionId = 1;
 constexpr std::uint16_t kLightOutputId = 4;
 constexpr std::uint16_t kLockOutputId = 5;
@@ -26,6 +32,27 @@ void BleRemoteRuntime::configure(
     readiness_ = readiness;
     physical_ = physical;
     bus_ = bus;
+
+    if (!tick_task_started_) {
+        tick_task_started_ = xTaskCreate(
+            &BleRemoteRuntime::tick_task,
+            "hg_ble_remote",
+            3072,
+            this,
+            4,
+            nullptr) == pdPASS;
+        if (!tick_task_started_) ESP_LOGE(kTag, "Unable to start BLE keyfob timer task");
+    }
+}
+
+void BleRemoteRuntime::tick_task(void* context)
+{
+    auto* self = static_cast<BleRemoteRuntime*>(context);
+    while (self != nullptr) {
+        self->tick(static_cast<std::uint64_t>(esp_timer_get_time() / 1000));
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    vTaskDelete(nullptr);
 }
 
 bool BleRemoteRuntime::begin_pairing(std::string_view name, std::uint32_t permissions, std::uint64_t now_ms)
@@ -36,6 +63,7 @@ bool BleRemoteRuntime::begin_pairing(std::string_view name, std::uint32_t permis
     std::memcpy(pairing_name_, name.data(), count);
     pairing_permissions_ = permissions;
     pairing_deadline_ms_ = now_ms + pairing_window_ms;
+    ESP_LOGI(kTag, "BLE keyfob pairing window opened for %lu ms", static_cast<unsigned long>(pairing_window_ms));
     return true;
 }
 
@@ -60,6 +88,7 @@ hg::BleRemoteResult BleRemoteRuntime::ingest(const hg::BleRemoteEvent& event, st
             pairing_name_,
             pairing_permissions_,
             true);
+        ESP_LOGI(kTag, "BLE keyfob paired; address type=%u", static_cast<unsigned>(event.identity.address_type));
         cancel_pairing();
     } else if (pairing_deadline_ms_ != 0U && !pairing_active(now_ms)) {
         cancel_pairing();
@@ -84,6 +113,7 @@ void BleRemoteRuntime::tick(std::uint64_t now_ms)
     if (model_->set_output_active(kLockOutputId, false, now_ms)) {
         (void)physical_->synchronize(*model_, *readiness_);
         if (bus_ != nullptr) (void)bus_->dispatch_all();
+        ESP_LOGI(kTag, "BLE keyfob lock pulse completed");
     }
 }
 
