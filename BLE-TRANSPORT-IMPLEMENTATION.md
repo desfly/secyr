@@ -1,0 +1,1 @@
+Functional scope: firmware BLE service + advertising, Android BLE discovery/session, BLE command routing, BLE telemetry notifications, and runtime/link/subscription status reporting.
