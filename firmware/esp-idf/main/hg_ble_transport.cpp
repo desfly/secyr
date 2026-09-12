@@ -27,6 +27,8 @@ constexpr std::size_t kHeaderSize = 6;
 constexpr std::size_t kMaxMessageBytes = 4096;
 constexpr std::size_t kMaxGattValue = 244;
 constexpr std::uint8_t kTelemetryType = 1;
+constexpr std::array<std::uint8_t, 4> kRemoteMagic{{'H','G','K','F'}};
+constexpr std::size_t kRemotePayloadBytes = 10;
 
 homeguard::idf::BleTransport* g_owner = nullptr;
 std::uint16_t g_tx_value_handle = 0;
@@ -90,6 +92,21 @@ int gap_event(ble_gap_event* event, void*) {
         case BLE_GAP_EVENT_SUBSCRIBE:
             if (event->subscribe.attr_handle == g_tx_value_handle) g_owner->on_notify_subscription(event->subscribe.cur_notify != 0);
             break;
+        case BLE_GAP_EVENT_DISC: {
+            ble_hs_adv_fields fields{};
+            if (ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data) == 0 &&
+                fields.mfg_data != nullptr && fields.mfg_data_len > 0) {
+                g_owner->accept_remote_advertisement(
+                    event->disc.addr.type,
+                    event->disc.addr.val,
+                    fields.mfg_data,
+                    fields.mfg_data_len);
+            }
+            break;
+        }
+        case BLE_GAP_EVENT_DISC_COMPLETE:
+            (void)g_owner->scan_remotes();
+            break;
         default: break;
     }
     return 0;
@@ -103,6 +120,8 @@ void stack_sync() {
     }
     const auto error = g_owner->advertise();
     if (error != ESP_OK) ESP_LOGE(kTag,"BLE advertising failed: %s",esp_err_to_name(error));
+    const auto scan_error = g_owner->scan_remotes();
+    if (scan_error != ESP_OK) ESP_LOGW(kTag,"BLE remote scan start deferred: %s",esp_err_to_name(scan_error));
 }
 
 void host_task(void*) {
@@ -138,6 +157,11 @@ esp_err_t BleTransport::start(const char* device_name) {
 void BleTransport::set_message_handler(MessageHandler handler, void* context) {
     message_handler_=handler;
     message_context_=context;
+}
+
+void BleTransport::set_remote_event_handler(RemoteEventHandler handler, void* context) {
+    remote_event_handler_ = handler;
+    remote_event_context_ = context;
 }
 
 bool BleTransport::link_connected() const {
@@ -202,7 +226,46 @@ esp_err_t BleTransport::advertise() {
     ble_gap_adv_params params{};
     params.conn_mode=BLE_GAP_CONN_MODE_UND;
     params.disc_mode=BLE_GAP_DISC_MODE_GEN;
-    return ble_gap_adv_start(own_address_type_,nullptr,BLE_HS_FOREVER,&params,gap_event,nullptr)==0 ? ESP_OK : ESP_FAIL;
+    const int rc = ble_gap_adv_start(own_address_type_,nullptr,BLE_HS_FOREVER,&params,gap_event,nullptr);
+    return rc == 0 || rc == BLE_HS_EALREADY ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t BleTransport::scan_remotes() {
+    ble_gap_disc_params params{};
+    params.passive = 1;
+    params.filter_duplicates = 0;
+    const int rc = ble_gap_disc(own_address_type_, BLE_HS_FOREVER, &params, gap_event, nullptr);
+    return rc == 0 || rc == BLE_HS_EALREADY ? ESP_OK : ESP_FAIL;
+}
+
+void BleTransport::accept_remote_advertisement(
+    std::uint8_t address_type,
+    const std::uint8_t address[6],
+    const std::uint8_t* payload,
+    std::size_t payload_size)
+{
+    if (remote_event_handler_ == nullptr || address == nullptr || payload == nullptr) return;
+
+    // Native HomeGuard key-fob manufacturer payload:
+    // optional 0xffff test/vendor prefix, "HGKF", version=1, action=0..5, uint32 LE replay counter.
+    std::size_t offset = 0;
+    if (payload_size >= kRemotePayloadBytes + 2U && payload[0] == 0xffU && payload[1] == 0xffU) offset = 2U;
+    if (payload_size < offset + kRemotePayloadBytes) return;
+    if (!std::equal(kRemoteMagic.begin(), kRemoteMagic.end(), payload + offset)) return;
+    if (payload[offset + 4U] != kProtocolVersion) return;
+    const auto action_value = payload[offset + 5U];
+    if (action_value > static_cast<std::uint8_t>(hg::BleRemoteAction::Panic)) return;
+
+    hg::BleRemoteEvent remote{};
+    remote.identity.address_type = address_type;
+    std::copy_n(address, remote.identity.address.size(), remote.identity.address.begin());
+    remote.action = static_cast<hg::BleRemoteAction>(action_value);
+    remote.counter_valid = true;
+    remote.counter = static_cast<std::uint32_t>(payload[offset + 6U]) |
+        (static_cast<std::uint32_t>(payload[offset + 7U]) << 8U) |
+        (static_cast<std::uint32_t>(payload[offset + 8U]) << 16U) |
+        (static_cast<std::uint32_t>(payload[offset + 9U]) << 24U);
+    remote_event_handler_(remote, remote_event_context_);
 }
 
 void BleTransport::reset_rx() {
