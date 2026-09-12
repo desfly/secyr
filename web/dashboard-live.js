@@ -11,6 +11,7 @@
     analogTimer: 0,
     authTimer: 0,
     lockBusy: false,
+    commandBusy: false,
   };
 
   const style = document.createElement("style");
@@ -42,6 +43,40 @@
     .replace(/>/g, "&gt;")
     .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#39;");
+
+  function sessionActor() {
+    return window.HomeGuardAuth?.actor?.() || "";
+  }
+
+  function requireSessionActor() {
+    if (!window.HomeGuardAuth?.authenticated?.()) throw new Error("потрібен активний сеанс");
+    const actor = sessionActor();
+    if (!actor) throw new Error("немає користувача активного сеансу");
+    return actor;
+  }
+
+  function ensureSessionQuickControls() {
+    const quick = document.querySelector(".quick");
+    if (!quick) return;
+
+    // Create these controls before index.html's legacy inline block runs. That
+    // block explicitly returns when #quickLight already exists, so its old
+    // per-click ID/PIN handlers never attach. Login PIN is verified once by
+    // access-session.js; dashboard mutations use the authenticated actor.
+    if (!document.getElementById("quickLight")) {
+      quick.insertAdjacentHTML("beforeend", `
+        <button id="quickLight" type="button" data-active="false" aria-pressed="false"><b class="orange-text">☀</b><strong>Світло</strong><small>ВИМКНЕНО</small></button>
+        <button id="quickLock" type="button" data-active="false" aria-pressed="false"><b class="blue-text">⌑</b><strong>Замок</strong><small>ЗАКРИТО</small></button>`);
+    }
+
+    const operatorId = document.getElementById("operatorId");
+    const operatorPin = document.getElementById("operatorPin");
+    const authPanel = operatorId?.closest("div");
+    if (authPanel && operatorPin && authPanel.contains(operatorPin)) {
+      authPanel.hidden = true;
+      authPanel.style.setProperty("display", "none", "important");
+    }
+  }
 
   function zoneView(raw) {
     const value = Number(raw);
@@ -141,8 +176,7 @@
   }
 
   async function commandOutput(outputId, active) {
-    const actor = window.HomeGuardAuth?.actor?.() || "";
-    if (!actor) throw new Error("немає активного сеансу");
+    const actor = requireSessionActor();
     await api("/api/v1/system/output-command", {
       method: "POST",
       body: JSON.stringify({ outputId, active, actor })
@@ -150,32 +184,31 @@
     await refreshOutputs();
   }
 
-  document.addEventListener("click", async event => {
-    const button = event.target.closest?.("#quickLight,#quickLock");
-    if (!button) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    if (!window.HomeGuardAuth?.authenticated?.()) {
-      showToast("Потрібен активний сеанс");
-      return;
-    }
+  async function commandSecurity(command) {
+    const actor = requireSessionActor();
+    await api("/api/v1/system/security-command", {
+      method: "POST",
+      body: JSON.stringify({ command, actor })
+    });
+    if (typeof refresh === "function") await refresh();
+  }
 
-    if (button.id === "quickLight") {
-      button.disabled = true;
-      try {
-        await refreshOutputs();
-        const next = live.outputs.get(4) !== true;
-        await commandOutput(4, next);
-        setQuickState("quickLight", next);
-        showToast(next ? "Світло увімкнено" : "Світло вимкнено");
-      } catch (error) {
-        showToast(`Світло: ${error.message}`);
-      } finally {
-        button.disabled = false;
-      }
-      return;
+  async function handleLight(button) {
+    button.disabled = true;
+    try {
+      await refreshOutputs();
+      const next = live.outputs.get(4) !== true;
+      await commandOutput(4, next);
+      setQuickState("quickLight", next);
+      showToast(next ? "Світло увімкнено" : "Світло вимкнено");
+    } catch (error) {
+      showToast(`Світло: ${error.message}`);
+    } finally {
+      button.disabled = false;
     }
+  }
 
+  async function handleLock(button) {
     if (live.lockBusy) return;
     live.lockBusy = true;
     button.disabled = true;
@@ -195,6 +228,60 @@
       live.lockBusy = false;
       button.disabled = false;
     }
+  }
+
+  async function handleSecurity(button) {
+    if (live.commandBusy) return;
+    const command = button.dataset.command || "";
+    if (!command) return;
+    live.commandBusy = true;
+    const buttons = [...document.querySelectorAll(".quick [data-command]")];
+    const previous = new Map(buttons.map(item => [item, item.disabled]));
+    buttons.forEach(item => { item.disabled = true; });
+    try {
+      await commandSecurity(command);
+      showToast("Команду виконано");
+    } catch (error) {
+      showToast(`Команда: ${error.message}`);
+    } finally {
+      buttons.forEach(item => { item.disabled = previous.get(item) === true; });
+      live.commandBusy = false;
+    }
+  }
+
+  async function handleOutputButton(button) {
+    const outputId = Number(button.dataset.outputId);
+    const active = button.dataset.outputActive === "true";
+    if (!Number.isInteger(outputId) || outputId <= 0) return;
+    const buttons = [...document.querySelectorAll("#ioState [data-output-id]")];
+    buttons.forEach(item => { item.disabled = true; });
+    try {
+      await commandOutput(outputId, active);
+      showToast(active ? "Вихід увімкнено" : "Вихід вимкнено");
+      if (typeof refresh === "function") await refresh();
+    } catch (error) {
+      showToast(`Вихід: ${error.message}`);
+    }
+  }
+
+  // Capture phase deliberately owns the working dashboard controls. The old
+  // app.js handlers still exist for compatibility, but they must not demand a
+  // second PIN after an authenticated login or send duplicate commands.
+  document.addEventListener("click", async event => {
+    const button = event.target.closest?.("#quickLight,#quickLock,.quick [data-command],#ioState [data-output-id]");
+    if (!button) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    if (!window.HomeGuardAuth?.authenticated?.()) {
+      showToast("Потрібен активний сеанс");
+      return;
+    }
+
+    if (button.id === "quickLight") return handleLight(button);
+    if (button.id === "quickLock") return handleLock(button);
+    if (button.matches(".quick [data-command]")) return handleSecurity(button);
+    if (button.matches("#ioState [data-output-id]")) return handleOutputButton(button);
   }, true);
 
   function matchConnectivityHeight() {
@@ -229,7 +316,11 @@
     }, 200);
   }
 
-  const observer = new MutationObserver(matchConnectivityHeight);
+  ensureSessionQuickControls();
+  const observer = new MutationObserver(() => {
+    ensureSessionQuickControls();
+    matchConnectivityHeight();
+  });
   observer.observe(document.documentElement, { childList: true, subtree: true });
   window.addEventListener("resize", matchConnectivityHeight);
   window.addEventListener("load", matchConnectivityHeight);
