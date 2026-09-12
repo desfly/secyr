@@ -1,0 +1,1 @@
+BLE transport work branch. Goal: Bluetooth BLE must remain an independent HomeGuard transport for Android control and telemetry, separate from Wi-Fi, Ethernet W5500, and Cloud MQTT. Runtime availability and client-link state must be reported separately.
