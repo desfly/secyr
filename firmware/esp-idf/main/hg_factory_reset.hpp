@@ -11,6 +11,7 @@ struct FactoryResetReport {
     esp_err_t controller_config{ESP_OK};
     esp_err_t provisioning{ESP_OK};
     esp_err_t commissioning{ESP_OK};
+    esp_err_t ble_remotes{ESP_OK};
 
     [[nodiscard]] bool ok() const {
         return access == ESP_OK &&
@@ -18,7 +19,8 @@ struct FactoryResetReport {
                cloud == ESP_OK &&
                controller_config == ESP_OK &&
                provisioning == ESP_OK &&
-               commissioning == ESP_OK;
+               commissioning == ESP_OK &&
+               ble_remotes == ESP_OK;
     }
 };
 
