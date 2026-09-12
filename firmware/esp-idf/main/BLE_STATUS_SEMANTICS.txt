@@ -1,0 +1,1 @@
+READY = BLE runtime initialized and available as a transport. CONNECTED = Android GATT link present. TELEMETRY = notifications subscribed. These states are independent from Wi-Fi, Ethernet W5500, and Cloud MQTT.
