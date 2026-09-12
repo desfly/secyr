@@ -33,6 +33,16 @@ void BleRemoteRuntime::configure(
     physical_ = physical;
     bus_ = bus;
 
+    const auto load_error = store_.load(registry_);
+    if (load_error == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(kTag, "No persisted BLE keyfobs");
+    } else if (load_error != ESP_OK) {
+        registry_.clear();
+        ESP_LOGW(kTag, "Persisted BLE keyfobs rejected: %s", esp_err_to_name(load_error));
+    } else {
+        ESP_LOGI(kTag, "Restored %u BLE keyfob(s)", static_cast<unsigned>(registry_.size()));
+    }
+
     if (!tick_task_started_) {
         tick_task_started_ = xTaskCreate(
             &BleRemoteRuntime::tick_task,
@@ -53,6 +63,12 @@ void BleRemoteRuntime::tick_task(void* context)
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     vTaskDelete(nullptr);
+}
+
+void BleRemoteRuntime::persist_registry()
+{
+    const auto error = store_.save(registry_);
+    if (error != ESP_OK) ESP_LOGE(kTag, "BLE keyfob persistence failed: %s", esp_err_to_name(error));
 }
 
 bool BleRemoteRuntime::begin_pairing(std::string_view name, std::uint32_t permissions, std::uint64_t now_ms)
@@ -81,21 +97,31 @@ bool BleRemoteRuntime::pairing_active(std::uint64_t now_ms) const
 
 hg::BleRemoteResult BleRemoteRuntime::ingest(const hg::BleRemoteEvent& event, std::uint64_t now_ms)
 {
+    bool newly_paired = false;
     if (!registry_.find(event.identity) && pairing_active(now_ms)) {
-        (void)registry_.bind(
+        newly_paired = registry_.bind(
             event.identity,
             hg::BleRemoteProfile::HomeGuardNative,
             pairing_name_,
             pairing_permissions_,
             true);
-        ESP_LOGI(kTag, "BLE keyfob paired; address type=%u", static_cast<unsigned>(event.identity.address_type));
+        if (newly_paired) {
+            ESP_LOGI(kTag, "BLE keyfob paired; address type=%u", static_cast<unsigned>(event.identity.address_type));
+        }
         cancel_pairing();
     } else if (pairing_deadline_ms_ != 0U && !pairing_active(now_ms)) {
         cancel_pairing();
     }
 
     auto result = registry_.accept(event);
-    if (result.decision != hg::BleRemoteDecision::Accepted) return result;
+    if (result.decision != hg::BleRemoteDecision::Accepted) {
+        if (newly_paired) persist_registry();
+        return result;
+    }
+
+    // Persist the monotonic counter before executing the action so a reboot
+    // cannot make an already accepted packet valid again.
+    persist_registry();
     if (!execute(event.action, now_ms)) {
         return {hg::BleRemoteDecision::InvalidAction, result.binding, result.command};
     }
