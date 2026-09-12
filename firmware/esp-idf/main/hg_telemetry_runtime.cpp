@@ -4,9 +4,9 @@
 #include "websocket_telemetry.hpp"
 #include "homeguard/system_model.hpp"
 #include "homeguard/hardware_calibration.hpp"
-#include "homeguard/physical_output_runtime.hpp"
-#include "homeguard/boot_readiness.hpp"
+#include "homeguard/hardware_profile.hpp"
 
+#include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -101,19 +101,12 @@ esp_err_t TelemetryRuntime::start(
     HardwareBootstrap* hardware,
     WebsocketTelemetry* websocket,
     hg::SystemModel* system_model,
-    hg::PhysicalOutputRuntime* physical_outputs,
-    hg::BootReadinessReport* readiness,
     BleTransport* ble_transport)
 {
-    if (hardware == nullptr || websocket == nullptr || system_model == nullptr ||
-        physical_outputs == nullptr || readiness == nullptr) {
-        return ESP_ERR_INVALID_ARG;
-    }
+    if (hardware == nullptr || websocket == nullptr || system_model == nullptr) return ESP_ERR_INVALID_ARG;
     hardware_ = hardware;
     websocket_ = websocket;
     system_model_ = system_model;
-    physical_outputs_ = physical_outputs;
-    readiness_ = readiness;
     ble_transport_ = ble_transport;
     const auto result = xTaskCreate(&TelemetryRuntime::task_entry, "hg_telemetry", 7168, this, 6, nullptr);
     return result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
@@ -126,7 +119,7 @@ void TelemetryRuntime::task_entry(void* context)
 
 bool TelemetryRuntime::set_light_output(bool active, std::uint64_t now_ms)
 {
-    if (system_model_ == nullptr || physical_outputs_ == nullptr || readiness_ == nullptr) return false;
+    if (system_model_ == nullptr) return false;
     const auto* output = system_model_->output(kLightOutputId);
     if (output == nullptr) return false;
 
@@ -134,8 +127,10 @@ bool TelemetryRuntime::set_light_output(bool active, std::uint64_t now_ms)
         ESP_LOGE(kTag, "Zone light: failed to update output model");
         return false;
     }
-    if (!physical_outputs_->synchronize(*system_model_, *readiness_)) {
-        ESP_LOGE(kTag, "Zone light: physical output synchronization failed");
+
+    const auto gpio = static_cast<gpio_num_t>(hg::direct_light_relay_gpio);
+    if (gpio_set_level(gpio, active ? 1 : 0) != ESP_OK) {
+        ESP_LOGE(kTag, "Zone light: GPIO%d write failed", hg::direct_light_relay_gpio);
         return false;
     }
     return true;
@@ -165,9 +160,9 @@ void TelemetryRuntime::update_zone_light(
         return;
     }
 
-    // A running one-minute cycle is never shortened or restarted by another
-    // transition inside the same minute. If a web/manual command turns the
-    // relay off during the automatic cycle, re-assert the required ON state.
+    // Never shorten or restart the running minute because of transitions that
+    // happen inside it. If something turns the relay off during the automatic
+    // cycle, assert the required ON state again on the next telemetry tick.
     const auto* light = system_model_->output(kLightOutputId);
     if (now_ms < light_cycle_deadline_ms_) {
         if (light != nullptr && !light->active) (void)set_light_output(true, now_ms);
@@ -175,16 +170,16 @@ void TelemetryRuntime::update_zone_light(
     }
 
     if (triggered) {
-        // The alarm is still present at the end of the minute: continue with a
-        // fresh one-minute cycle without pulsing the relay OFF between cycles.
+        // Still active after one minute: continue with the next minute without
+        // dropping the lamp between cycles.
         light_cycle_deadline_ms_ = now_ms + kLightCycleMs;
         if (light != nullptr && !light->active) (void)set_light_output(true, now_ms);
         ESP_LOGI(kTag, "Zone light: trigger still active, next 60 s cycle started");
         return;
     }
 
-    // Both zones are normal now. Finish the already-started minute, then
-    // restore the state that existed before the automatic cycle began.
+    // Both trigger zones returned to normal: the already-started minute has
+    // completed, so restore the state that existed before the cycle began.
     if (!set_light_output(light_restore_active_, now_ms)) return;
     light_cycle_active_ = false;
     light_cycle_deadline_ms_ = 0;
