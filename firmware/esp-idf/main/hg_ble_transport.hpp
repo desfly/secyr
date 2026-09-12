@@ -17,8 +17,16 @@ public:
     void set_message_handler(MessageHandler handler, void* context);
     esp_err_t publish_telemetry(const hg::TelemetryFrame& frame);
     esp_err_t send_message(std::uint8_t type, const std::string& payload);
+
+    // A BLE link can exist before the client subscribes to TX notifications.
+    // Keep those states separate so diagnostics do not report a live GATT link
+    // as disconnected while Android is still completing service setup.
+    bool link_connected() const;
+    bool notifications_enabled() const { return notify_enabled_; }
     bool connected() const;
     static bool active_connection();
+    static bool active_notifications();
+    static std::uint32_t active_connection_epoch();
     std::uint32_t connection_epoch() const { return connection_epoch_; }
 
     esp_err_t advertise();
