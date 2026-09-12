@@ -1,5 +1,6 @@
 #pragma once
 
+#include "homeguard/ble_remote.hpp"
 #include "homeguard/telemetry.hpp"
 #include "esp_err.h"
 
@@ -12,9 +13,11 @@ namespace homeguard::idf {
 class BleTransport {
 public:
     using MessageHandler = void (*)(std::uint8_t type, const std::string& json, void* context);
+    using RemoteEventHandler = void (*)(const hg::BleRemoteEvent& event, void* context);
 
     esp_err_t start(const char* device_name);
     void set_message_handler(MessageHandler handler, void* context);
+    void set_remote_event_handler(RemoteEventHandler handler, void* context);
     esp_err_t publish_telemetry(const hg::TelemetryFrame& frame);
     esp_err_t send_message(std::uint8_t type, const std::string& payload);
 
@@ -30,7 +33,13 @@ public:
     std::uint32_t connection_epoch() const { return connection_epoch_; }
 
     esp_err_t advertise();
+    esp_err_t scan_remotes();
     int accept_rx_fragment(const std::uint8_t* data, std::size_t size);
+    void accept_remote_advertisement(
+        std::uint8_t address_type,
+        const std::uint8_t address[6],
+        const std::uint8_t* payload,
+        std::size_t payload_size);
     void on_connected(std::uint16_t handle);
     void on_disconnected();
     void on_notify_subscription(bool enabled);
@@ -54,6 +63,8 @@ private:
 
     MessageHandler message_handler_{nullptr};
     void* message_context_{nullptr};
+    RemoteEventHandler remote_event_handler_{nullptr};
+    void* remote_event_context_{nullptr};
 };
 
 }  // namespace homeguard::idf
