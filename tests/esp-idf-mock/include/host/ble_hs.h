@@ -90,6 +90,7 @@ struct ble_hs_cfg_t {
 
 inline ble_hs_cfg_t ble_hs_cfg{};
 
+constexpr int BLE_HS_EALREADY = 2;
 constexpr int BLE_GATT_ACCESS_OP_WRITE_CHR = 1;
 constexpr int BLE_ATT_ERR_UNLIKELY = 0x0e;
 constexpr int BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN = 0x0d;
