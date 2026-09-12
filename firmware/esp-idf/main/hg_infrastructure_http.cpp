@@ -8,7 +8,6 @@
 #include "esp_wifi.h"
 
 #include <cstddef>
-#include <cstdio>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -126,8 +125,7 @@ esp_err_t InfrastructureHttp::connectivity_get(httpd_req_t* request)
             esp_netif_ip_info_t info{};
             if (esp_netif_get_ip_info(netif, &info) == ESP_OK && info.ip.addr != 0U) {
                 char buffer[16]{};
-                std::snprintf(buffer, sizeof(buffer), IPSTR, IP2STR(&info.ip));
-                wifi_ip = buffer;
+                if (esp_ip4addr_ntoa(&info.ip, buffer, sizeof(buffer)) != nullptr) wifi_ip = buffer;
             }
         }
     }
