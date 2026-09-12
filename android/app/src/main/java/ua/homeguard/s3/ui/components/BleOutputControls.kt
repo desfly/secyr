@@ -10,6 +10,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,7 +24,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import ua.homeguard.s3.network.ble.BleRuntimeRegistry
+
+private const val ALL_KEYFOB_PERMISSIONS = 0x3f
 
 @Composable
 fun BleOutputControlsRuntime() {
@@ -32,8 +36,10 @@ fun BleOutputControlsRuntime() {
     val access by ble.access().collectAsState()
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf("Готово") }
+    var remoteName by remember { mutableStateOf("Брелок 1") }
+    var pairingActive by remember { mutableStateOf(false) }
 
-    fun run(label: String, block: suspend () -> org.json.JSONObject) {
+    fun run(label: String, block: suspend () -> JSONObject) {
         scope.launch {
             status = "$label…"
             status = runCatching { block() }.fold(
@@ -46,6 +52,43 @@ fun BleOutputControlsRuntime() {
         }
     }
 
+    fun beginKeyfobPairing() {
+        val name = remoteName.trim()
+        if (name.isEmpty()) {
+            status = "Вкажіть назву брелка"
+            return
+        }
+        scope.launch {
+            status = "Пошук брелка…"
+            val result = runCatching {
+                ble.sendCommand(
+                    "remote.pair_begin",
+                    JSONObject()
+                        .put("name", name)
+                        .put("permissions", ALL_KEYFOB_PERMISSIONS),
+                )
+            }
+            result.onSuccess { reply ->
+                pairingActive = reply.optBoolean("ok", false)
+                status = if (pairingActive) {
+                    "Натисніть кнопку HomeGuard BLE-брелка протягом 30 с"
+                } else {
+                    "Pairing: ${reply.optString("reason", "відхилено")}"
+                }
+            }.onFailure { error ->
+                pairingActive = false
+                status = "Pairing: ${error.message ?: "помилка"}"
+            }
+        }
+    }
+
+    fun cancelKeyfobPairing() {
+        run("Pairing скасовано") {
+            ble.sendCommand("remote.pair_cancel")
+        }
+        pairingActive = false
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         BleOutputControls(
             enabled = access.authenticated,
@@ -55,6 +98,45 @@ fun BleOutputControlsRuntime() {
             onValve2Change = { active -> run(if (active) "Кран 2 ON" else "Кран 2 OFF") { ble.setValve2(active) } },
             onLockPulse = { run("Замок 5 с") { ble.pulseLock() } },
         )
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("BLE · брелки", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Прив’язка дозволена тільки через авторизований BLE-сеанс з правом accessManage.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = remoteName,
+                    onValueChange = { remoteName = it.take(23) },
+                    enabled = access.authenticated && access.accessManage && !pairingActive,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Назва брелка") },
+                )
+                if (pairingActive) {
+                    Button(
+                        enabled = access.authenticated && access.accessManage,
+                        onClick = ::cancelKeyfobPairing,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Скасувати pairing") }
+                } else {
+                    Button(
+                        enabled = access.authenticated && access.accessManage && remoteName.isNotBlank(),
+                        onClick = ::beginKeyfobPairing,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Додати BLE-брелок · 30 с") }
+                }
+                Text(
+                    "Native HomeGuard: Away / Home / Disarm / Lock 5 с / Light / Panic. Захист від повтору — лічильник пакета.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
         Text(status, style = MaterialTheme.typography.bodySmall)
     }
 }
