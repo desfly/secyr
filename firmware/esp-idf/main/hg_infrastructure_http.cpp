@@ -4,10 +4,37 @@
 #include "hg_request_auth.hpp"
 #include "homeguard/hardware_runtime.hpp"
 
+#include "esp_netif.h"
+#include "esp_wifi.h"
+
 #include <cstddef>
+#include <cstring>
 #include <sstream>
+#include <string>
 
 namespace homeguard::idf {
+namespace {
+
+std::string json_escape(const char* value)
+{
+    std::string out;
+    if (value == nullptr) return out;
+    for (const unsigned char ch : std::string(value)) {
+        switch (ch) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (ch >= 0x20U) out.push_back(static_cast<char>(ch));
+                break;
+        }
+    }
+    return out;
+}
+
+}  // namespace
 
 esp_err_t InfrastructureHttp::register_handlers(
     httpd_handle_t server,
@@ -88,14 +115,51 @@ esp_err_t InfrastructureHttp::connectivity_get(httpd_req_t* request)
     }
 
     const auto& ethernet = self->hardware_->ethernet().status();
+    const bool ethernet_online = ethernet.initialized && ethernet.link_up && ethernet.has_ip;
+
+    wifi_ap_record_t wifi_ap{};
+    const bool wifi_connected = esp_wifi_sta_get_ap_info(&wifi_ap) == ESP_OK;
+    std::string wifi_ip;
+    if (wifi_connected) {
+        if (auto* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"); netif != nullptr) {
+            esp_netif_ip_info_t info{};
+            if (esp_netif_get_ip_info(netif, &info) == ESP_OK && info.ip.addr != 0U) {
+                char buffer[16]{};
+                std::snprintf(buffer, sizeof(buffer), IPSTR, IP2STR(&info.ip));
+                wifi_ip = buffer;
+            }
+        }
+    }
+    const bool wifi_online = wifi_connected && !wifi_ip.empty();
+    const auto ssid_length = wifi_connected
+        ? strnlen(reinterpret_cast<const char*>(wifi_ap.ssid), sizeof(wifi_ap.ssid))
+        : 0U;
+    const std::string wifi_ssid = wifi_connected
+        ? std::string(reinterpret_cast<const char*>(wifi_ap.ssid), ssid_length)
+        : std::string{};
+
+    const bool ble_connected = BleTransport::active_connection();
+    const char* preferred = ethernet_online ? "ethernet" :
+                            wifi_online ? "wifi" :
+                            ble_connected ? "ble" : "offline";
+
     std::ostringstream output;
-    output << "{\"ok\":true,\"ethernet\":{";
+    output << "{\"ok\":true,\"preferred\":\"" << preferred << "\",";
+    output << "\"ethernet\":{";
     output << "\"initialized\":" << (ethernet.initialized ? "true" : "false") << ",";
+    output << "\"online\":" << (ethernet_online ? "true" : "false") << ",";
     output << "\"linkUp\":" << (ethernet.link_up ? "true" : "false") << ",";
     output << "\"hasIp\":" << (ethernet.has_ip ? "true" : "false") << ",";
-    output << "\"ip\":\"" << ethernet.ipv4 << "\"},";
+    output << "\"ip\":\"" << json_escape(ethernet.ipv4.c_str()) << "\"},";
+    output << "\"wifi\":{";
+    output << "\"online\":" << (wifi_online ? "true" : "false") << ",";
+    output << "\"connected\":" << (wifi_connected ? "true" : "false") << ",";
+    output << "\"ssid\":\"" << json_escape(wifi_ssid.c_str()) << "\",";
+    output << "\"ip\":\"" << json_escape(wifi_ip.c_str()) << "\",";
+    output << "\"rssi\":" << (wifi_connected ? static_cast<int>(wifi_ap.rssi) : 0) << "},";
     output << "\"ble\":{";
-    output << "\"connected\":" << (BleTransport::active_connection() ? "true" : "false") << ",";
+    output << "\"online\":" << (ble_connected ? "true" : "false") << ",";
+    output << "\"connected\":" << (ble_connected ? "true" : "false") << ",";
     output << "\"ip\":\"—\"}}";
 
     const auto body = output.str();
