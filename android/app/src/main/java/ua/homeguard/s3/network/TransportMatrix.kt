@@ -18,6 +18,26 @@ data class TransportStatus(
     val lastSeenAtMs: Long = 0L,
 )
 
+data class TransportSelection(
+    val command: TransportKind?,
+    val telemetry: TransportKind?,
+) {
+    val localActive: Boolean
+        get() = command == TransportKind.LOCAL_HTTP || telemetry == TransportKind.LOCAL_WSS
+
+    val bleActive: Boolean
+        get() = command == TransportKind.BLE || telemetry == TransportKind.BLE
+
+    val cloudActive: Boolean
+        get() = command == TransportKind.CLOUD_HTTP ||
+            command == TransportKind.MQTT ||
+            telemetry == TransportKind.CLOUD_WSS ||
+            telemetry == TransportKind.MQTT
+
+    val primary: TransportKind?
+        get() = command ?: telemetry
+}
+
 object TransportMatrix {
     val commandPriority = listOf(
         TransportKind.LOCAL_HTTP,
@@ -46,13 +66,22 @@ object TransportMatrix {
     fun chooseTelemetry(statuses: Collection<TransportStatus>): TransportKind? =
         choose(telemetryPriority, statuses)
 
+    fun chooseActive(statuses: Collection<TransportStatus>): TransportSelection =
+        TransportSelection(
+            command = chooseCommand(statuses),
+            telemetry = chooseTelemetry(statuses),
+        )
+
+    fun isUsable(status: TransportStatus): Boolean =
+        status.available && status.authenticated
+
     private fun choose(
         priority: List<TransportKind>,
         statuses: Collection<TransportStatus>,
     ): TransportKind? {
         val byKind = statuses.associateBy { it.kind }
         return priority.firstOrNull { kind ->
-            byKind[kind]?.let { it.available && it.authenticated } == true
+            byKind[kind]?.let(::isUsable) == true
         }
     }
 }
