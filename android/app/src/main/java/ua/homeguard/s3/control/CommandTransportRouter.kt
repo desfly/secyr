@@ -41,6 +41,8 @@ class CommandTransportRouter(
         CommandType.ARM_HOME,
         CommandType.ARM_AWAY,
         CommandType.DISARM,
+        CommandType.OPEN_VALVES,
+        CommandType.CLOSE_VALVES,
         -> true
         else -> false
     }
