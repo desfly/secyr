@@ -96,17 +96,14 @@ bool WebsocketTelemetry::authorize(httpd_req_t* request) {
     // short-lived, single-use ticket through the authenticated HTTP session and
     // present only that ticket in the upgrade URL. Long-lived local API tokens
     // are never accepted from the query string.
-    const size_t query_length = httpd_req_get_url_query_len(request);
-    if (query_length > 0U && query_length <= 192U) {
-        std::array<char, 193> query{};
-        std::array<char, 129> ticket{};
-        if (httpd_req_get_url_query_str(request, query.data(), query_length + 1U) == ESP_OK &&
-            httpd_query_key_value(query.data(), "ticket", ticket.data(), ticket.size()) == ESP_OK &&
-            ticket[0] != '\0') {
-            std::string authorization = "Bearer ";
-            authorization += ticket.data();
-            if (consume_session(authorization)) return true;
-        }
+    std::array<char, 193> query{};
+    std::array<char, 129> ticket{};
+    if (httpd_req_get_url_query_str(request, query.data(), query.size()) == ESP_OK &&
+        httpd_query_key_value(query.data(), "ticket", ticket.data(), ticket.size()) == ESP_OK &&
+        ticket[0] != '\0') {
+        std::string authorization = "Bearer ";
+        authorization += ticket.data();
+        if (consume_session(authorization)) return true;
     }
 
     const size_t length = httpd_req_get_hdr_value_len(request, "Authorization");
