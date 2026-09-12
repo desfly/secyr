@@ -5,8 +5,6 @@
 
 namespace hg {
 class SystemModel;
-class PhysicalOutputRuntime;
-struct BootReadinessReport;
 }
 
 class WebsocketTelemetry;
@@ -22,8 +20,6 @@ public:
         HardwareBootstrap* hardware,
         WebsocketTelemetry* websocket,
         hg::SystemModel* system_model,
-        hg::PhysicalOutputRuntime* physical_outputs,
-        hg::BootReadinessReport* readiness,
         BleTransport* ble_transport = nullptr);
 
 private:
@@ -35,8 +31,6 @@ private:
     HardwareBootstrap* hardware_{nullptr};
     WebsocketTelemetry* websocket_{nullptr};
     hg::SystemModel* system_model_{nullptr};
-    hg::PhysicalOutputRuntime* physical_outputs_{nullptr};
-    hg::BootReadinessReport* readiness_{nullptr};
     BleTransport* ble_transport_{nullptr};
     hg::TelemetryBuilder builder_{};
     hg::HealthMonitor health_{};
