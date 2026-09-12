@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hg_ble_remote_runtime.hpp"
 #include "homeguard/provisioning.hpp"
 
 #include <cstdint>
@@ -38,6 +39,7 @@ public:
     void handle(std::uint8_t type, const std::string& json);
 
 private:
+    static void on_remote_event(const hg::BleRemoteEvent& event, void* context);
     bool session_valid() const;
     void handle_hello(const std::string& json);
     void handle_command(const std::string& json);
@@ -56,6 +58,7 @@ private:
     hg::SystemEventBus* bus_{};
     NetworkHttp* network_{};
     NvsConfigStore* provisioning_store_{};
+    BleRemoteRuntime remote_runtime_{};
     hg::ProvisioningSession provisioning_session_{};
     bool provisioning_session_prepared_{};
     std::uint32_t provisioning_epoch_{};
