@@ -27,11 +27,12 @@ void append_i32(std::vector<std::byte>& out, int value) {
 }
 
 bool required_outputs_assigned(const BoardPinMap& pins) {
+    // Current bench wiring drives LIGHT and LOCK directly on fixed ESP GPIO1
+    // and GPIO2. aux1/aux2 are reserved for the future MCP23017 migration and
+    // must not gate output readiness while that expander path is not installed.
     return pins.siren != gpio_unassigned &&
         pins.valve1 != gpio_unassigned &&
-        pins.valve2 != gpio_unassigned &&
-        pins.aux1 != gpio_unassigned &&
-        pins.aux2 != gpio_unassigned;
+        pins.valve2 != gpio_unassigned;
 }
 
 }  // namespace
