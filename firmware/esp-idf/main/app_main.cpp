@@ -161,6 +161,8 @@ void initialize_system_model()
     g_system_model.add_output(1, hg::ModelOutputType::Siren);
     g_system_model.add_output(2, hg::ModelOutputType::Valve);
     g_system_model.add_output(3, hg::ModelOutputType::Valve);
+    g_system_model.add_output(4, hg::ModelOutputType::Light);
+    g_system_model.add_output(5, hg::ModelOutputType::Relay);
 }
 
 void initialize_physical_outputs()
