@@ -2,6 +2,7 @@
 
 #include "homeguard/ble_remote.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
