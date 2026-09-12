@@ -109,22 +109,25 @@
         `Link: ${local?.ethernet?.linkUp === true ? "UP" : "DOWN"}<br>IP: ${local?.ethernet?.hasIp === true ? "отримано" : "немає"}`,
         preferred === "ethernet");
 
-      const bleOnline = local?.ble?.connected === true;
+      const bleLink = local?.ble?.linkConnected === true || local?.ble?.connected === true;
+      const bleNotify = local?.ble?.notificationsEnabled === true;
+      const bleEpoch = Number(local?.ble?.connectionEpoch) || 0;
       setChannel(
         "netmonBle",
-        badge(bleOnline, false),
+        badge(bleLink, false),
         "<strong>GATT / без IP</strong>",
-        `Сесія: ${bleOnline ? "активна" : "немає клієнта"}<br>Канал: локальний BLE`,
+        `Link: ${bleLink ? "CONNECTED" : "DISCONNECTED"}<br>Notify TX: ${bleNotify ? "ON" : "OFF"}<br>Session epoch: ${bleEpoch}`,
         preferred === "ble");
 
       const cloudOnline = cloud?.connected === true;
       const cloudPending = cloud?.configured === true && !cloudOnline;
+      const cloudActive = preferred === "offline" && cloudOnline;
       setChannel(
         "netmonCloud",
         badge(cloudOnline, cloudPending),
         `<strong>${escapeHtml(cloud?.deviceId || "—")}</strong>`,
-        `Connect: ${Number(cloud?.connectCount) || 0}<br>Disconnect: ${Number(cloud?.disconnectCount) || 0}`,
-        false);
+        `State: ${escapeHtml(cloud?.state || "disabled")}<br>Connect: ${Number(cloud?.connectCount) || 0}<br>Disconnect: ${Number(cloud?.disconnectCount) || 0}`,
+        cloudActive);
 
       const updated = document.getElementById("networkConnectivityUpdated");
       if (updated) updated.textContent = `Оновлено ${new Date().toLocaleTimeString("uk-UA")}`;
