@@ -91,7 +91,7 @@ class DeviceSession(
         }
 
         bleStateJob = scope.launch {
-            ble.state().distinctUntilChanged().collect { state ->
+            ble.state().collect { state ->
                 if (state == BleHomeGuardClient.State.READY) {
                     val snapshot = ble.snapshots().value
                     if (snapshot.zones.isNotEmpty()) telemetry.acceptFallbackSnapshot(snapshot)
