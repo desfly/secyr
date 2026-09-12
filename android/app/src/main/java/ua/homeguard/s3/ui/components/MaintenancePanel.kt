@@ -28,56 +28,60 @@ fun MaintenancePanel(
     val connectionProblems = diagnostics.connectionItems.count { !it.ok }
     val hardwareProblems = diagnostics.hardwareItems.count { !it.ok }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text("Діагностика", style = MaterialTheme.typography.titleMedium)
-            Text(
-                if (diagnostics.connectionReady) "Зв’язок: готово"
-                else "Зв’язок: проблем $connectionProblems",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                if (diagnostics.hardwareTestReady) "Обладнання: готово"
-                else "Обладнання: проблем $hardwareProblems",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-
-            OutlinedButton(
-                onClick = { detailsExpanded = !detailsExpanded },
-                modifier = Modifier.fillMaxWidth(),
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(if (detailsExpanded) "Сховати деталі" else "Показати деталі")
-            }
+                Text("Діагностика", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (diagnostics.connectionReady) "Зв’язок: готово"
+                    else "Зв’язок: проблем $connectionProblems",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    if (diagnostics.hardwareTestReady) "Обладнання: готово"
+                    else "Обладнання: проблем $hardwareProblems",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
 
-            if (detailsExpanded) {
-                diagnostics.connectionItems.forEach { item ->
-                    Text(
-                        "${if (item.ok) "✓" else "!"} ${item.label}: ${item.detail}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                OutlinedButton(
+                    onClick = { detailsExpanded = !detailsExpanded },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (detailsExpanded) "Сховати деталі" else "Показати деталі")
                 }
-                diagnostics.hardwareItems.forEach { item ->
-                    Text(
-                        "${if (item.ok) "✓" else "!"} ${item.label}: ${item.detail}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
 
-            OutlinedButton(onClick = onExportSettings, modifier = Modifier.fillMaxWidth()) {
-                Text("Backup налаштувань")
+                if (detailsExpanded) {
+                    diagnostics.connectionItems.forEach { item ->
+                        Text(
+                            "${if (item.ok) "✓" else "!"} ${item.label}: ${item.detail}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    diagnostics.hardwareItems.forEach { item ->
+                        Text(
+                            "${if (item.ok) "✓" else "!"} ${item.label}: ${item.detail}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+
+                OutlinedButton(onClick = onExportSettings, modifier = Modifier.fillMaxWidth()) {
+                    Text("Backup налаштувань")
+                }
+                OutlinedButton(onClick = onImportSettings, modifier = Modifier.fillMaxWidth()) {
+                    Text("Restore налаштувань")
+                }
+                Text(backupStatus, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "API token не входить у backup і не замінюється під час restore.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
-            OutlinedButton(onClick = onImportSettings, modifier = Modifier.fillMaxWidth()) {
-                Text("Restore налаштувань")
-            }
-            Text(backupStatus, style = MaterialTheme.typography.bodySmall)
-            Text(
-                "API token не входить у backup і не замінюється під час restore.",
-                style = MaterialTheme.typography.bodySmall,
-            )
         }
+
+        BleOutputControlsRuntime()
     }
 }
