@@ -3,6 +3,9 @@
 #include "homeguard/telemetry.hpp"
 #include "esp_err.h"
 
+#include <array>
+#include <cstdint>
+
 namespace hg {
 class SystemModel;
 }
