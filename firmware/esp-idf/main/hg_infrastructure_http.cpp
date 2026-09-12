@@ -8,6 +8,7 @@
 #include "esp_wifi.h"
 
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <sstream>
 #include <string>
