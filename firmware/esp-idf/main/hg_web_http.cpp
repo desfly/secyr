@@ -102,15 +102,6 @@ esp_err_t WebHttp::css_get(httpd_req_t* request)
 
 [hidden]{display:none!important}
 #mobileNavToggle{display:none}
-.zone.hg-zone-normal:before{color:#0aaa42!important}.zone.hg-zone-normal strong{color:#0aaa42!important}
-.zone.hg-zone-open:before{color:#e31b23!important}.zone.hg-zone-open strong{color:#e31b23!important}
-.zone.hg-zone-short:before{color:#d99a00!important}.zone.hg-zone-short strong{color:#b98000!important}
-.zone.hg-zone-alarm:before{color:#e31b23!important}.zone.hg-zone-alarm strong{color:#e31b23!important}
-#adminConnectivityCard .hg-conn-dot{display:inline-block;width:13px;height:13px;border-radius:50%;vertical-align:middle;box-shadow:0 0 0 2px rgba(0,0,0,.035)}
-#adminConnectivityCard .hg-conn-online{background:#0aaa42}#adminConnectivityCard .hg-conn-offline{background:#e31b23}#adminConnectivityCard .hg-conn-pending{background:#d99a00}
-#quickLight[data-active="true"],#quickLock[data-active="true"]{border-color:#0aaa42!important;background:#edf9f1!important}
-#quickLight[data-active="true"] small,#quickLock[data-active="true"] small{color:#078c37!important;font-weight:800}
-#quickLight:disabled,#quickLock:disabled{opacity:.65;cursor:wait}
 @media (max-width:760px){
   html,body{max-width:100%;overflow-x:hidden}
   .shell{display:block!important;min-height:100vh}
@@ -216,172 +207,15 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
 })();
 
 ;(() => {
-  const originalRenderOutputs = typeof renderOutputs === "function" ? renderOutputs : null;
-  let outputSnapshot = new Map();
-  let liveBusy = false;
-  let lockBusy = false;
-
-  const zoneView = (state) => {
-    const value = String(state || "normal").toLowerCase();
-    if (value === "open") return {label:"ОБРИВ", row:"hg-zone-open"};
-    if (value === "fault" || value === "short") return {label:"КЗ", row:"hg-zone-short"};
-    if (value === "normal" || value === "closed") return {label:"НОРМА", row:"hg-zone-normal"};
-    return {label:value.toUpperCase(), row:"hg-zone-alarm"};
-  };
-
-  if (typeof renderZones === "function") {
-    renderZones = function(data) {
-      const zones = Array.isArray(data?.zones) ? data.zones : [];
-      const count = document.querySelector("#zoneCount");
-      if (count) count.textContent = zones.length || "—";
-      const target = document.querySelector("#zones");
-      if (!target) return;
-      target.innerHTML = zones.length ? zones.map(zone => {
-        const view = zoneView(zone.state);
-        return `<div class="zone ${view.row}" data-zone-id="${Number(zone.id) || 0}" data-zone-state="${escapeHtml(zone.state || "normal")}"><span>${escapeHtml(zone.name || `Зона ${zone.id}`)}${zone.alwaysOn ? " · 24/7" : ""}</span><strong>${view.label}</strong></div>`;
-      }).join("") : "<div class=\"zone\"><span>Дані ще не отримані</span><strong>—</strong></div>";
-    };
-  }
-
-  function setQuickState(id, active) {
-    const button = document.getElementById(id);
-    if (!button) return;
-    button.dataset.active = active ? "true" : "false";
-    button.setAttribute("aria-pressed", active ? "true" : "false");
-    const small = button.querySelector("small");
-    if (!small) return;
-    if (id === "quickLight") small.textContent = active ? "УВІМКНЕНО" : "ВИМКНЕНО";
-    else small.textContent = active ? "ВІДКРИТО" : "ЗАКРИТО";
-  }
-
-  function syncQuickStates(data) {
-    const outputs = Array.isArray(data?.outputs) ? data.outputs : [];
-    outputSnapshot = new Map(outputs.map(item => [Number(item.id), item.active === true]));
-    if (outputSnapshot.has(4)) setQuickState("quickLight", outputSnapshot.get(4));
-    if (outputSnapshot.has(5)) setQuickState("quickLock", outputSnapshot.get(5));
-  }
-
-  if (originalRenderOutputs) {
-    renderOutputs = function(data) {
-      originalRenderOutputs(data);
-      syncQuickStates(data);
-    };
-  }
-
-  const currentActor = () => document.querySelector("#operatorId")?.value.trim() || "session";
-
-  async function setOutput(outputId, active) {
-    const result = await api("/api/v1/system/output-command", {
-      method: "POST",
-      body: JSON.stringify({outputId, active, actor: currentActor()})
-    });
-    const outputs = await api("/api/v1/system/outputs");
-    if (typeof renderOutputs === "function") renderOutputs(outputs);
-    return result;
-  }
-
-  function bindFreshButton(id, handler) {
-    const oldButton = document.getElementById(id);
-    if (!oldButton) return false;
-    const button = oldButton.cloneNode(true);
-    oldButton.replaceWith(button);
-    button.disabled = false;
-    button.addEventListener("click", handler);
-    return true;
-  }
-
-  function wireQuickButtons() {
-    const lightReady = bindFreshButton("quickLight", async event => {
-      const button = event.currentTarget;
-      button.disabled = true;
-      try {
-        const next = !(outputSnapshot.get(4) === true);
-        await setOutput(4, next);
-        showToast(next ? "Світло увімкнено" : "Світло вимкнено");
-      } catch (error) {
-        showToast(`Світло: ${error.message}`);
-      } finally {
-        button.disabled = false;
-      }
-    });
-
-    const lockReady = bindFreshButton("quickLock", async event => {
-      if (lockBusy) return;
-      const button = event.currentTarget;
-      lockBusy = true;
-      button.disabled = true;
-      try {
-        await setOutput(5, true);
-        setQuickState("quickLock", true);
-        showToast("Замок відкрито на 5 секунд");
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        await setOutput(5, false);
-        setQuickState("quickLock", false);
-        showToast("Замок закрито");
-      } catch (error) {
-        try { await setOutput(5, false); } catch (_) {}
-        setQuickState("quickLock", false);
-        showToast(`Замок: ${error.message}`);
-      } finally {
-        lockBusy = false;
-        button.disabled = false;
-      }
-    });
-
-    if (lightReady || lockReady) {
-      api("/api/v1/system/outputs").then(data => {
-        if (typeof renderOutputs === "function") renderOutputs(data);
-        else syncQuickStates(data);
-      }).catch(() => {});
-    }
-  }
-
-  async function liveStep() {
-    if (liveBusy || !window.HomeGuardAuth?.authenticated?.()) return;
-    const hash = window.location.hash || "#overview";
-    if (hash === "#networkPage" || hash === "#system") return;
-    liveBusy = true;
-    try {
-      const [zones, outputs] = await Promise.all([
-        api("/api/v1/system/zones"),
-        api("/api/v1/system/outputs")
-      ]);
-      if (typeof renderZones === "function") renderZones(zones);
-      if (typeof renderOutputs === "function") renderOutputs(outputs);
-      else syncQuickStates(outputs);
-    } catch (_) {
-    } finally {
-      liveBusy = false;
-    }
-  }
-
-  window.addEventListener("load", () => {
-    // index.html creates the two quick buttons after app.js; cloning them here
-    // removes the obsolete PIN-dependent listeners from the legacy inline fix.
-    wireQuickButtons();
-    liveStep();
-    window.setInterval(liveStep, 1000);
-  });
-})();
-
-;(() => {
   let timer = 0;
 
+  const label = (ok, pending = false) => pending ? "ПІДКЛЮЧЕННЯ" : (ok ? "ОНЛАЙН" : "ОФЛАЙН");
   const badge = (ok, pending = false) => {
-    const state = pending ? "pending" : (ok ? "online" : "offline");
-    const title = pending ? "Підключення" : (ok ? "Онлайн" : "Офлайн");
-    return `<span class="hg-conn-dot hg-conn-${state}" role="img" aria-label="${title}" title="${title}"></span>`;
+    const text = label(ok, pending);
+    const bg = pending ? "#fff4cc" : (ok ? "#dcf8e8" : "#ffe3e3");
+    const fg = pending ? "#8a6500" : (ok ? "#157347" : "#b42318");
+    return `<strong style="display:inline-block;min-width:104px;padding:5px 9px;border-radius:999px;text-align:center;background:${bg};color:${fg}">${text}</strong>`;
   };
-
-  function matchZoneHeight(card) {
-    const zonesCard = document.getElementById("zones-section");
-    if (!card || !zonesCard || window.innerWidth <= 1100) return;
-    const height = Math.round(zonesCard.getBoundingClientRect().height);
-    if (height <= 0) return;
-    card.style.height = `${height}px`;
-    card.style.minHeight = `${height}px`;
-    card.style.maxHeight = `${height}px`;
-  }
 
   function removeModule() {
     document.getElementById("adminConnectivityCard")?.remove();
@@ -402,22 +236,21 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
       document.getElementById("cloudCard")?.setAttribute("hidden", "");
       card = document.createElement("article");
       card.id = "adminConnectivityCard";
-      card.style.cssText = "grid-column:span 2;display:block;min-height:0;padding:10px 14px;overflow:hidden";
+      card.style.cssText = "grid-column:span 2;display:block;min-height:0;padding:16px 18px";
       card.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px;line-height:1.05">
-          <div><span style="font-size:11px;color:#66758b">Admin</span><strong style="display:block;font-size:17px">Зв'язок</strong></div>
-          <small id="adminConnectivityUpdated" style="font-size:11px">—</small>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px">
+          <div><span style="font-size:13px;color:#66758b">Admin</span><strong style="display:block;font-size:18px">Зв'язок</strong></div>
+          <small id="adminConnectivityUpdated">—</small>
         </div>
-        <div class="hg-connectivity-grid" style="display:grid;grid-template-columns:minmax(120px,1fr) 44px minmax(120px,1fr);gap:0;border:1px solid #d7deea;border-radius:9px;overflow:hidden;font-size:13px;line-height:1.1">
-          <div style="padding:5px 8px;background:#f5f7fa;font-weight:700">Канал</div><div style="padding:5px 8px;background:#f5f7fa;font-weight:700;text-align:center">Стан</div><div style="padding:5px 8px;background:#f5f7fa;font-weight:700">IP / адреса</div>
-          <div style="padding:6px 8px;border-top:1px solid #e2e7ef;font-weight:700">Wi‑Fi</div><div id="commWifiState" style="padding:6px 8px;border-top:1px solid #e2e7ef;text-align:center">—</div><div id="commWifiIp" style="padding:6px 8px;border-top:1px solid #e2e7ef">—</div>
-          <div style="padding:6px 8px;border-top:1px solid #e2e7ef;font-weight:700">Ethernet W5500</div><div id="commEthState" style="padding:6px 8px;border-top:1px solid #e2e7ef;text-align:center">—</div><div id="commEthIp" style="padding:6px 8px;border-top:1px solid #e2e7ef">—</div>
-          <div style="padding:6px 8px;border-top:1px solid #e2e7ef;font-weight:700">Bluetooth BLE</div><div id="commBleState" style="padding:6px 8px;border-top:1px solid #e2e7ef;text-align:center">—</div><div id="commBleIp" style="padding:6px 8px;border-top:1px solid #e2e7ef">—</div>
-          <div style="padding:6px 8px;border-top:1px solid #e2e7ef;font-weight:700">Cloud MQTT</div><div id="commCloudState" style="padding:6px 8px;border-top:1px solid #e2e7ef;text-align:center">—</div><div id="commCloudIp" style="padding:6px 8px;border-top:1px solid #e2e7ef">—</div>
+        <div style="display:grid;grid-template-columns:minmax(120px,1fr) 130px minmax(120px,1fr);gap:0;border:1px solid #d7deea;border-radius:10px;overflow:hidden">
+          <div style="padding:8px 10px;background:#f5f7fa;font-weight:700">Канал</div><div style="padding:8px 10px;background:#f5f7fa;font-weight:700">Стан</div><div style="padding:8px 10px;background:#f5f7fa;font-weight:700">IP / адреса</div>
+          <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Wi‑Fi</div><div id="commWifiState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commWifiIp" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+          <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Ethernet W5500</div><div id="commEthState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commEthIp" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+          <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Bluetooth BLE</div><div id="commBleState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commBleIp" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+          <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Cloud MQTT</div><div id="commCloudState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commCloudIp" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
         </div>`;
       grid.appendChild(card);
     }
-    matchZoneHeight(card);
     return card;
   }
 
@@ -432,24 +265,23 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
 
   async function refreshConnectivity() {
     if (window.HomeGuardAuth?.role?.() !== "admin") { removeModule(); return; }
-    const card = ensureModule();
-    if (!card) return;
+    if (!ensureModule()) return;
     try {
       const [wifi, local, cloud] = await Promise.all([
         getJson("/api/v1/network/status"),
         getJson("/api/v1/connectivity/status"),
         getJson("/api/v1/cloud/status")
       ]);
-      const wifiConnected = wifi?.state === "connected" || local?.wifi?.online === true;
+      const wifiConnected = wifi?.state === "connected";
       const wifiPending = wifi?.state === "connecting";
       document.getElementById("commWifiState").innerHTML = badge(wifiConnected, wifiPending);
-      document.getElementById("commWifiIp").textContent = local?.wifi?.ip || wifi?.ip || "—";
+      document.getElementById("commWifiIp").textContent = wifi?.ip || "—";
 
-      const ethConnected = local?.ethernet?.online === true || (local?.ethernet?.linkUp === true && local?.ethernet?.hasIp === true);
+      const ethConnected = local?.ethernet?.linkUp === true && local?.ethernet?.hasIp === true;
       document.getElementById("commEthState").innerHTML = badge(ethConnected, local?.ethernet?.initialized === true && !ethConnected);
       document.getElementById("commEthIp").textContent = local?.ethernet?.ip || "—";
 
-      const bleConnected = local?.ble?.linkConnected === true || local?.ble?.connected === true;
+      const bleConnected = local?.ble?.connected === true;
       document.getElementById("commBleState").innerHTML = badge(bleConnected, false);
       document.getElementById("commBleIp").textContent = "—";
 
@@ -459,14 +291,11 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
       document.getElementById("commCloudIp").textContent = cloud?.deviceId || "—";
 
       document.getElementById("adminConnectivityUpdated").textContent = `Оновлено ${new Date().toLocaleTimeString("uk-UA")}`;
-      matchZoneHeight(card);
     } catch (error) {
       const updated = document.getElementById("adminConnectivityUpdated");
       if (updated) updated.textContent = `Помилка: ${error.message}`;
     }
   }
-
-  window.addEventListener("resize", () => matchZoneHeight(document.getElementById("adminConnectivityCard")));
 
   const boot = setInterval(() => {
     if (!window.HomeGuardAuth?.authenticated?.()) return;
@@ -474,7 +303,7 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
     if (window.HomeGuardAuth.role() !== "admin") { removeModule(); return; }
     ensureModule();
     refreshConnectivity();
-    timer = setInterval(refreshConnectivity, 2000);
+    timer = setInterval(refreshConnectivity, 5000);
   }, 250);
 })();
 )JS";
