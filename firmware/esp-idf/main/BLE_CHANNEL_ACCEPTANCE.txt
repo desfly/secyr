@@ -1,0 +1,1 @@
+Acceptance: 1) ESP boots with BLE runtime ready even with Wi-Fi/Ethernet/Cloud unavailable. 2) Android can discover/connect directly over BLE. 3) Commands work over BLE without LAN. 4) Telemetry notifications flow over BLE without LAN. 5) Web connectivity card shows BLE runtime ready separately from client link/subscription. 6) Loss of Wi-Fi/Ethernet/Cloud must not disable BLE.
