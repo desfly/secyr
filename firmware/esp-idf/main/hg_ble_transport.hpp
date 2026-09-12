@@ -1,7 +1,9 @@
 #pragma once
 
 #include "esp_err.h"
+#include "homeguard/ble_remote.hpp"
 #include "homeguard/system_model.hpp"
+#include "homeguard/telemetry.hpp"
 
 #include <cstddef>
 #include <cstdint>
