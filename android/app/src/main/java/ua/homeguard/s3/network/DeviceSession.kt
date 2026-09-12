@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceEndpoint
+import ua.homeguard.s3.network.ble.BleHomeGuardClient
 import ua.homeguard.s3.network.ble.BleRuntimeRegistry
 import ua.homeguard.s3.network.cloud.CloudRuntime
 import ua.homeguard.s3.network.mqtt.MqttConnectionConfig
@@ -34,6 +35,7 @@ class DeviceSession(
     private var reconnectJob: Job? = null
     private var ticketRefreshJob: Job? = null
     private var bleTelemetryJob: Job? = null
+    private var bleStateJob: Job? = null
     @Volatile private var activeTarget: SessionTarget? = null
 
     fun cloudState(): StateFlow<CloudRuntime.State> = remoteTransports.cloudState()
@@ -87,6 +89,17 @@ class DeviceSession(
                 if (ble.isReady()) telemetry.acceptFallbackSnapshot(snapshot)
             }
         }
+
+        bleStateJob = scope.launch {
+            ble.state().distinctUntilChanged().collect { state ->
+                if (state == BleHomeGuardClient.State.READY) {
+                    val snapshot = ble.snapshots().value
+                    if (snapshot.zones.isNotEmpty()) telemetry.acceptFallbackSnapshot(snapshot)
+                } else {
+                    telemetry.clearFallbackSnapshot()
+                }
+            }
+        }
     }
 
     fun stop() {
@@ -94,14 +107,17 @@ class DeviceSession(
         reconnectJob?.cancel()
         ticketRefreshJob?.cancel()
         bleTelemetryJob?.cancel()
+        bleStateJob?.cancel()
         job?.cancel()
         authorizationJob?.cancel()
         reconnectJob = null
         ticketRefreshJob = null
         bleTelemetryJob = null
+        bleStateJob = null
         job = null
         authorizationJob = null
         remoteTransports.stop()
+        telemetry.clearFallbackSnapshot()
         telemetry.disconnect()
     }
 
