@@ -4,6 +4,8 @@
 #include "websocket_telemetry.hpp"
 #include "homeguard/system_model.hpp"
 #include "homeguard/hardware_calibration.hpp"
+#include "homeguard/physical_output_runtime.hpp"
+#include "homeguard/boot_readiness.hpp"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -23,6 +25,8 @@ namespace {
 
 constexpr const char* kTag = "hg_telemetry";
 constexpr TickType_t kTelemetryPeriod = pdMS_TO_TICKS(1000);
+constexpr std::uint16_t kLightOutputId = 4;
+constexpr std::uint64_t kLightCycleMs = 60'000ULL;
 
 hg::HealthState module_health(homeguard::HardwareModuleState state)
 {
@@ -62,6 +66,13 @@ hg::ZoneState physical_zone_state(float millivolts)
     return millivolts < calibration.normal_min_mv ? hg::ZoneState::Short : hg::ZoneState::Open;
 }
 
+bool zone_triggers_light(hg::ZoneState state)
+{
+    return state == hg::ZoneState::Open ||
+           state == hg::ZoneState::Short ||
+           state == hg::ZoneState::Tamper;
+}
+
 void sample_zone_adc(Ads1115& adc, std::size_t first_zone, std::array<hg::ZoneState, 8>& zones)
 {
     for (std::size_t channel = 0; channel < 4; ++channel) {
@@ -86,12 +97,23 @@ std::uint64_t rtc_epoch(Ds3231& rtc, bool& valid)
 
 }  // namespace
 
-esp_err_t TelemetryRuntime::start(HardwareBootstrap* hardware, WebsocketTelemetry* websocket, const hg::SystemModel* system_model, BleTransport* ble_transport)
+esp_err_t TelemetryRuntime::start(
+    HardwareBootstrap* hardware,
+    WebsocketTelemetry* websocket,
+    hg::SystemModel* system_model,
+    hg::PhysicalOutputRuntime* physical_outputs,
+    hg::BootReadinessReport* readiness,
+    BleTransport* ble_transport)
 {
-    if (hardware == nullptr || websocket == nullptr || system_model == nullptr) return ESP_ERR_INVALID_ARG;
+    if (hardware == nullptr || websocket == nullptr || system_model == nullptr ||
+        physical_outputs == nullptr || readiness == nullptr) {
+        return ESP_ERR_INVALID_ARG;
+    }
     hardware_ = hardware;
     websocket_ = websocket;
     system_model_ = system_model;
+    physical_outputs_ = physical_outputs;
+    readiness_ = readiness;
     ble_transport_ = ble_transport;
     const auto result = xTaskCreate(&TelemetryRuntime::task_entry, "hg_telemetry", 7168, this, 6, nullptr);
     return result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
@@ -100,6 +122,73 @@ esp_err_t TelemetryRuntime::start(HardwareBootstrap* hardware, WebsocketTelemetr
 void TelemetryRuntime::task_entry(void* context)
 {
     static_cast<TelemetryRuntime*>(context)->run();
+}
+
+bool TelemetryRuntime::set_light_output(bool active, std::uint64_t now_ms)
+{
+    if (system_model_ == nullptr || physical_outputs_ == nullptr || readiness_ == nullptr) return false;
+    const auto* output = system_model_->output(kLightOutputId);
+    if (output == nullptr) return false;
+
+    if (output->active != active && !system_model_->set_output_active(kLightOutputId, active, now_ms)) {
+        ESP_LOGE(kTag, "Zone light: failed to update output model");
+        return false;
+    }
+    if (!physical_outputs_->synchronize(*system_model_, *readiness_)) {
+        ESP_LOGE(kTag, "Zone light: physical output synchronization failed");
+        return false;
+    }
+    return true;
+}
+
+void TelemetryRuntime::update_zone_light(
+    const std::array<hg::ZoneState, 8>& zones,
+    std::uint64_t now_ms)
+{
+    const bool triggered = zone_triggers_light(zones[0]) || zone_triggers_light(zones[1]);
+
+    if (!light_cycle_active_) {
+        if (!triggered) return;
+
+        const auto* light = system_model_->output(kLightOutputId);
+        if (light == nullptr) {
+            ESP_LOGE(kTag, "Zone light: output 4 is missing");
+            return;
+        }
+
+        light_restore_active_ = light->active;
+        if (!set_light_output(true, now_ms)) return;
+
+        light_cycle_active_ = true;
+        light_cycle_deadline_ms_ = now_ms + kLightCycleMs;
+        ESP_LOGI(kTag, "Zone light: zones 1/2 triggered, light ON for 60 s");
+        return;
+    }
+
+    // A running one-minute cycle is never shortened or restarted by another
+    // transition inside the same minute. If a web/manual command turns the
+    // relay off during the automatic cycle, re-assert the required ON state.
+    const auto* light = system_model_->output(kLightOutputId);
+    if (now_ms < light_cycle_deadline_ms_) {
+        if (light != nullptr && !light->active) (void)set_light_output(true, now_ms);
+        return;
+    }
+
+    if (triggered) {
+        // The alarm is still present at the end of the minute: continue with a
+        // fresh one-minute cycle without pulsing the relay OFF between cycles.
+        light_cycle_deadline_ms_ = now_ms + kLightCycleMs;
+        if (light != nullptr && !light->active) (void)set_light_output(true, now_ms);
+        ESP_LOGI(kTag, "Zone light: trigger still active, next 60 s cycle started");
+        return;
+    }
+
+    // Both zones are normal now. Finish the already-started minute, then
+    // restore the state that existed before the automatic cycle began.
+    if (!set_light_output(light_restore_active_, now_ms)) return;
+    light_cycle_active_ = false;
+    light_cycle_deadline_ms_ = 0;
+    ESP_LOGI(kTag, "Zone light: 60 s cycle complete, previous light state restored");
 }
 
 void TelemetryRuntime::run()
@@ -131,6 +220,7 @@ void TelemetryRuntime::run()
         zones.fill(hg::ZoneState::Disabled);
         sample_zone_adc(hardware_->zone_adc(), 0, zones);
         sample_zone_adc(hardware_->telemetry_adc(), 4, zones);
+        update_zone_light(zones, now_ms);
 
         std::array<hg::PressureState, 2> pressures{};
         std::array<float, 2> pressure_values{};
