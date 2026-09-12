@@ -163,7 +163,7 @@ esp_err_t InfrastructureHttp::connectivity_get(httpd_req_t* request)
     output << "\"ble\":{";
     output << "\"runtimeReady\":" << (ble_runtime_ready ? "true" : "false") << ",";
     output << "\"online\":" << (ble_runtime_ready ? "true" : "false") << ",";
-    output << "\"connected\":" << (ble_link_connected ? "true" : "false") << ",";
+    output << "\"connected\":" << (ble_runtime_ready ? "true" : "false") << ",";
     output << "\"linkConnected\":" << (ble_link_connected ? "true" : "false") << ",";
     output << "\"notificationsEnabled\":" << (ble_notifications ? "true" : "false") << ",";
     output << "\"connectionEpoch\":" << ble_epoch << ",";
