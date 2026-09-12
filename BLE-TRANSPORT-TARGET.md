@@ -1,0 +1,1 @@
+Bluetooth BLE is a first-class HomeGuard transport. It must support Android command and telemetry paths independently of Wi-Fi, Ethernet W5500, and Cloud MQTT. Runtime availability, advertising/readiness, client connection, and telemetry subscription are distinct states.
