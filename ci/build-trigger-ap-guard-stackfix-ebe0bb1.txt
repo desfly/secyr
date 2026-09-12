@@ -1,0 +1,1 @@
+CI trigger for final AP guard reboot-loop fix from main commit ebe0bb148ce152d95a1784b94e3a8a5e82f958ed.
