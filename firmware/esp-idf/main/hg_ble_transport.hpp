@@ -21,8 +21,10 @@ public:
     bool connected() const;
     bool link_connected() const;
     bool notifications_enabled() const { return notify_enabled_; }
+    bool runtime_ready() const { return runtime_ready_; }
     std::uint32_t connection_epoch() const { return connection_epoch_; }
 
+    static bool active_runtime_ready();
     static bool active_connection();
     static bool active_notifications();
     static std::uint32_t active_connection_epoch();
@@ -53,6 +55,7 @@ private:
     void* remote_event_context_ = nullptr;
     std::uint16_t connection_handle_ = 0xffff;
     bool notify_enabled_ = false;
+    bool runtime_ready_ = false;
     std::uint32_t connection_epoch_ = 0;
     std::uint8_t own_address_type_ = 0;
     std::uint16_t next_message_id_ = 1;
