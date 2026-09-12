@@ -77,9 +77,46 @@
     if (preferredNode) preferredNode.textContent = preferred ? "АКТИВНИЙ" : "";
   }
 
+  function setDashboardConnectivity(wifi, local, cloud) {
+    const card = document.getElementById("adminConnectivityCard");
+    if (!card) return;
+
+    const wifiOnline = wifi?.state === "connected" || local?.wifi?.online === true;
+    const wifiPending = wifi?.state === "connecting";
+    const ethOnline = local?.ethernet?.online === true ||
+      (local?.ethernet?.linkUp === true && local?.ethernet?.hasIp === true);
+    const ethPending = local?.ethernet?.initialized === true && !ethOnline;
+    const bleOnline = local?.ble?.linkConnected === true || local?.ble?.connected === true;
+    const cloudOnline = cloud?.connected === true;
+    const cloudPending = cloud?.configured === true && !cloudOnline;
+
+    const states = [
+      ["commWifiState", wifiOnline, wifiPending],
+      ["commEthState", ethOnline, ethPending],
+      ["commBleState", bleOnline, false],
+      ["commCloudState", cloudOnline, cloudPending],
+    ];
+    states.forEach(([id, online, pending]) => {
+      const node = document.getElementById(id);
+      if (node) node.innerHTML = badge(online, pending);
+    });
+
+    const wifiIp = document.getElementById("commWifiIp");
+    const ethIp = document.getElementById("commEthIp");
+    const bleIp = document.getElementById("commBleIp");
+    const cloudIp = document.getElementById("commCloudIp");
+    if (wifiIp) wifiIp.textContent = local?.wifi?.ip || wifi?.ip || "—";
+    if (ethIp) ethIp.textContent = local?.ethernet?.ip || "—";
+    if (bleIp) bleIp.textContent = "—";
+    if (cloudIp) cloudIp.textContent = cloud?.deviceId || "—";
+
+    const updated = document.getElementById("adminConnectivityUpdated");
+    if (updated) updated.textContent = `Оновлено ${new Date().toLocaleTimeString("uk-UA")}`;
+  }
+
   async function refreshConnectivityMonitor() {
     if (!window.HomeGuardAuth?.authenticated?.() || window.HomeGuardAuth?.role?.() !== "admin") return;
-    if (!ensurePanel()) return;
+    ensurePanel();
     try {
       const [wifi, local, cloud] = await Promise.all([
         getJson("/api/v1/network/status"),
@@ -129,6 +166,8 @@
         `State: ${escapeHtml(cloud?.state || "disabled")}<br>Connect: ${Number(cloud?.connectCount) || 0}<br>Disconnect: ${Number(cloud?.disconnectCount) || 0}`,
         cloudActive);
 
+      setDashboardConnectivity(wifi, local, cloud);
+
       const updated = document.getElementById("networkConnectivityUpdated");
       if (updated) updated.textContent = `Оновлено ${new Date().toLocaleTimeString("uk-UA")}`;
     } catch (error) {
@@ -143,11 +182,11 @@
     if (window.HomeGuardAuth?.role?.() !== "admin") return;
     ensurePanel();
     refreshConnectivityMonitor();
-    timer = window.setInterval(refreshConnectivityMonitor, 5000);
+    timer = window.setInterval(refreshConnectivityMonitor, 2000);
   }, 250);
 
   window.addEventListener("hashchange", () => {
-    if (window.location.hash === "#networkPage") refreshConnectivityMonitor();
+    refreshConnectivityMonitor();
   });
 
   window.HomeGuardConnectivityMonitor = {
