@@ -116,7 +116,7 @@ else()
 endif()
 
 if(DEFINED ENV{GITHUB_RUN_NUMBER})
-    set(HG_CI_BUILD_NUMBER "$ENV{GITHUB_RUN_NUMBER")
+    set(HG_CI_BUILD_NUMBER "$ENV{GITHUB_RUN_NUMBER}")
 else()
     set(HG_CI_BUILD_NUMBER "local")
 endif()
