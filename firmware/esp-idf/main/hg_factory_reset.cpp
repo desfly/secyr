@@ -40,6 +40,7 @@ FactoryResetReport FactoryResetManager::erase_mutable_state() const {
     report.cloud = erase_namespace("hg_cloud");
     report.controller_config = erase_namespace("hg-config");
     report.provisioning = erase_namespace("hg-provision");
+    report.ble_remotes = erase_namespace("hg_ble_remote");
 
     // Preserve immutable hardware verification and factory identity; erase only
     // user-owned commissioning progress.
