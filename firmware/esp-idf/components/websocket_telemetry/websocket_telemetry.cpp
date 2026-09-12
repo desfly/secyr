@@ -70,34 +70,55 @@ void WebsocketTelemetry::stop() {
 }
 
 bool WebsocketTelemetry::authorize(httpd_req_t* request) {
+    const auto consume_session = [this](std::string_view authorization) {
+        const auto now_us = esp_timer_get_time();
+        std::scoped_lock lock(mutex_);
+        for (std::size_t i = 0; i < session_tokens_.size(); ++i) {
+            auto& session = session_tokens_[i];
+            if (!session.configured()) continue;
+            const auto issued_us = session_token_issued_us_[i];
+            if (issued_us <= 0 || now_us - issued_us > kSessionTokenLifetimeUs) {
+                session.clear();
+                session_token_issued_us_[i] = 0;
+                continue;
+            }
+            if (session.authorized(authorization)) {
+                // Session tokens are one-shot handshake tickets.
+                session.clear();
+                session_token_issued_us_[i] = 0;
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // Browser WebSocket APIs cannot set an Authorization header. They obtain a
+    // short-lived, single-use ticket through the authenticated HTTP session and
+    // present only that ticket in the upgrade URL. Long-lived local API tokens
+    // are never accepted from the query string.
+    const size_t query_length = httpd_req_get_url_query_len(request);
+    if (query_length > 0U && query_length <= 192U) {
+        std::array<char, 193> query{};
+        std::array<char, 129> ticket{};
+        if (httpd_req_get_url_query_str(request, query.data(), query_length + 1U) == ESP_OK &&
+            httpd_query_key_value(query.data(), "ticket", ticket.data(), ticket.size()) == ESP_OK &&
+            ticket[0] != '\0') {
+            std::string authorization = "Bearer ";
+            authorization += ticket.data();
+            if (consume_session(authorization)) return true;
+        }
+    }
+
     const size_t length = httpd_req_get_hdr_value_len(request, "Authorization");
     if (length == 0U || length > 320U) return false;
     std::array<char, 321> value{};
     if (httpd_req_get_hdr_value_str(request, "Authorization", value.data(), length + 1U) != ESP_OK) return false;
     const std::string_view authorization(value.data(), length);
-    std::scoped_lock lock(mutex_);
-    if (token_.authorized(authorization)) return true;
-
-    const auto now_us = esp_timer_get_time();
-    for (std::size_t i = 0; i < session_tokens_.size(); ++i) {
-        auto& session = session_tokens_[i];
-        if (!session.configured()) continue;
-        const auto issued_us = session_token_issued_us_[i];
-        if (issued_us <= 0 || now_us - issued_us > kSessionTokenLifetimeUs) {
-            session.clear();
-            session_token_issued_us_[i] = 0;
-            continue;
-        }
-        if (session.authorized(authorization)) {
-            // Session tokens are short-lived handshake tickets. Consume them
-            // after one successful upgrade; Android requests a fresh ticket
-            // from its authenticated HTTP session when reconnecting.
-            session.clear();
-            session_token_issued_us_[i] = 0;
-            return true;
-        }
+    {
+        std::scoped_lock lock(mutex_);
+        if (token_.authorized(authorization)) return true;
     }
-    return false;
+    return consume_session(authorization);
 }
 
 void WebsocketTelemetry::add_client(int fd) {
