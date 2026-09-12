@@ -27,6 +27,22 @@ const BleRemoteBinding* BleRemoteRegistry::find(const BleRemoteIdentity& identit
     return nullptr;
 }
 
+BleRemoteBinding* BleRemoteRegistry::binding_at(std::size_t index)
+{
+    return index < size_ ? &bindings_[index] : nullptr;
+}
+
+const BleRemoteBinding* BleRemoteRegistry::binding_at(std::size_t index) const
+{
+    return index < size_ ? &bindings_[index] : nullptr;
+}
+
+void BleRemoteRegistry::clear()
+{
+    bindings_.fill({});
+    size_ = 0;
+}
+
 bool BleRemoteRegistry::bind(
     const BleRemoteIdentity& identity,
     BleRemoteProfile profile,
