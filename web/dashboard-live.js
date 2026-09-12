@@ -137,10 +137,10 @@
       </div>
       <div style="display:grid;grid-template-columns:minmax(120px,1fr) 130px minmax(120px,1fr);gap:0;border:1px solid #d7deea;border-radius:10px;overflow:hidden">
         <div style="padding:8px 10px;background:#f5f7fa;font-weight:700">Канал</div><div style="padding:8px 10px;background:#f5f7fa;font-weight:700">Стан</div><div style="padding:8px 10px;background:#f5f7fa;font-weight:700">IP / адреса</div>
-        <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Wi-Fi</div><div id="commWifiState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commWifiAddr" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
-        <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Ethernet W5500</div><div id="commEthState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commEthAddr" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
-        <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Bluetooth BLE</div><div id="commBleState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commBleAddr" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
-        <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Cloud MQTT</div><div id="commCloudState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commCloudAddr" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+        <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Wi-Fi</div><div id="commWifiState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commWifiIp" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+        <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Ethernet W5500</div><div id="commEthState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commEthIp" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+        <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Bluetooth BLE</div><div id="commBleState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commBleIp" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
+        <div style="padding:10px;border-top:1px solid #e2e7ef;font-weight:700">Cloud MQTT</div><div id="commCloudState" style="padding:10px;border-top:1px solid #e2e7ef">—</div><div id="commCloudIp" style="padding:10px;border-top:1px solid #e2e7ef">—</div>
       </div>`;
     grid.appendChild(card);
     return card;
@@ -178,14 +178,14 @@
       if (bleState) bleState.innerHTML = connectivityBadge(bleOnline, false);
       if (cloudState) cloudState.innerHTML = connectivityBadge(cloudOnline, cloudPending);
 
-      const wifiAddr = document.getElementById("commWifiAddr");
-      const ethAddr = document.getElementById("commEthAddr");
-      const bleAddr = document.getElementById("commBleAddr");
-      const cloudAddr = document.getElementById("commCloudAddr");
-      if (wifiAddr) wifiAddr.textContent = local?.wifi?.ip || wifi?.ip || "—";
-      if (ethAddr) ethAddr.textContent = local?.ethernet?.ip || "—";
-      if (bleAddr) bleAddr.textContent = "—";
-      if (cloudAddr) cloudAddr.textContent = cloud?.deviceId || "—";
+      const wifiIp = document.getElementById("commWifiIp");
+      const ethIp = document.getElementById("commEthIp");
+      const bleIp = document.getElementById("commBleIp");
+      const cloudIp = document.getElementById("commCloudIp");
+      if (wifiIp) wifiIp.textContent = local?.wifi?.ip || wifi?.ip || "—";
+      if (ethIp) ethIp.textContent = local?.ethernet?.ip || "—";
+      if (bleIp) bleIp.textContent = "—";
+      if (cloudIp) cloudIp.textContent = cloud?.deviceId || "—";
 
       const updated = document.getElementById("adminConnectivityUpdated");
       if (updated) updated.textContent = `Оновлено ${new Date().toLocaleTimeString("uk-UA")}`;
