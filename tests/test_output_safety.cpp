@@ -107,6 +107,8 @@ void test_physical_runtime() {
     TEST_CHECK(model.add_output(1, hg::ModelOutputType::Siren));
     TEST_CHECK(model.add_output(2, hg::ModelOutputType::Valve));
     TEST_CHECK(model.add_output(3, hg::ModelOutputType::Valve));
+    TEST_CHECK(model.add_output(4, hg::ModelOutputType::Light));
+    TEST_CHECK(model.add_output(5, hg::ModelOutputType::Relay));
 
     auto hardware = verified_hardware();
     hg::BootReadinessReport blocked{};
@@ -117,27 +119,38 @@ void test_physical_runtime() {
     TEST_CHECK(!backend.levels[10]);
     TEST_CHECK(!backend.levels[11]);
     TEST_CHECK(!backend.levels[12]);
+    TEST_CHECK(!backend.levels[13]);
+    TEST_CHECK(!backend.levels[14]);
 
     hg::BootReadinessReport ready{};
     ready.status = hg::BootReadinessStatus::ReadyForPhysicalOutputs;
     TEST_CHECK(model.set_output_active(1, true, 10));
     TEST_CHECK(model.set_output_active(2, true, 10));
     TEST_CHECK(model.set_output_active(3, true, 10));
+    TEST_CHECK(model.set_output_active(4, true, 10));
+    TEST_CHECK(model.set_output_active(5, true, 10));
     TEST_CHECK(runtime.synchronize(model, ready));
     TEST_CHECK(runtime.state().outputs_enabled);
     TEST_CHECK(backend.levels[10]);
     TEST_CHECK(backend.levels[11]);
     TEST_CHECK(backend.levels[12]);
+    TEST_CHECK(backend.levels[13]);
+    TEST_CHECK(backend.levels[14]);
 
     TEST_CHECK(model.set_output_active(3, false, 11));
+    TEST_CHECK(model.set_output_active(4, false, 11));
     TEST_CHECK(runtime.synchronize(model, ready));
     TEST_CHECK(backend.levels[11]);
     TEST_CHECK(!backend.levels[12]);
+    TEST_CHECK(!backend.levels[13]);
+    TEST_CHECK(backend.levels[14]);
 
     TEST_CHECK(runtime.synchronize(model, blocked));
     TEST_CHECK(!backend.levels[10]);
     TEST_CHECK(!backend.levels[11]);
     TEST_CHECK(!backend.levels[12]);
+    TEST_CHECK(!backend.levels[13]);
+    TEST_CHECK(!backend.levels[14]);
     TEST_CHECK(!runtime.state().outputs_enabled);
 
     FakeBackend failing;
