@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hg_ble_remote_nvs.hpp"
 #include "homeguard/ble_remote.hpp"
 
 #include <cstddef>
@@ -38,8 +39,10 @@ private:
     static void tick_task(void* context);
     bool execute(hg::BleRemoteAction action, std::uint64_t now_ms);
     void publish_remote_event(const hg::BleRemoteResult& result, hg::BleRemoteAction action, std::uint64_t now_ms);
+    void persist_registry();
 
     hg::BleRemoteRegistry registry_{};
+    BleRemoteNvsStore store_{};
     hg::SystemModel* model_{};
     hg::BootReadinessReport* readiness_{};
     hg::PhysicalOutputRuntime* physical_{};
