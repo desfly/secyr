@@ -1,0 +1,1 @@
+Work branch for making Bluetooth BLE a first-class independent HomeGuard transport for Android commands and telemetry, separate from Wi-Fi, Ethernet W5500, and Cloud MQTT.
