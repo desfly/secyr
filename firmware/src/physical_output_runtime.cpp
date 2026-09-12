@@ -24,8 +24,11 @@ bool PhysicalOutputRuntime::initialize(
         return false;
     }
 
+    // Light and lock are temporarily wired directly to ESP32-S3 GPIO1/GPIO2.
+    // MCP23017 output routing remains intentionally unused until the expander
+    // is physically installed and the project pin map is explicitly migrated.
     const int gpios[] = {hardware.pins.siren, hardware.pins.valve1, hardware.pins.valve2,
-                        hardware.pins.aux1, hardware.pins.aux2};
+                        direct_light_relay_gpio, direct_lock_relay_gpio};
     for (const int gpio : gpios) {
         if (gpio == gpio_unassigned) continue;
         if (!backend_->configure_output(gpio, false)) {
@@ -75,8 +78,8 @@ bool PhysicalOutputRuntime::force_safe() {
     ok = write_safe(hardware_->pins.siren) && ok;
     ok = write_safe(hardware_->pins.valve1) && ok;
     ok = write_safe(hardware_->pins.valve2) && ok;
-    ok = write_safe(hardware_->pins.aux1) && ok;
-    ok = write_safe(hardware_->pins.aux2) && ok;
+    ok = write_safe(direct_light_relay_gpio) && ok;
+    ok = write_safe(direct_lock_relay_gpio) && ok;
     state_.outputs_enabled = false;
     if (!ok) state_.status = PhysicalOutputStatus::BackendError;
     return ok;
@@ -95,8 +98,8 @@ bool PhysicalOutputRuntime::synchronize(const SystemModel& model, const BootRead
     ok = write_logical(hardware_->pins.siren, output_state(model, 1)) && ok;
     ok = write_logical(hardware_->pins.valve1, output_state(model, 2)) && ok;
     ok = write_logical(hardware_->pins.valve2, output_state(model, 3)) && ok;
-    ok = write_logical(hardware_->pins.aux1, output_state(model, 4)) && ok;
-    ok = write_logical(hardware_->pins.aux2, output_state(model, 5)) && ok;
+    ok = write_logical(direct_light_relay_gpio, output_state(model, 4)) && ok;
+    ok = write_logical(direct_lock_relay_gpio, output_state(model, 5)) && ok;
     if (!ok) force_safe();
     return ok;
 }
