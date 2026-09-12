@@ -8,6 +8,13 @@ namespace hg {
 
 inline constexpr int gpio_unassigned = -1;
 
+// Temporary direct relay wiring used on the current HomeGuard-S3 bench before
+// MCP23017 output migration is enabled. Do not redirect these two outputs to
+// MCP23017/aux pins until the expander is physically installed and the user
+// explicitly switches the hardware mapping.
+inline constexpr int direct_light_relay_gpio = 1;
+inline constexpr int direct_lock_relay_gpio = 2;
+
 struct BoardPinMap {
     int i2c_sda{gpio_unassigned};
     int i2c_scl{gpio_unassigned};
