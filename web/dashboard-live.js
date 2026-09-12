@@ -59,10 +59,6 @@
     const quick = document.querySelector(".quick");
     if (!quick) return;
 
-    // Create these controls before index.html's legacy inline block runs. That
-    // block explicitly returns when #quickLight already exists, so its old
-    // per-click ID/PIN handlers never attach. Login PIN is verified once by
-    // access-session.js; dashboard mutations use the authenticated actor.
     if (!document.getElementById("quickLight")) {
       quick.insertAdjacentHTML("beforeend", `
         <button id="quickLight" type="button" data-active="false" aria-pressed="false"><b class="orange-text">☀</b><strong>Світло</strong><small>ВИМКНЕНО</small></button>
@@ -91,7 +87,7 @@
     if (!Number.isFinite(millivolts)) return 3;
     if (millivolts <= 350) return 4;
     if (millivolts >= 2950) return 1;
-    if (millivolts >= 1250 && millivolts <= 1950) return 0;
+    if (millivolts >= 1250 && millivolts <= 2050) return 0;
     return millivolts < 1250 ? 4 : 1;
   }
 
@@ -264,9 +260,6 @@
     }
   }
 
-  // Capture phase deliberately owns the working dashboard controls. The old
-  // app.js handlers still exist for compatibility, but they must not demand a
-  // second PIN after an authenticated login or send duplicate commands.
   document.addEventListener("click", async event => {
     const button = event.target.closest?.("#quickLight,#quickLock,.quick [data-command],#ioState [data-output-id]");
     if (!button) return;
