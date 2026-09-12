@@ -1,12 +1,15 @@
 package ua.homeguard.s3.network.ble
 
 import android.content.Context
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import ua.homeguard.s3.model.CommandType
@@ -74,6 +77,14 @@ class BleRuntimeSession(context: Context) {
     private val scanner = BleProvisioningScanner(appContext)
     private val client = BleHomeGuardClient(appContext)
     private val accessFlow = MutableStateFlow(BleSessionAccess())
+
+    companion object {
+        const val VALVE_1_OUTPUT_ID = 2
+        const val VALVE_2_OUTPUT_ID = 3
+        const val LIGHT_OUTPUT_ID = 4
+        const val LOCK_OUTPUT_ID = 5
+        const val LOCK_PULSE_MS = 5_000L
+    }
 
     fun state(): StateFlow<BleHomeGuardClient.State> = client.state()
     fun snapshots(): StateFlow<SystemSnapshot> = client.snapshots()
@@ -163,8 +174,7 @@ class BleRuntimeSession(context: Context) {
     private suspend fun executeValves(active: Boolean, timeoutMs: Long): JSONObject {
         requireAllowed(if (active) "valve.open" else "valve.close")
         var lastReply = JSONObject().put("ok", true).put("status", "accepted")
-        // Keep BLE valve semantics identical to runtime HTTP: valve outputs are 2 and 3.
-        for (outputId in 2..3) {
+        for (outputId in VALVE_1_OUTPUT_ID..VALVE_2_OUTPUT_ID) {
             require(client.controlOutput(outputId, active, false)) {
                 "BLE valve output $outputId command could not start"
             }
@@ -173,6 +183,39 @@ class BleRuntimeSession(context: Context) {
             lastReply = reply
         }
         return lastReply
+    }
+
+    suspend fun setLight(active: Boolean, timeoutMs: Long = 8_000L): JSONObject =
+        controlOutput(LIGHT_OUTPUT_ID, active, false, timeoutMs)
+
+    suspend fun setValve1(active: Boolean, timeoutMs: Long = 8_000L): JSONObject {
+        requireAllowed(if (active) "valve.open" else "valve.close")
+        return controlOutput(VALVE_1_OUTPUT_ID, active, false, timeoutMs)
+    }
+
+    suspend fun setValve2(active: Boolean, timeoutMs: Long = 8_000L): JSONObject {
+        requireAllowed(if (active) "valve.open" else "valve.close")
+        return controlOutput(VALVE_2_OUTPUT_ID, active, false, timeoutMs)
+    }
+
+    /**
+     * Energizes the lock relay for exactly five seconds from the Android side.
+     * The OFF command is attempted in NonCancellable context even if the caller
+     * leaves the screen or cancels the command coroutine.
+     */
+    suspend fun pulseLock(timeoutMs: Long = 8_000L): JSONObject {
+        val onReply = controlOutput(LOCK_OUTPUT_ID, true, false, timeoutMs)
+        if (!onReply.optBoolean("ok", false)) return onReply
+        try {
+            delay(LOCK_PULSE_MS)
+        } finally {
+            withContext(NonCancellable) {
+                runCatching { controlOutput(LOCK_OUTPUT_ID, false, false, timeoutMs) }
+            }
+        }
+        return JSONObject(onReply.toString())
+            .put("pulseMs", LOCK_PULSE_MS)
+            .put("active", false)
     }
 
     suspend fun panic(timeoutMs: Long = 8_000L): JSONObject {
