@@ -1,0 +1,1 @@
+Implementation target: runtimeReady means the BLE subsystem is started and advertising/scanning is available; connected means an Android GATT client currently has a BLE link; notificationsEnabled means the client subscribed to telemetry. The dashboard must not mark BLE offline merely because no phone is presently connected.
