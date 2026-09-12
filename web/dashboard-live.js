@@ -247,7 +247,6 @@
   const observer = new MutationObserver(() => {
     if (window.HomeGuardAuth?.authenticated?.()) bindQuickButtons();
     matchConnectivityHeight();
-    if (live.zones && Date.now() - live.zonesAt < 3500) renderLiveZones(live.zones);
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
   window.addEventListener("resize", matchConnectivityHeight);
