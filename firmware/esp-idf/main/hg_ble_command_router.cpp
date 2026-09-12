@@ -66,6 +66,19 @@ bool parse_uint16(const std::string& body, const char* key, std::uint16_t& value
     return true;
 }
 
+bool parse_uint32(const std::string& body, const char* key, std::uint32_t& value)
+{
+    const auto pos = http_util::value_offset(body, key);
+    if (pos == std::string::npos) return false;
+    const auto first = body.data() + pos;
+    const auto last = body.data() + body.size();
+    unsigned long parsed{};
+    const auto result = std::from_chars(first, last, parsed);
+    if (result.ec != std::errc{} || result.ptr == first || parsed > 0xffffffffUL) return false;
+    value = static_cast<std::uint32_t>(parsed);
+    return true;
+}
+
 bool parse_bool(const std::string& body, const char* key, bool& value)
 {
     const auto pos = http_util::value_offset(body, key);
@@ -155,6 +168,18 @@ void BleCommandRouter::configure(
     authenticated_epoch_ = 0;
     provisioning_epoch_ = 0;
     provisioning_session_prepared_ = prepare_provisioning_session(now_ms());
+    remote_runtime_.configure(model_, readiness_, physical_, bus_);
+    if (transport_ != nullptr) transport_->set_remote_event_handler(&BleCommandRouter::on_remote_event, this);
+}
+
+void BleCommandRouter::on_remote_event(const hg::BleRemoteEvent& event, void* context)
+{
+    auto* self = static_cast<BleCommandRouter*>(context);
+    if (self == nullptr) return;
+    const auto result = self->remote_runtime_.ingest(event, now_ms());
+    if (result.decision == hg::BleRemoteDecision::Accepted) {
+        ESP_LOGI(kTag, "BLE keyfob action accepted: %u", static_cast<unsigned>(event.action));
+    }
 }
 
 bool BleCommandRouter::session_valid() const
@@ -396,6 +421,39 @@ void BleCommandRouter::handle_command(const std::string& json)
     if (!http_util::parse_json_string(json, "actor", actor) || actor != actor_ ||
         !http_util::parse_json_string(json, "command", command) || command.empty()) {
         send(kCommandReplyType, "{\"ok\":false,\"reason\":\"invalid_command\"}");
+        return;
+    }
+
+    if (command == "remote.pair_begin" || command == "remote.pair_cancel") {
+        const auto decision = access_->authorize_session(actor_, "access.manage");
+        if (decision != homeguard::AuditDecision::Allowed) {
+            const std::string body = std::string{"{\"ok\":false,\"reason\":\""} +
+                homeguard::to_string(decision) + "\"}";
+            send(kCommandReplyType, body);
+            return;
+        }
+
+        if (command == "remote.pair_cancel") {
+            remote_runtime_.cancel_pairing();
+            send(kCommandReplyType, "{\"ok\":true,\"command\":\"remote.pair_cancel\",\"pairing\":false}");
+            return;
+        }
+
+        std::string name;
+        std::uint32_t permissions{};
+        if (!http_util::parse_json_string(json, "name", name) || name.empty() || name.size() > 23U ||
+            !parse_uint32(json, "permissions", permissions) || permissions == 0U) {
+            send(kCommandReplyType, "{\"ok\":false,\"reason\":\"invalid_remote_pairing\"}");
+            return;
+        }
+        if (!remote_runtime_.begin_pairing(name, permissions, now_ms())) {
+            send(kCommandReplyType, "{\"ok\":false,\"reason\":\"remote_pairing_unavailable\"}");
+            return;
+        }
+        const std::string body = std::string{"{\"ok\":true,\"command\":\"remote.pair_begin\",\"pairing\":true,\"windowMs\":"} +
+            std::to_string(BleRemoteRuntime::pairing_window_ms) +
+            ",\"remoteCount\":" + std::to_string(remote_runtime_.size()) + "}";
+        send(kCommandReplyType, body);
         return;
     }
 
