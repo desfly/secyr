@@ -1,0 +1,1 @@
+Current code already starts NimBLE from app_main and has Android BLE client/session classes. Remaining work is to finish first-class routing/status semantics and validate build/runtime.
