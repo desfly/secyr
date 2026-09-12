@@ -140,12 +140,24 @@ void BleTransport::set_message_handler(MessageHandler handler, void* context) {
     message_context_=context;
 }
 
+bool BleTransport::link_connected() const {
+    return connection_handle_ != BLE_HS_CONN_HANDLE_NONE;
+}
+
 bool BleTransport::connected() const {
-    return connection_handle_ != BLE_HS_CONN_HANDLE_NONE && notify_enabled_;
+    return link_connected() && notify_enabled_;
 }
 
 bool BleTransport::active_connection() {
-    return g_owner != nullptr && g_owner->connected();
+    return g_owner != nullptr && g_owner->link_connected();
+}
+
+bool BleTransport::active_notifications() {
+    return g_owner != nullptr && g_owner->notifications_enabled();
+}
+
+std::uint32_t BleTransport::active_connection_epoch() {
+    return g_owner != nullptr ? g_owner->connection_epoch() : 0U;
 }
 
 esp_err_t BleTransport::publish_telemetry(const hg::TelemetryFrame& frame) {
