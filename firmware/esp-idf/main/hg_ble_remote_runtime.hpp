@@ -35,6 +35,7 @@ public:
     void tick(std::uint64_t now_ms);
 
 private:
+    static void tick_task(void* context);
     bool execute(hg::BleRemoteAction action, std::uint64_t now_ms);
     void publish_remote_event(const hg::BleRemoteResult& result, hg::BleRemoteAction action, std::uint64_t now_ms);
 
@@ -49,6 +50,7 @@ private:
     char pairing_name_[24]{};
 
     std::uint64_t lock_deadline_ms_{};
+    bool tick_task_started_{};
 };
 
 }  // namespace homeguard::idf
