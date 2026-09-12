@@ -26,8 +26,8 @@ hg::HardwareVerificationRecord verified_hardware() {
     record.pins.siren = 10;
     record.pins.valve1 = 11;
     record.pins.valve2 = 12;
-    record.pins.aux1 = 13;
-    record.pins.aux2 = 14;
+    // aux1/aux2 deliberately stay unassigned while MCP23017 output routing is
+    // not installed; LIGHT/LOCK use the fixed direct ESP GPIO mapping.
     record.active_polarity_verified = true;
     record.verified_at_ms = 1;
     record.profile_crc32 = hg::hardware_profile_crc32(record);
@@ -119,8 +119,8 @@ void test_physical_runtime() {
     TEST_CHECK(!backend.levels[10]);
     TEST_CHECK(!backend.levels[11]);
     TEST_CHECK(!backend.levels[12]);
-    TEST_CHECK(!backend.levels[13]);
-    TEST_CHECK(!backend.levels[14]);
+    TEST_CHECK(!backend.levels[hg::direct_light_relay_gpio]);
+    TEST_CHECK(!backend.levels[hg::direct_lock_relay_gpio]);
 
     hg::BootReadinessReport ready{};
     ready.status = hg::BootReadinessStatus::ReadyForPhysicalOutputs;
@@ -134,23 +134,23 @@ void test_physical_runtime() {
     TEST_CHECK(backend.levels[10]);
     TEST_CHECK(backend.levels[11]);
     TEST_CHECK(backend.levels[12]);
-    TEST_CHECK(backend.levels[13]);
-    TEST_CHECK(backend.levels[14]);
+    TEST_CHECK(backend.levels[hg::direct_light_relay_gpio]);
+    TEST_CHECK(backend.levels[hg::direct_lock_relay_gpio]);
 
     TEST_CHECK(model.set_output_active(3, false, 11));
     TEST_CHECK(model.set_output_active(4, false, 11));
     TEST_CHECK(runtime.synchronize(model, ready));
     TEST_CHECK(backend.levels[11]);
     TEST_CHECK(!backend.levels[12]);
-    TEST_CHECK(!backend.levels[13]);
-    TEST_CHECK(backend.levels[14]);
+    TEST_CHECK(!backend.levels[hg::direct_light_relay_gpio]);
+    TEST_CHECK(backend.levels[hg::direct_lock_relay_gpio]);
 
     TEST_CHECK(runtime.synchronize(model, blocked));
     TEST_CHECK(!backend.levels[10]);
     TEST_CHECK(!backend.levels[11]);
     TEST_CHECK(!backend.levels[12]);
-    TEST_CHECK(!backend.levels[13]);
-    TEST_CHECK(!backend.levels[14]);
+    TEST_CHECK(!backend.levels[hg::direct_light_relay_gpio]);
+    TEST_CHECK(!backend.levels[hg::direct_lock_relay_gpio]);
     TEST_CHECK(!runtime.state().outputs_enabled);
 
     FakeBackend failing;
