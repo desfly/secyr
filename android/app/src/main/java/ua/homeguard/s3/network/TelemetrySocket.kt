@@ -27,6 +27,7 @@ class TelemetrySocket {
     private val liveEventState = MutableSharedFlow<SystemEventRecord>(extraBufferCapacity = 16)
     private val connectionState = MutableStateFlow(TelemetryConnectionState.IDLE)
     private var socket: WebSocket? = null
+    private var fallbackSnapshot: SystemSnapshot? = null
 
     fun snapshots(): Flow<SystemSnapshot> = state
     fun events(): Flow<List<SystemEventRecord>> = eventState
@@ -41,12 +42,21 @@ class TelemetrySocket {
 
     /**
      * Feed an authenticated fallback transport snapshot into the same UI stream.
-     * A healthy WebSocket always wins; BLE/MQTT snapshots are accepted only when
-     * the primary WSS channel is not currently connected.
+     * The newest fallback is cached even while WSS is healthy so a BLE/MQTT
+     * snapshot can be promoted immediately if WSS drops between telemetry frames.
      */
     fun acceptFallbackSnapshot(snapshot: SystemSnapshot) {
+        fallbackSnapshot = snapshot
         if (connectionState.value != TelemetryConnectionState.CONNECTED) {
             state.value = snapshot
+        }
+    }
+
+    /** Drop fallback data when its authenticated transport/session is gone. */
+    fun clearFallbackSnapshot() {
+        fallbackSnapshot = null
+        if (connectionState.value != TelemetryConnectionState.CONNECTED) {
+            state.value = SystemSnapshot()
         }
     }
 
@@ -86,24 +96,24 @@ class TelemetrySocket {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (socket === webSocket) {
                     socket = null
-                    state.value = SystemSnapshot()
                     connectionState.value = if (response?.code == 401 || response?.code == 403) {
                         TelemetryConnectionState.UNAUTHORIZED
                     } else {
                         TelemetryConnectionState.OFFLINE
                     }
+                    state.value = fallbackSnapshot ?: SystemSnapshot()
                 }
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (socket === webSocket) {
                     socket = null
-                    state.value = SystemSnapshot()
                     connectionState.value = if (code == 1008 || reason.contains("unauthor", true) || reason.contains("forbidden", true)) {
                         TelemetryConnectionState.UNAUTHORIZED
                     } else {
                         TelemetryConnectionState.OFFLINE
                     }
+                    state.value = fallbackSnapshot ?: SystemSnapshot()
                 }
             }
         })
@@ -112,7 +122,7 @@ class TelemetrySocket {
     fun disconnect() {
         socket?.close(1000, "client disconnect")
         socket = null
-        state.value = SystemSnapshot()
         connectionState.value = TelemetryConnectionState.IDLE
+        state.value = fallbackSnapshot ?: SystemSnapshot()
     }
 }
