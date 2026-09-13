@@ -33,6 +33,43 @@ constexpr std::size_t kRemotePayloadBytes = 10;
 
 homeguard::idf::BleTransport* g_owner = nullptr;
 std::uint16_t g_tx_value_handle = 0;
+TaskHandle_t g_adv_restart_task = nullptr;
+
+void advertising_restart_task(void*) {
+    constexpr int kMaxAttempts = 10;
+    for (int attempt = 1; attempt <= kMaxAttempts; ++attempt) {
+        vTaskDelay(pdMS_TO_TICKS(attempt == 1 ? 150 : 500));
+        auto* owner = g_owner;
+        if (owner == nullptr || owner->link_connected()) break;
+        if (ble_gap_adv_active() != 0) {
+            homeguard::idf::ble_runtime_status::set_advertising(true);
+            ESP_LOGI(kTag,"BLE advertising already active during recovery; attempt=%d",attempt);
+            break;
+        }
+        const auto error = owner->advertise();
+        if (error == ESP_OK) {
+            ESP_LOGI(kTag,"BLE advertising recovered; attempt=%d",attempt);
+            break;
+        }
+        ESP_LOGW(kTag,"BLE advertising recovery deferred; attempt=%d/%d",attempt,kMaxAttempts);
+    }
+    g_adv_restart_task = nullptr;
+    vTaskDelete(nullptr);
+}
+
+void schedule_advertising_restart(const char* reason) {
+    if (g_owner == nullptr || g_owner->link_connected()) return;
+    if (ble_gap_adv_active() != 0) {
+        homeguard::idf::ble_runtime_status::set_advertising(true);
+        return;
+    }
+    if (g_adv_restart_task != nullptr) return;
+    ESP_LOGI(kTag,"Scheduling BLE advertising recovery; reason=%s",reason != nullptr ? reason : "unknown");
+    if (xTaskCreate(advertising_restart_task,"hg_ble_adv",3072,nullptr,4,&g_adv_restart_task) != pdPASS) {
+        g_adv_restart_task = nullptr;
+        ESP_LOGE(kTag,"Cannot create BLE advertising recovery task");
+    }
+}
 
 const ble_uuid128_t kServiceUuid = BLE_UUID128_INIT(
     0x9e,0xca,0xdc,0x24,0x0e,0xe5,0xa9,0xe0,0x93,0xf3,0xa3,0xb5,0x01,0x00,0x40,0x6e);
@@ -91,18 +128,18 @@ int gap_event(ble_gap_event* event, void*) {
                 g_owner->on_connected(event->connect.conn_handle);
             } else {
                 homeguard::idf::ble_runtime_status::set_advertising(false);
-                (void)g_owner->advertise();
+                schedule_advertising_restart("connect-failed");
             }
             break;
         case BLE_GAP_EVENT_DISCONNECT:
             ESP_LOGI(kTag,"BLE link disconnected; reason=%d",event->disconnect.reason);
             homeguard::idf::ble_runtime_status::set_advertising(false);
             g_owner->on_disconnected();
-            (void)g_owner->advertise();
+            schedule_advertising_restart("disconnect");
             break;
         case BLE_GAP_EVENT_ADV_COMPLETE:
             homeguard::idf::ble_runtime_status::set_advertising(false);
-            (void)g_owner->advertise();
+            schedule_advertising_restart("adv-complete");
             break;
         case BLE_GAP_EVENT_SUBSCRIBE:
             if (event->subscribe.attr_handle == g_tx_value_handle) g_owner->on_notify_subscription(event->subscribe.cur_notify != 0);
@@ -142,7 +179,10 @@ void stack_sync() {
         return;
     }
     const auto error = g_owner->advertise();
-    if (error != ESP_OK) ESP_LOGE(kTag,"BLE advertising failed: %s",esp_err_to_name(error));
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag,"BLE advertising failed: %s",esp_err_to_name(error));
+        schedule_advertising_restart("stack-sync");
+    }
     const auto scan_error = g_owner->scan_remotes();
     if (scan_error != ESP_OK) ESP_LOGW(kTag,"BLE remote scan start deferred: %s",esp_err_to_name(scan_error));
 }
@@ -272,6 +312,11 @@ void BleTransport::on_notify_subscription(bool enabled) {
 }
 
 esp_err_t BleTransport::advertise() {
+    if (ble_gap_adv_active() != 0) {
+        ble_runtime_status::set_advertising(true);
+        return ESP_OK;
+    }
+
     ble_hs_adv_fields fields{};
     fields.flags=BLE_HS_ADV_F_DISC_GEN|BLE_HS_ADV_F_BREDR_UNSUP;
     fields.uuids128=const_cast<ble_uuid128_t*>(&kServiceUuid);
@@ -324,7 +369,7 @@ esp_err_t BleTransport::advertise() {
 }
 
 esp_err_t BleTransport::scan_remotes() {
-    ble_gap_disc_params params{};
+    ble_hs_disc_params params{};
     params.passive = 1;
     params.filter_duplicates = 0;
     const int rc = ble_gap_disc(own_address_type_, BLE_HS_FOREVER, &params, gap_event, nullptr);
