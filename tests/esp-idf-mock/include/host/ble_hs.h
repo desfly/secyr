@@ -101,6 +101,7 @@ constexpr int BLE_GATT_ACCESS_OP_READ_CHR = 0;
 constexpr int BLE_GATT_ACCESS_OP_WRITE_CHR = 1;
 constexpr int BLE_ATT_ERR_UNLIKELY = 0x0e;
 constexpr int BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN = 0x0d;
+constexpr std::uint16_t BLE_GATT_CHR_F_READ = 0x0002;
 constexpr std::uint16_t BLE_GATT_CHR_F_WRITE = 0x0008;
 constexpr std::uint16_t BLE_GATT_CHR_F_WRITE_NO_RSP = 0x0010;
 constexpr std::uint16_t BLE_GATT_CHR_F_NOTIFY = 0x0020;
