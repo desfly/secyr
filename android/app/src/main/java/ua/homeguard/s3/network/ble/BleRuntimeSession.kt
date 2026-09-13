@@ -143,6 +143,7 @@ class BleRuntimeSession(context: Context) {
         withTimeout(timeoutMs.coerceAtLeast(12_000L)) {
             suspendCancellableCoroutine { continuation ->
                 var receiverRegistered = true
+                lateinit var bondReceiver: BroadcastReceiver
 
                 fun unregister() {
                     if (!receiverRegistered) return
@@ -151,7 +152,6 @@ class BleRuntimeSession(context: Context) {
                 }
 
                 val filter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
-                lateinit var bondReceiver: BroadcastReceiver
                 bondReceiver = object : BroadcastReceiver() {
                     override fun onReceive(context: Context?, intent: Intent?) {
                         if (intent?.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
