@@ -45,11 +45,21 @@ object SystemDiagnosticsEvaluator {
             if (scanError.isNotBlank()) append(" · ").append(scanError)
         }
         val ble = BleRuntimeDiagnostics.current()
+        val blePath = ble.history.takeLast(8).joinToString("→") { transition ->
+            buildString {
+                append(transition.stage)
+                if (transition.statusCode != null) {
+                    append('[').append(transition.statusCode).append(']')
+                }
+            }
+        }
         val bleDetail = buildString {
             append(ble.stage)
             if (ble.address.isNotBlank()) append(" · ").append(ble.address)
             if (ble.statusCode != null) append(" · status=").append(ble.statusCode)
             if (ble.detail.isNotBlank()) append(" · ").append(ble.detail)
+            append(" · step=").append(ble.transition)
+            if (blePath.isNotBlank()) append(" · path=").append(blePath)
         }
         val connection = listOf(
             DiagnosticItem("Device ID", deviceId.isNotBlank(), if (deviceId.isBlank()) "не задано" else deviceId),
