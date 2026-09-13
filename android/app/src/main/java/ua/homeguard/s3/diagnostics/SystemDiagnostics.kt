@@ -1,6 +1,7 @@
 package ua.homeguard.s3.diagnostics
 
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.network.ble.BleRuntimeDiagnostics
 
 data class DiagnosticItem(
     val label: String,
@@ -43,10 +44,28 @@ object SystemDiagnosticsEvaluator {
             if (scanLastResponder.isNotBlank()) append(" · last ").append(scanLastResponder)
             if (scanError.isNotBlank()) append(" · ").append(scanError)
         }
+        val ble = BleRuntimeDiagnostics.current()
+        val blePath = ble.history.takeLast(8).joinToString("→") { transition ->
+            buildString {
+                append(transition.stage)
+                if (transition.statusCode != null) {
+                    append('[').append(transition.statusCode).append(']')
+                }
+            }
+        }
+        val bleDetail = buildString {
+            append(ble.stage)
+            if (ble.address.isNotBlank()) append(" · ").append(ble.address)
+            if (ble.statusCode != null) append(" · status=").append(ble.statusCode)
+            if (ble.detail.isNotBlank()) append(" · ").append(ble.detail)
+            append(" · step=").append(ble.transition)
+            if (blePath.isNotBlank()) append(" · path=").append(blePath)
+        }
         val connection = listOf(
             DiagnosticItem("Device ID", deviceId.isNotBlank(), if (deviceId.isBlank()) "не задано" else deviceId),
             DiagnosticItem("Маршрут", route != "OFFLINE", route),
             DiagnosticItem("Локальне виявлення", localDevices > 0 || route == "CLOUD", "знайдено: $localDevices"),
+            DiagnosticItem("BLE", ble.stage == "READY", bleDetail),
             DiagnosticItem("LAN scan", scanError.isBlank(), scanDetail),
             DiagnosticItem("Broadcast targets", scanTargets.isNotEmpty() || scanPhase == "idle" || route == "CLOUD", targetDetail),
             DiagnosticItem("TLS fingerprint", certificateSha256.isNotBlank() || route == "CLOUD", if (certificateSha256.isBlank()) "не задано" else "налаштовано"),
@@ -54,10 +73,11 @@ object SystemDiagnosticsEvaluator {
         )
         val hardware = listOf(
             DiagnosticItem("Контролер відповідає", snapshot.sequence > 0, "telemetry sequence ${snapshot.sequence}"),
-            DiagnosticItem("Стан системи", snapshot.health.name != "FAILED", snapshot.health.name),
+            DiagnosticItem("Стан системи", snapshot.health.name == "OK", snapshot.health.name),
             DiagnosticItem("Зони", snapshot.zones.isNotEmpty(), "каналів: ${snapshot.zones.size}"),
             DiagnosticItem("Аналогові канали", snapshot.pressures.isNotEmpty(), "каналів: ${snapshot.pressures.size}"),
-            DiagnosticItem("Журнал подій", eventCount > 0, "подій: $eventCount"),
+            // An empty event journal is valid and informational; it is not a hardware fault.
+            DiagnosticItem("Журнал подій", true, "подій: $eventCount"),
         )
         return SystemDiagnostics(connection, hardware)
     }

@@ -14,6 +14,7 @@ import ua.homeguard.s3.model.DeviceEndpoint
 import ua.homeguard.s3.network.HttpDeviceApi
 import ua.homeguard.s3.network.LocalTelemetryTicketBroker
 import ua.homeguard.s3.network.ble.BleHomeGuardClient
+import ua.homeguard.s3.network.ble.BleRuntimeDiagnostics
 import ua.homeguard.s3.network.ble.BleRuntimeRegistry
 import ua.homeguard.s3.storage.SettingsStore
 import java.util.concurrent.atomic.AtomicLong
@@ -34,9 +35,32 @@ class CommandController(
     fun bleState(): StateFlow<BleHomeGuardClient.State> = ble.state()
 
     suspend fun accessState(): AccessLifecycleState {
-        val target = localTarget()
         clearLocalSession()
-        return createApi(target).accessState()
+        val target = endpoint.value
+
+        // A LAST_KNOWN_LOCAL address is only cached routing metadata; it is not
+        // evidence that the phone can still reach that LAN. Probing it first made
+        // the access gate block for the full HTTP timeout when Wi-Fi was disabled,
+        // so a registered controller never got a chance to enter through BLE.
+        // For a stale local route expose the normal login gate immediately and let
+        // login() establish the independent BLE session.
+        if (target.path == ControlPath.LAST_KNOWN_LOCAL && canAttemptBleLogin()) {
+            return AccessLifecycleState.LOGIN_REQUIRED
+        }
+
+        if (target.path != ControlPath.OFFLINE &&
+            target.path != ControlPath.CLOUD &&
+            target.apiBaseUrl.isNotBlank()
+        ) {
+            val localState = runCatching { createApi(target).accessState() }.getOrNull()
+            if (localState != null) return localState
+        }
+
+        return if (canAttemptBleLogin()) {
+            AccessLifecycleState.LOGIN_REQUIRED
+        } else {
+            AccessLifecycleState.UNAVAILABLE
+        }
     }
 
     suspend fun bootstrapAdmin(id: String, name: String, pin: String) {
@@ -66,6 +90,17 @@ class CommandController(
         ble.disconnect()
         val target = endpoint.value
         var httpFailure: Throwable? = null
+        var bleFailure: Throwable? = null
+
+        // LAST_KNOWN_LOCAL is deliberately BLE-first and BLE-only. The cached
+        // 192.168.x.x endpoint may belong to Wi-Fi or W5500 and can remain in the
+        // resolver after the phone has left that LAN. Waiting 8-12 seconds on that
+        // stale HTTP address defeats independent BLE operation and produced the
+        // exact hardware symptom seen on the phone. A currently discovered LOCAL
+        // endpoint still keeps HTTP-first behaviour below.
+        if (target.path == ControlPath.LAST_KNOWN_LOCAL || target.path == ControlPath.OFFLINE) {
+            return loginOverBle(normalizedActor, credential)
+        }
 
         if (target.path != ControlPath.OFFLINE && target.apiBaseUrl.isNotBlank()) {
             val api = createApi(target)
@@ -100,6 +135,7 @@ class CommandController(
         require(deviceId.isNotBlank()) {
             httpFailure?.message ?: "controller offline and BLE device id unavailable"
         }
+
         val bleReply = runCatching {
             ble.connectAndAuthenticate(
                 deviceId = deviceId,
@@ -108,15 +144,17 @@ class CommandController(
                 connectTimeoutMs = 12_000L,
                 authTimeoutMs = 8_000L,
             )
-        }.getOrElse { bleError ->
-            val httpReason = httpFailure?.message?.takeIf { it.isNotBlank() }
-            throw IllegalStateException(
-                listOfNotNull(httpReason, bleError.message).joinToString("; ").ifBlank { "HTTP and BLE login unavailable" },
-                bleError,
-            )
-        }
+        }.onFailure { bleFailure = it }
+            .getOrNull()
 
-        return parseBleAccessSession(bleReply, normalizedActor)
+        if (bleReply != null) return parseBleAccessSession(bleReply, normalizedActor)
+
+        val httpReason = httpFailure?.message?.takeIf { it.isNotBlank() }
+        val bleReason = bleFailure?.message?.takeIf { it.isNotBlank() }
+        throw IllegalStateException(
+            listOfNotNull(httpReason, bleReason).joinToString("; ").ifBlank { "HTTP and BLE login unavailable" },
+            bleFailure ?: httpFailure,
+        )
     }
 
     suspend fun refreshTelemetryToken(): String {
@@ -183,6 +221,35 @@ class CommandController(
         if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
         return runCatching { mapBleReply(ble.pulseLock()) }
             .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
+    }
+
+    private suspend fun loginOverBle(actor: String, credential: String): AccessSession {
+        val deviceId = settings.settings.value.deviceId.trim()
+        require(deviceId.isNotBlank() && !deviceId.startsWith("manual-", ignoreCase = true)) {
+            "BLE device id unavailable"
+        }
+        val reply = try {
+            ble.connectAndAuthenticate(
+                deviceId = deviceId,
+                actor = actor,
+                pin = credential,
+                connectTimeoutMs = 12_000L,
+                authTimeoutMs = 8_000L,
+            )
+        } catch (failure: Throwable) {
+            val diagnostic = BleRuntimeDiagnostics.current()
+            val path = diagnostic.history.joinToString("→") { transition -> transition.stage }
+            val detail = diagnostic.detail.takeIf { it.isNotBlank() }
+            val original = failure.message?.takeIf { it.isNotBlank() }
+            val message = buildString {
+                append("BLE ").append(diagnostic.stage)
+                detail?.let { append(": ").append(it) }
+                original?.let { append("; ").append(it) }
+                if (path.isNotBlank()) append("; path=").append(path)
+            }
+            throw IllegalStateException(message, failure)
+        }
+        return parseBleAccessSession(reply, actor)
     }
 
     private suspend fun executeHttp(type: CommandType, actor: String, credential: String): CommandReply {
@@ -269,6 +336,11 @@ class CommandController(
     private fun clearLocalSession() {
         localHttpSessionToken = ""
         localActor = ""
+    }
+
+    private fun canAttemptBleLogin(): Boolean {
+        val deviceId = settings.settings.value.deviceId.trim()
+        return deviceId.isNotBlank() && !deviceId.startsWith("manual-", ignoreCase = true)
     }
 
     private fun localTarget(): DeviceEndpoint {

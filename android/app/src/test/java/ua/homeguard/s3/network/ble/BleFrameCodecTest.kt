@@ -33,6 +33,27 @@ class BleFrameCodecTest {
     }
 
     @Test
+    fun reassemblesInterleavedMessagesIndependently() {
+        val telemetryPayload = ByteArray(120) { (it and 0xff).toByte() }
+        val helloPayload = ByteArray(80) { ((it + 17) and 0xff).toByte() }
+        val telemetry = BleFrameCodec.encode(HomeGuardBleContract.Type.TELEMETRY, 100, telemetryPayload, 23)
+        val hello = BleFrameCodec.encode(HomeGuardBleContract.Type.HELLO_SESSION, 101, helloPayload, 23)
+        val decoder = BleFrameCodec.Decoder()
+        val completed = mutableListOf<BleFrameCodec.Message>()
+
+        val maxFragments = maxOf(telemetry.size, hello.size)
+        repeat(maxFragments) { index ->
+            if (index < telemetry.size) decoder.accept(telemetry[index])?.let(completed::add)
+            if (index < hello.size) decoder.accept(hello[index])?.let(completed::add)
+        }
+
+        val telemetryMessage = completed.single { it.messageId == 100 }
+        val helloMessage = completed.single { it.messageId == 101 }
+        assertArrayEquals(telemetryPayload, telemetryMessage.payload)
+        assertArrayEquals(helloPayload, helloMessage.payload)
+    }
+
+    @Test
     fun rejectsOutOfOrderFragments() {
         val payload = ByteArray(100) { it.toByte() }
         val frames = BleFrameCodec.encode(HomeGuardBleContract.Type.EVENT, 10, payload, 23)
