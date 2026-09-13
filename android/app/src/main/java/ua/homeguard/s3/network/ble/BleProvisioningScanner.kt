@@ -31,9 +31,15 @@ class BleProvisioningScanner(private val context: Context) {
         suspendCancellableCoroutine { continuation ->
             val callback = object : ScanCallback() {
                 override fun onScanResult(callbackType: Int, result: ScanResult) {
+                    // The ESP advertises the HomeGuard service UUID in the primary
+                    // advertising packet. Older firmware builds did not also place
+                    // the GAP local name in the advertising payload, so Android can
+                    // legitimately return a service-matched result with no
+                    // scanRecord.deviceName. Do not discard that valid controller.
                     val advertisedName = result.scanRecord?.deviceName.orEmpty().uppercase()
-                    if (!advertisedName.startsWith("HOMEGUARD-S3-") ||
-                        !advertisedName.endsWith(expectedSuffix)) return
+                    if (advertisedName.isNotBlank() &&
+                        (!advertisedName.startsWith("HOMEGUARD-S3-") ||
+                            !advertisedName.endsWith(expectedSuffix))) return
                     runCatching { scanner.stopScan(this) }
                     if (continuation.isActive) continuation.resume(result.device)
                 }
