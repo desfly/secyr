@@ -34,9 +34,29 @@ class CommandController(
     fun bleState(): StateFlow<BleHomeGuardClient.State> = ble.state()
 
     suspend fun accessState(): AccessLifecycleState {
-        val target = localTarget()
         clearLocalSession()
-        return createApi(target).accessState()
+        val target = endpoint.value
+
+        // Access-gate discovery used to be HTTP-only. When the phone leaves the
+        // controller LAN, LAST_KNOWN_LOCAL can still point at 192.168.x.x and the
+        // failed HTTP probe forced the UI into UNAVAILABLE before the operator
+        // ever got a chance to enter credentials for BLE. A registered physical
+        // controller can always offer the login gate: login() will try the live
+        // HTTP route first and then establish/authenticate the independent BLE
+        // session when HTTP is unreachable.
+        if (target.path != ControlPath.OFFLINE &&
+            target.path != ControlPath.CLOUD &&
+            target.apiBaseUrl.isNotBlank()
+        ) {
+            val localState = runCatching { createApi(target).accessState() }.getOrNull()
+            if (localState != null) return localState
+        }
+
+        return if (canAttemptBleLogin()) {
+            AccessLifecycleState.LOGIN_REQUIRED
+        } else {
+            AccessLifecycleState.UNAVAILABLE
+        }
     }
 
     suspend fun bootstrapAdmin(id: String, name: String, pin: String) {
@@ -269,6 +289,11 @@ class CommandController(
     private fun clearLocalSession() {
         localHttpSessionToken = ""
         localActor = ""
+    }
+
+    private fun canAttemptBleLogin(): Boolean {
+        val deviceId = settings.settings.value.deviceId.trim()
+        return deviceId.isNotBlank() && !deviceId.startsWith("manual-", ignoreCase = true)
     }
 
     private fun localTarget(): DeviceEndpoint {
