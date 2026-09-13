@@ -103,11 +103,16 @@ class BleRuntimeSession(context: Context) {
         val effectiveConnectTimeoutMs = timeoutMs.coerceAtLeast(12_000L)
         val device = scanner.find(deviceId, effectiveConnectTimeoutMs)
 
-        // HomeGuard characteristics require encrypted ATT access. Establish the
-        // Android bond first instead of relying on an implicit pairing attempt
-        // during the first encrypted GATT write, which some Android stacks abort
-        // with status 22 (GATT_CONN_TERMINATE_LOCAL_HOST).
-        ensureBonded(device, effectiveConnectTimeoutMs)
+        // Do not force Android bonding before connectGatt. Real hardware reaches
+        // service discovery/subscription without it, while some Android stacks can
+        // remain stuck in BOND_BONDING indefinitely before a GATT link exists.
+        // Encrypted ATT access is still enforced by the ESP characteristics and the
+        // Android stack can negotiate security on the live GATT connection.
+        BleRuntimeDiagnostics.update(
+            stage = "CONNECTING",
+            detail = "connect GATT; encrypted ATT negotiates on-link",
+            address = device.address,
+        )
 
         client.connect(device)
         withTimeout(effectiveConnectTimeoutMs) {
@@ -233,7 +238,7 @@ class BleRuntimeSession(context: Context) {
         }
         require(reply.optBoolean("ok", false)) {
             accessFlow.value = BleSessionAccess()
-            "BLE authentication rejected: ${reply.optString("reason", "unauthorized")}"
+            "BLE authentication rejected: ${reply.optString("reason", "unauthorized") }"
         }
         accessFlow.value = BleSessionAccess.fromHello(reply)
         require(accessFlow.value.authenticated) { "BLE authentication reply has no actor" }
