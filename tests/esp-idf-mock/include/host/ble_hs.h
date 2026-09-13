@@ -66,6 +66,9 @@ struct ble_hs_adv_fields {
     ble_uuid128_t* uuids128{nullptr};
     std::uint8_t num_uuids128{0};
     std::uint8_t uuids128_is_complete{0};
+    std::uint8_t* name{nullptr};
+    std::uint8_t name_len{0};
+    std::uint8_t name_is_complete{0};
     const std::uint8_t* mfg_data{nullptr};
     std::uint8_t mfg_data_len{0};
 };
@@ -137,7 +140,13 @@ inline int ble_gatts_notify_custom(std::uint16_t, std::uint16_t, os_mbuf*) { ret
 inline std::uint16_t ble_att_mtu(std::uint16_t) { return 247; }
 inline int ble_hs_id_infer_auto(int, std::uint8_t* out_addr_type) { if (out_addr_type) *out_addr_type = 0; return 0; }
 inline int ble_gap_adv_set_fields(const ble_hs_adv_fields*) { return 0; }
-inline int ble_gap_adv_start(std::uint8_t, const void*, std::int32_t, const ble_gap_adv_params*, ble_gap_event_fn, void*) { return 0; }
+inline int ble_gap_adv_rsp_set_fields(const ble_hs_adv_fields*) { return 0; }
+inline bool& ble_mock_adv_active_storage() { static bool active = false; return active; }
+inline int ble_gap_adv_start(std::uint8_t, const void*, std::int32_t, const ble_gap_adv_params*, ble_gap_event_fn, void*) {
+    ble_mock_adv_active_storage() = true;
+    return 0;
+}
+inline int ble_gap_adv_active() { return ble_mock_adv_active_storage() ? 1 : 0; }
 inline int ble_gap_disc(std::uint8_t, std::int32_t, const ble_gap_disc_params*, ble_gap_event_fn, void*) { return 0; }
 inline int ble_hs_adv_parse_fields(ble_hs_adv_fields* fields, const std::uint8_t* data, std::uint8_t length) {
     if (!fields) return -1;
