@@ -43,8 +43,6 @@ class BleProvisioningScanner(private val context: Context) {
             BleRuntimeDiagnostics.update("SCAN_ERROR", "BLE scanner unavailable")
             error("BLE сканер недоступний")
         }
-        val expectedSuffix = deviceId.takeLast(6).uppercase()
-
         val effectiveTimeoutMs = timeoutMs.coerceAtLeast(12_000L)
         BleRuntimeDiagnostics.update("SCANNING", "low-latency ${effectiveTimeoutMs}ms")
 
@@ -56,16 +54,19 @@ class BleProvisioningScanner(private val context: Context) {
                             val record = result.scanRecord
                             val advertisedName = record?.deviceName.orEmpty().uppercase()
                             val cachedName = runCatching { result.device.name.orEmpty().uppercase() }.getOrDefault("")
-                            val nameMatches = sequenceOf(advertisedName, cachedName)
-                                .filter { it.isNotBlank() }
-                                .any { name ->
-                                    name.startsWith("HOMEGUARD-S3") &&
-                                        (name.endsWith(expectedSuffix) || name == "HOMEGUARD-S3")
-                                }
                             val serviceMatches = record?.serviceUuids
                                 ?.any { it.uuid == HomeGuardBleContract.SERVICE_UUID } == true
 
-                            if (!serviceMatches && !nameMatches) return
+                            // A service UUID identifies the product family, not
+                            // one controller. Requiring the per-device suffix
+                            // prevents a nearby HomeGuard from being selected.
+                            if (!BleAdvertisementMatcher.matches(
+                                    deviceId = deviceId,
+                                    advertisedName = advertisedName,
+                                    cachedName = cachedName,
+                                    serviceMatches = serviceMatches,
+                                )
+                            ) return
 
                             val address = result.device.address
                             Log.i(TAG, "BLE scan matched $address; service=$serviceMatches name=$advertisedName")
@@ -116,5 +117,21 @@ class BleProvisioningScanner(private val context: Context) {
         require(missing.isEmpty()) {
             "Надайте застосунку дозвіл Bluetooth/пристрої поблизу"
         }
+    }
+}
+
+internal object BleAdvertisementMatcher {
+    fun matches(
+        deviceId: String,
+        advertisedName: String,
+        cachedName: String,
+        serviceMatches: Boolean,
+    ): Boolean {
+        if (!serviceMatches) return false
+        val normalizedId = deviceId.trim().uppercase()
+        if (normalizedId.length < 6) return false
+        val expectedName = "HOMEGUARD-S3-${normalizedId.takeLast(6)}"
+        return advertisedName.trim().uppercase() == expectedName ||
+            cachedName.trim().uppercase() == expectedName
     }
 }

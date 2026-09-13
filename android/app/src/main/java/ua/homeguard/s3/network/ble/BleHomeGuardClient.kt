@@ -23,6 +23,7 @@ import ua.homeguard.s3.model.Transport
 import ua.homeguard.s3.network.JsonParsers
 import java.util.ArrayDeque
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 
 class BleHomeGuardClient(private val context: Context) {
     enum class State {
@@ -40,11 +41,11 @@ class BleHomeGuardClient(private val context: Context) {
     private val writeQueue = ArrayDeque<ByteArray>()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var writeInFlight = false
-    private var gatt: BluetoothGatt? = null
-    private var rx: BluetoothGattCharacteristic? = null
-    private var tx: BluetoothGattCharacteristic? = null
-    private var mtu = 23
-    private var nextMessageId = 1
+    @Volatile private var gatt: BluetoothGatt? = null
+    @Volatile private var rx: BluetoothGattCharacteristic? = null
+    @Volatile private var tx: BluetoothGattCharacteristic? = null
+    @Volatile private var mtu = 23
+    private val nextMessageId = AtomicInteger(1)
     private var sessionActor: String? = null
     private var pendingActor: String? = null
     private var securityProbeAttempt = 0
@@ -59,8 +60,11 @@ class BleHomeGuardClient(private val context: Context) {
 
     companion object {
         private val CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-        private const val SECURITY_PROBE_MAX_ATTEMPTS = 6
-        private const val SECURITY_PROBE_RETRY_MS = 500L
+        // Pairing on some Android stacks takes several seconds even for Just Works.
+        // Keep the probe window inside BleRuntimeSession's 12 second connection
+        // timeout, but do not abort the link after the previous ~3 second window.
+        private const val SECURITY_PROBE_MAX_ATTEMPTS = 12
+        private const val SECURITY_PROBE_RETRY_MS = 750L
         private const val GATT_INSUFFICIENT_AUTHENTICATION = 5
         private const val GATT_INSUFFICIENT_ENCRYPTION = 15
         private const val GATT_ANDROID_GENERIC_ERROR = 133
@@ -75,7 +79,17 @@ class BleHomeGuardClient(private val context: Context) {
         disconnect(resetDiagnostics = false)
         stateFlow.value = State.CONNECTING
         BleRuntimeDiagnostics.update("CONNECTING", "connectGatt", address = device.address)
-        gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+        // Pin every GATT callback to one looper. Vendor stacks otherwise may
+        // dispatch callbacks on different Binder threads and race teardown,
+        // security probing and queued writes.
+        gatt = device.connectGatt(
+            context,
+            false,
+            callback,
+            BluetoothDevice.TRANSPORT_LE,
+            BluetoothDevice.PHY_LE_1M_MASK,
+            mainHandler,
+        )
         if (gatt == null) {
             stateFlow.value = State.ERROR
             BleRuntimeDiagnostics.update("CONNECT_ERROR", "connectGatt returned null", address = device.address)
@@ -84,10 +98,23 @@ class BleHomeGuardClient(private val context: Context) {
 
     fun disconnect() = disconnect(resetDiagnostics = true)
 
+    /**
+     * Tears down a failed GATT attempt before the scanner looks for the same
+     * peripheral again. Diagnostics intentionally survive so the retry remains
+     * visible as one traceable connection chain.
+     */
+    internal fun disconnectForRetry() = disconnect(resetDiagnostics = false)
+
     @SuppressLint("MissingPermission")
     private fun disconnect(resetDiagnostics: Boolean) {
         cancelSecurityProbe()
-        gatt?.disconnect(); gatt?.close(); gatt = null
+        // Detach first so a late callback from this attempt cannot mutate the
+        // next attempt. Keep a local reference so close() is guaranteed even if
+        // disconnect() synchronously dispatches a vendor callback.
+        val currentGatt = gatt
+        gatt = null
+        runCatching { currentGatt?.disconnect() }
+        runCatching { currentGatt?.close() }
         rx = null; tx = null; mtu = 23; decoder.reset(); sessionActor = null; pendingActor = null
         synchronized(writeQueue) { writeQueue.clear(); writeInFlight = false }
         snapshotFlow.value = SystemSnapshot()
@@ -180,11 +207,11 @@ class BleHomeGuardClient(private val context: Context) {
 
     fun sendJson(type: Int, json: JSONObject): Boolean {
         if (gatt == null || rx == null || stateFlow.value == State.IDLE || stateFlow.value == State.OFFLINE || stateFlow.value == State.ERROR) return false
-        val id = nextMessageId++ and 0xffff
+        val id = nextMessageId.getAndIncrement() and 0xffff
         val frames = BleFrameCodec.encode(type, id, json.toString().toByteArray(Charsets.UTF_8), mtu)
         synchronized(writeQueue) {
             frames.forEach(writeQueue::addLast)
-            if (!writeInFlight) writeNextLocked()
+            if (!writeInFlight) return writeNextLocked()
         }
         return true
     }
@@ -202,6 +229,11 @@ class BleHomeGuardClient(private val context: Context) {
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 cancelSecurityProbe()
+                // A remotely disconnected BluetoothGatt must be closed as well.
+                // Keeping it around leaks a client slot and is a common precursor
+                // to status 133 on subsequent connection attempts.
+                gatt = null
+                runCatching { g.close() }
                 rx = null; tx = null; decoder.reset(); sessionActor = null; pendingActor = null
                 synchronized(writeQueue) { writeQueue.clear(); writeInFlight = false }
                 snapshotFlow.value = SystemSnapshot(); stateFlow.value = State.OFFLINE
@@ -320,8 +352,17 @@ class BleHomeGuardClient(private val context: Context) {
             BleRuntimeDiagnostics.update("SUBSCRIBE_ERROR", "CCCD descriptor missing")
             return
         }
-        cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-        if (!g.writeDescriptor(cccd)) {
+        val writeStarted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            g.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ==
+                BluetoothGatt.GATT_SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            run {
+                cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                g.writeDescriptor(cccd)
+            }
+        }
+        if (!writeStarted) {
             stateFlow.value = State.ERROR
             BleRuntimeDiagnostics.update("SUBSCRIBE_ERROR", "writeDescriptor returned false")
         }
@@ -386,17 +427,31 @@ class BleHomeGuardClient(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun writeNextLocked() {
-        val currentGatt = gatt ?: return
-        val characteristic = rx ?: return
-        val frame = writeQueue.pollFirst() ?: return
-        characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        characteristic.value = frame
+    private fun writeNextLocked(): Boolean {
+        val currentGatt = gatt ?: return false
+        val characteristic = rx ?: return false
+        val frame = writeQueue.pollFirst() ?: return true
         writeInFlight = true
-        if (!currentGatt.writeCharacteristic(characteristic)) {
+        val writeStarted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            currentGatt.writeCharacteristic(
+                characteristic,
+                frame,
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+            ) == BluetoothGatt.GATT_SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            run {
+                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                characteristic.value = frame
+                currentGatt.writeCharacteristic(characteristic)
+            }
+        }
+        if (!writeStarted) {
             writeInFlight = false; writeQueue.clear(); stateFlow.value = State.ERROR
             BleRuntimeDiagnostics.update("WRITE_ERROR", "writeCharacteristic returned false")
+            return false
         }
+        return true
     }
 
     private fun accept(frame: ByteArray) {

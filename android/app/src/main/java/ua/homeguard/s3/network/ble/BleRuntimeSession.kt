@@ -1,12 +1,8 @@
 package ua.homeguard.s3.network.ble
 
-import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
-import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.os.Build
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,14 +11,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.SystemSnapshot
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
+import java.util.concurrent.atomic.AtomicLong
 
 data class BleSessionAccess(
     val actor: String = "",
@@ -78,7 +74,11 @@ class BleRuntimeSession(context: Context) {
     private val appContext = context.applicationContext
     private val scanner = BleProvisioningScanner(appContext)
     private val client = BleHomeGuardClient(appContext)
+    private val connectRetrier = BleConnectRetrier()
+    private val operationMutex = Mutex()
+    private val lifecycleGeneration = AtomicLong(0L)
     private val accessFlow = MutableStateFlow(BleSessionAccess())
+    @Volatile private var connectedDeviceId: String = ""
 
     companion object {
         const val VALVE_1_OUTPUT_ID = 2
@@ -94,18 +94,30 @@ class BleRuntimeSession(context: Context) {
     fun access(): StateFlow<BleSessionAccess> = accessFlow.asStateFlow()
     fun isReady(): Boolean = client.state().value == BleHomeGuardClient.State.READY
 
-    suspend fun connect(deviceId: String, timeoutMs: Long = 15_000L) {
-        require(deviceId.isNotBlank()) { "BLE device id is empty" }
-        if (client.state().value == BleHomeGuardClient.State.READY) return
+    suspend fun connect(deviceId: String, timeoutMs: Long = 15_000L) = operationMutex.withLock {
+        connectUnlocked(deviceId, timeoutMs)
+    }
+
+    private suspend fun connectUnlocked(deviceId: String, timeoutMs: Long) {
+        val normalizedDeviceId = deviceId.trim()
+        require(normalizedDeviceId.isNotBlank()) { "BLE device id is empty" }
+        val currentState = client.state().value
+        if ((currentState == BleHomeGuardClient.State.CONNECTED || currentState == BleHomeGuardClient.State.READY) &&
+            connectedDeviceId.equals(normalizedDeviceId, ignoreCase = true)
+        ) return
 
         accessFlow.value = BleSessionAccess()
+        connectedDeviceId = ""
+        val generation = lifecycleGeneration.incrementAndGet()
+        // A previous READY/ERROR/AUTHENTICATING link also suppresses peripheral
+        // advertising. Always tear it down before the first scan of a new chain.
+        client.disconnect()
         val effectiveConnectTimeoutMs = timeoutMs.coerceAtLeast(12_000L)
-        var connectedDevice: BluetoothDevice? = null
-        var lastFailure: Throwable? = null
-
-        for (attempt in 1..2) {
-            try {
-                val device = scanner.find(deviceId, effectiveConnectTimeoutMs)
+        val device = connectRetrier.run(
+            attempt = { attempt ->
+                ensureCurrentGeneration(generation)
+                val device = scanner.find(normalizedDeviceId, effectiveConnectTimeoutMs)
+                ensureCurrentGeneration(generation)
                 BleRuntimeDiagnostics.update(
                     stage = "CONNECTING",
                     detail = "attempt=$attempt/2; connect GATT before encrypted bond",
@@ -120,26 +132,27 @@ class BleRuntimeSession(context: Context) {
                             BleHomeGuardClient.State.READY -> true
                             BleHomeGuardClient.State.ERROR,
                             BleHomeGuardClient.State.OFFLINE -> throw IllegalStateException("BLE connection failed: $state")
+                            BleHomeGuardClient.State.IDLE -> throw CancellationException("BLE connection cancelled")
                             else -> false
                         }
                     }.first()
                 }
-                connectedDevice = device
-                lastFailure = null
-                break
-            } catch (failure: Throwable) {
-                lastFailure = failure
-                if (attempt < 2) {
-                    BleRuntimeDiagnostics.update(
-                        stage = "RETRYING",
-                        detail = "early GATT drop; retrying once after 750ms",
-                    )
-                    delay(750L)
-                }
-            }
-        }
-
-        val device = connectedDevice ?: throw (lastFailure ?: IllegalStateException("BLE connection failed"))
+                ensureCurrentGeneration(generation)
+                device
+            },
+            cleanupAfterFailure = {
+                // The old connection suppresses ESP advertising. Closing it
+                // before scanner.find() is therefore mandatory, not optional.
+                client.disconnectForRetry()
+            },
+            onRetry = { nextAttempt, failure ->
+                BleRuntimeDiagnostics.update(
+                    stage = "RETRYING",
+                    detail = "GATT attempt failed (${failure.javaClass.simpleName}); " +
+                        "link closed before attempt=$nextAttempt/2 scan",
+                )
+            },
+        )
 
         // BleHomeGuardClient now reports CONNECTED only after an encrypted read
         // of the ESP TX characteristic succeeds. That encrypted ATT probe is the
@@ -167,126 +180,37 @@ class BleRuntimeSession(context: Context) {
             client.state().value == BleHomeGuardClient.State.CONNECTED ||
                 client.state().value == BleHomeGuardClient.State.READY
         ) { "BLE encrypted ATT link dropped before authentication: ${client.state().value}" }
+        ensureCurrentGeneration(generation)
+        connectedDeviceId = normalizedDeviceId
     }
 
-    @SuppressLint("MissingPermission")
-    private suspend fun awaitEspInitiatedBond(device: BluetoothDevice, timeoutMs: Long) {
-        if (device.bondState == BluetoothDevice.BOND_BONDED) {
-            BleRuntimeDiagnostics.update(
-                stage = "BOND_READY",
-                detail = "already bonded",
-                address = device.address,
-            )
-            return
-        }
+    suspend fun authenticate(actor: String, pin: String, timeoutMs: Long = 8_000L): JSONObject =
+        operationMutex.withLock { authenticateUnlocked(actor, pin, timeoutMs) }
 
-        BleRuntimeDiagnostics.update(
-            stage = "SECURITY_WAIT",
-            detail = "waiting for ESP-initiated pairing on active GATT",
-            address = device.address,
-        )
-
-        withTimeout(timeoutMs.coerceAtLeast(12_000L)) {
-            suspendCancellableCoroutine { continuation ->
-                var receiverRegistered = true
-                lateinit var bondReceiver: BroadcastReceiver
-
-                fun unregister() {
-                    if (!receiverRegistered) return
-                    receiverRegistered = false
-                    runCatching { appContext.unregisterReceiver(bondReceiver) }
-                }
-
-                val filter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
-                bondReceiver = object : BroadcastReceiver() {
-                    override fun onReceive(context: Context?, intent: Intent?) {
-                        if (intent?.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
-                        val changedDevice = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE) as? BluetoothDevice
-                        } ?: return
-                        if (!changedDevice.address.equals(device.address, ignoreCase = true)) return
-
-                        val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
-                        val previous = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR)
-                        when (state) {
-                            BluetoothDevice.BOND_BONDING -> {
-                                BleRuntimeDiagnostics.update(
-                                    stage = "BONDING",
-                                    detail = "ESP-initiated pairing in progress",
-                                    address = device.address,
-                                )
-                            }
-                            BluetoothDevice.BOND_BONDED -> {
-                                BleRuntimeDiagnostics.update(
-                                    stage = "BOND_READY",
-                                    detail = "encrypted bond established on active GATT",
-                                    address = device.address,
-                                )
-                                unregister()
-                                if (continuation.isActive) continuation.resume(Unit)
-                            }
-                            BluetoothDevice.BOND_NONE -> if (previous == BluetoothDevice.BOND_BONDING) {
-                                BleRuntimeDiagnostics.update(
-                                    stage = "BOND_ERROR",
-                                    detail = "ESP-initiated pairing rejected or failed",
-                                    address = device.address,
-                                )
-                                unregister()
-                                if (continuation.isActive) {
-                                    continuation.resumeWithException(
-                                        IllegalStateException("BLE bonding failed for ${device.address}")
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    appContext.registerReceiver(bondReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-                } else {
-                    @Suppress("DEPRECATION")
-                    appContext.registerReceiver(bondReceiver, filter)
-                }
-
-                continuation.invokeOnCancellation { unregister() }
-
-                if (device.bondState == BluetoothDevice.BOND_BONDED) {
-                    BleRuntimeDiagnostics.update("BOND_READY", "already bonded", address = device.address)
-                    unregister()
-                    if (continuation.isActive) continuation.resume(Unit)
-                } else if (device.bondState == BluetoothDevice.BOND_BONDING) {
-                    BleRuntimeDiagnostics.update(
-                        stage = "BONDING",
-                        detail = "ESP-initiated pairing already in progress",
-                        address = device.address,
-                    )
-                }
-            }
-        }
-    }
-
-    suspend fun authenticate(actor: String, pin: String, timeoutMs: Long = 8_000L): JSONObject {
+    private suspend fun authenticateUnlocked(actor: String, pin: String, timeoutMs: Long): JSONObject {
         require(actor.isNotBlank()) { "BLE actor is empty" }
         require(pin.length in 4..12 && pin.all(Char::isDigit)) { "Invalid BLE PIN" }
-        require(client.authenticate(actor, pin)) { "BLE authentication could not start" }
-
-        val reply = withTimeout(timeoutMs) {
-            client.sessionReplies().filterNotNull().first()
-        }
-        require(reply.optBoolean("ok", false)) {
+        try {
+            require(client.authenticate(actor, pin)) { "BLE authentication could not start" }
+            val reply = withTimeout(timeoutMs) {
+                client.sessionReplies().filterNotNull().first()
+            }
+            require(reply.optBoolean("ok", false)) {
+                "BLE authentication rejected: ${reply.optString("reason", "unauthorized") }"
+            }
+            accessFlow.value = BleSessionAccess.fromHello(reply)
+            require(accessFlow.value.authenticated) { "BLE authentication reply has no actor" }
+            withTimeout(timeoutMs) {
+                client.state().filter { it == BleHomeGuardClient.State.READY }.first()
+            }
+            return reply
+        } catch (failure: Throwable) {
+            // A timed-out HELLO reply may still arrive later. Closing this link
+            // prevents it from authenticating or satisfying a later operation.
             accessFlow.value = BleSessionAccess()
-            "BLE authentication rejected: ${reply.optString("reason", "unauthorized") }"
+            invalidateSession()
+            throw failure
         }
-        accessFlow.value = BleSessionAccess.fromHello(reply)
-        require(accessFlow.value.authenticated) { "BLE authentication reply has no actor" }
-        withTimeout(timeoutMs) {
-            client.state().filter { it == BleHomeGuardClient.State.READY }.first()
-        }
-        return reply
     }
 
     suspend fun connectAndAuthenticate(
@@ -295,28 +219,16 @@ class BleRuntimeSession(context: Context) {
         pin: String,
         connectTimeoutMs: Long = 15_000L,
         authTimeoutMs: Long = 8_000L,
-    ): JSONObject {
-        connect(deviceId, connectTimeoutMs)
-        if (isReady() && accessFlow.value.authenticated) {
-            return JSONObject()
-                .put("ok", true)
-                .put("state", "authenticated")
-                .put("actor", accessFlow.value.actor)
-                .put("name", accessFlow.value.name)
-                .put("role", accessFlow.value.role)
-                .put("transport", "ble")
-        }
-        BleRuntimeDiagnostics.update(
-            stage = "AUTH_SETTLE",
-            detail = "waiting for ESP notification subscription",
-        )
-        delay(400L)
-        return authenticate(actor, pin, authTimeoutMs)
+    ): JSONObject = operationMutex.withLock {
+        connectUnlocked(deviceId, connectTimeoutMs)
+        // CONNECTED is emitted only after the CCCD callback and encrypted ATT
+        // probe, so an arbitrary settling delay is both unnecessary and racy.
+        authenticateUnlocked(actor, pin, authTimeoutMs)
     }
 
-    suspend fun execute(type: CommandType, timeoutMs: Long = 8_000L): JSONObject {
+    suspend fun execute(type: CommandType, timeoutMs: Long = 8_000L): JSONObject = operationMutex.withLock {
         require(isReady()) { "BLE runtime is not authenticated" }
-        return when (type) {
+        when (type) {
             CommandType.ARM_HOME -> executeNamedCommand("security.arm_home", type, timeoutMs)
             CommandType.ARM_AWAY -> executeNamedCommand("security.arm_away", type, timeoutMs)
             CommandType.DISARM -> executeNamedCommand("security.disarm", type, timeoutMs)
@@ -346,17 +258,18 @@ class BleRuntimeSession(context: Context) {
         return lastReply
     }
 
-    suspend fun setLight(active: Boolean, timeoutMs: Long = 8_000L): JSONObject =
-        controlOutput(LIGHT_OUTPUT_ID, active, false, timeoutMs)
-
-    suspend fun setValve1(active: Boolean, timeoutMs: Long = 8_000L): JSONObject {
-        requireAllowed(if (active) "valve.open" else "valve.close")
-        return controlOutput(VALVE_1_OUTPUT_ID, active, false, timeoutMs)
+    suspend fun setLight(active: Boolean, timeoutMs: Long = 8_000L): JSONObject = operationMutex.withLock {
+        controlOutputUnlocked(LIGHT_OUTPUT_ID, active, false, timeoutMs)
     }
 
-    suspend fun setValve2(active: Boolean, timeoutMs: Long = 8_000L): JSONObject {
+    suspend fun setValve1(active: Boolean, timeoutMs: Long = 8_000L): JSONObject = operationMutex.withLock {
         requireAllowed(if (active) "valve.open" else "valve.close")
-        return controlOutput(VALVE_2_OUTPUT_ID, active, false, timeoutMs)
+        controlOutputUnlocked(VALVE_1_OUTPUT_ID, active, false, timeoutMs)
+    }
+
+    suspend fun setValve2(active: Boolean, timeoutMs: Long = 8_000L): JSONObject = operationMutex.withLock {
+        requireAllowed(if (active) "valve.open" else "valve.close")
+        controlOutputUnlocked(VALVE_2_OUTPUT_ID, active, false, timeoutMs)
     }
 
     suspend fun pulseLock(timeoutMs: Long = 8_000L): JSONObject {
@@ -374,23 +287,23 @@ class BleRuntimeSession(context: Context) {
             .put("active", false)
     }
 
-    suspend fun panic(timeoutMs: Long = 8_000L): JSONObject {
+    suspend fun panic(timeoutMs: Long = 8_000L): JSONObject = operationMutex.withLock {
         require(isReady()) { "BLE runtime is not authenticated" }
         requireAllowed("security.panic")
         require(client.panic()) { "BLE panic command could not start" }
-        return awaitCommandReply(timeoutMs)
+        awaitCommandReply(timeoutMs)
     }
 
     suspend fun sendCommand(
         command: String,
         arguments: JSONObject = JSONObject(),
         timeoutMs: Long = 8_000L,
-    ): JSONObject {
+    ): JSONObject = operationMutex.withLock {
         require(isReady()) { "BLE runtime is not authenticated" }
         require(command.isNotBlank()) { "BLE command is empty" }
         requireAllowed(command)
         require(client.sendCommand(command, arguments)) { "BLE command could not start" }
-        return awaitCommandReply(timeoutMs)
+        awaitCommandReply(timeoutMs)
     }
 
     suspend fun controlOutput(
@@ -398,6 +311,15 @@ class BleRuntimeSession(context: Context) {
         active: Boolean,
         alarmActive: Boolean = false,
         timeoutMs: Long = 8_000L,
+    ): JSONObject = operationMutex.withLock {
+        controlOutputUnlocked(outputId, active, alarmActive, timeoutMs)
+    }
+
+    private suspend fun controlOutputUnlocked(
+        outputId: Int,
+        active: Boolean,
+        alarmActive: Boolean,
+        timeoutMs: Long,
     ): JSONObject {
         require(isReady()) { "BLE runtime is not authenticated" }
         require(outputId in 1..65535) { "Invalid output id" }
@@ -406,6 +328,8 @@ class BleRuntimeSession(context: Context) {
     }
 
     fun disconnect() {
+        lifecycleGeneration.incrementAndGet()
+        connectedDeviceId = ""
         accessFlow.value = BleSessionAccess()
         client.disconnect()
     }
@@ -418,7 +342,29 @@ class BleRuntimeSession(context: Context) {
         }
     }
 
-    private suspend fun awaitCommandReply(timeoutMs: Long): JSONObject = withTimeout(timeoutMs) {
-        client.commandReplies().filterNotNull().first()
+    private suspend fun awaitCommandReply(timeoutMs: Long): JSONObject {
+        try {
+            return withTimeout(timeoutMs) {
+                client.commandReplies().filterNotNull().first()
+            }
+        } catch (cancelled: CancellationException) {
+            // Without request correlation, a late response must never be allowed
+            // to satisfy the next command. Invalidate the whole GATT session.
+            invalidateSession()
+            throw cancelled
+        }
+    }
+
+    private fun ensureCurrentGeneration(expected: Long) {
+        if (lifecycleGeneration.get() != expected) {
+            throw CancellationException("BLE connection superseded or cancelled")
+        }
+    }
+
+    private fun invalidateSession() {
+        lifecycleGeneration.incrementAndGet()
+        connectedDeviceId = ""
+        accessFlow.value = BleSessionAccess()
+        client.disconnectForRetry()
     }
 }
