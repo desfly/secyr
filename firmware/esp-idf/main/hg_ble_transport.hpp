@@ -53,6 +53,7 @@ private:
     void* message_context_ = nullptr;
     RemoteEventHandler remote_event_handler_ = nullptr;
     void* remote_event_context_ = nullptr;
+    std::string device_name_;
     std::uint16_t connection_handle_ = 0xffff;
     bool notify_enabled_ = false;
     std::uint32_t connection_epoch_ = 0;
