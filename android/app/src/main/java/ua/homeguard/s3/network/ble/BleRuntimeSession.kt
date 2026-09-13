@@ -260,6 +260,11 @@ class BleRuntimeSession(context: Context) {
                 .put("role", accessFlow.value.role)
                 .put("transport", "ble")
         }
+        BleRuntimeDiagnostics.update(
+            stage = "AUTH_SETTLE",
+            detail = "waiting for ESP notification subscription",
+        )
+        delay(400L)
         return authenticate(actor, pin, authTimeoutMs)
     }
 
