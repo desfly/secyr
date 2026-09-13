@@ -43,6 +43,14 @@ hg::HealthState module_health(homeguard::HardwareModuleState state)
     }
 }
 
+hg::HealthState combine_health(hg::HealthState first, hg::HealthState second)
+{
+    if (first == hg::HealthState::Failed || second == hg::HealthState::Failed) return hg::HealthState::Failed;
+    if (first == hg::HealthState::Degraded || second == hg::HealthState::Degraded) return hg::HealthState::Degraded;
+    if (first == hg::HealthState::Unknown || second == hg::HealthState::Unknown) return hg::HealthState::Unknown;
+    return hg::HealthState::Ok;
+}
+
 hg::SystemMode system_mode(const hg::SystemModel& model)
 {
     const auto* partition = model.partition_at(0);
@@ -195,11 +203,18 @@ void TelemetryRuntime::run()
 
         health_.set(hg::Component::Esp, hg::HealthState::Ok, now_ms);
         health_.set(hg::Component::Nvs, hg::HealthState::Ok, now_ms);
-        health_.set(hg::Component::Adc1, module_health(hardware_status.ads1115_zones.state), now_ms);
-        health_.set(hg::Component::Adc2, module_health(hardware_status.ads1115_telemetry.state), now_ms);
+        const auto adc1_health = module_health(hardware_status.ads1115_zones.state);
+        const auto adc2_health = module_health(hardware_status.ads1115_telemetry.state);
+        health_.set(hg::Component::Adc1, adc1_health, now_ms);
+        health_.set(hg::Component::Adc2, adc2_health, now_ms);
         health_.set(hg::Component::W5500, module_health(hardware_status.w5500.state), now_ms);
-        health_.set(hg::Component::Inputs, module_health(hardware_status.mcp23017.state), now_ms);
-        health_.set(hg::Component::Outputs, module_health(hardware_status.mcp23017.state), now_ms);
+
+        // Current bench wiring has no MCP23017 installed. Zone inputs come
+        // directly from the two ADS1115 devices, while LIGHT and LOCK relays
+        // are driven directly by ESP32-S3 GPIO1/GPIO2. Do not degrade the
+        // whole system merely because the future I/O expander is absent.
+        health_.set(hg::Component::Inputs, combine_health(adc1_health, adc2_health), now_ms);
+        health_.set(hg::Component::Outputs, hg::HealthState::Ok, now_ms);
 
         bool rtc_valid = false;
         const auto epoch = rtc_epoch(hardware_->rtc(), rtc_valid);
