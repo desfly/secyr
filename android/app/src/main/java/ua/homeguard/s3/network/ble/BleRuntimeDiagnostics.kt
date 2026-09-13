@@ -36,9 +36,10 @@ object BleRuntimeDiagnostics {
     ) {
         val previous = flow.value
         val nextIndex = previous.transition + 1
+        val historyStage = if (statusCode != null) "$stage[$statusCode]" else stage
         val nextHistory = (previous.history + BleRuntimeTransition(
             index = nextIndex,
-            stage = stage,
+            stage = historyStage,
             detail = detail,
             statusCode = statusCode,
         )).takeLast(MAX_HISTORY)
