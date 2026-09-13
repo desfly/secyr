@@ -14,6 +14,7 @@ import ua.homeguard.s3.model.DeviceEndpoint
 import ua.homeguard.s3.network.HttpDeviceApi
 import ua.homeguard.s3.network.LocalTelemetryTicketBroker
 import ua.homeguard.s3.network.ble.BleHomeGuardClient
+import ua.homeguard.s3.network.ble.BleRuntimeDiagnostics
 import ua.homeguard.s3.network.ble.BleRuntimeRegistry
 import ua.homeguard.s3.storage.SettingsStore
 import java.util.concurrent.atomic.AtomicLong
@@ -227,13 +228,27 @@ class CommandController(
         require(deviceId.isNotBlank() && !deviceId.startsWith("manual-", ignoreCase = true)) {
             "BLE device id unavailable"
         }
-        val reply = ble.connectAndAuthenticate(
-            deviceId = deviceId,
-            actor = actor,
-            pin = credential,
-            connectTimeoutMs = 12_000L,
-            authTimeoutMs = 8_000L,
-        )
+        val reply = try {
+            ble.connectAndAuthenticate(
+                deviceId = deviceId,
+                actor = actor,
+                pin = credential,
+                connectTimeoutMs = 12_000L,
+                authTimeoutMs = 8_000L,
+            )
+        } catch (failure: Throwable) {
+            val diagnostic = BleRuntimeDiagnostics.current()
+            val path = diagnostic.history.joinToString("→") { transition -> transition.stage }
+            val detail = diagnostic.detail.takeIf { it.isNotBlank() }
+            val original = failure.message?.takeIf { it.isNotBlank() }
+            val message = buildString {
+                append("BLE ").append(diagnostic.stage)
+                detail?.let { append(": ").append(it) }
+                original?.let { append("; ").append(it) }
+                if (path.isNotBlank()) append("; path=").append(path)
+            }
+            throw IllegalStateException(message, failure)
+        }
         return parseBleAccessSession(reply, actor)
     }
 
