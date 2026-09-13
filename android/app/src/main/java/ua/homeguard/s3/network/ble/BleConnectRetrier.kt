@@ -27,15 +27,14 @@ internal class BleConnectRetrier(
         for (attemptNumber in 1..maxAttempts) {
             try {
                 val result = attempt(attemptNumber)
-                // StateFlow can resume the waiting connection coroutine directly
-                // from inside BluetoothGattCallback.onCharacteristicRead(). If we
-                // immediately start HELLO_SESSION there, Android sees a new GATT
-                // write while the encrypted read callback has not unwound yet and
-                // some vendor stacks answer with the generic status 133. Yield one
-                // event-loop turn after a successful attempt so the read callback
-                // returns before any authentication write can start. This is a
-                // callback-drain barrier, not a timing delay.
+                // Real hardware 3421 still returned WRITE_ERROR[133] immediately
+                // after SECURITY_READY even though the coroutine yielded once.
+                // Yield first so the BluetoothGattCallback can unwind, then give
+                // the vendor stack a short post-encryption settle window before
+                // HELLO_SESSION starts. This delay is intentionally bounded and
+                // only applies once after a successful encrypted ATT probe.
                 yield()
+                delay(300L)
                 return result
             } catch (timeout: TimeoutCancellationException) {
                 cleanupAfterFailure()
