@@ -363,5 +363,6 @@ class CommandController(
         CommandType.OPEN_VALVES,
         CommandType.ENTER_MAINTENANCE,
         -> true
+        else -> false
     }
 }
