@@ -141,9 +141,11 @@ class BleRuntimeSession(context: Context) {
 
         val device = connectedDevice ?: throw (lastFailure ?: IllegalStateException("BLE connection failed"))
 
-        // ESP RX/TX characteristics require encrypted ATT. Pair on the already-live
-        // GATT link so Android can encrypt the upcoming HELLO_SESSION write.
-        ensureBonded(device, effectiveConnectTimeoutMs)
+        // ESP RX/TX characteristics require encrypted ATT. The controller now
+        // initiates SMP on the already-live GATT link after CCCD subscription;
+        // Android only observes the resulting bond state and never races it
+        // with BluetoothDevice.createBond().
+        awaitEspInitiatedBond(device, effectiveConnectTimeoutMs)
         require(
             client.state().value == BleHomeGuardClient.State.CONNECTED ||
                 client.state().value == BleHomeGuardClient.State.READY
@@ -151,7 +153,7 @@ class BleRuntimeSession(context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    private suspend fun ensureBonded(device: BluetoothDevice, timeoutMs: Long) {
+    private suspend fun awaitEspInitiatedBond(device: BluetoothDevice, timeoutMs: Long) {
         if (device.bondState == BluetoothDevice.BOND_BONDED) {
             BleRuntimeDiagnostics.update(
                 stage = "BOND_READY",
@@ -162,8 +164,8 @@ class BleRuntimeSession(context: Context) {
         }
 
         BleRuntimeDiagnostics.update(
-            stage = "BONDING",
-            detail = "establishing encrypted BLE link on active GATT",
+            stage = "SECURITY_WAIT",
+            detail = "waiting for ESP-initiated pairing on active GATT",
             address = device.address,
         )
 
@@ -193,6 +195,13 @@ class BleRuntimeSession(context: Context) {
                         val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
                         val previous = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR)
                         when (state) {
+                            BluetoothDevice.BOND_BONDING -> {
+                                BleRuntimeDiagnostics.update(
+                                    stage = "BONDING",
+                                    detail = "ESP-initiated pairing in progress",
+                                    address = device.address,
+                                )
+                            }
                             BluetoothDevice.BOND_BONDED -> {
                                 BleRuntimeDiagnostics.update(
                                     stage = "BOND_READY",
@@ -205,7 +214,7 @@ class BleRuntimeSession(context: Context) {
                             BluetoothDevice.BOND_NONE -> if (previous == BluetoothDevice.BOND_BONDING) {
                                 BleRuntimeDiagnostics.update(
                                     stage = "BOND_ERROR",
-                                    detail = "bonding rejected or failed",
+                                    detail = "ESP-initiated pairing rejected or failed",
                                     address = device.address,
                                 )
                                 unregister()
@@ -228,23 +237,19 @@ class BleRuntimeSession(context: Context) {
 
                 continuation.invokeOnCancellation { unregister() }
 
+                // Pairing can finish between CONNECTED and receiver registration.
+                // Re-read bondState, but deliberately never call createBond(): the
+                // ESP owns SMP initiation for this encrypted GATT transport.
                 if (device.bondState == BluetoothDevice.BOND_BONDED) {
                     BleRuntimeDiagnostics.update("BOND_READY", "already bonded", address = device.address)
                     unregister()
                     if (continuation.isActive) continuation.resume(Unit)
-                    return@suspendCancellableCoroutine
-                }
-
-                if (device.bondState != BluetoothDevice.BOND_BONDING && !device.createBond()) {
+                } else if (device.bondState == BluetoothDevice.BOND_BONDING) {
                     BleRuntimeDiagnostics.update(
-                        stage = "BOND_ERROR",
-                        detail = "createBond returned false on active GATT",
+                        stage = "BONDING",
+                        detail = "ESP-initiated pairing already in progress",
                         address = device.address,
                     )
-                    unregister()
-                    if (continuation.isActive) {
-                        continuation.resumeWithException(IllegalStateException("BLE createBond failed"))
-                    }
                 }
             }
         }

@@ -52,6 +52,7 @@ struct ble_gap_event {
     struct { int status{0}; std::uint16_t conn_handle{0}; } connect{};
     struct { int reason{0}; } disconnect{};
     struct { std::uint16_t attr_handle{0}; int cur_notify{0}; } subscribe{};
+    struct { int status{0}; std::uint16_t conn_handle{0}; } enc_change{};
     struct {
         ble_addr_t addr{};
         const std::uint8_t* data{nullptr};
@@ -89,6 +90,8 @@ struct ble_hs_cfg_t {
     std::uint8_t sm_sc{0};
     std::uint8_t sm_mitm{0};
     std::uint8_t sm_io_cap{0};
+    std::uint8_t sm_our_key_dist{0};
+    std::uint8_t sm_their_key_dist{0};
 };
 
 inline ble_hs_cfg_t ble_hs_cfg{};
@@ -111,11 +114,14 @@ constexpr int BLE_GAP_EVENT_ADV_COMPLETE = 3;
 constexpr int BLE_GAP_EVENT_SUBSCRIBE = 4;
 constexpr int BLE_GAP_EVENT_DISC = 5;
 constexpr int BLE_GAP_EVENT_DISC_COMPLETE = 6;
+constexpr int BLE_GAP_EVENT_ENC_CHANGE = 7;
 constexpr std::uint8_t BLE_HS_ADV_F_DISC_GEN = 0x02;
 constexpr std::uint8_t BLE_HS_ADV_F_BREDR_UNSUP = 0x04;
 constexpr std::uint8_t BLE_GAP_CONN_MODE_UND = 1;
 constexpr std::uint8_t BLE_GAP_DISC_MODE_GEN = 1;
 constexpr std::uint8_t BLE_HS_IO_NO_INPUT_OUTPUT = 3;
+constexpr std::uint8_t BLE_SM_PAIR_KEY_DIST_ENC = 0x01;
+constexpr std::uint8_t BLE_SM_PAIR_KEY_DIST_ID = 0x02;
 constexpr std::int32_t BLE_HS_FOREVER = -1;
 
 inline int ble_hs_mbuf_to_flat(os_mbuf* om, void* dst, std::uint16_t max_len, std::uint16_t* out_len) {
@@ -148,6 +154,7 @@ inline int ble_gap_adv_start(std::uint8_t, const void*, std::int32_t, const ble_
 }
 inline int ble_gap_adv_active() { return ble_mock_adv_active_storage() ? 1 : 0; }
 inline int ble_gap_disc(std::uint8_t, std::int32_t, const ble_gap_disc_params*, ble_gap_event_fn, void*) { return 0; }
+inline int ble_gap_security_initiate(std::uint16_t) { return 0; }
 inline int ble_hs_adv_parse_fields(ble_hs_adv_fields* fields, const std::uint8_t* data, std::uint8_t length) {
     if (!fields) return -1;
     fields->mfg_data = data;

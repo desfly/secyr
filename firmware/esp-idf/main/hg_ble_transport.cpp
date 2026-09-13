@@ -107,6 +107,13 @@ int gap_event(ble_gap_event* event, void*) {
         case BLE_GAP_EVENT_SUBSCRIBE:
             if (event->subscribe.attr_handle == g_tx_value_handle) g_owner->on_notify_subscription(event->subscribe.cur_notify != 0);
             break;
+        case BLE_GAP_EVENT_ENC_CHANGE:
+            ESP_LOGI(
+                kTag,
+                "BLE encryption change; handle=%u status=%d",
+                static_cast<unsigned>(event->enc_change.conn_handle),
+                event->enc_change.status);
+            break;
         case BLE_GAP_EVENT_DISC: {
             ble_hs_adv_fields fields{};
             if (ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data) == 0 &&
@@ -179,6 +186,10 @@ esp_err_t BleTransport::start(const char* device_name) {
     ble_hs_cfg.sm_sc = 1;
     ble_hs_cfg.sm_mitm = 0;
     ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
+    // Bonding needs encryption/identity keys to be exchanged and persisted.
+    // Without these masks Android can remain in BOND_BONDING indefinitely.
+    ble_hs_cfg.sm_our_key_dist |= BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+    ble_hs_cfg.sm_their_key_dist |= BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
     ble_store_config_init();
     if (xTaskCreate(host_task,"hg_ble_host",4096,nullptr,5,nullptr) != pdPASS) return ESP_ERR_NO_MEM;
     ESP_LOGI(kTag,"NimBLE HomeGuard transport started");
@@ -245,6 +256,19 @@ void BleTransport::on_disconnected() {
 void BleTransport::on_notify_subscription(bool enabled) {
     notify_enabled_=enabled;
     ESP_LOGI(kTag,"BLE telemetry notifications %s",enabled?"enabled":"disabled");
+    if (!enabled || !link_connected()) return;
+
+    // Android has completed service discovery and CCCD subscription. Start SMP
+    // from the ESP on this live GATT link; Android only observes the bond state
+    // instead of racing us with BluetoothDevice.createBond().
+    const int security_rc = ble_gap_security_initiate(connection_handle_);
+    if (security_rc == 0) {
+        ESP_LOGI(kTag,"BLE security initiated by ESP; handle=%u",connection_handle_);
+    } else if (security_rc == BLE_HS_EALREADY) {
+        ESP_LOGI(kTag,"BLE security already active; handle=%u",connection_handle_);
+    } else {
+        ESP_LOGE(kTag,"BLE security initiation failed; handle=%u rc=%d",connection_handle_,security_rc);
+    }
 }
 
 esp_err_t BleTransport::advertise() {
