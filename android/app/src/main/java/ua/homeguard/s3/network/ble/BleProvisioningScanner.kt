@@ -95,40 +95,12 @@ class BleProvisioningScanner(private val context: Context) {
                 }
             }
         } catch (timeout: TimeoutCancellationException) {
-            val address = deriveEsp32S3BluetoothAddress(deviceId)
-                ?: run {
-                    BleRuntimeDiagnostics.update("SCAN_TIMEOUT", "no derivable ESP32-S3 address")
-                    throw IllegalStateException("BLE scan timeout and device id has no derivable ESP32-S3 address", timeout)
-                }
-            Log.w(TAG, "BLE scan timeout; trying deterministic controller address $address")
             BleRuntimeDiagnostics.update(
-                stage = "SCAN_TIMEOUT_DIRECT",
-                detail = "scan timeout; direct GATT fallback",
-                address = address,
+                stage = "SCAN_TIMEOUT",
+                detail = "no HomeGuard advertisement seen in ${effectiveTimeoutMs}ms",
             )
-            runCatching { adapter.getRemoteDevice(address) }
-                .getOrElse {
-                    BleRuntimeDiagnostics.update("SCAN_DIRECT_ERROR", it.message ?: "invalid derived address", address = address)
-                    throw IllegalStateException("BLE scan timeout; invalid derived address $address", it)
-                }
+            throw IllegalStateException("BLE scan timeout: HomeGuard advertisement not seen", timeout)
         }
-    }
-
-    private fun deriveEsp32S3BluetoothAddress(deviceId: String): String? {
-        val raw = deviceId.trim().uppercase().removePrefix("HG-")
-        if (raw.length != 12 || raw.any { it !in '0'..'9' && it !in 'A'..'F' }) return null
-
-        val bytes = IntArray(6) { index ->
-            raw.substring(index * 2, index * 2 + 2).toInt(16)
-        }
-        var carry = 2
-        for (index in bytes.lastIndex downTo 0) {
-            if (carry == 0) break
-            val sum = bytes[index] + carry
-            bytes[index] = sum and 0xff
-            carry = sum ushr 8
-        }
-        return bytes.joinToString(":") { value -> "%02X".format(value) }
     }
 
     private fun requirePermissions() {
