@@ -369,7 +369,7 @@ esp_err_t BleTransport::advertise() {
 }
 
 esp_err_t BleTransport::scan_remotes() {
-    ble_hs_disc_params params{};
+    ble_gap_disc_params params{};
     params.passive = 1;
     params.filter_duplicates = 0;
     const int rc = ble_gap_disc(own_address_type_, BLE_HS_FOREVER, &params, gap_event, nullptr);
