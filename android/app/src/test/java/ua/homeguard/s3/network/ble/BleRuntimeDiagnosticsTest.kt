@@ -32,7 +32,7 @@ class BleRuntimeDiagnosticsTest {
         assertEquals(14L, diagnostic.transition)
         assertEquals(12, diagnostic.history.size)
         assertEquals("S3", diagnostic.history.first().stage)
-        assertEquals("S14", diagnostic.history.last().stage)
+        assertEquals("S14[22]", diagnostic.history.last().stage)
         assertEquals(22, diagnostic.history.last().statusCode)
         assertEquals("AC:A7:04:1D:A7:12", diagnostic.address)
     }
