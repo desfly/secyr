@@ -100,30 +100,46 @@ class BleRuntimeSession(context: Context) {
 
         accessFlow.value = BleSessionAccess()
         val effectiveConnectTimeoutMs = timeoutMs.coerceAtLeast(12_000L)
-        val device = scanner.find(deviceId, effectiveConnectTimeoutMs)
+        var connectedDevice: BluetoothDevice? = null
+        var lastFailure: Throwable? = null
 
-        // Establish GATT first. Real hardware reaches service discovery and CCCD
-        // subscription successfully without a pre-bond, but the first encrypted RX
-        // write fails with GATT 133 unless link security is negotiated. Bond only
-        // after the live GATT/notification path exists, immediately before auth.
-        BleRuntimeDiagnostics.update(
-            stage = "CONNECTING",
-            detail = "connect GATT before encrypted bond",
-            address = device.address,
-        )
+        for (attempt in 1..2) {
+            try {
+                val device = scanner.find(deviceId, effectiveConnectTimeoutMs)
+                BleRuntimeDiagnostics.update(
+                    stage = "CONNECTING",
+                    detail = "attempt=$attempt/2; connect GATT before encrypted bond",
+                    address = device.address,
+                )
 
-        client.connect(device)
-        withTimeout(effectiveConnectTimeoutMs) {
-            client.state().filter { state ->
-                when (state) {
-                    BleHomeGuardClient.State.CONNECTED,
-                    BleHomeGuardClient.State.READY -> true
-                    BleHomeGuardClient.State.ERROR,
-                    BleHomeGuardClient.State.OFFLINE -> throw IllegalStateException("BLE connection failed: $state")
-                    else -> false
+                client.connect(device)
+                withTimeout(effectiveConnectTimeoutMs) {
+                    client.state().filter { state ->
+                        when (state) {
+                            BleHomeGuardClient.State.CONNECTED,
+                            BleHomeGuardClient.State.READY -> true
+                            BleHomeGuardClient.State.ERROR,
+                            BleHomeGuardClient.State.OFFLINE -> throw IllegalStateException("BLE connection failed: $state")
+                            else -> false
+                        }
+                    }.first()
                 }
-            }.first()
+                connectedDevice = device
+                lastFailure = null
+                break
+            } catch (failure: Throwable) {
+                lastFailure = failure
+                if (attempt < 2) {
+                    BleRuntimeDiagnostics.update(
+                        stage = "RETRYING",
+                        detail = "early GATT drop; retrying once after 750ms",
+                    )
+                    delay(750L)
+                }
+            }
         }
+
+        val device = connectedDevice ?: throw (lastFailure ?: IllegalStateException("BLE connection failed"))
 
         // ESP RX/TX characteristics require encrypted ATT. Pair on the already-live
         // GATT link so Android can encrypt the upcoming HELLO_SESSION write.
