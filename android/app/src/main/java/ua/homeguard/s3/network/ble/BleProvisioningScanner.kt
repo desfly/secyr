@@ -24,18 +24,29 @@ class BleProvisioningScanner(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     suspend fun find(deviceId: String, timeoutMs: Long = 12_000L): BluetoothDevice {
+        BleRuntimeDiagnostics.update("SCAN_PRECHECK", "checking permissions and adapter")
         requirePermissions()
         val manager = context.getSystemService(BluetoothManager::class.java)
-            ?: error("Bluetooth недоступний")
-        val adapter = manager.adapter ?: error("Bluetooth адаптер відсутній")
-        require(adapter.isEnabled) { "Увімкніть Bluetooth" }
-        val scanner = adapter.bluetoothLeScanner ?: error("BLE сканер недоступний")
+            ?: run {
+                BleRuntimeDiagnostics.update("SCAN_ERROR", "Bluetooth manager unavailable")
+                error("Bluetooth недоступний")
+            }
+        val adapter = manager.adapter ?: run {
+            BleRuntimeDiagnostics.update("SCAN_ERROR", "Bluetooth adapter missing")
+            error("Bluetooth адаптер відсутній")
+        }
+        if (!adapter.isEnabled) {
+            BleRuntimeDiagnostics.update("SCAN_ERROR", "Bluetooth disabled")
+            error("Увімкніть Bluetooth")
+        }
+        val scanner = adapter.bluetoothLeScanner ?: run {
+            BleRuntimeDiagnostics.update("SCAN_ERROR", "BLE scanner unavailable")
+            error("BLE сканер недоступний")
+        }
         val expectedSuffix = deviceId.takeLast(6).uppercase()
 
-        // Four seconds was too aggressive for the opportunistic post-HTTP-login
-        // BLE path on real phones. Keep BLE independent, but always give the
-        // controller a full low-latency scan window before declaring it absent.
         val effectiveTimeoutMs = timeoutMs.coerceAtLeast(12_000L)
+        BleRuntimeDiagnostics.update("SCANNING", "low-latency ${effectiveTimeoutMs}ms")
 
         return try {
             withTimeout(effectiveTimeoutMs) {
@@ -54,19 +65,21 @@ class BleProvisioningScanner(private val context: Context) {
                             val serviceMatches = record?.serviceUuids
                                 ?.any { it.uuid == HomeGuardBleContract.SERVICE_UUID } == true
 
-                            // Do not depend on Android controller-offloaded UUID scan
-                            // filters. Some phones fail to surface the ESP32-S3 result
-                            // through a filtered scan even though the same ScanRecord
-                            // contains the HomeGuard UUID. An unfiltered app-side match
-                            // accepts only our service UUID or our canonical device name.
                             if (!serviceMatches && !nameMatches) return
 
-                            Log.i(TAG, "BLE scan matched ${result.device.address}; service=$serviceMatches name=$advertisedName")
+                            val address = result.device.address
+                            Log.i(TAG, "BLE scan matched $address; service=$serviceMatches name=$advertisedName")
+                            BleRuntimeDiagnostics.update(
+                                stage = "SCAN_MATCHED",
+                                detail = "service=$serviceMatches name=${advertisedName.ifBlank { cachedName.ifBlank { "<none>" } }}",
+                                address = address,
+                            )
                             runCatching { scanner.stopScan(this) }
                             if (continuation.isActive) continuation.resume(result.device)
                         }
 
                         override fun onScanFailed(errorCode: Int) {
+                            BleRuntimeDiagnostics.update("SCAN_FAILED", "Android scan callback failed", errorCode)
                             if (continuation.isActive) {
                                 continuation.resumeWithException(IllegalStateException("BLE scan failed: $errorCode"))
                             }
@@ -82,15 +95,22 @@ class BleProvisioningScanner(private val context: Context) {
                 }
             }
         } catch (timeout: TimeoutCancellationException) {
-            // HomeGuard device_id is derived from ESP_MAC_WIFI_STA. This firmware
-            // uses the ESP32-S3 default four-universal-MAC layout, where Bluetooth
-            // is base/Wi-Fi STA + 2. A direct GATT attempt bypasses vendor Android
-            // scan filtering while preserving the normal advertised UUID/name path.
             val address = deriveEsp32S3BluetoothAddress(deviceId)
-                ?: throw IllegalStateException("BLE scan timeout and device id has no derivable ESP32-S3 address", timeout)
+                ?: run {
+                    BleRuntimeDiagnostics.update("SCAN_TIMEOUT", "no derivable ESP32-S3 address")
+                    throw IllegalStateException("BLE scan timeout and device id has no derivable ESP32-S3 address", timeout)
+                }
             Log.w(TAG, "BLE scan timeout; trying deterministic controller address $address")
+            BleRuntimeDiagnostics.update(
+                stage = "SCAN_TIMEOUT_DIRECT",
+                detail = "scan timeout; direct GATT fallback",
+                address = address,
+            )
             runCatching { adapter.getRemoteDevice(address) }
-                .getOrElse { throw IllegalStateException("BLE scan timeout; invalid derived address $address", it) }
+                .getOrElse {
+                    BleRuntimeDiagnostics.update("SCAN_DIRECT_ERROR", it.message ?: "invalid derived address", address = address)
+                    throw IllegalStateException("BLE scan timeout; invalid derived address $address", it)
+                }
         }
     }
 
@@ -117,7 +137,11 @@ class BleProvisioningScanner(private val context: Context) {
         } else {
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
-        require(required.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
+        val missing = required.filter { context.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty()) {
+            BleRuntimeDiagnostics.update("SCAN_PERMISSION", "missing: ${missing.joinToString()}")
+        }
+        require(missing.isEmpty()) {
             "Надайте застосунку дозвіл Bluetooth/пристрої поблизу"
         }
     }
