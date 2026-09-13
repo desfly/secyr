@@ -104,7 +104,10 @@ const ble_gatt_chr_def kCharacteristics[] = {
     {
         .uuid = &kTxUuid.u,
         .access_cb = tx_access,
-        .flags = BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_READ_ENC,
+        // READ_ENC is only an ATT security permission in NimBLE; it does not
+        // advertise the GATT Read property. Android readCharacteristic() rejects
+        // the probe locally unless BLE_GATT_CHR_F_READ is present as well.
+        .flags = BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC,
         .val_handle = &g_tx_value_handle,
     },
     {0}
@@ -243,7 +246,7 @@ void BleTransport::set_message_handler(MessageHandler handler, void* context) {
 
 void BleTransport::set_remote_event_handler(RemoteEventHandler handler, void* context) {
     remote_event_handler_ = handler;
-    remote_event_context_ = context;
+    remote_event_context_=context;
 }
 
 bool BleTransport::link_connected() const {
