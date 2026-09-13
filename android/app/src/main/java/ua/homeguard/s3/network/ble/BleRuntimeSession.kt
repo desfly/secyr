@@ -98,9 +98,10 @@ class BleRuntimeSession(context: Context) {
             client.state().value == BleHomeGuardClient.State.CONNECTED) return
 
         accessFlow.value = BleSessionAccess()
-        val device = scanner.find(deviceId, timeoutMs.coerceAtMost(12_000L))
+        val effectiveConnectTimeoutMs = timeoutMs.coerceAtLeast(12_000L)
+        val device = scanner.find(deviceId, effectiveConnectTimeoutMs)
         client.connect(device)
-        withTimeout(timeoutMs) {
+        withTimeout(effectiveConnectTimeoutMs) {
             client.state().filter { state ->
                 when (state) {
                     BleHomeGuardClient.State.CONNECTED,
