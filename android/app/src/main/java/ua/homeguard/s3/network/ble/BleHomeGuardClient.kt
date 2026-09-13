@@ -10,6 +10,8 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +38,7 @@ class BleHomeGuardClient(private val context: Context) {
     private val provisioningReplyFlow = MutableStateFlow<JSONObject?>(null)
     private val errorFlow = MutableStateFlow<JSONObject?>(null)
     private val writeQueue = ArrayDeque<ByteArray>()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var writeInFlight = false
     private var gatt: BluetoothGatt? = null
     private var rx: BluetoothGattCharacteristic? = null
@@ -44,6 +47,8 @@ class BleHomeGuardClient(private val context: Context) {
     private var nextMessageId = 1
     private var sessionActor: String? = null
     private var pendingActor: String? = null
+    private var securityProbeAttempt = 0
+    private var securityProbeRunnable: Runnable? = null
 
     fun state(): StateFlow<State> = stateFlow.asStateFlow()
     fun snapshots(): StateFlow<SystemSnapshot> = snapshotFlow.asStateFlow()
@@ -54,6 +59,12 @@ class BleHomeGuardClient(private val context: Context) {
 
     companion object {
         private val CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        private const val SECURITY_PROBE_MAX_ATTEMPTS = 6
+        private const val SECURITY_PROBE_RETRY_MS = 500L
+        private const val GATT_INSUFFICIENT_AUTHENTICATION = 5
+        private const val GATT_INSUFFICIENT_ENCRYPTION = 15
+        private const val GATT_ANDROID_GENERIC_ERROR = 133
+
         fun runtimePermissions(): Array<String> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
         } else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -75,6 +86,7 @@ class BleHomeGuardClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     private fun disconnect(resetDiagnostics: Boolean) {
+        cancelSecurityProbe()
         gatt?.disconnect(); gatt?.close(); gatt = null
         rx = null; tx = null; mtu = 23; decoder.reset(); sessionActor = null; pendingActor = null
         synchronized(writeQueue) { writeQueue.clear(); writeInFlight = false }
@@ -189,6 +201,7 @@ class BleHomeGuardClient(private val context: Context) {
                     BleRuntimeDiagnostics.update("DISCOVER_ERROR", "discoverServices returned false", status)
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                cancelSecurityProbe()
                 rx = null; tx = null; decoder.reset(); sessionActor = null; pendingActor = null
                 synchronized(writeQueue) { writeQueue.clear(); writeInFlight = false }
                 snapshotFlow.value = SystemSnapshot(); stateFlow.value = State.OFFLINE
@@ -246,11 +259,31 @@ class BleHomeGuardClient(private val context: Context) {
             if (gatt === g && characteristic.uuid == HomeGuardBleContract.TX_UUID) accept(value)
         }
 
+        @Deprecated("Android 13 compatibility callback")
+        override fun onCharacteristicRead(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            if (gatt === g && characteristic.uuid == HomeGuardBleContract.TX_UUID) completeSecurityProbe(g, status)
+        }
+
+        override fun onCharacteristicRead(
+            g: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int,
+        ) {
+            if (gatt === g && characteristic.uuid == HomeGuardBleContract.TX_UUID) completeSecurityProbe(g, status)
+        }
+
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             if (gatt !== g || descriptor.uuid != CCCD) return
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                stateFlow.value = State.CONNECTED
-                BleRuntimeDiagnostics.update("CONNECTED", "notifications enabled", status)
+                stateFlow.value = State.SUBSCRIBING
+                BleRuntimeDiagnostics.update(
+                    "SECURITY_WAIT",
+                    "notifications enabled; verify encrypted ATT before CONNECTED",
+                    status,
+                )
+                securityProbeAttempt = 0
+                scheduleSecurityProbe(g, 250L)
             } else {
                 stateFlow.value = State.ERROR
                 BleRuntimeDiagnostics.update("SUBSCRIBE_ERROR", "CCCD write failed", status)
@@ -292,6 +325,64 @@ class BleHomeGuardClient(private val context: Context) {
             stateFlow.value = State.ERROR
             BleRuntimeDiagnostics.update("SUBSCRIBE_ERROR", "writeDescriptor returned false")
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun scheduleSecurityProbe(g: BluetoothGatt, delayMs: Long) {
+        securityProbeRunnable?.let(mainHandler::removeCallbacks)
+        val runnable = Runnable {
+            if (gatt !== g || stateFlow.value == State.OFFLINE || stateFlow.value == State.ERROR) return@Runnable
+            val characteristic = tx ?: run {
+                stateFlow.value = State.ERROR
+                BleRuntimeDiagnostics.update("SECURITY_ERROR", "TX characteristic unavailable for encrypted read")
+                return@Runnable
+            }
+            securityProbeAttempt += 1
+            BleRuntimeDiagnostics.update(
+                "SECURITY_PROBE",
+                "encrypted TX read attempt=$securityProbeAttempt/$SECURITY_PROBE_MAX_ATTEMPTS",
+            )
+            if (!g.readCharacteristic(characteristic)) {
+                if (securityProbeAttempt < SECURITY_PROBE_MAX_ATTEMPTS) {
+                    BleRuntimeDiagnostics.update("SECURITY_WAIT", "encrypted TX read could not start; retrying")
+                    scheduleSecurityProbe(g, SECURITY_PROBE_RETRY_MS)
+                } else {
+                    stateFlow.value = State.ERROR
+                    BleRuntimeDiagnostics.update("SECURITY_ERROR", "encrypted TX read could not start")
+                }
+            }
+        }
+        securityProbeRunnable = runnable
+        mainHandler.postDelayed(runnable, delayMs)
+    }
+
+    private fun completeSecurityProbe(g: BluetoothGatt, status: Int) {
+        if (gatt !== g) return
+        if (status == BluetoothGatt.GATT_SUCCESS) {
+            cancelSecurityProbe()
+            stateFlow.value = State.CONNECTED
+            BleRuntimeDiagnostics.update("SECURITY_READY", "encrypted TX read confirmed; GATT ready", status)
+            return
+        }
+
+        val retryable = status == GATT_INSUFFICIENT_AUTHENTICATION ||
+            status == GATT_INSUFFICIENT_ENCRYPTION ||
+            status == GATT_ANDROID_GENERIC_ERROR
+        if (retryable && securityProbeAttempt < SECURITY_PROBE_MAX_ATTEMPTS) {
+            BleRuntimeDiagnostics.update("SECURITY_WAIT", "encrypted TX read not ready; retrying", status)
+            scheduleSecurityProbe(g, SECURITY_PROBE_RETRY_MS)
+            return
+        }
+
+        cancelSecurityProbe()
+        stateFlow.value = State.ERROR
+        BleRuntimeDiagnostics.update("SECURITY_ERROR", "encrypted TX read failed", status)
+    }
+
+    private fun cancelSecurityProbe() {
+        securityProbeRunnable?.let(mainHandler::removeCallbacks)
+        securityProbeRunnable = null
+        securityProbeAttempt = 0
     }
 
     @SuppressLint("MissingPermission")
