@@ -61,13 +61,20 @@ class BleHomeGuardClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun connect(device: BluetoothDevice) {
-        disconnect()
+        disconnect(resetDiagnostics = false)
         stateFlow.value = State.CONNECTING
+        BleRuntimeDiagnostics.update("CONNECTING", "connectGatt", address = device.address)
         gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+        if (gatt == null) {
+            stateFlow.value = State.ERROR
+            BleRuntimeDiagnostics.update("CONNECT_ERROR", "connectGatt returned null", address = device.address)
+        }
     }
 
+    fun disconnect() = disconnect(resetDiagnostics = true)
+
     @SuppressLint("MissingPermission")
-    fun disconnect() {
+    private fun disconnect(resetDiagnostics: Boolean) {
         gatt?.disconnect(); gatt?.close(); gatt = null
         rx = null; tx = null; mtu = 23; decoder.reset(); sessionActor = null; pendingActor = null
         synchronized(writeQueue) { writeQueue.clear(); writeInFlight = false }
@@ -77,6 +84,7 @@ class BleHomeGuardClient(private val context: Context) {
         provisioningReplyFlow.value = null
         errorFlow.value = null
         stateFlow.value = State.IDLE
+        if (resetDiagnostics) BleRuntimeDiagnostics.reset()
     }
 
     fun authenticate(actor: String, pin: String): Boolean {
@@ -85,6 +93,7 @@ class BleHomeGuardClient(private val context: Context) {
         pendingActor = actor
         sessionReplyFlow.value = null
         stateFlow.value = State.AUTHENTICATING
+        BleRuntimeDiagnostics.update("AUTHENTICATING", "HELLO_SESSION actor=$actor")
         val queued = sendJson(
             HomeGuardBleContract.Type.HELLO_SESSION,
             JSONObject().put("actor", actor).put("pin", pin)
@@ -92,6 +101,7 @@ class BleHomeGuardClient(private val context: Context) {
         if (!queued) {
             pendingActor = null
             stateFlow.value = State.CONNECTED
+            BleRuntimeDiagnostics.update("AUTH_QUEUE_ERROR", "HELLO_SESSION could not be queued")
         }
         return queued
     }
@@ -172,29 +182,58 @@ class BleHomeGuardClient(private val context: Context) {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             if (gatt !== g) return
             if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
-                stateFlow.value = State.DISCOVERING; g.discoverServices()
+                stateFlow.value = State.DISCOVERING
+                BleRuntimeDiagnostics.update("DISCOVERING", "GATT connected; discoverServices", status)
+                if (!g.discoverServices()) {
+                    stateFlow.value = State.ERROR
+                    BleRuntimeDiagnostics.update("DISCOVER_ERROR", "discoverServices returned false", status)
+                }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 rx = null; tx = null; decoder.reset(); sessionActor = null; pendingActor = null
                 synchronized(writeQueue) { writeQueue.clear(); writeInFlight = false }
                 snapshotFlow.value = SystemSnapshot(); stateFlow.value = State.OFFLINE
-            } else if (status != BluetoothGatt.GATT_SUCCESS) stateFlow.value = State.ERROR
+                BleRuntimeDiagnostics.update("DISCONNECTED", "GATT disconnected; newState=$newState", status)
+            } else if (status != BluetoothGatt.GATT_SUCCESS) {
+                stateFlow.value = State.ERROR
+                BleRuntimeDiagnostics.update("CONNECT_ERROR", "onConnectionStateChange newState=$newState", status)
+            }
         }
 
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
-            if (gatt !== g || status != BluetoothGatt.GATT_SUCCESS) { stateFlow.value = State.ERROR; return }
+            if (gatt !== g) return
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                stateFlow.value = State.ERROR
+                BleRuntimeDiagnostics.update("DISCOVER_ERROR", "onServicesDiscovered", status)
+                return
+            }
             val service = g.getService(HomeGuardBleContract.SERVICE_UUID)
-            rx = service?.getCharacteristic(HomeGuardBleContract.RX_UUID)
-            tx = service?.getCharacteristic(HomeGuardBleContract.TX_UUID)
-            if (rx == null || tx == null) { stateFlow.value = State.ERROR; return }
+            if (service == null) {
+                stateFlow.value = State.ERROR
+                BleRuntimeDiagnostics.update("SERVICE_MISSING", "HomeGuard service UUID not found", status)
+                return
+            }
+            rx = service.getCharacteristic(HomeGuardBleContract.RX_UUID)
+            tx = service.getCharacteristic(HomeGuardBleContract.TX_UUID)
+            if (rx == null || tx == null) {
+                stateFlow.value = State.ERROR
+                BleRuntimeDiagnostics.update("CHARACTERISTIC_MISSING", "rx=${rx != null} tx=${tx != null}", status)
+                return
+            }
             stateFlow.value = State.SUBSCRIBING
-            if (!g.requestMtu(HomeGuardBleContract.PREFERRED_MTU)) { mtu = 23; subscribe(g) }
+            BleRuntimeDiagnostics.update("MTU_REQUEST", "request ${HomeGuardBleContract.PREFERRED_MTU}", status)
+            if (!g.requestMtu(HomeGuardBleContract.PREFERRED_MTU)) {
+                mtu = 23
+                BleRuntimeDiagnostics.update("SUBSCRIBING", "MTU request rejected; fallback=23")
+                subscribe(g)
+            }
         }
 
         @SuppressLint("MissingPermission")
         override fun onMtuChanged(g: BluetoothGatt, newMtu: Int, status: Int) {
             if (gatt !== g) return
             mtu = if (status == BluetoothGatt.GATT_SUCCESS) newMtu else 23
+            BleRuntimeDiagnostics.update("SUBSCRIBING", "MTU=$mtu; write CCCD", status)
             subscribe(g)
         }
 
@@ -209,7 +248,13 @@ class BleHomeGuardClient(private val context: Context) {
 
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             if (gatt !== g || descriptor.uuid != CCCD) return
-            stateFlow.value = if (status == BluetoothGatt.GATT_SUCCESS) State.CONNECTED else State.ERROR
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                stateFlow.value = State.CONNECTED
+                BleRuntimeDiagnostics.update("CONNECTED", "notifications enabled", status)
+            } else {
+                stateFlow.value = State.ERROR
+                BleRuntimeDiagnostics.update("SUBSCRIBE_ERROR", "CCCD write failed", status)
+            }
         }
 
         override fun onCharacteristicWrite(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
@@ -217,18 +262,36 @@ class BleHomeGuardClient(private val context: Context) {
             synchronized(writeQueue) {
                 writeInFlight = false
                 if (status == BluetoothGatt.GATT_SUCCESS) writeNextLocked()
-                else { writeQueue.clear(); stateFlow.value = State.ERROR }
+                else {
+                    writeQueue.clear(); stateFlow.value = State.ERROR
+                    BleRuntimeDiagnostics.update("WRITE_ERROR", "RX characteristic write failed", status)
+                }
             }
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun subscribe(g: BluetoothGatt) {
-        val characteristic = tx ?: return
-        if (!g.setCharacteristicNotification(characteristic, true)) { stateFlow.value = State.ERROR; return }
-        val cccd = characteristic.getDescriptor(CCCD) ?: run { stateFlow.value = State.ERROR; return }
+        val characteristic = tx ?: run {
+            stateFlow.value = State.ERROR
+            BleRuntimeDiagnostics.update("SUBSCRIBE_ERROR", "TX characteristic unavailable")
+            return
+        }
+        if (!g.setCharacteristicNotification(characteristic, true)) {
+            stateFlow.value = State.ERROR
+            BleRuntimeDiagnostics.update("SUBSCRIBE_ERROR", "setCharacteristicNotification returned false")
+            return
+        }
+        val cccd = characteristic.getDescriptor(CCCD) ?: run {
+            stateFlow.value = State.ERROR
+            BleRuntimeDiagnostics.update("SUBSCRIBE_ERROR", "CCCD descriptor missing")
+            return
+        }
         cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-        if (!g.writeDescriptor(cccd)) stateFlow.value = State.ERROR
+        if (!g.writeDescriptor(cccd)) {
+            stateFlow.value = State.ERROR
+            BleRuntimeDiagnostics.update("SUBSCRIBE_ERROR", "writeDescriptor returned false")
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -241,23 +304,31 @@ class BleHomeGuardClient(private val context: Context) {
         writeInFlight = true
         if (!currentGatt.writeCharacteristic(characteristic)) {
             writeInFlight = false; writeQueue.clear(); stateFlow.value = State.ERROR
+            BleRuntimeDiagnostics.update("WRITE_ERROR", "writeCharacteristic returned false")
         }
     }
 
     private fun accept(frame: ByteArray) {
         val message = runCatching { decoder.accept(frame) }.getOrElse {
-            decoder.reset(); stateFlow.value = State.ERROR; return
+            decoder.reset(); stateFlow.value = State.ERROR
+            BleRuntimeDiagnostics.update("FRAME_ERROR", it.message ?: "frame decode failed")
+            return
         } ?: return
 
         val json = runCatching { JSONObject(message.payload.toString(Charsets.UTF_8)) }.getOrElse {
-            stateFlow.value = State.ERROR; return
+            stateFlow.value = State.ERROR
+            BleRuntimeDiagnostics.update("JSON_ERROR", it.message ?: "invalid BLE JSON")
+            return
         }
 
         when (message.type) {
             HomeGuardBleContract.Type.TELEMETRY -> runCatching {
                 val parsed = JsonParsers.snapshot(json)
                 snapshotFlow.value = parsed.copy(transport = Transport.BLE)
-            }.onFailure { stateFlow.value = State.ERROR }
+            }.onFailure {
+                stateFlow.value = State.ERROR
+                BleRuntimeDiagnostics.update("TELEMETRY_ERROR", it.message ?: "telemetry parse failed")
+            }
 
             HomeGuardBleContract.Type.HELLO_SESSION -> {
                 sessionReplyFlow.value = json
@@ -265,19 +336,20 @@ class BleHomeGuardClient(private val context: Context) {
                     sessionActor = pendingActor
                     pendingActor = null
                     stateFlow.value = if (sessionActor != null) State.READY else State.CONNECTED
+                    BleRuntimeDiagnostics.update(
+                        if (sessionActor != null) "READY" else "CONNECTED",
+                        if (sessionActor != null) "HELLO_SESSION accepted" else "HELLO reply missing pending actor",
+                    )
                 } else {
                     sessionActor = null
                     pendingActor = null
                     stateFlow.value = State.CONNECTED
+                    BleRuntimeDiagnostics.update("AUTH_REJECTED", json.optString("reason", "unauthorized"))
                 }
             }
 
             HomeGuardBleContract.Type.PROVISIONING_REPLY -> {
                 provisioningReplyFlow.value = json
-                // Authorization keeps the link in provisioning mode so the next
-                // packet can carry the configuration. A completed/failed apply
-                // returns control to the normal connected state; the ESP may then
-                // restart or associate to the supplied Wi-Fi network.
                 when (json.optString("stage")) {
                     "authorized" -> stateFlow.value = State.PROVISIONING
                     "applied", "failed" -> stateFlow.value = State.CONNECTED
@@ -288,6 +360,7 @@ class BleHomeGuardClient(private val context: Context) {
             HomeGuardBleContract.Type.COMMAND_REPLY -> commandReplyFlow.value = json
             HomeGuardBleContract.Type.ERROR -> {
                 errorFlow.value = json
+                BleRuntimeDiagnostics.update("PROTOCOL_ERROR", json.optString("reason", "unknown"))
                 if (json.optString("reason") == "ble_session_required") {
                     sessionActor = null
                     pendingActor = null
