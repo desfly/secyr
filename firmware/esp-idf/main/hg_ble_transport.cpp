@@ -1,4 +1,5 @@
 #include "hg_ble_transport.hpp"
+#include "hg_ble_runtime_status.hpp"
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -85,15 +86,22 @@ int gap_event(ble_gap_event* event, void*) {
     if (!g_owner || !event) return 0;
     switch (event->type) {
         case BLE_GAP_EVENT_CONNECT:
-            if (event->connect.status == 0) g_owner->on_connected(event->connect.conn_handle);
-            else (void)g_owner->advertise();
+            if (event->connect.status == 0) {
+                homeguard::idf::ble_runtime_status::set_advertising(false);
+                g_owner->on_connected(event->connect.conn_handle);
+            } else {
+                homeguard::idf::ble_runtime_status::set_advertising(false);
+                (void)g_owner->advertise();
+            }
             break;
         case BLE_GAP_EVENT_DISCONNECT:
             ESP_LOGI(kTag,"BLE link disconnected; reason=%d",event->disconnect.reason);
+            homeguard::idf::ble_runtime_status::set_advertising(false);
             g_owner->on_disconnected();
             (void)g_owner->advertise();
             break;
         case BLE_GAP_EVENT_ADV_COMPLETE:
+            homeguard::idf::ble_runtime_status::set_advertising(false);
             (void)g_owner->advertise();
             break;
         case BLE_GAP_EVENT_SUBSCRIBE:
@@ -122,6 +130,7 @@ int gap_event(ble_gap_event* event, void*) {
 void stack_sync() {
     if (!g_owner) return;
     if (ble_hs_id_infer_auto(0,g_owner->own_address_type_storage()) != 0) {
+        homeguard::idf::ble_runtime_status::set_advertising(false);
         ESP_LOGE(kTag,"Cannot infer BLE identity address");
         return;
     }
@@ -142,6 +151,7 @@ esp_err_t BleTransport::start(const char* device_name) {
     if (!device_name || !device_name[0]) return ESP_ERR_INVALID_ARG;
     if (g_owner && g_owner != this) return ESP_ERR_INVALID_STATE;
     g_owner = this;
+    ble_runtime_status::set_advertising(false);
     auto error = nimble_port_init();
     if (error != ESP_OK) {
         ESP_LOGE(kTag,"NimBLE init failed: %s",esp_err_to_name(error));
@@ -243,12 +253,50 @@ esp_err_t BleTransport::advertise() {
     fields.uuids128=const_cast<ble_uuid128_t*>(&kServiceUuid);
     fields.num_uuids128=1;
     fields.uuids128_is_complete=1;
-    if (ble_gap_adv_set_fields(&fields) != 0) return ESP_FAIL;
+    int rc = ble_gap_adv_set_fields(&fields);
+    if (rc != 0) {
+        ble_runtime_status::set_advertising(false);
+        ESP_LOGE(kTag,"BLE advertising fields failed: rc=%d",rc);
+        return ESP_FAIL;
+    }
+
+    // Keep the 128-bit HomeGuard service UUID in the advertisement itself and
+    // place the human-readable controller name in the scan response. The UUID
+    // plus full name does not fit in one legacy 31-byte advertising payload.
+    // Android's ScanRecord combines the advertisement and scan response, so it
+    // can now match by either the service UUID or HomeGuard-S3 device name.
+    const char* name = ble_svc_gap_device_name();
+    if (name != nullptr && name[0] != '\0') {
+        ble_hs_adv_fields response{};
+        response.name = reinterpret_cast<std::uint8_t*>(const_cast<char*>(name));
+        response.name_len = std::strlen(name);
+        response.name_is_complete = 1;
+        rc = ble_gap_adv_rsp_set_fields(&response);
+        if (rc != 0) {
+            ble_runtime_status::set_advertising(false);
+            ESP_LOGE(kTag,"BLE scan-response fields failed: rc=%d",rc);
+            return ESP_FAIL;
+        }
+    }
+
     ble_gap_adv_params params{};
     params.conn_mode=BLE_GAP_CONN_MODE_UND;
     params.disc_mode=BLE_GAP_DISC_MODE_GEN;
-    const int rc = ble_gap_adv_start(own_address_type_,nullptr,BLE_HS_FOREVER,&params,gap_event,nullptr);
-    return rc == 0 || rc == BLE_HS_EALREADY ? ESP_OK : ESP_FAIL;
+    rc = ble_gap_adv_start(own_address_type_,nullptr,BLE_HS_FOREVER,&params,gap_event,nullptr);
+    if (rc != 0 && rc != BLE_HS_EALREADY) {
+        ble_runtime_status::set_advertising(false);
+        ESP_LOGE(kTag,"BLE advertising start failed: rc=%d",rc);
+        return ESP_FAIL;
+    }
+
+    const bool active = ble_gap_adv_active() != 0;
+    ble_runtime_status::set_advertising(active);
+    if (!active) {
+        ESP_LOGE(kTag,"BLE advertising request returned rc=%d but advertising is not active",rc);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(kTag,"BLE advertising active; name=%s",name != nullptr ? name : "<none>");
+    return ESP_OK;
 }
 
 esp_err_t BleTransport::scan_remotes() {
