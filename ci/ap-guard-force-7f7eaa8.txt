@@ -1,0 +1,1 @@
+Validate forced inclusion/startup of hg_setup_ap_guard for Build after UART hardware diagnosis.
