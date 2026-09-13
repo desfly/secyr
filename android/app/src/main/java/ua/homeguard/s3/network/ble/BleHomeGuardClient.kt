@@ -69,6 +69,20 @@ class BleHomeGuardClient(private val context: Context) {
         private const val GATT_INSUFFICIENT_ENCRYPTION = 15
         private const val GATT_ANDROID_GENERIC_ERROR = 133
 
+        /**
+         * HomeGuard frames have their own message-level replies and sequencing, so
+         * prefer an ATT Write Command when the RX characteristic advertises it.
+         * This avoids making the first HELLO notification compete with an ATT Write
+         * Response on vendor stacks that surface that collision as generic 133.
+         */
+        internal fun preferredWriteType(properties: Int): Int? = when {
+            properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0 ->
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0 ->
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            else -> null
+        }
+
         fun runtimePermissions(): Array<String> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
         } else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -329,7 +343,12 @@ class BleHomeGuardClient(private val context: Context) {
                 if (status == BluetoothGatt.GATT_SUCCESS) writeNextLocked()
                 else {
                     writeQueue.clear(); stateFlow.value = State.ERROR
-                    BleRuntimeDiagnostics.update("WRITE_ERROR", "RX characteristic write failed", status)
+                    val type = preferredWriteType(characteristic.properties)
+                    BleRuntimeDiagnostics.update(
+                        "WRITE_ERROR",
+                        "RX characteristic write failed; type=${if (type == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) "command" else "request"}; props=0x${characteristic.properties.toString(16)}",
+                        status,
+                    )
                 }
             }
         }
@@ -431,24 +450,36 @@ class BleHomeGuardClient(private val context: Context) {
         val currentGatt = gatt ?: return false
         val characteristic = rx ?: return false
         val frame = writeQueue.pollFirst() ?: return true
+        val writeType = preferredWriteType(characteristic.properties) ?: run {
+            writeQueue.clear()
+            stateFlow.value = State.ERROR
+            BleRuntimeDiagnostics.update(
+                "WRITE_ERROR",
+                "RX characteristic is not writable; props=0x${characteristic.properties.toString(16)}",
+            )
+            return false
+        }
         writeInFlight = true
+        BleRuntimeDiagnostics.update(
+            "WRITE_START",
+            "RX type=${if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) "command" else "request"}; bytes=${frame.size}; props=0x${characteristic.properties.toString(16)}",
+        )
         val writeStarted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            currentGatt.writeCharacteristic(
-                characteristic,
-                frame,
-                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
-            ) == BluetoothGatt.GATT_SUCCESS
+            currentGatt.writeCharacteristic(characteristic, frame, writeType) == BluetoothGatt.GATT_SUCCESS
         } else {
             @Suppress("DEPRECATION")
             run {
-                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                characteristic.writeType = writeType
                 characteristic.value = frame
                 currentGatt.writeCharacteristic(characteristic)
             }
         }
         if (!writeStarted) {
             writeInFlight = false; writeQueue.clear(); stateFlow.value = State.ERROR
-            BleRuntimeDiagnostics.update("WRITE_ERROR", "writeCharacteristic returned false")
+            BleRuntimeDiagnostics.update(
+                "WRITE_ERROR",
+                "writeCharacteristic could not start; type=${if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) "command" else "request"}; props=0x${characteristic.properties.toString(16)}",
+            )
             return false
         }
         return true
