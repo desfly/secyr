@@ -1,6 +1,7 @@
 package ua.homeguard.s3.diagnostics
 
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.network.ble.BleRuntimeDiagnostics
 
 data class DiagnosticItem(
     val label: String,
@@ -43,10 +44,18 @@ object SystemDiagnosticsEvaluator {
             if (scanLastResponder.isNotBlank()) append(" · last ").append(scanLastResponder)
             if (scanError.isNotBlank()) append(" · ").append(scanError)
         }
+        val ble = BleRuntimeDiagnostics.current()
+        val bleDetail = buildString {
+            append(ble.stage)
+            if (ble.address.isNotBlank()) append(" · ").append(ble.address)
+            if (ble.statusCode != null) append(" · status=").append(ble.statusCode)
+            if (ble.detail.isNotBlank()) append(" · ").append(ble.detail)
+        }
         val connection = listOf(
             DiagnosticItem("Device ID", deviceId.isNotBlank(), if (deviceId.isBlank()) "не задано" else deviceId),
             DiagnosticItem("Маршрут", route != "OFFLINE", route),
             DiagnosticItem("Локальне виявлення", localDevices > 0 || route == "CLOUD", "знайдено: $localDevices"),
+            DiagnosticItem("BLE", ble.stage == "READY", bleDetail),
             DiagnosticItem("LAN scan", scanError.isBlank(), scanDetail),
             DiagnosticItem("Broadcast targets", scanTargets.isNotEmpty() || scanPhase == "idle" || route == "CLOUD", targetDetail),
             DiagnosticItem("TLS fingerprint", certificateSha256.isNotBlank() || route == "CLOUD", if (certificateSha256.isBlank()) "не задано" else "налаштовано"),
