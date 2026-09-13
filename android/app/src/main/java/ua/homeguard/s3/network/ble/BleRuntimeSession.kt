@@ -96,21 +96,19 @@ class BleRuntimeSession(context: Context) {
 
     suspend fun connect(deviceId: String, timeoutMs: Long = 15_000L) {
         require(deviceId.isNotBlank()) { "BLE device id is empty" }
-        if (client.state().value == BleHomeGuardClient.State.READY ||
-            client.state().value == BleHomeGuardClient.State.CONNECTED) return
+        if (client.state().value == BleHomeGuardClient.State.READY) return
 
         accessFlow.value = BleSessionAccess()
         val effectiveConnectTimeoutMs = timeoutMs.coerceAtLeast(12_000L)
         val device = scanner.find(deviceId, effectiveConnectTimeoutMs)
 
-        // Do not force Android bonding before connectGatt. Real hardware reaches
-        // service discovery/subscription without it, while some Android stacks can
-        // remain stuck in BOND_BONDING indefinitely before a GATT link exists.
-        // Encrypted ATT access is still enforced by the ESP characteristics and the
-        // Android stack can negotiate security on the live GATT connection.
+        // Establish GATT first. Real hardware reaches service discovery and CCCD
+        // subscription successfully without a pre-bond, but the first encrypted RX
+        // write fails with GATT 133 unless link security is negotiated. Bond only
+        // after the live GATT/notification path exists, immediately before auth.
         BleRuntimeDiagnostics.update(
             stage = "CONNECTING",
-            detail = "connect GATT; encrypted ATT negotiates on-link",
+            detail = "connect GATT before encrypted bond",
             address = device.address,
         )
 
@@ -126,6 +124,14 @@ class BleRuntimeSession(context: Context) {
                 }
             }.first()
         }
+
+        // ESP RX/TX characteristics require encrypted ATT. Pair on the already-live
+        // GATT link so Android can encrypt the upcoming HELLO_SESSION write.
+        ensureBonded(device, effectiveConnectTimeoutMs)
+        require(
+            client.state().value == BleHomeGuardClient.State.CONNECTED ||
+                client.state().value == BleHomeGuardClient.State.READY
+        ) { "BLE link dropped during post-GATT bonding: ${client.state().value}" }
     }
 
     @SuppressLint("MissingPermission")
@@ -141,7 +147,7 @@ class BleRuntimeSession(context: Context) {
 
         BleRuntimeDiagnostics.update(
             stage = "BONDING",
-            detail = "establishing encrypted BLE link",
+            detail = "establishing encrypted BLE link on active GATT",
             address = device.address,
         )
 
@@ -174,7 +180,7 @@ class BleRuntimeSession(context: Context) {
                             BluetoothDevice.BOND_BONDED -> {
                                 BleRuntimeDiagnostics.update(
                                     stage = "BOND_READY",
-                                    detail = "encrypted bond established",
+                                    detail = "encrypted bond established on active GATT",
                                     address = device.address,
                                 )
                                 unregister()
@@ -216,7 +222,7 @@ class BleRuntimeSession(context: Context) {
                 if (device.bondState != BluetoothDevice.BOND_BONDING && !device.createBond()) {
                     BleRuntimeDiagnostics.update(
                         stage = "BOND_ERROR",
-                        detail = "createBond returned false",
+                        detail = "createBond returned false on active GATT",
                         address = device.address,
                     )
                     unregister()
