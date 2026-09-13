@@ -3,6 +3,7 @@ package ua.homeguard.s3.network.ble
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.yield
 
 /**
  * Runs bounded BLE connection attempts while enforcing the critical ordering:
@@ -25,7 +26,17 @@ internal class BleConnectRetrier(
     ): T {
         for (attemptNumber in 1..maxAttempts) {
             try {
-                return attempt(attemptNumber)
+                val result = attempt(attemptNumber)
+                // StateFlow can resume the waiting connection coroutine directly
+                // from inside BluetoothGattCallback.onCharacteristicRead(). If we
+                // immediately start HELLO_SESSION there, Android sees a new GATT
+                // write while the encrypted read callback has not unwound yet and
+                // some vendor stacks answer with the generic status 133. Yield one
+                // event-loop turn after a successful attempt so the read callback
+                // returns before any authentication write can start. This is a
+                // callback-drain barrier, not a timing delay.
+                yield()
+                return result
             } catch (timeout: TimeoutCancellationException) {
                 cleanupAfterFailure()
                 if (attemptNumber == maxAttempts) throw timeout
