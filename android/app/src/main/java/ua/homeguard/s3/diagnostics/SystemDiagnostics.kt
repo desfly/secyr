@@ -73,10 +73,11 @@ object SystemDiagnosticsEvaluator {
         )
         val hardware = listOf(
             DiagnosticItem("Контролер відповідає", snapshot.sequence > 0, "telemetry sequence ${snapshot.sequence}"),
-            DiagnosticItem("Стан системи", snapshot.health.name != "FAILED", snapshot.health.name),
+            DiagnosticItem("Стан системи", snapshot.health.name == "OK", snapshot.health.name),
             DiagnosticItem("Зони", snapshot.zones.isNotEmpty(), "каналів: ${snapshot.zones.size}"),
             DiagnosticItem("Аналогові канали", snapshot.pressures.isNotEmpty(), "каналів: ${snapshot.pressures.size}"),
-            DiagnosticItem("Журнал подій", eventCount > 0, "подій: $eventCount"),
+            // An empty event journal is valid and informational; it is not a hardware fault.
+            DiagnosticItem("Журнал подій", true, "подій: $eventCount"),
         )
         return SystemDiagnostics(connection, hardware)
     }
