@@ -1,6 +1,12 @@
 package ua.homeguard.s3.network.ble
 
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -9,11 +15,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.SystemSnapshot
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 data class BleSessionAccess(
     val actor: String = "",
@@ -40,7 +49,7 @@ data class BleSessionAccess(
         "network.configure" -> networkConfigure
         "access.manage" -> accessManage
         "system.service.invalidate" -> serviceInvalidate
-        else -> true // ESP remains authoritative for commands not represented in HELLO capabilities.
+        else -> true
     }
 
     companion object {
@@ -65,13 +74,6 @@ data class BleSessionAccess(
     }
 }
 
-/**
- * Owns the authenticated runtime BLE link to one HomeGuard controller.
- *
- * The PIN is used only while creating the BLE session and is never retained by
- * this class. Once HELLO_SESSION succeeds, the ESP binds authorization to the
- * current BLE connection epoch and normal telemetry/commands use that session.
- */
 class BleRuntimeSession(context: Context) {
     private val appContext = context.applicationContext
     private val scanner = BleProvisioningScanner(appContext)
@@ -100,6 +102,13 @@ class BleRuntimeSession(context: Context) {
         accessFlow.value = BleSessionAccess()
         val effectiveConnectTimeoutMs = timeoutMs.coerceAtLeast(12_000L)
         val device = scanner.find(deviceId, effectiveConnectTimeoutMs)
+
+        // HomeGuard characteristics require encrypted ATT access. Establish the
+        // Android bond first instead of relying on an implicit pairing attempt
+        // during the first encrypted GATT write, which some Android stacks abort
+        // with status 22 (GATT_CONN_TERMINATE_LOCAL_HOST).
+        ensureBonded(device, effectiveConnectTimeoutMs)
+
         client.connect(device)
         withTimeout(effectiveConnectTimeoutMs) {
             client.state().filter { state ->
@@ -111,6 +120,106 @@ class BleRuntimeSession(context: Context) {
                     else -> false
                 }
             }.first()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun ensureBonded(device: BluetoothDevice, timeoutMs: Long) {
+        if (device.bondState == BluetoothDevice.BOND_BONDED) {
+            BleRuntimeDiagnostics.update(
+                stage = "BOND_READY",
+                detail = "already bonded",
+                address = device.address,
+            )
+            return
+        }
+
+        BleRuntimeDiagnostics.update(
+            stage = "BONDING",
+            detail = "establishing encrypted BLE link",
+            address = device.address,
+        )
+
+        withTimeout(timeoutMs.coerceAtLeast(12_000L)) {
+            suspendCancellableCoroutine { continuation ->
+                var receiverRegistered = true
+
+                fun unregister() {
+                    if (!receiverRegistered) return
+                    receiverRegistered = false
+                    runCatching { appContext.unregisterReceiver(bondReceiver) }
+                }
+
+                val filter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+                lateinit var bondReceiver: BroadcastReceiver
+                bondReceiver = object : BroadcastReceiver() {
+                    override fun onReceive(context: Context?, intent: Intent?) {
+                        if (intent?.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
+                        val changedDevice = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE) as? BluetoothDevice
+                        } ?: return
+                        if (!changedDevice.address.equals(device.address, ignoreCase = true)) return
+
+                        val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
+                        val previous = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR)
+                        when (state) {
+                            BluetoothDevice.BOND_BONDED -> {
+                                BleRuntimeDiagnostics.update(
+                                    stage = "BOND_READY",
+                                    detail = "encrypted bond established",
+                                    address = device.address,
+                                )
+                                unregister()
+                                if (continuation.isActive) continuation.resume(Unit)
+                            }
+                            BluetoothDevice.BOND_NONE -> if (previous == BluetoothDevice.BOND_BONDING) {
+                                BleRuntimeDiagnostics.update(
+                                    stage = "BOND_ERROR",
+                                    detail = "bonding rejected or failed",
+                                    address = device.address,
+                                )
+                                unregister()
+                                if (continuation.isActive) {
+                                    continuation.resumeWithException(
+                                        IllegalStateException("BLE bonding failed for ${device.address}")
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    appContext.registerReceiver(bondReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                } else {
+                    @Suppress("DEPRECATION")
+                    appContext.registerReceiver(bondReceiver, filter)
+                }
+
+                continuation.invokeOnCancellation { unregister() }
+
+                if (device.bondState == BluetoothDevice.BOND_BONDED) {
+                    BleRuntimeDiagnostics.update("BOND_READY", "already bonded", address = device.address)
+                    unregister()
+                    if (continuation.isActive) continuation.resume(Unit)
+                    return@suspendCancellableCoroutine
+                }
+
+                if (device.bondState != BluetoothDevice.BOND_BONDING && !device.createBond()) {
+                    BleRuntimeDiagnostics.update(
+                        stage = "BOND_ERROR",
+                        detail = "createBond returned false",
+                        address = device.address,
+                    )
+                    unregister()
+                    if (continuation.isActive) {
+                        continuation.resumeWithException(IllegalStateException("BLE createBond failed"))
+                    }
+                }
+            }
         }
     }
 
@@ -199,11 +308,6 @@ class BleRuntimeSession(context: Context) {
         return controlOutput(VALVE_2_OUTPUT_ID, active, false, timeoutMs)
     }
 
-    /**
-     * Energizes the lock relay for exactly five seconds from the Android side.
-     * The OFF command is attempted in NonCancellable context even if the caller
-     * leaves the screen or cancels the command coroutine.
-     */
     suspend fun pulseLock(timeoutMs: Long = 8_000L): JSONObject {
         val onReply = controlOutput(LOCK_OUTPUT_ID, true, false, timeoutMs)
         if (!onReply.optBoolean("ok", false)) return onReply
@@ -246,8 +350,6 @@ class BleRuntimeSession(context: Context) {
     ): JSONObject {
         require(isReady()) { "BLE runtime is not authenticated" }
         require(outputId in 1..65535) { "Invalid output id" }
-        // Generic output.control does not have a matching HELLO capability yet;
-        // the ESP access-control layer remains authoritative for this command.
         require(client.controlOutput(outputId, active, alarmActive)) { "BLE output command could not start" }
         return awaitCommandReply(timeoutMs)
     }
