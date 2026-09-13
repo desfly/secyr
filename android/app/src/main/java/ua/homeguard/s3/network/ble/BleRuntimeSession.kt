@@ -141,15 +141,32 @@ class BleRuntimeSession(context: Context) {
 
         val device = connectedDevice ?: throw (lastFailure ?: IllegalStateException("BLE connection failed"))
 
-        // ESP RX/TX characteristics require encrypted ATT. The controller now
-        // initiates SMP on the already-live GATT link after CCCD subscription;
-        // Android only observes the resulting bond state and never races it
-        // with BluetoothDevice.createBond().
-        awaitEspInitiatedBond(device, effectiveConnectTimeoutMs)
+        // BleHomeGuardClient now reports CONNECTED only after an encrypted read
+        // of the ESP TX characteristic succeeds. That encrypted ATT probe is the
+        // authoritative runtime security gate. Android's bondState broadcast can
+        // lag behind encryption (and has been observed to remain BOND_BONDING for
+        // >12s after SECURITY_READY), so do not block HELLO_SESSION on it.
+        when (device.bondState) {
+            BluetoothDevice.BOND_BONDED -> BleRuntimeDiagnostics.update(
+                stage = "BOND_READY",
+                detail = "encrypted ATT ready; persistent bond already complete",
+                address = device.address,
+            )
+            BluetoothDevice.BOND_BONDING -> BleRuntimeDiagnostics.update(
+                stage = "BOND_BACKGROUND",
+                detail = "encrypted ATT ready; Android bond completion continues in background",
+                address = device.address,
+            )
+            else -> BleRuntimeDiagnostics.update(
+                stage = "BOND_BACKGROUND",
+                detail = "encrypted ATT ready; bond state=${device.bondState}; continue runtime session",
+                address = device.address,
+            )
+        }
         require(
             client.state().value == BleHomeGuardClient.State.CONNECTED ||
                 client.state().value == BleHomeGuardClient.State.READY
-        ) { "BLE link dropped during post-GATT bonding: ${client.state().value}" }
+        ) { "BLE encrypted ATT link dropped before authentication: ${client.state().value}" }
     }
 
     @SuppressLint("MissingPermission")
@@ -237,9 +254,6 @@ class BleRuntimeSession(context: Context) {
 
                 continuation.invokeOnCancellation { unregister() }
 
-                // Pairing can finish between CONNECTED and receiver registration.
-                // Re-read bondState, but deliberately never call createBond(): the
-                // ESP owns SMP initiation for this encrypted GATT transport.
                 if (device.bondState == BluetoothDevice.BOND_BONDED) {
                     BleRuntimeDiagnostics.update("BOND_READY", "already bonded", address = device.address)
                     unregister()
