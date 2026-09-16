@@ -111,6 +111,8 @@ HARNESS = r"""
   if (loginEyeCount !== 1) throw new Error(`login eye count: expected 1, got ${loginEyeCount}`);
 
   document.documentElement.dataset.setupUiSmoke = 'done';
+  document.documentElement.dataset.setupEyeSmoke = 'done';
+  document.documentElement.dataset.setupEyeCount = String(setupEyeCount);
   document.documentElement.dataset.setupUiViewport = expectedColumns === 1 ? 'mobile' : 'desktop';
   document.documentElement.dataset.setupUiColumns = String(columns);
   document.documentElement.dataset.setupUiWifiRows = String(networks.length);
@@ -119,6 +121,8 @@ HARNESS = r"""
 })().catch(error => {
   document.documentElement.dataset.setupUiSmoke = 'failed';
   document.documentElement.dataset.setupUiError = String(error && error.message || error);
+  document.documentElement.dataset.setupEyeSmoke = 'failed';
+  document.documentElement.dataset.setupEyeError = String(error && error.message || error);
 });
 </script>
 """
