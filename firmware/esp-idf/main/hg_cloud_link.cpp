@@ -453,7 +453,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         return;
     }
 
-    if (request_id.empty() || expires_at_ms <= issued_at_ms ||
+    if (request_id.empty() || request_id.size() > 128U || expires_at_ms <= issued_at_ms ||
         (expires_at_ms - issued_at_ms) > kMaxCommandTtlMs) {
         publish_response(false, "invalid_freshness_window");
         return;
@@ -471,7 +471,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
 
     CloudCommandTrust trust;
     CloudTrustStore trust_store;
-    if (trust_store.load(trust) != ESP_OK) {
+    if (trust_store.load(trust) != ESP_OK || trust.version != 1U || trust.public_key_pem.empty()) {
         publish_response(false, "command_trust_unavailable");
         return;
     }
