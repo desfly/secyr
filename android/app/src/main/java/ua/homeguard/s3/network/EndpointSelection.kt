@@ -13,9 +13,10 @@ data class EndpointAvailability(
 )
 
 fun selectControlPath(input: EndpointAvailability): ControlPath = when {
-    // HomeGuard emergency AP and current LAN firmware expose the local API over HTTP.
-    // Do not reject a discovered controller merely because TLS is disabled locally.
-    input.hasDeviceId && input.matchingLocalFound && input.matchingLocalApiVersion == 1 -> ControlPath.LOCAL
+    // Normal operational discovery must be authenticated TLS. Insecure HTTP is
+    // reserved for the explicit setup/emergency bootstrap flow and must never win
+    // ordinary controller endpoint selection.
+    input.hasDeviceId && input.matchingLocalFound && input.matchingLocalSecure && input.matchingLocalApiVersion == 1 -> ControlPath.LOCAL
     input.hasDeviceId && input.hasLastKnownLocal -> ControlPath.LAST_KNOWN_LOCAL
     input.hasDeviceId && input.remoteAccessEnabled && input.hasCloudBaseUrl -> ControlPath.CLOUD
     else -> ControlPath.OFFLINE
