@@ -188,9 +188,11 @@ if "remote_rgb_test_disabled" not in infrastructure_http:
     errors.append("hg_infrastructure_http.cpp: disabled RGB handler must remain fail-closed")
 
 app_main = (MAIN / "app_main.cpp").read_text(encoding="utf-8")
-for required in ("rollback_http", "g_system_http.detach_transport()", "httpd_stop(g_http_server)", "g_http_server = nullptr"):
+for required in ("rollback_http", "httpd_stop(g_http_server)", "g_http_server = nullptr"):
     if required not in app_main:
-        errors.append(f"app_main.cpp: partial HTTP registration rollback missing required step: {required}")
+        errors.append(f"app_main.cpp: partial HTTP bootstrap registration rollback missing required step: {required}")
+if "g_system_http.register_handlers(g_http_server" in app_main:
+    errors.append("app_main.cpp: operational system routes must not be registered on cleartext HTTP")
 if "return g_build_http.register_handlers(g_http_server);" in app_main:
     errors.append("app_main.cpp: final build route must also participate in HTTP rollback")
 
