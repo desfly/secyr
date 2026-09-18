@@ -5,6 +5,7 @@
 #include "hg_cloud_link.hpp"
 #include "hg_cloud_http.hpp"
 #include "hg_cloud_nvs.hpp"
+#include "hg_cloud_trusted_time.hpp"
 #include "hg_build_http.hpp"
 #include "hg_build_info.hpp"
 #include "hg_infrastructure_http.hpp"
@@ -61,6 +62,7 @@ homeguard::idf::LanHttp g_lan_http;
 homeguard::idf::CloudLink g_cloud_link;
 homeguard::idf::CloudHttp g_cloud_http;
 homeguard::idf::CloudNvsStore g_cloud_store;
+homeguard::idf::CloudTrustedTime g_cloud_time;
 homeguard::idf::InfrastructureHttp g_http_api;
 homeguard::idf::BuildHttp g_build_http;
 homeguard::idf::SystemHttp g_system_http;
@@ -378,6 +380,10 @@ extern "C" void app_main()
             ESP_LOGE(kTag, "Setup AP guard failed after Wi-Fi initialization: %s", esp_err_to_name(setup_ap_error));
         }
     }
+
+    const auto time_error = g_cloud_time.start();
+    if (time_error != ESP_OK) ESP_LOGE(kTag, "Cloud trusted-time SNTP init failed: %s", esp_err_to_name(time_error));
+    else ESP_LOGI(kTag, "Cloud trusted-time SNTP initialized; freshness remains fail-closed until wall clock is synchronized");
 
     const auto cloud_identity_error = g_cloud_link.prepare_identity();
     if (cloud_identity_error != ESP_OK) ESP_LOGE(kTag, "Cloud identity preparation failed: %s", esp_err_to_name(cloud_identity_error));
