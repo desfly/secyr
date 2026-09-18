@@ -13,6 +13,7 @@ link = read("hg_cloud_link.cpp")
 http = read("hg_cloud_http.cpp")
 nvs = read("hg_cloud_nvs.cpp")
 trust_nvs = read("hg_cloud_trust_nvs.cpp")
+verifier = read("hg_cloud_command_verifier.cpp")
 cmake = read("CMakeLists.txt")
 contract = (ROOT / "docs" / "CLOUD-BACKEND-CONTRACT.md").read_text(encoding="utf-8")
 errors = []
@@ -20,6 +21,10 @@ errors = []
 def require(ok: bool, msg: str):
     if not ok: errors.append(msg)
 
+require("std::string owned_public_key{public_key_pem}" in verifier and
+        "owned_public_key.c_str()" in verifier and
+        "owned_public_key.size() + 1U" in verifier,
+        "command verifier must own and NUL-terminate PEM string_view input before mbedTLS parsing")
 require('"hg_cloud_nvs.cpp"' in cmake, "cloud NVS source not compiled")
 require("g_cloud_store.load" in app and "restore_cloud_config" in app, "cloud config not restored at boot")
 require("g_cloud_link.start" in app, "persisted cloud config does not auto-start MQTT")
