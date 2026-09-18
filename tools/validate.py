@@ -159,7 +159,7 @@ policy = {
     'output_commands_bind_actor_to_authenticated_session': all(item in output_http for item in ['parse_json_string(body, "actor", actor)', 'authenticated_actor(request, *access_control_, actor)', 'authorize_session(actor, command)']),
     'wss_requires_bearer_token': all(item in websocket for item in ['Authorization', '401 Unauthorized', '/ws/telemetry', 'is_websocket = true']),
     'wss_telemetry_published': 'g_telemetry.start(&g_hardware, &g_websocket_telemetry' in app_main and 'WebsocketTelemetry::publish' in websocket and 'telemetry_json(frame)' in websocket,
-    'partial_service_startup_rolls_back': 'runtime.websocket->stop();' in app_main and 'runtime.rest->stop();' in app_main,
+    'partial_service_startup_rolls_back': 'rolling back partial server' in app_main and 'httpd_stop(g_http_server)' in app_main and 'g_http_server = nullptr' in app_main and 'return rollback_http(error' in app_main,
     'discovery_advertises_certificate_hostname': '{"host", hostname_local_.c_str()}' in discovery and 'operational_hostname' in factory_tool,
     'idf_managed_dependencies_pinned': all(item in idf_manifest for item in ['>=5.4.4,<5.5.0', 'espressif/mdns', '1.11.3', 'espressif/mqtt', '1.0.0']),
     'mqtt_transport_component_enabled': 'mqtt' in main_cmake and 'hg_cloud_link.cpp' in main_cmake,
