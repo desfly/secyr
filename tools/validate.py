@@ -116,7 +116,7 @@ factory_tool = (root / 'tools/make_factory_bundle.py').read_text(encoding='utf-8
 release_workflow = (root / '.github/workflows/homeguard-build.yml').read_text(encoding='utf-8')
 idf_manifest = (root / 'firmware/esp-idf/main/idf_component.yml').read_text(encoding='utf-8')
 main_cmake = (root / 'firmware/esp-idf/main/CMakeLists.txt').read_text(encoding='utf-8')
-build_info = (root / 'firmware/include/homeguard/build_info.hpp').read_text(encoding='utf-8')
+build_info = (root / 'firmware/esp-idf/main/hg_version.hpp').read_text(encoding='utf-8')
 android_text = '\n'.join(path.read_text(encoding='utf-8', errors='ignore') for path in kotlin)
 endpoint_resolver = (root / 'android/app/src/main/java/ua/homeguard/s3/network/DeviceEndpointResolver.kt').read_text(encoding='utf-8')
 endpoint_selection = (root / 'android/app/src/main/java/ua/homeguard/s3/network/EndpointSelection.kt').read_text(encoding='utf-8')
@@ -162,7 +162,7 @@ policy = {
     'discovery_advertises_certificate_hostname': '{"host", hostname_local_.c_str()}' in discovery and 'operational_hostname' in factory_tool,
     'idf_managed_dependencies_pinned': all(item in idf_manifest for item in ['>=5.4.4,<5.5.0', 'espressif/mdns', '1.11.3', 'espressif/mqtt', '1.0.0']),
     'mqtt_transport_component_enabled': 'mqtt' in main_cmake and 'hg_cloud_link.cpp' in main_cmake,
-    'central_build_metadata': all(item in build_info for item in ['number = "0013"', 'version = "0.0.13"', 'HomeGuard-S3 Build-0013']),
+    'central_build_metadata': all(item in build_info for item in ['HG_PROJECT_NAME "HomeGuard-S3"', 'HG_BUILD_NUMBER "0027"', 'HG_FIRMWARE_VERSION "0.27.0-test"', 'HG_ESP_IDF_REQUIRED "5.4.4"']),
     'android_rejects_insecure_discovery': 'it.secure && it.apiVersion == 1' in endpoint_resolver and 'matchingLocalSecure' in endpoint_selection,
     'ci_current_actions_configured': all(item in release_workflow for item in ['actions/checkout@v7', 'actions/upload-artifact@v7', 'actions/setup-java@v5', 'android-actions/setup-android@v4', 'gradle/actions/setup-gradle@v6']),
     'ci_firmware_build_configured': all(item in release_workflow for item in ['espressif/idf:v5.4.4', 'idf.py set-target esp32s3', 'idf.py reconfigure', 'dependencies.lock', 'project_description.json', 'homeguard_s3.bin']),
