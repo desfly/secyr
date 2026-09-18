@@ -46,7 +46,8 @@ fun main() {
         id: Boolean = true
     ) = EndpointAvailability(id, found, secure, api, last, remote, cloud)
     checkThat(selectControlPath(availability()) == ControlPath.LOCAL)
-    checkThat(selectControlPath(availability(secure = false)) == ControlPath.LAST_KNOWN_LOCAL)
+    // Local HTTP is intentionally accepted by the current LAN/emergency-AP runtime.
+    checkThat(selectControlPath(availability(secure = false)) == ControlPath.LOCAL)
     checkThat(selectControlPath(availability(api = 2)) == ControlPath.LAST_KNOWN_LOCAL)
     checkThat(selectControlPath(availability(found = false, last = false)) == ControlPath.CLOUD)
     checkThat(selectControlPath(availability(found = false, last = false, remote = false)) == ControlPath.OFFLINE)
