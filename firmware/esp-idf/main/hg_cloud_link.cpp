@@ -421,7 +421,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
 {
     if (client_ == nullptr || data == nullptr || size == 0) return;
     const std::string body(data, size);
-    std::string request_id, actor, credential, command, signature;
+    std::string request_id, actor, credential, command, challenge, signature;
     (void)parse_json_string(body, "requestId", request_id);
 
     auto publish_response = [&](bool ok, const char* reason, const char* arm_state = nullptr) {
@@ -448,6 +448,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         !parse_json_u64(body, "counter", command_counter) || command_counter == 0 ||
         !parse_json_u64(body, "issuedAtMs", issued_at_ms) ||
         !parse_json_u64(body, "expiresAtMs", expires_at_ms) ||
+        !parse_json_string(body, "challenge", challenge) ||
         !parse_json_string(body, "signature", signature)) {
         publish_response(false, "invalid_request");
         return;
@@ -484,7 +485,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         "counter=" + std::to_string(command_counter) + "\n" +
         "issuedAtMs=" + std::to_string(issued_at_ms) + "\n" +
         "expiresAtMs=" + std::to_string(expires_at_ms) + "\n" +
-        "challenge=";
+        "challenge=" + challenge;
     CloudCommandVerifier verifier;
     if (verifier.verify(trust.public_key_pem, canonical, signature) != ESP_OK) {
         publish_response(false, "signature_rejected");
