@@ -76,8 +76,11 @@ require("!canonical_text_safe(envelope_device_id)" in link and
         "!canonical_text_safe(command)" in link and
         "!canonical_text_safe(challenge)" in link,
         "all signed textual envelope fields must be canonical-text validated")
-require("access_control_->authorize_session(actor, command)" in link,
-        "MQTT commands do not authorize the signed actor through AccessControl session roles")
+require('command == "security.disarm_challenge" ? std::string_view{"security.disarm"}' in link and
+        "access_control_->authorize_session(actor, authorization_command)" in link,
+        "disarm challenge issuance must inherit the security.disarm permission")
+require('authorize_session(actor, "security.disarm")' not in link[challenge_branch:challenge_issue],
+        "disarm challenge branch must not perform a redundant second authorization")
 require('parse_json_string(body, "credential"' not in link and "authorize(actor, credential" not in link,
         "MQTT command path must not transport or re-check a user PIN credential")
 require("model_->set_partition_arm" in link and "bus_->dispatch_all" in link, "MQTT security command does not reach live model")
