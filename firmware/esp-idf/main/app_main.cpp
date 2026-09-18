@@ -177,6 +177,29 @@ void initialize_physical_outputs()
     ESP_LOGI(kTag, "Physical output runtime initialized: %s", hg::to_string(g_physical_outputs.state().status));
 }
 
+esp_err_t register_operational_handlers(httpd_handle_t server)
+{
+    auto error = g_lan_http.register_handlers(server, &g_access_control);
+    if (error != ESP_OK) return error;
+    error = g_cloud_http.register_handlers(server, &g_cloud_link, &g_cloud_store, &g_access_control);
+    if (error != ESP_OK) return error;
+    error = g_http_api.register_handlers(server, &g_hardware, &g_access_control);
+    if (error != ESP_OK) return error;
+    error = g_system_http.register_handlers(server, &g_system_model, &g_system_bus, &g_access_control);
+    if (error != ESP_OK) return error;
+    g_output_http.set_access_control(&g_access_control);
+    error = g_output_http.register_handlers(server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus);
+    if (error != ESP_OK) return error;
+    error = g_access_http.register_handlers(server, &g_access_control, &g_access_store, g_access_bootstrap_allowed);
+    if (error != ESP_OK) return error;
+    error = g_telemetry_session_http.register_handlers(server, &g_access_control, &g_websocket_telemetry);
+    if (error != ESP_OK) return error;
+    g_service_http.set_access_control(&g_access_control);
+    error = g_service_http.register_handlers(server, &g_commissioning_store, &g_hardware_verification, &g_commissioning_state, &g_boot_readiness, &g_system_bus);
+    if (error != ESP_OK) return error;
+    return g_build_http.register_handlers(server, &g_access_control);
+}
+
 esp_err_t start_https_server()
 {
     FactoryProvisioningIdentity identity{};
@@ -204,7 +227,17 @@ esp_err_t start_https_server()
         ESP_LOGE(kTag, "HTTPS server start failed: %s", esp_err_to_name(error));
         return error;
     }
-    ESP_LOGI(kTag, "HTTPS transport listening on port 443 with factory identity");
+
+    const auto routes_error = register_operational_handlers(g_https_server);
+    if (routes_error != ESP_OK) {
+        ESP_LOGE(kTag, "HTTPS operational route registration failed: %s; rolling back TLS server", esp_err_to_name(routes_error));
+        const auto stop_error = httpd_ssl_stop(g_https_server);
+        if (stop_error != ESP_OK) ESP_LOGE(kTag, "Partial HTTPS server stop failed: %s", esp_err_to_name(stop_error));
+        g_https_server = nullptr;
+        return routes_error;
+    }
+
+    ESP_LOGI(kTag, "HTTPS operational API listening on port 443 with factory identity");
     return ESP_OK;
 }
 
