@@ -147,7 +147,7 @@ policy = {
     'default_api_port_443': bool(re.search(r'config HOMEGUARD_API_PORT.*?default 443', kconfig, re.S)),
     'telemetry_interval_configured': bool(re.search(r'config HOMEGUARD_TELEMETRY_INTERVAL_MS.*?default 1000', kconfig, re.S)) and 'CONFIG_HOMEGUARD_TELEMETRY_INTERVAL_MS=1000' in sdkconfig,
     'cloud_disabled_by_default': bool(re.search(r'config HOMEGUARD_CLOUD_ENABLED.*?default n', kconfig, re.S)),
-    'nvs_encryption_enabled': 'CONFIG_NVS_ENCRYPTION=y' in sdkconfig,
+    'bench_nvs_encryption_disabled': 'CONFIG_NVS_ENCRYPTION=y' not in sdkconfig,
     'rest_requires_bearer_token': all(item in (rest + all_text) for item in ['BearerTokenVerifier', 'Authorization', '401 Unauthorized', '/api/status', '/api/command']),
     'dangerous_commands_require_challenge': 'dangerous(*command_type)' in rest and 'challenge_required' in rest,
     'server_receive_time_used_for_commands': 'const uint64_t received_at = now_ms()' in rest and 'request_id, received_at' in rest,
@@ -170,6 +170,12 @@ policy = {
 
 result = {
     'build': '0013',
+    'security_profile': 'BENCH',
+    'security_facts_from_sdkconfig_defaults': {
+        'nvs_encryption_enabled': 'CONFIG_NVS_ENCRYPTION=y' in sdkconfig,
+        'secure_boot_enabled': 'CONFIG_SECURE_BOOT=y' in sdkconfig,
+        'flash_encryption_enabled': 'CONFIG_SECURE_FLASH_ENC_ENABLED=y' in sdkconfig,
+    },
     'source_files': len(cpp) + len(kotlin),
     'host_test_output': test_output,
     'host_pass': True,
