@@ -29,6 +29,7 @@ public:
     [[nodiscard]] std::uint32_t disconnect_count() const { return disconnect_count_; }
 
     esp_err_t publish_state(const char* json, int qos = 1, bool retain = true);
+    esp_err_t issue_disarm_challenge();
 
 private:
     static void mqtt_event_handler(void* handler_args,
