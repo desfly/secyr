@@ -50,8 +50,20 @@ bool valid_public_key_pem(const std::string& public_key)
     mbedtls_pk_init(&key);
     const int rc = mbedtls_pk_parse_public_key(
         &key, reinterpret_cast<const unsigned char*>(public_key.c_str()), public_key.size() + 1U);
+    if (rc != 0) {
+        mbedtls_pk_free(&key);
+        return false;
+    }
+
+    // Cloud Command Trust v1 uses ECDSA P-256 only. Keeping the accepted
+    // algorithm narrow prevents provisioning a parseable but unintended or
+    // weak key type.
+    const auto type = mbedtls_pk_get_type(&key);
+    const auto bits = mbedtls_pk_get_bitlen(&key);
+    const bool allowed =
+        (type == MBEDTLS_PK_ECKEY || type == MBEDTLS_PK_ECDSA) && bits == 256U;
     mbedtls_pk_free(&key);
-    return rc == 0;
+    return allowed;
 }
 
 void scrub_cloud_password(CloudConfig& config)
