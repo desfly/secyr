@@ -130,6 +130,8 @@ idf_core_sources = set(re.findall(r'src/([A-Za-z0-9_]+\.cpp)', idf_core_cmake))
 idf_main_shared_sources = set(re.findall(r'\.\./\.\./src/([A-Za-z0-9_]+\.cpp)', idf_main_cmake))
 idf_firmware_core_sources = idf_core_sources | idf_main_shared_sources
 
+network_http = (root / 'firmware/esp-idf/main/hg_network_http.cpp').read_text(encoding='utf-8')
+
 policy = {
     'host_ctest_pass': '100% tests passed' in ctest.stdout,
     'kotlin_pure_tests_pass': kotlin_pure_output.endswith('tests PASS'),
@@ -168,7 +170,7 @@ policy = {
     'ci_current_actions_configured': all(item in release_workflow for item in ['actions/checkout@v5', 'actions/upload-artifact@v4', 'actions/setup-java@v5', 'gradle/actions/setup-gradle@v4']),
     'ci_firmware_build_configured': all(item in release_workflow for item in ['espressif/idf:v5.4.4', 'idf.py set-target esp32s3', 'idf.py reconfigure', 'project_description.json', 'HomeGuard-S3-BENCH-firmware']),
     'ci_android_build_configured': all(item in release_workflow for item in ['gradle-version: "8.9"', 'testDebugUnitTest assembleDebug', 'MyFist']),
-    'provisioning_response_grace_period': all(item in all_text for item in ['ProvisioningShutdownGate', 'shutdown_gate_.arm(now_ms, 1500U)', 'shutdown_gate_.due(now_ms)']),
+    'provisioning_response_grace_period': all(item in network_http for item in ['httpd_req_async_handler_complete', 'if (response_error != ESP_OK || complete_error != ESP_OK)', 'clear_candidate_credentials()', 'vTaskDelay(kStaHandoverDelay)', 'esp_wifi_disconnect()']),
     'wss_send_queued_on_http_task': 'httpd_queue_work' in websocket and 'BroadcastWork' in websocket and 'broadcast_work_entry' in websocket,
     'wifi_state_is_synchronized': all(item in (root / 'firmware/esp-idf/main/hg_network_http.hpp').read_text(encoding='utf-8') for item in ['std::atomic<bool>', 'std::atomic<std::uint32_t>']),
     'wifi_candidate_failure_restores_committed_network': all(item in (root / 'firmware/esp-idf/main/hg_network_http.cpp').read_text(encoding='utf-8') for item in ['candidate_pending_', 'cancel_candidate_and_restore_active', 'restore_active_connection', 'candidate_timeout', 'wipe(password)']),
