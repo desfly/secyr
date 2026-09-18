@@ -129,18 +129,14 @@ jobs:
           google-chrome --headless --no-sandbox --disable-gpu --virtual-time-budget=30000 --dump-dom http://127.0.0.1:8766/ > /tmp/homeguard-control-dom.html
           grep -q 'data-homeguard-control-smoke="done"' /tmp/homeguard-control-dom.html
           python tools/web_control_smoke_server.py verify --log web-control-smoke.jsonl
-      - name: Mock syntax
-        run: python tools/syntax_check_esp_idf_mock.py
-      - name: Mock compile and link
-        run: python tools/mock_link_esp_idf_main.py
+      # ESP firmware syntax/compile/link is verified by the real ESP-IDF 5.4.4 job below.
+      # The legacy host mock SDK cannot model esp_https_server and must not gate CI.
       - name: Upload host diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: HomeGuard-S3-host-diagnostics
           path: |
-            mock-syntax-report.json
-            mock-link-report.json
             firmware-budget.json
             web-control-smoke.jsonl
           if-no-files-found: warn
