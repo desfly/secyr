@@ -43,6 +43,11 @@ esp_err_t CloudTrustStore::save(const CloudCommandTrust& trust) const
     if (trust.version == 0 || trust.public_key_pem.empty() ||
         trust.public_key_pem.size() > kMaxPublicKeyPem) return ESP_ERR_INVALID_ARG;
 
+    CloudCommandTrust current{};
+    const auto current_error = load(current);
+    if (current_error == ESP_OK && trust.version <= current.version) return ESP_ERR_INVALID_STATE;
+    if (current_error != ESP_OK && current_error != ESP_ERR_NVS_NOT_FOUND) return current_error;
+
     nvs_handle_t handle{};
     auto error = nvs_open(kNamespace, NVS_READWRITE, &handle);
     if (error != ESP_OK) return error;
