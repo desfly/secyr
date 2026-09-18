@@ -6,6 +6,7 @@
 #include "hg_cloud_http.hpp"
 #include "hg_cloud_nvs.hpp"
 #include "hg_cloud_trusted_time.hpp"
+#include "hg_cloud_trust_nvs.hpp"
 #include "hg_build_http.hpp"
 #include "hg_build_info.hpp"
 #include "hg_infrastructure_http.hpp"
@@ -62,6 +63,7 @@ homeguard::idf::LanHttp g_lan_http;
 homeguard::idf::CloudLink g_cloud_link;
 homeguard::idf::CloudHttp g_cloud_http;
 homeguard::idf::CloudNvsStore g_cloud_store;
+homeguard::idf::CloudTrustStore g_cloud_trust_store;
 homeguard::idf::CloudTrustedTime g_cloud_time;
 homeguard::idf::InfrastructureHttp g_http_api;
 homeguard::idf::BuildHttp g_build_http;
@@ -184,7 +186,7 @@ esp_err_t register_operational_handlers(httpd_handle_t server)
 {
     auto error = g_lan_http.register_handlers(server, &g_access_control);
     if (error != ESP_OK) return error;
-    error = g_cloud_http.register_handlers(server, &g_cloud_link, &g_cloud_store, &g_access_control);
+    error = g_cloud_http.register_handlers(server, &g_cloud_link, &g_cloud_store, &g_cloud_trust_store, &g_access_control);
     if (error != ESP_OK) return error;
     error = g_http_api.register_handlers(server, &g_hardware, &g_access_control);
     if (error != ESP_OK) return error;
