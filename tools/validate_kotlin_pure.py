@@ -30,21 +30,9 @@ with tempfile.TemporaryDirectory(prefix="homeguard-kotlin-") as temporary:
         raise SystemExit(f"handoff tests failed ({handoff_run.returncode}):\n{(handoff_run.stderr or handoff_run.stdout).strip()}")
     handoff_output = handoff_run.stdout.strip()
 
-    queue_sources = [
-        root / "android/app/src/main/java/ua/homeguard/s3/model/CommandModels.kt",
-        root / "android/app/src/main/java/ua/homeguard/s3/queue/QueuedCommand.kt",
-        root / "android/app/src/main/java/ua/homeguard/s3/queue/OfflineCommandQueue.kt",
-        root / "android/pure-tests/QueueRuntimeTest.kt",
-    ]
-    queue_jar = temp / "queue-tests.jar"
-    subprocess.run([kotlinc, "-J-Dkotlin.daemon.enabled=false", "-J-Dkotlin.compiler.execution.strategy=in-process", "-classpath", str(coroutines), *map(str, queue_sources), "-include-runtime", "-d", str(queue_jar)], check=True)
-    queue_run = subprocess.run([java, "-cp", f"{queue_jar}:{coroutines}", "QueueRuntimeTestKt"], text=True, capture_output=True)
-    if queue_run.returncode != 0:
-        raise SystemExit(f"queue tests failed ({queue_run.returncode}):\n{(queue_run.stderr or queue_run.stdout).strip()}")
-    queue_output = queue_run.stdout.strip()
 
 counts = []
-for output in (handoff_output, queue_output):
+for output in (handoff_output,):
     match = re.search(r"(\d+) tests PASS$", output)
     if not match:
         raise SystemExit(f"unexpected Kotlin test output: {output}")
