@@ -18,7 +18,7 @@
         android:label="MyFist"
         android:icon="@drawable/bruce_launcher"
         android:roundIcon="@drawable/bruce_launcher"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
         android:allowBackup="false">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
