@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
+#include "nvs.h"
 #include "homeguard/access_control.hpp"
 #include "homeguard/system_model.hpp"
 
@@ -21,6 +22,52 @@ namespace {
 constexpr const char* kTag = "hg_cloud";
 constexpr const char* kPrefix = "homeguard/v1/devices";
 constexpr std::uint64_t kHeartbeatPeriodUs = 60ULL * 1000ULL * 1000ULL;
+constexpr char kCloudSecurityNamespace[] = "hg-cloud-sec";
+constexpr char kCommandCounterKey[] = "cmd_counter";
+
+bool parse_json_u64(const std::string& body, const char* key, std::uint64_t& value)
+{
+    const std::string marker = std::string{"\""} + key + "\"";
+    auto pos = body.find(marker);
+    if (pos == std::string::npos) return false;
+    pos = body.find(':', pos + marker.size());
+    if (pos == std::string::npos) return false;
+    ++pos;
+    while (pos < body.size() && std::isspace(static_cast<unsigned char>(body[pos]))) ++pos;
+    if (pos >= body.size() || !std::isdigit(static_cast<unsigned char>(body[pos]))) return false;
+    std::uint64_t parsed = 0;
+    do {
+        const auto digit = static_cast<unsigned>(body[pos] - '0');
+        if (parsed > (UINT64_MAX - digit) / 10U) return false;
+        parsed = parsed * 10U + digit;
+        ++pos;
+    } while (pos < body.size() && std::isdigit(static_cast<unsigned char>(body[pos])));
+    value = parsed;
+    return true;
+}
+
+bool load_command_counter(std::uint64_t& value)
+{
+    nvs_handle_t handle{};
+    if (nvs_open(kCloudSecurityNamespace, NVS_READONLY, &handle) != ESP_OK) {
+        value = 0;
+        return true;
+    }
+    const auto error = nvs_get_u64(handle, kCommandCounterKey, &value);
+    nvs_close(handle);
+    if (error == ESP_ERR_NVS_NOT_FOUND) { value = 0; return true; }
+    return error == ESP_OK;
+}
+
+bool persist_command_counter(std::uint64_t value)
+{
+    nvs_handle_t handle{};
+    if (nvs_open(kCloudSecurityNamespace, NVS_READWRITE, &handle) != ESP_OK) return false;
+    auto error = nvs_set_u64(handle, kCommandCounterKey, value);
+    if (error == ESP_OK) error = nvs_commit(handle);
+    nvs_close(handle);
+    return error == ESP_OK;
+}
 
 bool parse_json_string(const std::string& body, const char* key, std::string& value)
 {
@@ -369,6 +416,21 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         return;
     }
 
+    std::uint64_t command_counter = 0;
+    std::uint64_t stored_counter = 0;
+    if (!parse_json_u64(body, "counter", command_counter) || command_counter == 0) {
+        publish_response(false, "counter_required");
+        return;
+    }
+    if (!load_command_counter(stored_counter)) {
+        publish_response(false, "replay_state_unavailable");
+        return;
+    }
+    if (command_counter <= stored_counter) {
+        publish_response(false, "replay_rejected");
+        return;
+    }
+
     hg::PartitionArmState target{};
     if (command == "security.arm_away") target = hg::PartitionArmState::Away;
     else if (command == "security.arm_home") target = hg::PartitionArmState::Stay;
@@ -376,6 +438,13 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     else if (command == "security.panic") target = hg::PartitionArmState::Alarm;
     else {
         publish_response(false, "unsupported_command");
+        return;
+    }
+
+    // Persist the monotonic counter before the side effect. If persistence
+    // fails, fail closed so a reboot cannot reopen a replay window.
+    if (!persist_command_counter(command_counter)) {
+        publish_response(false, "replay_state_persist_failed");
         return;
     }
 
