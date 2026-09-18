@@ -461,7 +461,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
 {
     if (client_ == nullptr || data == nullptr || size == 0) return;
     const std::string body(data, size);
-    std::string request_id, actor, credential, command, challenge, signature;
+    std::string request_id, actor, command, challenge, signature;
     (void)parse_json_string(body, "requestId", request_id);
 
     auto publish_response = [&](bool ok, const char* reason, const char* arm_state = nullptr) {
@@ -484,7 +484,6 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         envelope_device_id != device_id_.data() ||
         !parse_json_string(body, "command", command) ||
         !parse_json_string(body, "actor", actor) ||
-        !parse_json_string(body, "credential", credential) ||
         !parse_json_u64(body, "counter", command_counter) || command_counter == 0 ||
         !parse_json_u64(body, "issuedAtMs", issued_at_ms) ||
         !parse_json_u64(body, "expiresAtMs", expires_at_ms) ||
@@ -537,13 +536,13 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // counter/requestId state below; a replayed signed envelope cannot execute.
     if (command == "security.disarm" &&
         (challenge.empty() || challenge.size() > kMaxChallengeLength || !valid_disarm_challenge(challenge))) {
-        std::fill(credential.begin(), credential.end(), '\0');
         publish_response(false, "challenge_required");
         return;
     }
 
-    const auto decision = access_control_->authorize(actor, credential, command);
-    std::fill(credential.begin(), credential.end(), '\0');
+    // The signed envelope authenticates the cloud command and binds actor.
+    // Authorize that signed actor locally; never transport a user PIN over MQTT.
+    const auto decision = access_control_->authorize_session(actor, command);
     if (decision != homeguard::AuditDecision::Allowed) {
         publish_response(false, homeguard::to_string(decision));
         return;
@@ -571,8 +570,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // Challenge issuance is itself a signed, authorized and replay-protected
     // operation. Reuse the same persisted counter/requestId barrier as commands.
     if (command == "security.disarm_challenge") {
-        const auto decision = access_control_->authorize(actor, credential, "security.disarm");
-        std::fill(credential.begin(), credential.end(), '\0');
+        const auto decision = access_control_->authorize_session(actor, "security.disarm");
         if (decision != homeguard::AuditDecision::Allowed) {
             publish_response(false, homeguard::to_string(decision));
             return;
