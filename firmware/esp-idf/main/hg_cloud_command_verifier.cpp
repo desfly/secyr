@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <string>
 #include <vector>
 
 namespace homeguard::idf {
@@ -60,10 +61,14 @@ esp_err_t CloudCommandVerifier::verify(
         return ESP_FAIL;
     }
 
+    // mbedtls_pk_parse_public_key() expects PEM input to include its terminating
+    // NUL in the supplied length. A string_view does not guarantee accessible
+    // storage at data()[size()], so make an owned, NUL-terminated copy first.
+    std::string owned_public_key{public_key_pem};
     mbedtls_pk_context key;
     mbedtls_pk_init(&key);
-    const auto* pem = reinterpret_cast<const unsigned char*>(public_key_pem.data());
-    const int parse_rc = mbedtls_pk_parse_public_key(&key, pem, public_key_pem.size() + 1U);
+    const auto* pem = reinterpret_cast<const unsigned char*>(owned_public_key.c_str());
+    const int parse_rc = mbedtls_pk_parse_public_key(&key, pem, owned_public_key.size() + 1U);
     int verify_rc = parse_rc;
     if (parse_rc == 0) {
         verify_rc = mbedtls_pk_verify(
