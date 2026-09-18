@@ -13,6 +13,7 @@ link = read("hg_cloud_link.cpp")
 http = read("hg_cloud_http.cpp")
 nvs = read("hg_cloud_nvs.cpp")
 cmake = read("CMakeLists.txt")
+contract = (ROOT / "docs" / "CLOUD-BACKEND-CONTRACT.md").read_text(encoding="utf-8")
 errors = []
 
 def require(ok: bool, msg: str):
@@ -39,6 +40,17 @@ require("model_->set_partition_arm" in link and "bus_->dispatch_all" in link, "M
 require("deferred to safe command router" not in link, "old deferred MQTT command placeholder remains")
 require("nvs_set_str" in nvs and "nvs_get_str" in nvs and "nvs_commit" in nvs, "cloud credentials are not persisted in NVS")
 
+canonical_fields = [
+    '"version"', '"deviceId"', '"requestId"', '"actor"', '"command"',
+    '"counter"', '"issuedAtMs"', '"expiresAtMs"', '"challenge"', '"signature"',
+]
+for field in canonical_fields:
+    require(field in contract, f"canonical MQTT contract missing {field}")
+require("Factory identity" in contract and "MQTT credentials" in contract and "Cloud Command Trust identity" in contract,
+        "MQTT trust identities are not explicitly separated")
+require("must not be claimed as implemented until their CI gates are green" in contract,
+        "contract must distinguish required MQTT security from implemented firmware")
+
 if errors:
     print("Cloud runtime contract FAIL")
     for error in errors:
@@ -50,3 +62,4 @@ print(" - persistent MQTT config + boot restore")
 print(" - Bearer-session cloud configuration endpoint")
 print(" - live AccessControl/SystemModel command routing")
 print(" - MQTT responses topic")
+print(" - canonical signed-command contract + trust separation")
