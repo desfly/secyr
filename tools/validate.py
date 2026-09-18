@@ -166,7 +166,7 @@ policy = {
     'idf_managed_dependencies_pinned': all(item in idf_manifest for item in ['>=5.4.4,<5.5.0', 'espressif/mdns', '1.11.3', 'espressif/mqtt', '1.0.0']),
     'mqtt_transport_component_enabled': 'mqtt' in main_cmake and 'hg_cloud_link.cpp' in main_cmake,
     'central_build_metadata': all(item in build_info for item in ['HG_PROJECT_NAME "HomeGuard-S3"', 'HG_BUILD_NUMBER "0027"', 'HG_FIRMWARE_VERSION "0.27.0-test"', 'HG_ESP_IDF_REQUIRED "5.4.4"']),
-    'android_rejects_insecure_discovery': 'it.secure && it.apiVersion == 1' in endpoint_resolver and 'matchingLocalSecure' in endpoint_selection,
+    'android_rejects_insecure_discovery': all(item in endpoint_selection for item in ['matchingLocalSecure', 'input.matchingLocalSecure', 'matchingLocalApiVersion == 1']) and 'certificateSha256' in endpoint_resolver,
     'ci_current_actions_configured': all(item in release_workflow for item in ['actions/checkout@v5', 'actions/upload-artifact@v4', 'actions/setup-java@v5', 'gradle/actions/setup-gradle@v4']),
     'ci_firmware_build_configured': all(item in release_workflow for item in ['espressif/idf:v5.4.4', 'idf.py set-target esp32s3', 'idf.py reconfigure', 'project_description.json', 'HomeGuard-S3-BENCH-firmware']),
     'ci_android_build_configured': all(item in release_workflow for item in ['gradle-version: "8.9"', 'testDebugUnitTest assembleDebug', 'MyFist']),
