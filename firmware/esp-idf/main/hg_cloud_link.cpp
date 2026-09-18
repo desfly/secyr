@@ -166,6 +166,12 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
 {
     if (client_ != nullptr) return ESP_ERR_INVALID_STATE;
     if (broker_uri == nullptr || broker_uri[0] == '\0') return ESP_ERR_INVALID_ARG;
+    // Cloud control is fail-closed: credentials and commands must never be
+    // sent over plaintext MQTT, even if a bad broker URI is provisioned.
+    if (std::strncmp(broker_uri, "mqtts://", 8) != 0) {
+        ESP_LOGE(kTag, "Refusing non-TLS MQTT broker URI");
+        return ESP_ERR_INVALID_ARG;
+    }
     if (device_id_[0] == '\0') ESP_RETURN_ON_ERROR(prepare_identity(), kTag, "cloud identity");
 
     const esp_mqtt_client_config_t config = {
