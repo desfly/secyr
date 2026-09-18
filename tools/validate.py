@@ -87,7 +87,7 @@ def balanced(text: str) -> bool:
     return not stack and not in_string and not in_char and not block_comment
 
 kotlin_bad = [str(path.relative_to(root)) for path in kotlin if not balanced(path.read_text(encoding='utf-8'))]
-all_text = '\n'.join(path.read_text(encoding='utf-8', errors='ignore') for path in cpp + kotlin + [root / '.github/workflows/build-release.yml', root / 'docs/API.md', root / 'firmware/esp-idf/main/idf_component.yml', root / 'firmware/esp-idf/sdkconfig.defaults'])
+all_text = '\n'.join(path.read_text(encoding='utf-8', errors='ignore') for path in cpp + kotlin + [root / '.github/workflows/homeguard-build.yml', root / 'docs/API.md', root / 'firmware/esp-idf/main/idf_component.yml', root / 'firmware/esp-idf/sdkconfig.defaults'])
 required = [
     'BearerTokenVerifier', 'telemetry_json', 'health_json', 'parse_command_type',
     '/api/status', '/api/health', '/api/challenge', '/api/command', '/ws/telemetry',
@@ -110,7 +110,7 @@ websocket = (root / 'firmware/esp-idf/components/websocket_telemetry/websocket_t
 app_main = (root / 'firmware/esp-idf/main/app_main.cpp').read_text(encoding='utf-8')
 discovery = (root / 'firmware/esp-idf/components/device_discovery/device_discovery.cpp').read_text(encoding='utf-8')
 factory_tool = (root / 'tools/make_factory_bundle.py').read_text(encoding='utf-8')
-release_workflow = (root / '.github/workflows/build-release.yml').read_text(encoding='utf-8')
+release_workflow = (root / '.github/workflows/homeguard-build.yml').read_text(encoding='utf-8')
 idf_manifest = (root / 'firmware/esp-idf/main/idf_component.yml').read_text(encoding='utf-8')
 cloud_cmake = (root / 'firmware/esp-idf/components/cloud_transport/CMakeLists.txt').read_text(encoding='utf-8')
 build_info = (root / 'firmware/include/homeguard/build_info.hpp').read_text(encoding='utf-8')
