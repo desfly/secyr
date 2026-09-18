@@ -61,6 +61,12 @@ require(replay_check >= 0 and request_replay_check >= 0 and replay_check < chall
         "disarm challenge issuance bypasses persistent replay checks")
 require(challenge_persist >= 0 and challenge_issue >= 0 and challenge_persist < challenge_issue,
         "disarm challenge replay state must persist before token issuance")
+require("kDisarmChallengeLength = 32U" in link and
+        "challenge.size() != kDisarmChallengeLength" in link and
+        "(ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')" in link,
+        "disarm challenge must be exactly 32 lowercase hexadecimal characters")
+require("difference |=" in link and "return difference == 0;" in link,
+        "disarm challenge comparison must not use ordinary early-exit string equality")
 disarm_target = link.find('else if (command == "security.disarm") target =')
 disarm_persist = link.find("persist_command_replay_state(command_counter, request_id)", disarm_target)
 disarm_consume = link.find("consume_disarm_challenge()", disarm_target)
