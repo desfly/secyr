@@ -1,6 +1,6 @@
 import ua.homeguard.s3.provisioning.HandoffState
 import ua.homeguard.s3.provisioning.ProvisioningHandoff
-import ua.homeguard.s3.network.LocalApiContract
+import ua.homeguard.s3.network.LegacyApiContract
 import ua.homeguard.s3.network.EndpointAvailability
 import ua.homeguard.s3.network.selectControlPath
 import ua.homeguard.s3.model.ControlPath
@@ -30,12 +30,11 @@ fun main() {
     checkThat(timeout.tick(101).state == HandoffState.TIMED_OUT)
     checkThat(!timeout.observe("HG-S3-7A31BC", true, false, "https://192.168.1.20:443", 102).accepted)
 
-    checkThat(LocalApiContract.STATUS_PATH == "/api/status")
-    checkThat(LocalApiContract.HEALTH_PATH == "/api/health")
-    checkThat(LocalApiContract.CHALLENGE_PATH == "/api/challenge")
-    checkThat(LocalApiContract.COMMAND_PATH == "/api/command")
-    checkThat(LocalApiContract.TELEMETRY_PATH == "/ws/telemetry")
-    checkThat(LocalApiContract.requestId(Long.MAX_VALUE) == "9223372036854775807")
+    checkThat(LegacyApiContract.STATUS_PATH == "/api/status")
+    checkThat(LegacyApiContract.HEALTH_PATH == "/api/health")
+    checkThat(LegacyApiContract.CHALLENGE_PATH == "/api/challenge")
+    checkThat(LegacyApiContract.COMMAND_PATH == "/api/command")
+    checkThat(LegacyApiContract.requestId(Long.MAX_VALUE) == "9223372036854775807")
 
     fun availability(
         secure: Boolean = true,
