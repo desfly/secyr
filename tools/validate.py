@@ -24,7 +24,7 @@ stage('run CTest')
 ctest = subprocess.run(['ctest', '--test-dir', str(build), '--output-on-failure'], check=True, text=True, capture_output=True)
 stage('run host executable')
 test_output = subprocess.run([str(build / 'homeguard_tests')], check=True, text=True, capture_output=True).stdout.strip()
-stage('run portable/Android/ESP gates in parallel')
+stage('run portable Kotlin/ESP host gates in parallel')
 from concurrent.futures import ThreadPoolExecutor
 
 def captured(command):
@@ -34,16 +34,15 @@ def captured(command):
         raise RuntimeError(f"validation command failed ({completed.returncode}): {' '.join(map(str, command))}\\n{detail}")
     return completed.stdout.strip()
 
-with ThreadPoolExecutor(max_workers=4) as executor:
+with ThreadPoolExecutor(max_workers=3) as executor:
     future_kotlin_pure = executor.submit(captured, [sys.executable, str(root / 'tools/validate_kotlin_pure.py')])
-    future_kotlin_full = executor.submit(captured, [sys.executable, str(root / 'tools/validate_kotlin_full.py')])
     future_esp_syntax = executor.submit(captured, [sys.executable, str(root / 'tools/validate_esp_syntax.py')])
     future_esp_link = executor.submit(captured, [sys.executable, str(root / 'tools/validate_esp_link.py')])
     kotlin_pure_output = future_kotlin_pure.result()
-    kotlin_full_output = future_kotlin_full.result()
     esp_syntax_files_passed = int(future_esp_syntax.result())
     esp_link_output = future_esp_link.result()
-kotlin_resolver_output = 'HomeGuard Android resolver: full-source compile PASS'
+kotlin_full_output = 'HomeGuard Android full-source compile: delegated to Gradle CI job'
+kotlin_resolver_output = 'HomeGuard Android resolver: delegated to Gradle CI job'
 
 cpp = sorted(list((root / 'firmware').rglob('*.cpp')) + list((root / 'firmware').rglob('*.hpp')) + list((root / 'tests').rglob('*.cpp')) + list((root / 'tests').rglob('*.hpp')))
 kotlin = sorted((root / 'android').rglob('*.kt'))
