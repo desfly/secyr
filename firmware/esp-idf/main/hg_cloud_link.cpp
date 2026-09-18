@@ -30,6 +30,7 @@ constexpr char kCommandCounterKey[] = "cmd_counter";
 constexpr char kRequestIdKey[] = "req_id";
 constexpr std::uint64_t kMaxCommandTtlMs = 120000ULL;
 constexpr std::uint64_t kMaxIssuedFutureSkewMs = 30000ULL;
+constexpr std::size_t kMaxChallengeLength = 128U;
 
 bool parse_json_u64(const std::string& body, const char* key, std::uint64_t& value)
 {
@@ -489,6 +490,15 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     CloudCommandVerifier verifier;
     if (verifier.verify(trust.public_key_pem, canonical, signature) != ESP_OK) {
         publish_response(false, "signature_rejected");
+        return;
+    }
+
+    // Remote disarm is a high-risk action: require a signed, non-empty challenge.
+    // One-time replay resistance is jointly provided by the persisted monotonic
+    // counter/requestId state below; a replayed signed envelope cannot execute.
+    if (command == "security.disarm" && (challenge.empty() || challenge.size() > kMaxChallengeLength)) {
+        std::fill(credential.begin(), credential.end(), '\0');
+        publish_response(false, "challenge_required");
         return;
     }
 
