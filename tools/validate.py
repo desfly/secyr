@@ -169,8 +169,8 @@ policy = {
     'ci_android_build_configured': all(item in release_workflow for item in ["gradle-version: '8.9'", 'testDebugUnitTest lintDebug assembleDebug', 'HomeGuard-S3-Build-0013-debug.apk']),
     'provisioning_response_grace_period': all(item in all_text for item in ['ProvisioningShutdownGate', 'shutdown_gate_.arm(now_ms, 1500U)', 'shutdown_gate_.due(now_ms)']),
     'wss_send_queued_on_http_task': 'httpd_queue_work' in websocket and 'BroadcastWork' in websocket and 'broadcast_work_entry' in websocket,
-    'wifi_state_is_synchronized': all(item in (root / 'firmware/esp-idf/components/network_manager/include/network_manager.hpp').read_text(encoding='utf-8') for item in ['std::atomic_bool', 'std::atomic_uint32_t', 'std::mutex']),
-    'wifi_partial_init_rolls_back': all(item in (root / 'firmware/esp-idf/components/network_manager/network_manager.cpp').read_text(encoding='utf-8') for item in ['rollback_init()', 'esp_wifi_deinit()', 'esp_netif_destroy_default_wifi', 'clear_password()']),
+    'wifi_state_is_synchronized': all(item in (root / 'firmware/esp-idf/main/hg_network_http.hpp').read_text(encoding='utf-8') for item in ['std::atomic_bool', 'std::atomic_uint32_t']),
+    'wifi_candidate_failure_restores_committed_network': all(item in (root / 'firmware/esp-idf/main/hg_network_http.cpp').read_text(encoding='utf-8') for item in ['candidate_pending_', 'cancel_candidate_and_restore_active', 'restore_active_connection', 'candidate_timeout', 'wipe(password)']),
 }
 
 result = {
