@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
+#include "esp_random.h"
 #include "nvs.h"
 #include "homeguard/access_control.hpp"
 #include "homeguard/system_model.hpp"
@@ -31,6 +32,30 @@ constexpr char kRequestIdKey[] = "req_id";
 constexpr std::uint64_t kMaxCommandTtlMs = 120000ULL;
 constexpr std::uint64_t kMaxIssuedFutureSkewMs = 30000ULL;
 constexpr std::size_t kMaxChallengeLength = 128U;
+constexpr std::uint64_t kDisarmChallengeTtlUs = 60ULL * 1000ULL * 1000ULL;
+std::string g_disarm_challenge;
+std::uint64_t g_disarm_challenge_deadline_us{};
+
+std::string issue_disarm_challenge()
+{
+    char token[33]{};
+    std::snprintf(token, sizeof(token), "%08lx%08lx%08lx%08lx",
+                  static_cast<unsigned long>(esp_random()), static_cast<unsigned long>(esp_random()),
+                  static_cast<unsigned long>(esp_random()), static_cast<unsigned long>(esp_random()));
+    g_disarm_challenge.assign(token);
+    g_disarm_challenge_deadline_us = static_cast<std::uint64_t>(esp_timer_get_time()) + kDisarmChallengeTtlUs;
+    return g_disarm_challenge;
+}
+
+bool consume_disarm_challenge(const std::string& challenge)
+{
+    const auto now = static_cast<std::uint64_t>(esp_timer_get_time());
+    if (g_disarm_challenge.empty() || now > g_disarm_challenge_deadline_us || challenge != g_disarm_challenge) return false;
+    std::fill(g_disarm_challenge.begin(), g_disarm_challenge.end(), '\0');
+    g_disarm_challenge.clear();
+    g_disarm_challenge_deadline_us = 0;
+    return true;
+}
 
 bool parse_json_u64(const std::string& body, const char* key, std::uint64_t& value)
 {
@@ -496,7 +521,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // Remote disarm is a high-risk action: require a signed, non-empty challenge.
     // One-time replay resistance is jointly provided by the persisted monotonic
     // counter/requestId state below; a replayed signed envelope cannot execute.
-    if (command == "security.disarm" && (challenge.empty() || challenge.size() > kMaxChallengeLength)) {
+    if (command == "security.disarm" && (challenge.empty() || challenge.size() > kMaxChallengeLength || !consume_disarm_challenge(challenge))) {
         std::fill(credential.begin(), credential.end(), '\0');
         publish_response(false, "challenge_required");
         return;
