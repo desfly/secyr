@@ -50,6 +50,7 @@ namespace {
 
 constexpr const char* kTag = "homeguard_main";
 constexpr std::uint16_t kLocalApiPort = 80;
+constexpr std::uint16_t kLocalTlsApiPort = 443;
 
 homeguard::idf::HardwareBootstrap g_hardware;
 homeguard::idf::TelemetryRuntime g_telemetry;
@@ -330,11 +331,14 @@ void start_device_discovery()
     std::transform(suffix.begin(), suffix.end(), suffix.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     const std::string hostname = "homeguard-" + suffix;
 
-    if (!g_device_discovery.begin(device_id, hostname, kLocalApiPort, false)) {
+    const bool secure = g_https_server != nullptr;
+    const auto api_port = secure ? kLocalTlsApiPort : kLocalApiPort;
+    if (!g_device_discovery.begin(device_id, hostname, api_port, secure)) {
         ESP_LOGE(kTag, "LAN discovery responder failed to start");
         return;
     }
-    ESP_LOGI(kTag, "LAN discovery responder ready: UDP/45678 -> http://%s.local:%u", hostname.c_str(), kLocalApiPort);
+    ESP_LOGI(kTag, "LAN discovery responder ready: UDP/45678 -> %s://%s.local:%u",
+             secure ? "https" : "http", hostname.c_str(), api_port);
 }
 
 void on_ble_message(std::uint8_t type, const std::string& json, void*)
