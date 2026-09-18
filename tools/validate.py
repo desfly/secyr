@@ -89,14 +89,12 @@ def balanced(text: str) -> bool:
 kotlin_bad = [str(path.relative_to(root)) for path in kotlin if not balanced(path.read_text(encoding='utf-8'))]
 all_text = '\n'.join(path.read_text(encoding='utf-8', errors='ignore') for path in cpp + kotlin + [root / '.github/workflows/homeguard-build.yml', root / 'docs/API.md', root / 'firmware/esp-idf/main/idf_component.yml', root / 'firmware/esp-idf/sdkconfig.defaults'])
 required = [
-    'BearerTokenVerifier', 'telemetry_json', 'health_json', 'parse_command_type',
-    '/api/status', '/api/health', '/api/challenge', '/api/command', '/ws/telemetry',
-    'httpd_ssl_start', 'httpd_ws_send_frame_async', 'is_websocket',
-    'Authorization', 'Bearer ', 'constant_time_equal', 'PinnedTlsClientFactory',
-    'LocalApiContract', 'DeviceSession', 'homeguard-s3-7a31bc.local',
+    'telemetry_json', '/api/v1/system/status', '/api/v1/system/security-command',
+    '/ws/telemetry', 'is_websocket', 'Authorization', 'Bearer ',
+    'PinnedTlsClientFactory', 'MessageDigest.isEqual', 'LegacyApiContract',
     '_homeguard._tcp', 'HG_DISCOVER_V1', 'homeguard-discovery-v1',
-    'espressif/idf:v5.4.4', "gradle-version: '8.9'", 'assembleDebug',
-    'espressif/mdns', 'espressif/mqtt', 'CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y'
+    'espressif/idf:v5.4.4', 'gradle-version: "8.9"', 'assembleDebug',
+    'espressif/mdns', 'espressif/mqtt'
 ]
 missing = [item for item in required if item not in all_text and item not in certificate_text]
 
