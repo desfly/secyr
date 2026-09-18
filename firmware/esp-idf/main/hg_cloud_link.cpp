@@ -1,4 +1,6 @@
 #include "hg_cloud_link.hpp"
+#include "hg_cloud_command_verifier.hpp"
+#include "hg_cloud_trust_nvs.hpp"
 
 #include "esp_check.h"
 #include "esp_crt_bundle.h"
@@ -385,7 +387,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
 {
     if (client_ == nullptr || data == nullptr || size == 0) return;
     const std::string body(data, size);
-    std::string request_id, actor, credential, command;
+    std::string request_id, actor, credential, command, signature;
     (void)parse_json_string(body, "request_id", request_id);
     if (request_id.empty()) (void)parse_json_string(body, "requestId", request_id);
 
@@ -402,10 +404,41 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         publish_response(false, "runtime_unavailable");
         return;
     }
-    if (!parse_json_string(body, "command", command) ||
+    std::uint64_t version = 0, command_counter = 0, issued_at_ms = 0, expires_at_ms = 0;
+    std::string envelope_device_id;
+    if (!parse_json_u64(body, "version", version) || version != 1 ||
+        !parse_json_string(body, "deviceId", envelope_device_id) ||
+        envelope_device_id != device_id_.data() ||
+        !parse_json_string(body, "command", command) ||
         !parse_json_string(body, "actor", actor) ||
-        !parse_json_string(body, "credential", credential)) {
+        !parse_json_string(body, "credential", credential) ||
+        !parse_json_u64(body, "counter", command_counter) || command_counter == 0 ||
+        !parse_json_u64(body, "issuedAtMs", issued_at_ms) ||
+        !parse_json_u64(body, "expiresAtMs", expires_at_ms) ||
+        !parse_json_string(body, "signature", signature)) {
         publish_response(false, "invalid_request");
+        return;
+    }
+
+    CloudCommandTrust trust;
+    CloudTrustStore trust_store;
+    if (trust_store.load(trust) != ESP_OK) {
+        publish_response(false, "command_trust_unavailable");
+        return;
+    }
+    const std::string canonical =
+        "version=" + std::to_string(version) + "\n" +
+        "deviceId=" + envelope_device_id + "\n" +
+        "requestId=" + request_id + "\n" +
+        "actor=" + actor + "\n" +
+        "command=" + command + "\n" +
+        "counter=" + std::to_string(command_counter) + "\n" +
+        "issuedAtMs=" + std::to_string(issued_at_ms) + "\n" +
+        "expiresAtMs=" + std::to_string(expires_at_ms) + "\n" +
+        "challenge=";
+    CloudCommandVerifier verifier;
+    if (verifier.verify(trust.public_key_pem, canonical, signature) != ESP_OK) {
+        publish_response(false, "signature_rejected");
         return;
     }
 
@@ -416,12 +449,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         return;
     }
 
-    std::uint64_t command_counter = 0;
     std::uint64_t stored_counter = 0;
-    if (!parse_json_u64(body, "counter", command_counter) || command_counter == 0) {
-        publish_response(false, "counter_required");
-        return;
-    }
     if (!load_command_counter(stored_counter)) {
         publish_response(false, "replay_state_unavailable");
         return;
