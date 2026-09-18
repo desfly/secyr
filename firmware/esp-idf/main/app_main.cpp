@@ -194,6 +194,9 @@ esp_err_t start_https_server()
     config.prvtkey_pem = reinterpret_cast<const unsigned char*>(identity.private_key_pem.c_str());
     config.prvtkey_len = identity.private_key_pem.size() + 1U;
 
+    // ESP-IDF consumes/copies the TLS config during httpd_ssl_start(); the
+    // httpd_ssl_config_t itself does not need to remain valid after this call.
+    // Clear the NVS-loaded private material immediately after startup returns.
     const auto error = httpd_ssl_start(&g_https_server, &config);
     identity.clear_private_material();
     if (error != ESP_OK) {
