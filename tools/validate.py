@@ -124,8 +124,11 @@ secret_files = [str(path.relative_to(root)) for path in root.rglob('*') if path.
 
 host_cmake = (root / 'firmware/CMakeLists.txt').read_text(encoding='utf-8')
 idf_core_cmake = (root / 'firmware/esp-idf/components/homeguard_core/CMakeLists.txt').read_text(encoding='utf-8')
+idf_main_cmake = (root / 'firmware/esp-idf/main/CMakeLists.txt').read_text(encoding='utf-8')
 host_core_sources = set(re.findall(r'src/([A-Za-z0-9_]+\.cpp)', host_cmake))
 idf_core_sources = set(re.findall(r'src/([A-Za-z0-9_]+\.cpp)', idf_core_cmake))
+idf_main_shared_sources = set(re.findall(r'\.\./\.\./src/([A-Za-z0-9_]+\.cpp)', idf_main_cmake))
+idf_firmware_core_sources = idf_core_sources | idf_main_shared_sources
 
 policy = {
     'host_ctest_pass': '100% tests passed' in ctest.stdout,
@@ -139,7 +142,7 @@ policy = {
     'factory_bundle_files_pass': factory_files_pass,
     'factory_certificate_covers_setup_and_mdns': factory_san_pass,
     'no_factory_secrets_in_tree': not secret_files,
-    'host_idf_core_source_parity': host_core_sources == idf_core_sources,
+    'host_idf_core_source_parity': host_core_sources == idf_firmware_core_sources,
     'android_cleartext_disabled': 'android:usesCleartextTraffic="false"' in manifest,
     'android_backup_disabled': 'android:allowBackup="false"' in manifest,
     'api_token_kept_out_of_plain_preferences': '.putString("api_token"' not in settings_store and 'SecureTokenStore' in settings_store,
@@ -206,7 +209,9 @@ result = {
     'source_parity': {
         'host_core_sources': sorted(host_core_sources),
         'idf_core_sources': sorted(idf_core_sources),
-        'missing_from_idf': sorted(host_core_sources - idf_core_sources),
+        'idf_main_shared_sources': sorted(idf_main_shared_sources),
+        'idf_firmware_core_sources': sorted(idf_firmware_core_sources),
+        'missing_from_idf': sorted(host_core_sources - idf_firmware_core_sources),
     },
     'toolchain_build_status': {
         'esp_idf_linked_in_this_environment': False,
