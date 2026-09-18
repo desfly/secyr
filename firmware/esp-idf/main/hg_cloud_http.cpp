@@ -2,6 +2,7 @@
 
 #include "hg_cloud_link.hpp"
 #include "hg_cloud_nvs.hpp"
+#include "hg_cloud_trust_nvs.hpp"
 #include "hg_http_util.hpp"
 #include "hg_request_auth.hpp"
 #include "homeguard/access_control.hpp"
@@ -9,6 +10,8 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
+#include <cstdint>
 #include <string>
 
 namespace homeguard::idf {
@@ -41,15 +44,18 @@ esp_err_t CloudHttp::register_handlers(
     httpd_handle_t server,
     CloudLink* cloud,
     CloudNvsStore* store,
+    CloudTrustStore* trust_store,
     homeguard::AccessControl* access_control)
 {
-    if (server == nullptr || cloud == nullptr || store == nullptr || access_control == nullptr) return ESP_ERR_INVALID_ARG;
+    if (server == nullptr || cloud == nullptr || store == nullptr || trust_store == nullptr || access_control == nullptr) return ESP_ERR_INVALID_ARG;
     cloud_ = cloud;
     store_ = store;
+    trust_store_ = trust_store;
     access_control_ = access_control;
     const httpd_uri_t routes[] = {
         {.uri = "/api/v1/cloud/status", .method = HTTP_GET, .handler = &CloudHttp::status_get, .user_ctx = this},
         {.uri = "/api/v1/cloud/config", .method = HTTP_POST, .handler = &CloudHttp::config_post, .user_ctx = this},
+        {.uri = "/api/v1/cloud/trust", .method = HTTP_POST, .handler = &CloudHttp::trust_post, .user_ctx = this},
     };
     for (const auto& route : routes) {
         const auto error = httpd_register_uri_handler(server, &route);
@@ -84,6 +90,57 @@ esp_err_t CloudHttp::config_post(httpd_req_t* request)
 {
     if (request == nullptr || request->user_ctx == nullptr) return ESP_ERR_INVALID_ARG;
     return static_cast<CloudHttp*>(request->user_ctx)->handle_config(request);
+}
+
+esp_err_t CloudHttp::trust_post(httpd_req_t* request)
+{
+    if (request == nullptr || request->user_ctx == nullptr) return ESP_ERR_INVALID_ARG;
+    return static_cast<CloudHttp*>(request->user_ctx)->handle_trust(request);
+}
+
+esp_err_t CloudHttp::handle_trust(httpd_req_t* request)
+{
+    if (!request_auth::authenticated_admin(request, *access_control_)) {
+        return request_auth::send_admin_required(request);
+    }
+    std::string body;
+    if (!http_util::read_body(request, 3072U, body)) {
+        httpd_resp_set_status(request, "400 Bad Request");
+        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_body\"}");
+    }
+    std::string public_key;
+    if (!http_util::parse_json_string(body, "publicKeyPem", public_key) || public_key.empty()) {
+        http_util::scrub(body);
+        httpd_resp_set_status(request, "400 Bad Request");
+        return send_json(request, "{\"ok\":false,\"reason\":\"public_key_required\"}");
+    }
+    const auto version_pos = http_util::value_offset(body, "version");
+    if (version_pos == std::string::npos) {
+        http_util::scrub(body);
+        httpd_resp_set_status(request, "400 Bad Request");
+        return send_json(request, "{\"ok\":false,\"reason\":\"version_required\"}");
+    }
+    char* end{};
+    const auto version = std::strtoul(body.c_str() + version_pos, &end, 10);
+    http_util::scrub(body);
+    if (end == body.c_str() + version_pos || version == 0 || version > UINT32_MAX) {
+        http_util::scrub(public_key);
+        httpd_resp_set_status(request, "400 Bad Request");
+        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_version\"}");
+    }
+    CloudCommandTrust trust{static_cast<std::uint32_t>(version), public_key};
+    const auto error = trust_store_->save(trust);
+    http_util::scrub(public_key);
+    http_util::scrub(trust.public_key_pem);
+    if (error == ESP_ERR_INVALID_STATE) {
+        httpd_resp_set_status(request, "409 Conflict");
+        return send_json(request, "{\"ok\":false,\"reason\":\"trust_version_not_newer\"}");
+    }
+    if (error != ESP_OK) {
+        httpd_resp_set_status(request, "500 Internal Server Error");
+        return send_json(request, "{\"ok\":false,\"reason\":\"trust_persist_failed\"}");
+    }
+    return send_json(request, "{\"ok\":true,\"state\":\"trust_updated\"}");
 }
 
 esp_err_t CloudHttp::handle_config(httpd_req_t* request)
