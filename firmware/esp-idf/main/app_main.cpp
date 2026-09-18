@@ -36,6 +36,7 @@
 
 #include "esp_event.h"
 #include "esp_http_server.h"
+#include "esp_https_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "nvs_flash.h"
@@ -81,6 +82,7 @@ hg::PhysicalOutputRuntime g_physical_outputs;
 hg::SystemEventBus g_system_bus;
 hg::SystemModel g_system_model{g_system_bus};
 httpd_handle_t g_http_server = nullptr;
+httpd_handle_t g_https_server = nullptr;
 bool g_access_bootstrap_allowed = false;
 
 esp_err_t initialize_nvs()
@@ -173,6 +175,34 @@ void initialize_physical_outputs()
         return;
     }
     ESP_LOGI(kTag, "Physical output runtime initialized: %s", hg::to_string(g_physical_outputs.state().status));
+}
+
+esp_err_t start_https_server()
+{
+    FactoryProvisioningIdentity identity{};
+    if (!g_provisioning_store.load_factory_identity(identity)) {
+        ESP_LOGW(kTag, "Factory TLS identity unavailable; HTTPS server not started");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    httpd_ssl_config_t config = HTTPD_SSL_CONFIG_DEFAULT();
+    config.httpd.max_uri_handlers = 48;
+    config.httpd.stack_size = 8192;
+    config.httpd.lru_purge_enable = true;
+    config.servercert = reinterpret_cast<const unsigned char*>(identity.certificate_pem.c_str());
+    config.servercert_len = identity.certificate_pem.size() + 1U;
+    config.prvtkey_pem = reinterpret_cast<const unsigned char*>(identity.private_key_pem.c_str());
+    config.prvtkey_len = identity.private_key_pem.size() + 1U;
+
+    const auto error = httpd_ssl_start(&g_https_server, &config);
+    identity.clear_private_material();
+    if (error != ESP_OK) {
+        g_https_server = nullptr;
+        ESP_LOGE(kTag, "HTTPS server start failed: %s", esp_err_to_name(error));
+        return error;
+    }
+    ESP_LOGI(kTag, "HTTPS transport listening on port 443 with factory identity");
+    return ESP_OK;
 }
 
 esp_err_t start_http_server()
@@ -345,6 +375,9 @@ extern "C" void app_main()
     const auto hardware_error = g_hardware.initialize();
     if (hardware_error != ESP_OK) ESP_LOGE(kTag, "Hardware bootstrap failed: %s", esp_err_to_name(hardware_error));
     else ESP_LOGI(kTag, "Hardware bootstrap completed");
+
+    const auto https_error = start_https_server();
+    if (https_error != ESP_OK) ESP_LOGW(kTag, "HTTPS transport unavailable: %s", esp_err_to_name(https_error));
 
     const auto http_error = start_http_server();
     if (http_error != ESP_OK) {
