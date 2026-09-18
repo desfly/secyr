@@ -24,6 +24,7 @@ idf_component_register(
         "hg_lan_http.cpp"
         "hg_cloud_link.cpp"
         "hg_cloud_identity.cpp"
+        "hg_cloud_command_verifier.cpp"
         "hg_cloud_http.cpp"
         "hg_cloud_nvs.cpp"
         "hg_cloud_trust_nvs.cpp"
