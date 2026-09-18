@@ -8,9 +8,10 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 kotlinc = shutil.which("kotlinc")
 java = shutil.which("java")
-coroutines = Path("/root/.sdkman/candidates/kotlin/1.9.0/lib/kotlinx-coroutines-core-jvm.jar")
+kotlin_home = Path(kotlinc).resolve().parents[1] if kotlinc else None
+coroutines = kotlin_home / "lib/kotlinx-coroutines-core-jvm.jar" if kotlin_home else Path()
 if not kotlinc or not java or not coroutines.is_file():
-    raise SystemExit("kotlinc, java and kotlinx-coroutines-core-jvm.jar are required")
+    raise SystemExit(f"kotlinc, java and kotlinx-coroutines-core-jvm.jar are required; kotlinc={kotlinc}, coroutines={coroutines}")
 
 with tempfile.TemporaryDirectory(prefix="homeguard-kotlin-") as temporary:
     temp = Path(temporary)
