@@ -164,12 +164,12 @@ policy = {
     'mqtt_transport_component_enabled': 'mqtt' in main_cmake and 'hg_cloud_link.cpp' in main_cmake,
     'central_build_metadata': all(item in build_info for item in ['HG_PROJECT_NAME "HomeGuard-S3"', 'HG_BUILD_NUMBER "0027"', 'HG_FIRMWARE_VERSION "0.27.0-test"', 'HG_ESP_IDF_REQUIRED "5.4.4"']),
     'android_rejects_insecure_discovery': 'it.secure && it.apiVersion == 1' in endpoint_resolver and 'matchingLocalSecure' in endpoint_selection,
-    'ci_current_actions_configured': all(item in release_workflow for item in ['actions/checkout@v7', 'actions/upload-artifact@v7', 'actions/setup-java@v5', 'android-actions/setup-android@v4', 'gradle/actions/setup-gradle@v6']),
-    'ci_firmware_build_configured': all(item in release_workflow for item in ['espressif/idf:v5.4.4', 'idf.py set-target esp32s3', 'idf.py reconfigure', 'dependencies.lock', 'project_description.json', 'homeguard_s3.bin']),
-    'ci_android_build_configured': all(item in release_workflow for item in ["gradle-version: '8.9'", 'testDebugUnitTest lintDebug assembleDebug', 'HomeGuard-S3-Build-0013-debug.apk']),
+    'ci_current_actions_configured': all(item in release_workflow for item in ['actions/checkout@v5', 'actions/upload-artifact@v4', 'actions/setup-java@v5', 'android-actions/setup-android@v4', 'gradle/actions/setup-gradle@v4']),
+    'ci_firmware_build_configured': all(item in release_workflow for item in ['espressif/idf:v5.4.4', 'idf.py set-target esp32s3', 'idf.py reconfigure', 'project_description.json', 'HomeGuard-S3-BENCH-firmware']),
+    'ci_android_build_configured': all(item in release_workflow for item in ['gradle-version: "8.9"', 'testDebugUnitTest assembleDebug', 'MyFist']),
     'provisioning_response_grace_period': all(item in all_text for item in ['ProvisioningShutdownGate', 'shutdown_gate_.arm(now_ms, 1500U)', 'shutdown_gate_.due(now_ms)']),
     'wss_send_queued_on_http_task': 'httpd_queue_work' in websocket and 'BroadcastWork' in websocket and 'broadcast_work_entry' in websocket,
-    'wifi_state_is_synchronized': all(item in (root / 'firmware/esp-idf/main/hg_network_http.hpp').read_text(encoding='utf-8') for item in ['std::atomic_bool', 'std::atomic_uint32_t']),
+    'wifi_state_is_synchronized': all(item in (root / 'firmware/esp-idf/main/hg_network_http.hpp').read_text(encoding='utf-8') for item in ['std::atomic<bool>', 'std::atomic<std::uint32_t>']),
     'wifi_candidate_failure_restores_committed_network': all(item in (root / 'firmware/esp-idf/main/hg_network_http.cpp').read_text(encoding='utf-8') for item in ['candidate_pending_', 'cancel_candidate_and_restore_active', 'restore_active_connection', 'candidate_timeout', 'wipe(password)']),
 }
 
