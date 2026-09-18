@@ -27,6 +27,7 @@ constexpr const char* kPrefix = "homeguard/v1/devices";
 constexpr std::uint64_t kHeartbeatPeriodUs = 60ULL * 1000ULL * 1000ULL;
 constexpr char kCloudSecurityNamespace[] = "hg-cloud-sec";
 constexpr char kCommandCounterKey[] = "cmd_counter";
+constexpr char kRequestIdKey[] = "req_id";
 constexpr std::uint64_t kMaxCommandTtlMs = 120000ULL;
 constexpr std::uint64_t kMaxIssuedFutureSkewMs = 30000ULL;
 
@@ -64,11 +65,39 @@ bool load_command_counter(std::uint64_t& value)
     return error == ESP_OK;
 }
 
-bool persist_command_counter(std::uint64_t value)
+bool load_last_request_id(std::string& value)
+{
+    nvs_handle_t handle{};
+    if (nvs_open(kCloudSecurityNamespace, NVS_READONLY, &handle) != ESP_OK) {
+        value.clear();
+        return true;
+    }
+    std::size_t size = 0;
+    auto error = nvs_get_str(handle, kRequestIdKey, nullptr, &size);
+    if (error == ESP_ERR_NVS_NOT_FOUND) {
+        nvs_close(handle);
+        value.clear();
+        return true;
+    }
+    if (error != ESP_OK || size == 0 || size > 129U) {
+        nvs_close(handle);
+        return false;
+    }
+    std::string stored(size, '\0');
+    error = nvs_get_str(handle, kRequestIdKey, stored.data(), &size);
+    nvs_close(handle);
+    if (error != ESP_OK) return false;
+    if (!stored.empty() && stored.back() == '\0') stored.pop_back();
+    value = std::move(stored);
+    return true;
+}
+
+bool persist_command_replay_state(std::uint64_t counter, const std::string& request_id)
 {
     nvs_handle_t handle{};
     if (nvs_open(kCloudSecurityNamespace, NVS_READWRITE, &handle) != ESP_OK) return false;
-    auto error = nvs_set_u64(handle, kCommandCounterKey, value);
+    auto error = nvs_set_u64(handle, kCommandCounterKey, counter);
+    if (error == ESP_OK) error = nvs_set_str(handle, kRequestIdKey, request_id.c_str());
     if (error == ESP_OK) error = nvs_commit(handle);
     nvs_close(handle);
     return error == ESP_OK;
@@ -478,6 +507,15 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         publish_response(false, "replay_rejected");
         return;
     }
+    std::string last_request_id;
+    if (!load_last_request_id(last_request_id)) {
+        publish_response(false, "replay_state_unavailable");
+        return;
+    }
+    if (request_id == last_request_id) {
+        publish_response(false, "request_replay_rejected");
+        return;
+    }
 
     hg::PartitionArmState target{};
     if (command == "security.arm_away") target = hg::PartitionArmState::Away;
@@ -491,7 +529,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
 
     // Persist the monotonic counter before the side effect. If persistence
     // fails, fail closed so a reboot cannot reopen a replay window.
-    if (!persist_command_counter(command_counter)) {
+    if (!persist_command_replay_state(command_counter, request_id)) {
         publish_response(false, "replay_state_persist_failed");
         return;
     }
