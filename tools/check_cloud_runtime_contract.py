@@ -68,6 +68,14 @@ disarm_side_effect = link.find("model_->set_partition_arm", disarm_target)
 require(disarm_target >= 0 and disarm_persist >= 0 and disarm_consume >= 0 and disarm_side_effect >= 0
         and disarm_persist < disarm_consume < disarm_side_effect,
         "disarm must durably persist replay state before burning challenge and applying side effect")
+require("canonical_text_safe" in link and 'publish_response(false, "invalid_canonical_text")' in link,
+        "signed envelope text fields are not protected from canonical transcript control-character injection")
+require("!canonical_text_safe(envelope_device_id)" in link and
+        "!canonical_text_safe(request_id)" in link and
+        "!canonical_text_safe(actor)" in link and
+        "!canonical_text_safe(command)" in link and
+        "!canonical_text_safe(challenge)" in link,
+        "all signed textual envelope fields must be canonical-text validated")
 require("access_control_->authorize_session(actor, command)" in link,
         "MQTT commands do not authorize the signed actor through AccessControl session roles")
 require('parse_json_string(body, "credential"' not in link and "authorize(actor, credential" not in link,
