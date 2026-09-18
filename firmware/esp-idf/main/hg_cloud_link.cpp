@@ -166,6 +166,14 @@ bool parse_json_string(const std::string& body, const char* key, std::string& va
     return false;
 }
 
+bool canonical_text_safe(const std::string& value)
+{
+    for (const unsigned char ch : value) {
+        if (ch < 0x20U || ch == 0x7fU) return false;
+    }
+    return true;
+}
+
 std::string json_escape(const std::string& value)
 {
     std::string out;
@@ -490,6 +498,16 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         !parse_json_string(body, "challenge", challenge) ||
         !parse_json_string(body, "signature", signature)) {
         publish_response(false, "invalid_request");
+        return;
+    }
+
+    // The signature transcript is line-oriented (key=value\\n). Reject control
+    // characters before canonicalization so signed fields cannot inject lines or
+    // create an ambiguous transcript.
+    if (!canonical_text_safe(envelope_device_id) || !canonical_text_safe(request_id) ||
+        !canonical_text_safe(actor) || !canonical_text_safe(command) ||
+        !canonical_text_safe(challenge)) {
+        publish_response(false, "invalid_canonical_text");
         return;
     }
 
