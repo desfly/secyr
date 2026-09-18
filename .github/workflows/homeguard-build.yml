@@ -176,7 +176,7 @@ jobs:
           echo "=== BENCH security facts from generated sdkconfig ==="
           grep -E 'CONFIG_(NVS_ENCRYPTION|SECURE_BOOT|SECURE_FLASH_ENC)' sdkconfig || true
           if grep -q 'CONFIG_NVS_ENCRYPTION=y' sdkconfig; then exit 1; fi
-          if grep -q 'CONFIG_SECURE_BOOT' sdkconfig; then exit 1; fi
+          if grep -Eq '^CONFIG_SECURE_BOOT.*=y' sdkconfig; then exit 1; fi
           if grep -q 'CONFIG_SECURE_FLASH_ENC_ENABLED=y' sdkconfig; then exit 1; fi
           echo "BENCH SECURITY PROFILE CONFIRMED"
       - name: Build firmware
