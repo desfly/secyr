@@ -25,7 +25,10 @@ with tempfile.TemporaryDirectory(prefix="homeguard-kotlin-") as temporary:
     ]
     handoff_jar = temp / "handoff-tests.jar"
     subprocess.run([kotlinc, "-J-Dkotlin.daemon.enabled=false", "-J-Dkotlin.compiler.execution.strategy=in-process", *map(str, handoff_sources), "-include-runtime", "-d", str(handoff_jar)], check=True)
-    handoff_output = subprocess.run([java, "-jar", str(handoff_jar)], check=True, text=True, capture_output=True).stdout.strip()
+    handoff_run = subprocess.run([java, "-jar", str(handoff_jar)], text=True, capture_output=True)
+    if handoff_run.returncode != 0:
+        raise SystemExit(f"handoff tests failed ({handoff_run.returncode}):\n{(handoff_run.stderr or handoff_run.stdout).strip()}")
+    handoff_output = handoff_run.stdout.strip()
 
     queue_sources = [
         root / "android/app/src/main/java/ua/homeguard/s3/model/CommandModels.kt",
@@ -35,7 +38,10 @@ with tempfile.TemporaryDirectory(prefix="homeguard-kotlin-") as temporary:
     ]
     queue_jar = temp / "queue-tests.jar"
     subprocess.run([kotlinc, "-J-Dkotlin.daemon.enabled=false", "-J-Dkotlin.compiler.execution.strategy=in-process", "-classpath", str(coroutines), *map(str, queue_sources), "-include-runtime", "-d", str(queue_jar)], check=True)
-    queue_output = subprocess.run([java, "-cp", f"{queue_jar}:{coroutines}", "QueueRuntimeTestKt"], check=True, text=True, capture_output=True).stdout.strip()
+    queue_run = subprocess.run([java, "-cp", f"{queue_jar}:{coroutines}", "QueueRuntimeTestKt"], text=True, capture_output=True)
+    if queue_run.returncode != 0:
+        raise SystemExit(f"queue tests failed ({queue_run.returncode}):\n{(queue_run.stderr or queue_run.stdout).strip()}")
+    queue_output = queue_run.stdout.strip()
 
 counts = []
 for output in (handoff_output, queue_output):
