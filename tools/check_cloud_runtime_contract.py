@@ -37,6 +37,16 @@ require("responses" in link and "response_topic_" in link, "MQTT response topic 
 require("handle_command(event->data" in link, "MQTT command payload is not routed")
 require("trusted_time_->ready()" in link and "expires_at_ms" in link and "issued_at_ms" in link,
         "MQTT command freshness is not gated by trusted time")
+challenge_branch = link.find('if (command == "security.disarm_challenge")')
+replay_check = link.find("if (command_counter <= stored_counter)")
+request_replay_check = link.find("if (request_id == last_request_id)")
+challenge_persist = link.find("persist_command_replay_state(command_counter, request_id)", challenge_branch)
+challenge_issue = link.find("issue_disarm_challenge()", challenge_branch)
+require(challenge_branch >= 0, "signed disarm challenge issuance path missing")
+require(replay_check >= 0 and request_replay_check >= 0 and replay_check < challenge_branch and request_replay_check < challenge_branch,
+        "disarm challenge issuance bypasses persistent replay checks")
+require(challenge_persist >= 0 and challenge_issue >= 0 and challenge_persist < challenge_issue,
+        "disarm challenge replay state must persist before token issuance")
 require("access_control_->authorize(actor, credential, command)" in link, "MQTT commands bypass AccessControl")
 require("model_->set_partition_arm" in link and "bus_->dispatch_all" in link, "MQTT security command does not reach live model")
 require("deferred to safe command router" not in link, "old deferred MQTT command placeholder remains")
@@ -64,4 +74,5 @@ print(" - persistent MQTT config + boot restore")
 print(" - Bearer-session cloud configuration endpoint")
 print(" - live AccessControl/SystemModel command routing")
 print(" - MQTT responses topic")
+print(" - replay-protected one-time disarm challenge issuance")
 print(" - canonical signed-command contract + trust separation")
