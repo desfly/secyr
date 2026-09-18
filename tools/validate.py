@@ -165,6 +165,7 @@ policy = {
     'discovery_advertises_certificate_hostname': '{"host", hostname_local_.c_str()}' in discovery and 'operational_hostname' in factory_tool,
     'idf_managed_dependencies_pinned': all(item in idf_manifest for item in ['>=5.4.4,<5.5.0', 'espressif/mdns', '1.11.3', 'espressif/mqtt', '1.0.0']),
     'mqtt_transport_component_enabled': 'mqtt' in main_cmake and 'hg_cloud_link.cpp' in main_cmake,
+    'mqtt_tls_transport_enforced': all(item in cloud_link for item in ['mqtts://', 'esp_crt_bundle_attach', 'Refusing non-TLS MQTT broker URI']),
     'central_build_metadata': all(item in build_info for item in ['HG_PROJECT_NAME "HomeGuard-S3"', 'HG_BUILD_NUMBER "0027"', 'HG_FIRMWARE_VERSION "0.27.0-test"', 'HG_ESP_IDF_REQUIRED "5.4.4"']),
     'android_rejects_insecure_discovery': all(item in endpoint_selection for item in ['matchingLocalSecure', 'input.matchingLocalSecure', 'matchingLocalApiVersion == 1']) and 'certificateSha256' in endpoint_resolver,
     'ci_current_actions_configured': all(item in release_workflow for item in ['actions/checkout@v5', 'actions/upload-artifact@v4', 'actions/setup-java@v5', 'gradle/actions/setup-gradle@v4']),
