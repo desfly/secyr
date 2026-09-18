@@ -22,7 +22,7 @@ def require(ok: bool, msg: str):
 require('"hg_cloud_nvs.cpp"' in cmake, "cloud NVS source not compiled")
 require("g_cloud_store.load" in app and "restore_cloud_config" in app, "cloud config not restored at boot")
 require("g_cloud_link.start" in app, "persisted cloud config does not auto-start MQTT")
-require("set_command_runtime(&g_system_model, &g_system_bus, &g_access_control)" in app, "live command runtime not wired")
+require("set_command_runtime(&g_system_model, &g_system_bus, &g_access_control, &g_cloud_time)" in app, "live command runtime + trusted time not wired")
 require('"/api/v1/cloud/status"' in http, "cloud status endpoint missing")
 require('"/api/v1/cloud/config"' in http, "cloud config endpoint missing")
 require("request_auth::authenticated_actor(request, *access_control_, actor)" in http,
@@ -35,6 +35,8 @@ require("store_->save(config)" in http, "cloud config is not persisted")
 require("cloud_->stop()" in http and "cloud_->start(" in http, "cloud config change does not restart MQTT")
 require("responses" in link and "response_topic_" in link, "MQTT response topic missing")
 require("handle_command(event->data" in link, "MQTT command payload is not routed")
+require("trusted_time_->ready()" in link and "expires_at_ms" in link and "issued_at_ms" in link,
+        "MQTT command freshness is not gated by trusted time")
 require("access_control_->authorize(actor, credential, command)" in link, "MQTT commands bypass AccessControl")
 require("model_->set_partition_arm" in link and "bus_->dispatch_all" in link, "MQTT security command does not reach live model")
 require("deferred to safe command router" not in link, "old deferred MQTT command placeholder remains")
