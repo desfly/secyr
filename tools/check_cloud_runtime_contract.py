@@ -101,8 +101,9 @@ for field in canonical_fields:
     require(field in contract, f"canonical MQTT contract missing {field}")
 require("Factory identity" in contract and "MQTT credentials" in contract and "Cloud Command Trust identity" in contract,
         "MQTT trust identities are not explicitly separated")
-require("must not be claimed as implemented until their CI gates are green" in contract,
-        "contract must distinguish required MQTT security from implemented firmware")
+require("firmware enforces signed-command verification" in contract.lower() and
+        "guarded by ci" in contract.lower(),
+        "contract must state the implemented MQTT security baseline and CI enforcement")
 
 if errors:
     print("Cloud runtime contract FAIL")
