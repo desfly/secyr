@@ -32,6 +32,8 @@ require('access_control_->authorize_session(actor, "cloud.configure")' in http,
 require('access_control_->authorize(actor, credential, "cloud.configure")' not in http,
         "cloud config endpoint still re-checks acting PIN after Bearer login")
 require("store_->save(config)" in http, "cloud config is not persisted")
+require("CloudTrustStore" not in http and "hg_cloud_trust_nvs" not in http,
+        "ordinary /cloud/config must not provision, rotate, or clear Cloud Command Trust")
 require("cloud_->stop()" in http and "cloud_->start(" in http, "cloud config change does not restart MQTT")
 require("responses" in link and "response_topic_" in link, "MQTT response topic missing")
 require("handle_command(event->data" in link, "MQTT command payload is not routed")
@@ -72,6 +74,7 @@ if errors:
 print("Cloud runtime contract PASS")
 print(" - persistent MQTT config + boot restore")
 print(" - Bearer-session cloud configuration endpoint")
+print(" - ordinary cloud config isolated from Cloud Command Trust")
 print(" - live AccessControl/SystemModel command routing")
 print(" - MQTT responses topic")
 print(" - replay-protected one-time disarm challenge issuance")
