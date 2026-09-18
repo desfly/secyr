@@ -245,7 +245,7 @@ esp_err_t start_https_server()
 esp_err_t start_http_server()
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 48;
+    config.max_uri_handlers = 16;
     config.stack_size = 8192;
     config.lru_purge_enable = true;
 
@@ -253,8 +253,7 @@ esp_err_t start_http_server()
 
     const auto rollback_http = [](esp_err_t error, const char* stage) -> esp_err_t {
         if (error == ESP_OK) return ESP_OK;
-        ESP_LOGE(kTag, "HTTP route registration failed at %s: %s; rolling back partial server", stage, esp_err_to_name(error));
-        g_system_http.detach_transport();
+        ESP_LOGE(kTag, "HTTP bootstrap route registration failed at %s: %s; rolling back partial server", stage, esp_err_to_name(error));
         if (g_http_server != nullptr) {
             const auto stop_error = httpd_stop(g_http_server);
             if (stop_error != ESP_OK) ESP_LOGE(kTag, "Partial HTTP server stop failed: %s", esp_err_to_name(stop_error));
@@ -263,34 +262,12 @@ esp_err_t start_http_server()
         return error;
     };
 
+    // Port 80 is bootstrap-only. Operational control, status, access, service,
+    // build, cloud, hardware and telemetry routes live exclusively on HTTPS.
     auto error = g_web_http.register_handlers(g_http_server);
-    if (error != ESP_OK) return rollback_http(error, "web routes");
+    if (error != ESP_OK) return rollback_http(error, "web bootstrap routes");
     error = g_network_http.register_handlers(g_http_server);
-    if (error != ESP_OK) return rollback_http(error, "network routes");
-    error = g_lan_http.register_handlers(g_http_server, &g_access_control);
-    if (error != ESP_OK) return rollback_http(error, "LAN discovery routes");
-    error = g_cloud_http.register_handlers(g_http_server, &g_cloud_link, &g_cloud_store, &g_access_control);
-    if (error != ESP_OK) return rollback_http(error, "cloud routes");
-    error = g_http_api.register_handlers(g_http_server, &g_hardware, &g_access_control);
-    if (error != ESP_OK) return rollback_http(error, "hardware routes");
-    error = g_system_http.register_handlers(g_http_server, &g_system_model, &g_system_bus, &g_access_control);
-    if (error != ESP_OK) return rollback_http(error, "system routes");
-
-    g_output_http.set_access_control(&g_access_control);
-    error = g_output_http.register_handlers(g_http_server, &g_system_model, &g_boot_readiness, &g_physical_outputs, &g_system_bus);
-    if (error != ESP_OK) return rollback_http(error, "output routes");
-
-    error = g_access_http.register_handlers(g_http_server, &g_access_control, &g_access_store, g_access_bootstrap_allowed);
-    if (error != ESP_OK) return rollback_http(error, "access routes");
-    error = g_telemetry_session_http.register_handlers(g_http_server, &g_access_control, &g_websocket_telemetry);
-    if (error != ESP_OK) return rollback_http(error, "telemetry session route");
-
-    g_service_http.set_access_control(&g_access_control);
-    error = g_service_http.register_handlers(g_http_server, &g_commissioning_store, &g_hardware_verification, &g_commissioning_state, &g_boot_readiness, &g_system_bus);
-    if (error != ESP_OK) return rollback_http(error, "service routes");
-
-    error = g_build_http.register_handlers(g_http_server, &g_access_control);
-    if (error != ESP_OK) return rollback_http(error, "build routes");
+    if (error != ESP_OK) return rollback_http(error, "network bootstrap routes");
     return ESP_OK;
 }
 
