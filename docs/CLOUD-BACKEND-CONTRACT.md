@@ -26,12 +26,12 @@ There is one command schema for firmware, backend and CI. The backend must accep
   "counter": 42,
   "issuedAtMs": 1785740000000,
   "expiresAtMs": 1785740120000,
-  "challenge": null,
+  "challenge": "",
   "signature": "<signature over canonical fields>"
 }
 ```
 
-The signature covers, in fixed canonical order, `version`, `deviceId`, `requestId`, `actor`, `command`, `counter`, `issuedAtMs`, `expiresAtMs` and `challenge`. The signature field itself is never part of the signed bytes.
+The signature covers, in fixed canonical order, `version`, `deviceId`, `requestId`, `actor`, `command`, `counter`, `issuedAtMs`, `expiresAtMs` and `challenge`. The signature field itself is never part of the signed bytes. `challenge` is always a JSON string: use `""` for commands that do not require a challenge; `security.disarm` uses the currently issued 32-character hexadecimal one-time challenge. `null` is not valid.
 
 Before any command side effect, firmware must fail closed unless all applicable checks succeed:
 
@@ -44,7 +44,7 @@ Before any command side effect, firmware must fail closed unless all applicable 
 7. the actor is authorized for the requested command;
 8. dangerous actions satisfy their required challenge/presence policy.
 
-The current firmware already enforces local command authorization and persistent monotonic anti-replay. Signature verification, freshness, request-ID replay protection and dangerous-action challenge enforcement are required implementation work and must not be claimed as implemented until their CI gates are green.
+The firmware enforces signed-command verification, trusted-time freshness, local actor authorization, persistent monotonic counter/request-ID replay barriers, and one-time challenge enforcement for remote disarm; these contracts are guarded by CI.
 
 ## Trust separation
 
