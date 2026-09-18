@@ -12,6 +12,7 @@ app = read("app_main.cpp")
 link = read("hg_cloud_link.cpp")
 http = read("hg_cloud_http.cpp")
 nvs = read("hg_cloud_nvs.cpp")
+trust_nvs = read("hg_cloud_trust_nvs.cpp")
 cmake = read("CMakeLists.txt")
 contract = (ROOT / "docs" / "CLOUD-BACKEND-CONTRACT.md").read_text(encoding="utf-8")
 errors = []
@@ -36,6 +37,15 @@ config_start = http.find("esp_err_t CloudHttp::handle_config")
 config_body = http[config_start:] if config_start >= 0 else ""
 require("CloudTrustStore" not in config_body and "trust_store_" not in config_body and "hg_cloud_trust_nvs" not in config_body,
         "ordinary /cloud/config must not provision, rotate, or clear Cloud Command Trust")
+require('"/api/v1/cloud/trust"' in http, "separate Cloud Command Trust endpoint missing")
+trust_start = http.find("esp_err_t CloudHttp::handle_trust")
+trust_body = http[trust_start:] if trust_start >= 0 else ""
+require("request_auth::authenticated_admin(request, *access_control_)" in trust_body,
+        "Cloud Command Trust provisioning is not admin-only")
+require("trust_store_->save(trust)" in trust_body,
+        "Cloud Command Trust endpoint does not persist trust material")
+require("trust.version <= current.version" in trust_nvs and "ESP_ERR_INVALID_STATE" in trust_nvs,
+        "Cloud Command Trust store does not reject version rollback")
 require("cloud_->stop()" in http and "cloud_->start(" in http, "cloud config change does not restart MQTT")
 require("responses" in link and "response_topic_" in link, "MQTT response topic missing")
 require("handle_command(event->data" in link, "MQTT command payload is not routed")
@@ -77,6 +87,7 @@ print("Cloud runtime contract PASS")
 print(" - persistent MQTT config + boot restore")
 print(" - Bearer-session cloud configuration endpoint")
 print(" - ordinary cloud config isolated from Cloud Command Trust")
+print(" - admin-only monotonic Cloud Command Trust provisioning")
 print(" - live AccessControl/SystemModel command routing")
 print(" - MQTT responses topic")
 print(" - replay-protected one-time disarm challenge issuance")
