@@ -61,6 +61,13 @@ require(replay_check >= 0 and request_replay_check >= 0 and replay_check < chall
         "disarm challenge issuance bypasses persistent replay checks")
 require(challenge_persist >= 0 and challenge_issue >= 0 and challenge_persist < challenge_issue,
         "disarm challenge replay state must persist before token issuance")
+disarm_target = link.find('else if (command == "security.disarm") target =')
+disarm_persist = link.find("persist_command_replay_state(command_counter, request_id)", disarm_target)
+disarm_consume = link.find("consume_disarm_challenge()", disarm_target)
+disarm_side_effect = link.find("model_->set_partition_arm", disarm_target)
+require(disarm_target >= 0 and disarm_persist >= 0 and disarm_consume >= 0 and disarm_side_effect >= 0
+        and disarm_persist < disarm_consume < disarm_side_effect,
+        "disarm must durably persist replay state before burning challenge and applying side effect")
 require("access_control_->authorize_session(actor, command)" in link,
         "MQTT commands do not authorize the signed actor through AccessControl session roles")
 require('parse_json_string(body, "credential"' not in link and "authorize(actor, credential" not in link,
@@ -93,5 +100,5 @@ print(" - ordinary cloud config isolated from Cloud Command Trust")
 print(" - admin-only monotonic Cloud Command Trust provisioning")
 print(" - signed-actor AccessControl session authorization; no MQTT PIN credential")
 print(" - MQTT responses topic")
-print(" - replay-protected one-time disarm challenge issuance")
+print(" - replay-protected one-time disarm challenge issuance + durable burn ordering")
 print(" - canonical signed-command contract + trust separation")
