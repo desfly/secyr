@@ -31,7 +31,7 @@ constexpr char kCommandCounterKey[] = "cmd_counter";
 constexpr char kRequestIdKey[] = "req_id";
 constexpr std::uint64_t kMaxCommandTtlMs = 120000ULL;
 constexpr std::uint64_t kMaxIssuedFutureSkewMs = 30000ULL;
-constexpr std::size_t kMaxChallengeLength = 128U;
+constexpr std::size_t kDisarmChallengeLength = 32U;
 constexpr std::uint64_t kDisarmChallengeTtlUs = 60ULL * 1000ULL * 1000ULL;
 std::string g_disarm_challenge;
 std::uint64_t g_disarm_challenge_deadline_us{};
@@ -50,8 +50,21 @@ std::string issue_disarm_challenge()
 bool valid_disarm_challenge(const std::string& challenge)
 {
     const auto now = static_cast<std::uint64_t>(esp_timer_get_time());
-    return !g_disarm_challenge.empty() && now <= g_disarm_challenge_deadline_us &&
-           challenge == g_disarm_challenge;
+    if (g_disarm_challenge.size() != kDisarmChallengeLength ||
+        challenge.size() != kDisarmChallengeLength ||
+        now > g_disarm_challenge_deadline_us) {
+        return false;
+    }
+
+    unsigned char difference = 0;
+    for (std::size_t i = 0; i < kDisarmChallengeLength; ++i) {
+        const auto ch = static_cast<unsigned char>(challenge[i]);
+        const bool hex = (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
+        if (!hex) return false;
+        difference |= static_cast<unsigned char>(
+            ch ^ static_cast<unsigned char>(g_disarm_challenge[i]));
+    }
+    return difference == 0;
 }
 
 void consume_disarm_challenge()
@@ -553,7 +566,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // One-time replay resistance is jointly provided by the persisted monotonic
     // counter/requestId state below; a replayed signed envelope cannot execute.
     if (command == "security.disarm" &&
-        (challenge.empty() || challenge.size() > kMaxChallengeLength || !valid_disarm_challenge(challenge))) {
+        !valid_disarm_challenge(challenge)) {
         publish_response(false, "challenge_required");
         return;
     }
