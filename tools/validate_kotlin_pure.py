@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory(prefix="homeguard-kotlin-") as temporary:
     temp = Path(temporary)
     handoff_sources = [
         root / "android/app/src/main/java/ua/homeguard/s3/provisioning/ProvisioningHandoff.kt",
-        root / "android/app/src/main/java/ua/homeguard/s3/network/LocalApiContract.kt",
+        root / "android/app/src/main/java/ua/homeguard/s3/network/LegacyApiContract.kt",
         root / "android/app/src/main/java/ua/homeguard/s3/model/ConnectivityModels.kt",
         root / "android/app/src/main/java/ua/homeguard/s3/model/SystemModels.kt",
         root / "android/app/src/main/java/ua/homeguard/s3/network/EndpointSelection.kt",
