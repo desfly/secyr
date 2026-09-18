@@ -23,6 +23,7 @@ idf_component_register(
         "hg_network_http.cpp"
         "hg_lan_http.cpp"
         "hg_cloud_link.cpp"
+        "hg_cloud_identity.cpp"
         "hg_cloud_http.cpp"
         "hg_cloud_nvs.cpp"
         "hg_build_info.cpp"
@@ -87,6 +88,7 @@ idf_component_register(
         fatfs
         homeguard_core
         mqtt
+        mbedtls
         nvs_flash
         sdmmc
         nvs_config_store
