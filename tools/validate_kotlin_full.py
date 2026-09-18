@@ -8,9 +8,10 @@ root = Path(__file__).resolve().parents[1]
 kotlinc = shutil.which('kotlinc')
 if not kotlinc:
     raise SystemExit('kotlinc is required')
-coroutines = Path('/root/.sdkman/candidates/kotlin/1.9.0/lib/kotlinx-coroutines-core-jvm.jar')
+kotlin_home = Path(kotlinc).resolve().parents[1]
+coroutines = kotlin_home / 'lib/kotlinx-coroutines-core-jvm.jar'
 if not coroutines.is_file():
-    raise SystemExit(f'kotlinx-coroutines-core-jvm.jar missing: {coroutines}')
+    raise SystemExit(f'kotlinx-coroutines-core-jvm.jar missing for active kotlinc={kotlinc}: {coroutines}')
 
 STUBS = {
     'AndroidManifest.kt': '''package android\nobject Manifest { object permission { const val CAMERA="CAMERA"; const val NEARBY_WIFI_DEVICES="NEARBY_WIFI_DEVICES"; const val ACCESS_FINE_LOCATION="ACCESS_FINE_LOCATION" } }\n''',
