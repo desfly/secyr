@@ -28,7 +28,11 @@ stage('run portable/Android/ESP gates in parallel')
 from concurrent.futures import ThreadPoolExecutor
 
 def captured(command):
-    return subprocess.run(command, check=True, text=True, capture_output=True).stdout.strip()
+    completed = subprocess.run(command, text=True, capture_output=True)
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(f"validation command failed ({completed.returncode}): {' '.join(map(str, command))}\\n{detail}")
+    return completed.stdout.strip()
 
 with ThreadPoolExecutor(max_workers=4) as executor:
     future_kotlin_pure = executor.submit(captured, [sys.executable, str(root / 'tools/validate_kotlin_pure.py')])
