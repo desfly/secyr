@@ -433,6 +433,16 @@ esp_err_t CloudLink::publish_state(const char* json, int qos, bool retain)
     return id >= 0 ? ESP_OK : ESP_FAIL;
 }
 
+esp_err_t CloudLink::issue_disarm_challenge()
+{
+    if (client_ == nullptr || !connected_) return ESP_ERR_INVALID_STATE;
+    const std::string challenge = ::homeguard::idf::issue_disarm_challenge();
+    const std::string payload = std::string{"{\"type\":\"security.disarm_challenge\",\"challenge\":\""} +
+                                json_escape(challenge) + "\",\"ttlMs\":60000}";
+    const int id = esp_mqtt_client_publish(client_, response_topic_.data(), payload.c_str(), 0, 1, 0);
+    return id >= 0 ? ESP_OK : ESP_FAIL;
+}
+
 void CloudLink::mqtt_event_handler(void* handler_args,
                                    esp_event_base_t,
                                    std::int32_t,
