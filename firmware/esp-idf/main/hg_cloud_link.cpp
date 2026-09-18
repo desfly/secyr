@@ -1,6 +1,7 @@
 #include "hg_cloud_link.hpp"
 #include "hg_cloud_command_verifier.hpp"
 #include "hg_cloud_trust_nvs.hpp"
+#include "hg_cloud_trusted_time.hpp"
 
 #include "esp_check.h"
 #include "esp_crt_bundle.h"
@@ -26,6 +27,8 @@ constexpr const char* kPrefix = "homeguard/v1/devices";
 constexpr std::uint64_t kHeartbeatPeriodUs = 60ULL * 1000ULL * 1000ULL;
 constexpr char kCloudSecurityNamespace[] = "hg-cloud-sec";
 constexpr char kCommandCounterKey[] = "cmd_counter";
+constexpr std::uint64_t kMaxCommandTtlMs = 120000ULL;
+constexpr std::uint64_t kMaxIssuedFutureSkewMs = 30000ULL;
 
 bool parse_json_u64(const std::string& body, const char* key, std::uint64_t& value)
 {
@@ -171,11 +174,13 @@ bool should_publish_event(hg::SystemEventType type)
 void CloudLink::set_command_runtime(
     hg::SystemModel* model,
     hg::SystemEventBus* bus,
-    homeguard::AccessControl* access_control)
+    homeguard::AccessControl* access_control,
+    CloudTrustedTime* trusted_time)
 {
     model_ = model;
     bus_ = bus;
     access_control_ = access_control;
+    trusted_time_ = trusted_time;
     if (bus_ != nullptr && !event_bus_subscribed_) {
         event_bus_subscribed_ = bus_->subscribe(&CloudLink::system_event_handler, this);
         if (!event_bus_subscribed_) ESP_LOGE(kTag, "Cloud event subscription failed");
@@ -388,8 +393,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     if (client_ == nullptr || data == nullptr || size == 0) return;
     const std::string body(data, size);
     std::string request_id, actor, credential, command, signature;
-    (void)parse_json_string(body, "request_id", request_id);
-    if (request_id.empty()) (void)parse_json_string(body, "requestId", request_id);
+    (void)parse_json_string(body, "requestId", request_id);
 
     auto publish_response = [&](bool ok, const char* reason, const char* arm_state = nullptr) {
         std::string response = std::string{"{\"ok\":"} + (ok ? "true" : "false") +
@@ -417,6 +421,22 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         !parse_json_u64(body, "expiresAtMs", expires_at_ms) ||
         !parse_json_string(body, "signature", signature)) {
         publish_response(false, "invalid_request");
+        return;
+    }
+
+    if (request_id.empty() || expires_at_ms <= issued_at_ms ||
+        (expires_at_ms - issued_at_ms) > kMaxCommandTtlMs) {
+        publish_response(false, "invalid_freshness_window");
+        return;
+    }
+    if (trusted_time_ == nullptr || !trusted_time_->ready()) {
+        publish_response(false, "trusted_time_unavailable");
+        return;
+    }
+    const auto now_ms = trusted_time_->now_ms();
+    if (now_ms == 0 || now_ms > expires_at_ms ||
+        issued_at_ms > now_ms + kMaxIssuedFutureSkewMs) {
+        publish_response(false, "stale_or_future_command");
         return;
     }
 
