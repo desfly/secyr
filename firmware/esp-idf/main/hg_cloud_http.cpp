@@ -7,11 +7,12 @@
 #include "hg_request_auth.hpp"
 #include "homeguard/access_control.hpp"
 #include "nvs.h"
+#include "mbedtls/pk.h"
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdlib>
 #include <cstdint>
+#include <limits>
 #include <string>
 
 namespace homeguard::idf {
@@ -24,6 +25,33 @@ bool parse_json_bool(const std::string& body, const char* key, bool& value)
     if (body.compare(pos, 4, "true") == 0) { value = true; return true; }
     if (body.compare(pos, 5, "false") == 0) { value = false; return true; }
     return false;
+}
+
+bool parse_json_u32_strict(const std::string& body, const char* key, std::uint32_t& value)
+{
+    const auto pos = http_util::value_offset(body, key);
+    if (pos == std::string::npos || pos >= body.size() || body[pos] < '0' || body[pos] > '9') return false;
+    std::uint64_t parsed = 0;
+    std::size_t i = pos;
+    for (; i < body.size() && body[i] >= '0' && body[i] <= '9'; ++i) {
+        parsed = parsed * 10U + static_cast<unsigned>(body[i] - '0');
+        if (parsed > std::numeric_limits<std::uint32_t>::max()) return false;
+    }
+    while (i < body.size() && (body[i] == ' ' || body[i] == '\t' || body[i] == '\r' || body[i] == '\n')) ++i;
+    if (i >= body.size() || (body[i] != ',' && body[i] != '}') || parsed == 0U) return false;
+    value = static_cast<std::uint32_t>(parsed);
+    return true;
+}
+
+bool valid_public_key_pem(const std::string& public_key)
+{
+    if (public_key.empty() || public_key.size() > 2048U) return false;
+    mbedtls_pk_context key;
+    mbedtls_pk_init(&key);
+    const int rc = mbedtls_pk_parse_public_key(
+        &key, reinterpret_cast<const unsigned char*>(public_key.c_str()), public_key.size() + 1U);
+    mbedtls_pk_free(&key);
+    return rc == 0;
 }
 
 void scrub_cloud_password(CloudConfig& config)
@@ -114,21 +142,21 @@ esp_err_t CloudHttp::handle_trust(httpd_req_t* request)
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"public_key_required\"}");
     }
-    const auto version_pos = http_util::value_offset(body, "version");
-    if (version_pos == std::string::npos) {
+    std::uint32_t version{};
+    if (!parse_json_u32_strict(body, "version", version)) {
         http_util::scrub(body);
-        httpd_resp_set_status(request, "400 Bad Request");
-        return send_json(request, "{\"ok\":false,\"reason\":\"version_required\"}");
-    }
-    char* end{};
-    const auto version = std::strtoul(body.c_str() + version_pos, &end, 10);
-    http_util::scrub(body);
-    if (end == body.c_str() + version_pos || version == 0 || version > UINT32_MAX) {
         http_util::scrub(public_key);
         httpd_resp_set_status(request, "400 Bad Request");
         return send_json(request, "{\"ok\":false,\"reason\":\"invalid_version\"}");
     }
-    CloudCommandTrust trust{static_cast<std::uint32_t>(version), public_key};
+    if (!valid_public_key_pem(public_key)) {
+        http_util::scrub(body);
+        http_util::scrub(public_key);
+        httpd_resp_set_status(request, "400 Bad Request");
+        return send_json(request, "{\"ok\":false,\"reason\":\"invalid_public_key\"}");
+    }
+    http_util::scrub(body);
+    CloudCommandTrust trust{version, public_key};
     const auto error = trust_store_->save(trust);
     http_util::scrub(public_key);
     http_util::scrub(trust.public_key_pem);
