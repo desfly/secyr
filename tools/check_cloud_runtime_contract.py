@@ -61,7 +61,10 @@ require(replay_check >= 0 and request_replay_check >= 0 and replay_check < chall
         "disarm challenge issuance bypasses persistent replay checks")
 require(challenge_persist >= 0 and challenge_issue >= 0 and challenge_persist < challenge_issue,
         "disarm challenge replay state must persist before token issuance")
-require("access_control_->authorize(actor, credential, command)" in link, "MQTT commands bypass AccessControl")
+require("access_control_->authorize_session(actor, command)" in link,
+        "MQTT commands do not authorize the signed actor through AccessControl session roles")
+require('parse_json_string(body, "credential"' not in link and "authorize(actor, credential" not in link,
+        "MQTT command path must not transport or re-check a user PIN credential")
 require("model_->set_partition_arm" in link and "bus_->dispatch_all" in link, "MQTT security command does not reach live model")
 require("deferred to safe command router" not in link, "old deferred MQTT command placeholder remains")
 require("nvs_set_str" in nvs and "nvs_get_str" in nvs and "nvs_commit" in nvs, "cloud credentials are not persisted in NVS")
@@ -88,7 +91,7 @@ print(" - persistent MQTT config + boot restore")
 print(" - Bearer-session cloud configuration endpoint")
 print(" - ordinary cloud config isolated from Cloud Command Trust")
 print(" - admin-only monotonic Cloud Command Trust provisioning")
-print(" - live AccessControl/SystemModel command routing")
+print(" - signed-actor AccessControl session authorization; no MQTT PIN credential")
 print(" - MQTT responses topic")
 print(" - replay-protected one-time disarm challenge issuance")
 print(" - canonical signed-command contract + trust separation")
