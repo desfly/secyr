@@ -172,16 +172,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # This workflow intentionally produces a BENCH image. Fail closed if
-          # its security posture is mislabeled or silently changes.
           test -f sdkconfig
-          if grep -qx 'CONFIG_NVS_ENCRYPTION=y' sdkconfig; then
-            echo "Unexpected NVS encryption in BENCH profile; use a reviewed production profile instead." >&2
-            exit 1
-          fi
-          if grep -Eq '^CONFIG_SECURE_BOOT.*=y
-        working-directory: firmware/esp-idf
-        shell: bash
+          grep -qx '# CONFIG_NVS_ENCRYPTION is not set' sdkconfig
+          if grep -Eq '^(CONFIG_SECURE_BOOT|CONFIG_SECURE_FLASH_ENC_ENABLED).*=[yY]        shell: bash
         run: |
           set -o pipefail
           source "$IDF_PATH/export.sh"
@@ -304,135 +297,7 @@ jobs:
             android/app/build/outputs/apk/debug/APKSIGNER-VERIFY.txt
           if-no-files-found: warn
  sdkconfig; then
-            echo "Unexpected Secure Boot in BENCH profile." >&2
-            exit 1
-          fi
-          if grep -Eq '^CONFIG_SECURE_FLASH_ENC_ENABLED=y
-        working-directory: firmware/esp-idf
-        shell: bash
-        run: |
-          set -o pipefail
-          source "$IDF_PATH/export.sh"
-          idf.py build 2>&1 | tee firmware-build.log
-      - name: Generate firmware checksums
-        if: success()
-        working-directory: firmware/esp-idf
-        shell: bash
-        run: |
-          find build -type f \( -name "*.bin" -o -name "*.elf" -o -name "*.map" \) -print0 | sort -z | xargs -0 sha256sum > build/SHA256SUMS.txt
-      - name: Upload ESP-IDF diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: HomeGuard-S3-ESP-IDF-diagnostics
-          path: |
-            firmware/esp-idf/firmware-build.log
-            firmware/esp-idf/sdkconfig
-            firmware/esp-idf/build/CMakeCache.txt
-            firmware/esp-idf/build/project_description.json
-            firmware/esp-idf/build/flasher_args.json
-            firmware/esp-idf/build/flash_args
-            firmware/esp-idf/build/compile_commands.json
-          if-no-files-found: warn
-      - name: Upload firmware
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: HomeGuard-S3-firmware
-          path: |
-            firmware/esp-idf/build/*.bin
-            firmware/esp-idf/build/*.elf
-            firmware/esp-idf/build/*.map
-            firmware/esp-idf/build/bootloader/*.bin
-            firmware/esp-idf/build/partition_table/*.bin
-            firmware/esp-idf/build/ota_data_initial.bin
-            firmware/esp-idf/build/flasher_args.json
-            firmware/esp-idf/build/flash_args
-            firmware/esp-idf/build/SHA256SUMS.txt
-          if-no-files-found: error
-
-  android-build:
-    name: Android debug APK
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-      - name: Set up Java 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Set up Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
-      - name: Restore stable Android debug signing key
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: homeguard-android-debug-keystore-v2
-      - name: Ensure stable Android debug signing key exists
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.android"
-          if [[ ! -s "$HOME/.android/debug.keystore" ]]; then
-            keytool -genkeypair -v \
-              -keystore "$HOME/.android/debug.keystore" \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -dname "CN=Android Debug,O=Android,C=US" \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000
-          fi
-          test -s "$HOME/.android/debug.keystore"
-          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey \
-            | grep -E 'SHA256:|Valid from:'
-      - name: Test Android access policy and build debug APK
-        working-directory: android
-        run: gradle --no-daemon --stacktrace testDebugUnitTest assembleDebug
-      - name: Prepare and verify MyFist installer
-        if: success()
-        shell: bash
-        run: |
-          set -euo pipefail
-          source_apk=$(find android/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' ! -name 'MyFist.apk' | head -n 1)
-          test -n "$source_apk"
-          cp "$source_apk" android/app/build/outputs/apk/debug/MyFist.apk
-          APK=android/app/build/outputs/apk/debug/MyFist.apk
-          test -s "$APK"
-          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-          test -n "$SDK_ROOT"
-          APKSIGNER=$(find "$SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -n 1)
-          test -x "$APKSIGNER"
-          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee android/app/build/outputs/apk/debug/APKSIGNER-VERIFY.txt
-          sha256sum "$APK" > android/app/build/outputs/apk/debug/SHA256SUMS.txt
-      - name: Upload Android APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: MyFist-Android
-          path: |
-            android/app/build/outputs/apk/debug/MyFist.apk
-            android/app/build/outputs/apk/debug/SHA256SUMS.txt
-            android/app/build/outputs/apk/debug/APKSIGNER-VERIFY.txt
-          if-no-files-found: error
-      - name: Upload Android diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: MyFist-Android-diagnostics
-          path: |
-            android/.gradle/**
-            android/app/build/reports/**
-            android/app/build/test-results/**
-            android/app/build/outputs/apk/debug/APKSIGNER-VERIFY.txt
-          if-no-files-found: warn
- sdkconfig; then
-            echo "Unexpected Flash Encryption in BENCH profile." >&2
+            echo "BENCH profile unexpectedly enables production security fuses" >&2
             exit 1
           fi
           echo "BENCH SECURITY PROFILE CONFIRMED: not production-flashable"
@@ -467,7 +332,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: HomeGuard-S3-firmware
+          name: HomeGuard-S3-BENCH-firmware
           path: |
             firmware/esp-idf/build/*.bin
             firmware/esp-idf/build/*.elf
