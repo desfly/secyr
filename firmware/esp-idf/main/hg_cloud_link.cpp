@@ -597,17 +597,17 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         return;
     }
 
-    // Consume a valid disarm challenge only after signature, authorization,
-    // and replay checks have succeeded. Unauthorized or replayed requests must
-    // not be able to burn the one-time token.
-    if (command == "security.disarm") consume_disarm_challenge();
-
-    // Persist the monotonic counter before the side effect. If persistence
-    // fails, fail closed so a reboot cannot reopen a replay window.
+    // Persist the monotonic counter before consuming a one-time challenge or
+    // applying the side effect. An NVS failure must not burn a valid challenge,
+    // while a reboot must not reopen the replay window.
     if (!persist_command_replay_state(command_counter, request_id)) {
         publish_response(false, "replay_state_persist_failed");
         return;
     }
+
+    // Signature, authorization, replay checks and durable replay-state update
+    // have all succeeded. Only now burn the one-time disarm token.
+    if (command == "security.disarm") consume_disarm_challenge();
 
     if (!model_->set_partition_arm(1, target, 0)) {
         publish_response(false, "partition_command_failed");
