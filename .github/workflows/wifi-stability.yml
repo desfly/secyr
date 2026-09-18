@@ -32,9 +32,8 @@ jobs:
         run: python tools/check_access_boundary.py
       - name: Firmware preflight
         run: python tools/preflight_firmware.py
-      - name: ESP-IDF mock syntax
-        run: python tools/syntax_check_esp_idf_mock.py
-      - name: ESP-IDF mock link
-        run: python tools/mock_link_esp_idf_main.py
+      # Firmware compilation/linking is authoritative in HomeGuard-S3 Build using ESP-IDF 5.4.4.
+      # Do not duplicate it with the legacy host mock SDK; that mock does not model
+      # components such as esp_https_server and can false-fail valid firmware.
       - name: Web JavaScript syntax
         run: node --check web/app.js && node --check web/access-session.js && node --check web/factory-reset.js
