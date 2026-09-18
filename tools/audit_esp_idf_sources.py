@@ -151,16 +151,17 @@ for required in (
     "esp_crt_bundle_attach",
     'parse_json_u64(body, "counter", command_counter)',
     "command_counter <= stored_counter",
-    "persist_command_counter(command_counter)",
-    "nvs_set_u64(handle, kCommandCounterKey, value)",
+    "persist_command_replay_state(command_counter, request_id)",
+    "nvs_set_u64(handle, kCommandCounterKey, counter)",
+    "nvs_set_str(handle, kRequestIdKey, request_id.c_str())",
     "nvs_commit(handle)",
 ):
     if required not in cloud_link:
         errors.append(f"hg_cloud_link.cpp: MQTT TLS/anti-replay contract missing {required}")
-persist_pos = cloud_link.find("persist_command_counter(command_counter)")
+persist_pos = cloud_link.find("persist_command_replay_state(command_counter, request_id)")
 effect_pos = cloud_link.find("model_->set_partition_arm")
 if persist_pos < 0 or effect_pos < 0 or persist_pos > effect_pos:
-    errors.append("hg_cloud_link.cpp: MQTT anti-replay counter must persist before command side effect")
+    errors.append("hg_cloud_link.cpp: MQTT replay state must persist before command side effect")
 
 output_http = (MAIN / "hg_output_http.cpp").read_text(encoding="utf-8")
 if '#include "hg_http_util.hpp"' not in output_http or \
