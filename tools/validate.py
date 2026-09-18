@@ -131,6 +131,7 @@ idf_main_shared_sources = set(re.findall(r'\.\./\.\./src/([A-Za-z0-9_]+\.cpp)', 
 idf_firmware_core_sources = idf_core_sources | idf_main_shared_sources
 
 network_http = (root / 'firmware/esp-idf/main/hg_network_http.cpp').read_text(encoding='utf-8')
+cloud_link = (root / 'firmware/esp-idf/main/hg_cloud_link.cpp').read_text(encoding='utf-8')
 
 policy = {
     'host_ctest_pass': '100% tests passed' in ctest.stdout,
