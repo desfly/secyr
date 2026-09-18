@@ -11,7 +11,7 @@ class DiscoveryRouteTest {
             EndpointAvailability(
                 hasDeviceId = true,
                 matchingLocalFound = true,
-                matchingLocalSecure = false,
+                matchingLocalSecure = true,
                 matchingLocalApiVersion = 1,
                 hasLastKnownLocal = true,
                 remoteAccessEnabled = true,
@@ -19,6 +19,22 @@ class DiscoveryRouteTest {
             )
         )
         assertEquals(ControlPath.LOCAL, path)
+    }
+
+    @Test
+    fun insecureDiscoveredDeviceDoesNotUseOperationalLocalRoute() {
+        val path = selectControlPath(
+            EndpointAvailability(
+                hasDeviceId = true,
+                matchingLocalFound = true,
+                matchingLocalSecure = false,
+                matchingLocalApiVersion = 1,
+                hasLastKnownLocal = true,
+                remoteAccessEnabled = true,
+                hasCloudBaseUrl = true,
+            )
+        )
+        assertEquals(ControlPath.LAST_KNOWN_LOCAL, path)
     }
 
     @Test
