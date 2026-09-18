@@ -528,6 +528,24 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         return;
     }
 
+    // Challenge issuance is itself a signed and authorized cloud operation.
+    // It never executes a partition side effect and the token is published
+    // non-retained with a short TTL by issue_disarm_challenge().
+    if (command == "security.disarm_challenge") {
+        const auto decision = access_control_->authorize(actor, credential, "security.disarm");
+        std::fill(credential.begin(), credential.end(), '\0');
+        if (decision != homeguard::AuditDecision::Allowed) {
+            publish_response(false, homeguard::to_string(decision));
+            return;
+        }
+        if (issue_disarm_challenge() != ESP_OK) {
+            publish_response(false, "challenge_issue_failed");
+            return;
+        }
+        publish_response(true, "challenge_issued");
+        return;
+    }
+
     // Remote disarm is a high-risk action: require a signed, non-empty challenge.
     // One-time replay resistance is jointly provided by the persisted monotonic
     // counter/requestId state below; a replayed signed envelope cannot execute.
