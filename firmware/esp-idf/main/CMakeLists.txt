@@ -26,6 +26,7 @@ idf_component_register(
         "hg_cloud_identity.cpp"
         "hg_cloud_http.cpp"
         "hg_cloud_nvs.cpp"
+        "hg_cloud_trust_nvs.cpp"
         "hg_build_info.cpp"
         "hg_build_http.cpp"
         "hg_i2c_bus.cpp"
