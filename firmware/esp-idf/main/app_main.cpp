@@ -296,7 +296,7 @@ esp_err_t start_http_server()
 
 void start_authenticated_telemetry_websocket()
 {
-    if (g_http_server == nullptr) return;
+    if (g_https_server == nullptr) return;
     std::string token;
     hg::ProvisioningPayload provisioning{};
     if (g_provisioning_store.load_provisioning(provisioning) && provisioning.valid({})) {
@@ -306,7 +306,7 @@ void start_authenticated_telemetry_websocket()
     }
     provisioning.clear_secrets();
 
-    const bool started = g_websocket_telemetry.begin(g_http_server, token);
+    const bool started = g_websocket_telemetry.begin(g_https_server, token);
     std::fill(token.begin(), token.end(), '\0');
     token.clear();
 
@@ -314,7 +314,7 @@ void start_authenticated_telemetry_websocket()
         ESP_LOGE(kTag, "Authenticated telemetry websocket registration failed");
         return;
     }
-    ESP_LOGI(kTag, "Authenticated telemetry websocket ready at /ws/telemetry");
+    ESP_LOGI(kTag, "Authenticated telemetry WSS ready at /ws/telemetry");
 }
 
 void start_device_discovery()
@@ -422,7 +422,9 @@ extern "C" void app_main()
     const auto http_error = start_http_server();
     if (http_error != ESP_OK) {
         ESP_LOGE(kTag, "HTTP server failed: %s", esp_err_to_name(http_error));
-    } else {
+    }
+
+    if (https_error == ESP_OK) {
         start_authenticated_telemetry_websocket();
         if (cloud_identity_error == ESP_OK) start_device_discovery();
     }
