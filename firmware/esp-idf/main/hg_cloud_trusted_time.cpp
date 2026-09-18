@@ -3,6 +3,7 @@
 #include "esp_netif_sntp.h"
 
 #include <ctime>
+#include <cstdint>
 
 namespace homeguard::idf {
 namespace {
