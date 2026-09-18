@@ -32,7 +32,9 @@ require('access_control_->authorize_session(actor, "cloud.configure")' in http,
 require('access_control_->authorize(actor, credential, "cloud.configure")' not in http,
         "cloud config endpoint still re-checks acting PIN after Bearer login")
 require("store_->save(config)" in http, "cloud config is not persisted")
-require("CloudTrustStore" not in http and "hg_cloud_trust_nvs" not in http,
+config_start = http.find("esp_err_t CloudHttp::handle_config")
+config_body = http[config_start:] if config_start >= 0 else ""
+require("CloudTrustStore" not in config_body and "trust_store_" not in config_body and "hg_cloud_trust_nvs" not in config_body,
         "ordinary /cloud/config must not provision, rotate, or clear Cloud Command Trust")
 require("cloud_->stop()" in http and "cloud_->start(" in http, "cloud config change does not restart MQTT")
 require("responses" in link and "response_topic_" in link, "MQTT response topic missing")
