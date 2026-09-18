@@ -9,6 +9,7 @@ namespace homeguard::idf {
 
 class CloudLink;
 class CloudNvsStore;
+class CloudTrustStore;
 
 class CloudHttp {
 public:
@@ -16,15 +17,19 @@ public:
         httpd_handle_t server,
         CloudLink* cloud,
         CloudNvsStore* store,
+        CloudTrustStore* trust_store,
         homeguard::AccessControl* access_control);
 
 private:
     static esp_err_t status_get(httpd_req_t* request);
     static esp_err_t config_post(httpd_req_t* request);
+    static esp_err_t trust_post(httpd_req_t* request);
     esp_err_t handle_config(httpd_req_t* request);
+    esp_err_t handle_trust(httpd_req_t* request);
 
     CloudLink* cloud_{};
     CloudNvsStore* store_{};
+    CloudTrustStore* trust_store_{};
     homeguard::AccessControl* access_control_{};
 };
 
