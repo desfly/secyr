@@ -27,6 +27,7 @@ fun MaintenancePanel(
     var detailsExpanded by remember { mutableStateOf(false) }
     val connectionProblems = diagnostics.connectionItems.count { !it.ok }
     val hardwareProblems = diagnostics.hardwareItems.count { !it.ok }
+    val bleItem = diagnostics.connectionItems.firstOrNull { it.label == "BLE" }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -46,20 +47,31 @@ fun MaintenancePanel(
                     style = MaterialTheme.typography.bodyMedium,
                 )
 
+                Text(
+                    when {
+                        bleItem == null -> "BLE: немає діагностичних даних"
+                        bleItem.ok -> "✓ BLE: ${bleItem.detail}"
+                        else -> "! BLE: ${bleItem.detail}"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+
                 OutlinedButton(
                     onClick = { detailsExpanded = !detailsExpanded },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (detailsExpanded) "Сховати деталі" else "Показати деталі")
+                    Text(if (detailsExpanded) "Сховати всі деталі" else "Показати всі деталі")
                 }
 
                 if (detailsExpanded) {
-                    diagnostics.connectionItems.forEach { item ->
-                        Text(
-                            "${if (item.ok) "✓" else "!"} ${item.label}: ${item.detail}",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
+                    diagnostics.connectionItems
+                        .filterNot { it.label == "BLE" }
+                        .forEach { item ->
+                            Text(
+                                "${if (item.ok) "✓" else "!"} ${item.label}: ${item.detail}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                     diagnostics.hardwareItems.forEach { item ->
                         Text(
                             "${if (item.ok) "✓" else "!"} ${item.label}: ${item.detail}",

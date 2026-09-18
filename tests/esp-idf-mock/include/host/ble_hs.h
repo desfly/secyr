@@ -52,6 +52,7 @@ struct ble_gap_event {
     struct { int status{0}; std::uint16_t conn_handle{0}; } connect{};
     struct { int reason{0}; } disconnect{};
     struct { std::uint16_t attr_handle{0}; int cur_notify{0}; } subscribe{};
+    struct { int status{0}; std::uint16_t conn_handle{0}; } enc_change{};
     struct {
         ble_addr_t addr{};
         const std::uint8_t* data{nullptr};
@@ -66,6 +67,9 @@ struct ble_hs_adv_fields {
     ble_uuid128_t* uuids128{nullptr};
     std::uint8_t num_uuids128{0};
     std::uint8_t uuids128_is_complete{0};
+    std::uint8_t* name{nullptr};
+    std::uint8_t name_len{0};
+    std::uint8_t name_is_complete{0};
     const std::uint8_t* mfg_data{nullptr};
     std::uint8_t mfg_data_len{0};
 };
@@ -86,14 +90,18 @@ struct ble_hs_cfg_t {
     std::uint8_t sm_sc{0};
     std::uint8_t sm_mitm{0};
     std::uint8_t sm_io_cap{0};
+    std::uint8_t sm_our_key_dist{0};
+    std::uint8_t sm_their_key_dist{0};
 };
 
 inline ble_hs_cfg_t ble_hs_cfg{};
 
 constexpr int BLE_HS_EALREADY = 2;
+constexpr int BLE_GATT_ACCESS_OP_READ_CHR = 0;
 constexpr int BLE_GATT_ACCESS_OP_WRITE_CHR = 1;
 constexpr int BLE_ATT_ERR_UNLIKELY = 0x0e;
 constexpr int BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN = 0x0d;
+constexpr std::uint16_t BLE_GATT_CHR_F_READ = 0x0002;
 constexpr std::uint16_t BLE_GATT_CHR_F_WRITE = 0x0008;
 constexpr std::uint16_t BLE_GATT_CHR_F_WRITE_NO_RSP = 0x0010;
 constexpr std::uint16_t BLE_GATT_CHR_F_NOTIFY = 0x0020;
@@ -107,11 +115,14 @@ constexpr int BLE_GAP_EVENT_ADV_COMPLETE = 3;
 constexpr int BLE_GAP_EVENT_SUBSCRIBE = 4;
 constexpr int BLE_GAP_EVENT_DISC = 5;
 constexpr int BLE_GAP_EVENT_DISC_COMPLETE = 6;
+constexpr int BLE_GAP_EVENT_ENC_CHANGE = 7;
 constexpr std::uint8_t BLE_HS_ADV_F_DISC_GEN = 0x02;
 constexpr std::uint8_t BLE_HS_ADV_F_BREDR_UNSUP = 0x04;
 constexpr std::uint8_t BLE_GAP_CONN_MODE_UND = 1;
 constexpr std::uint8_t BLE_GAP_DISC_MODE_GEN = 1;
 constexpr std::uint8_t BLE_HS_IO_NO_INPUT_OUTPUT = 3;
+constexpr std::uint8_t BLE_SM_PAIR_KEY_DIST_ENC = 0x01;
+constexpr std::uint8_t BLE_SM_PAIR_KEY_DIST_ID = 0x02;
 constexpr std::int32_t BLE_HS_FOREVER = -1;
 
 inline int ble_hs_mbuf_to_flat(os_mbuf* om, void* dst, std::uint16_t max_len, std::uint16_t* out_len) {
@@ -136,8 +147,15 @@ inline int ble_gatts_notify_custom(std::uint16_t, std::uint16_t, os_mbuf*) { ret
 inline std::uint16_t ble_att_mtu(std::uint16_t) { return 247; }
 inline int ble_hs_id_infer_auto(int, std::uint8_t* out_addr_type) { if (out_addr_type) *out_addr_type = 0; return 0; }
 inline int ble_gap_adv_set_fields(const ble_hs_adv_fields*) { return 0; }
-inline int ble_gap_adv_start(std::uint8_t, const void*, std::int32_t, const ble_gap_adv_params*, ble_gap_event_fn, void*) { return 0; }
+inline int ble_gap_adv_rsp_set_fields(const ble_hs_adv_fields*) { return 0; }
+inline bool& ble_mock_adv_active_storage() { static bool active = false; return active; }
+inline int ble_gap_adv_start(std::uint8_t, const void*, std::int32_t, const ble_gap_adv_params*, ble_gap_event_fn, void*) {
+    ble_mock_adv_active_storage() = true;
+    return 0;
+}
+inline int ble_gap_adv_active() { return ble_mock_adv_active_storage() ? 1 : 0; }
 inline int ble_gap_disc(std::uint8_t, std::int32_t, const ble_gap_disc_params*, ble_gap_event_fn, void*) { return 0; }
+inline int ble_gap_security_initiate(std::uint16_t) { return 0; }
 inline int ble_hs_adv_parse_fields(ble_hs_adv_fields* fields, const std::uint8_t* data, std::uint8_t length) {
     if (!fields) return -1;
     fields->mfg_data = data;
