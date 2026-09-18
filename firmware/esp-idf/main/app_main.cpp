@@ -390,7 +390,7 @@ extern "C" void app_main()
     else ESP_LOGI(kTag, "Cloud identity ready: %s", g_cloud_link.device_id());
 
     initialize_system_model();
-    g_cloud_link.set_command_runtime(&g_system_model, &g_system_bus, &g_access_control);
+    g_cloud_link.set_command_runtime(&g_system_model, &g_system_bus, &g_access_control, &g_cloud_time);
     if (cloud_identity_error == ESP_OK) restore_cloud_config();
     initialize_physical_outputs();
     start_ble_transport();
