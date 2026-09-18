@@ -179,6 +179,18 @@ jobs:
           if grep -q '^CONFIG_SECURE_BOOT=y' sdkconfig; then exit 1; fi
           if grep -q 'CONFIG_SECURE_FLASH_ENC_ENABLED=y' sdkconfig; then exit 1; fi
           echo "BENCH SECURITY PROFILE CONFIRMED"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          cfg = Path("sdkconfig").read_text(encoding="utf-8")
+          facts = {
+              "profile": "BENCH",
+              "nvs_encryption_enabled": "CONFIG_NVS_ENCRYPTION=y" in cfg,
+              "secure_boot_enabled": "CONFIG_SECURE_BOOT=y" in cfg,
+              "flash_encryption_enabled": "CONFIG_SECURE_FLASH_ENC_ENABLED=y" in cfg,
+          }
+          Path("build-security-profile.json").write_text(json.dumps(facts, indent=2) + "\\n", encoding="utf-8")
+          PY
       - name: Build firmware
         working-directory: firmware/esp-idf
         shell: bash
@@ -200,6 +212,7 @@ jobs:
           path: |
             firmware/esp-idf/firmware-build.log
             firmware/esp-idf/sdkconfig
+            firmware/esp-idf/build-security-profile.json
             firmware/esp-idf/build/CMakeCache.txt
             firmware/esp-idf/build/project_description.json
             firmware/esp-idf/build/flasher_args.json
