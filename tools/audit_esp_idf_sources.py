@@ -145,6 +145,23 @@ if 'access_control_->authorize_session(actor, "cloud.configure")' not in cloud_h
 if "std::string credential" in cloud_http:
     errors.append("hg_cloud_http.cpp: acting credential must not exist in v2 cloud runtime")
 
+cloud_link = (MAIN / "hg_cloud_link.cpp").read_text(encoding="utf-8")
+for required in (
+    'std::strncmp(broker_uri, "mqtts://", 8)',
+    "esp_crt_bundle_attach",
+    'parse_json_u64(body, "counter", command_counter)',
+    "command_counter <= stored_counter",
+    "persist_command_counter(command_counter)",
+    "nvs_set_u64(handle, kCommandCounterKey, value)",
+    "nvs_commit(handle)",
+):
+    if required not in cloud_link:
+        errors.append(f"hg_cloud_link.cpp: MQTT TLS/anti-replay contract missing {required}")
+persist_pos = cloud_link.find("persist_command_counter(command_counter)")
+effect_pos = cloud_link.find("model_->set_partition_arm")
+if persist_pos < 0 or effect_pos < 0 or persist_pos > effect_pos:
+    errors.append("hg_cloud_link.cpp: MQTT anti-replay counter must persist before command side effect")
+
 output_http = (MAIN / "hg_output_http.cpp").read_text(encoding="utf-8")
 if '#include "hg_http_util.hpp"' not in output_http or \
         "http_util::read_body(request, 384U, body)" not in output_http or \
