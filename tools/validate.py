@@ -105,7 +105,10 @@ kconfig = (root / 'firmware/esp-idf/main/Kconfig.projbuild').read_text(encoding=
 sdkconfig = (root / 'firmware/esp-idf/sdkconfig.defaults').read_text(encoding='utf-8')
 settings_store = (root / 'android/app/src/main/java/ua/homeguard/s3/storage/SettingsStore.kt').read_text(encoding='utf-8')
 http_api = (root / 'android/app/src/main/java/ua/homeguard/s3/network/HttpDeviceApi.kt').read_text(encoding='utf-8')
-rest = (root / 'firmware/esp-idf/components/rest_server/rest_server.cpp').read_text(encoding='utf-8')
+request_auth = (root / 'firmware/esp-idf/main/hg_request_auth.hpp').read_text(encoding='utf-8')
+system_http = (root / 'firmware/esp-idf/main/hg_system_http.cpp').read_text(encoding='utf-8')
+output_http = (root / 'firmware/esp-idf/main/hg_output_http.cpp').read_text(encoding='utf-8')
+rest = request_auth + '\n' + system_http + '\n' + output_http
 websocket = (root / 'firmware/esp-idf/components/websocket_telemetry/websocket_telemetry.cpp').read_text(encoding='utf-8')
 app_main = (root / 'firmware/esp-idf/main/app_main.cpp').read_text(encoding='utf-8')
 discovery = (root / 'firmware/esp-idf/components/device_discovery/device_discovery.cpp').read_text(encoding='utf-8')
@@ -150,9 +153,9 @@ policy = {
     'telemetry_interval_configured': bool(re.search(r'config HOMEGUARD_TELEMETRY_INTERVAL_MS.*?default 1000', kconfig, re.S)) and 'CONFIG_HOMEGUARD_TELEMETRY_INTERVAL_MS=1000' in sdkconfig,
     'cloud_disabled_by_default': bool(re.search(r'config HOMEGUARD_CLOUD_ENABLED.*?default n', kconfig, re.S)),
     'bench_nvs_encryption_disabled': 'CONFIG_NVS_ENCRYPTION=y' not in sdkconfig,
-    'rest_requires_bearer_token': all(item in (rest + all_text) for item in ['BearerTokenVerifier', 'Authorization', '401 Unauthorized', '/api/status', '/api/command']),
-    'dangerous_commands_require_challenge': 'dangerous(*command_type)' in rest and 'challenge_required' in rest,
-    'server_receive_time_used_for_commands': 'const uint64_t received_at = now_ms()' in rest and 'request_id, received_at' in rest,
+    'rest_requires_bearer_token': all(item in rest for item in ['Authorization', '401 Unauthorized', 'WWW-Authenticate', 'Bearer realm=', '/api/v1/system/status', '/api/v1/system/security-command', 'request_auth::authenticated']),
+    'dangerous_commands_require_authorized_session': all(item in rest for item in ['authorize_session', 'security.disarm', 'security.panic', '403 Forbidden']),
+    'output_commands_bind_actor_to_authenticated_session': all(item in output_http for item in ['parse_json_string(body, "actor", actor)', 'authenticated_actor(request, *access_control_, actor)', 'authorize_session(actor, command)']),
     'wss_requires_bearer_token': all(item in websocket for item in ['Authorization', '401 Unauthorized', '/ws/telemetry', 'is_websocket = true']),
     'wss_telemetry_published': 'websocket->publish' in app_main and 'telemetry_json(frame)' in websocket,
     'partial_service_startup_rolls_back': 'runtime.websocket->stop();' in app_main and 'runtime.rest->stop();' in app_main,
