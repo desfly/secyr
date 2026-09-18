@@ -47,14 +47,18 @@ std::string issue_disarm_challenge()
     return g_disarm_challenge;
 }
 
-bool consume_disarm_challenge(const std::string& challenge)
+bool valid_disarm_challenge(const std::string& challenge)
 {
     const auto now = static_cast<std::uint64_t>(esp_timer_get_time());
-    if (g_disarm_challenge.empty() || now > g_disarm_challenge_deadline_us || challenge != g_disarm_challenge) return false;
+    return !g_disarm_challenge.empty() && now <= g_disarm_challenge_deadline_us &&
+           challenge == g_disarm_challenge;
+}
+
+void consume_disarm_challenge()
+{
     std::fill(g_disarm_challenge.begin(), g_disarm_challenge.end(), '\0');
     g_disarm_challenge.clear();
     g_disarm_challenge_deadline_us = 0;
-    return true;
 }
 
 bool parse_json_u64(const std::string& body, const char* key, std::uint64_t& value)
@@ -531,7 +535,8 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // Remote disarm is a high-risk action: require a signed, non-empty challenge.
     // One-time replay resistance is jointly provided by the persisted monotonic
     // counter/requestId state below; a replayed signed envelope cannot execute.
-    if (command == "security.disarm" && (challenge.empty() || challenge.size() > kMaxChallengeLength || !consume_disarm_challenge(challenge))) {
+    if (command == "security.disarm" &&
+        (challenge.empty() || challenge.size() > kMaxChallengeLength || !valid_disarm_challenge(challenge))) {
         std::fill(credential.begin(), credential.end(), '\0');
         publish_response(false, "challenge_required");
         return;
@@ -593,6 +598,11 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         publish_response(false, "unsupported_command");
         return;
     }
+
+    // Consume a valid disarm challenge only after signature, authorization,
+    // and replay checks have succeeded. Unauthorized or replayed requests must
+    // not be able to burn the one-time token.
+    if (command == "security.disarm") consume_disarm_challenge();
 
     // Persist the monotonic counter before the side effect. If persistence
     // fails, fail closed so a reboot cannot reopen a replay window.
