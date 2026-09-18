@@ -559,8 +559,13 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     }
 
     // The signed envelope authenticates the cloud command and binds actor.
-    // Authorize that signed actor locally; never transport a user PIN over MQTT.
-    const auto decision = access_control_->authorize_session(actor, command);
+    // Challenge issuance is part of the disarm flow, so it inherits exactly the
+    // actor permission required for security.disarm instead of introducing a
+    // separate role capability. Never transport a user PIN over MQTT.
+    const std::string_view authorization_command =
+        command == "security.disarm_challenge" ? std::string_view{"security.disarm"}
+                                                : std::string_view{command};
+    const auto decision = access_control_->authorize_session(actor, authorization_command);
     if (decision != homeguard::AuditDecision::Allowed) {
         publish_response(false, homeguard::to_string(decision));
         return;
@@ -588,11 +593,6 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // Challenge issuance is itself a signed, authorized and replay-protected
     // operation. Reuse the same persisted counter/requestId barrier as commands.
     if (command == "security.disarm_challenge") {
-        const auto decision = access_control_->authorize_session(actor, "security.disarm");
-        if (decision != homeguard::AuditDecision::Allowed) {
-            publish_response(false, homeguard::to_string(decision));
-            return;
-        }
         if (!persist_command_replay_state(command_counter, request_id)) {
             publish_response(false, "replay_state_persist_failed");
             return;
