@@ -339,6 +339,7 @@ class MainActivity : ComponentActivity() {
                         onImportSettings = { settingsRestoreLauncher.launch("application/json") },
                         onFactoryReset = ::factoryResetController,
                         onCommand = ::executeCommand,
+                        onPanic = ::executePanic,
                     )
                 }
             }
@@ -559,6 +560,22 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    private fun executePanic() {
+        val session = accessSession.value
+        if (session == null || !session.capabilities.panic) {
+            commandStatus.value = "Паніка: потрібен авторизований користувач із правом panic"
+            return
+        }
+        lifecycleScope.launch {
+            commandStatus.value = "Паніка: надсилання через BLE…"
+            val result = runCatching { commands.panicOverBle() }
+            commandStatus.value = result.fold(
+                { reply -> if (reply.accepted) "Паніка: команду прийнято контролером (${reply.code})" else "Паніка відхилена: ${reply.code}" },
+                { error -> "Паніка: помилка BLE — ${error.message ?: "network"}" },
+            )
         }
     }
 
