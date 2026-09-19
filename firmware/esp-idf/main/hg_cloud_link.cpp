@@ -510,13 +510,14 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         publish_response(false, "runtime_unavailable");
         return;
     }
-    std::uint64_t version = 0, command_counter = 0, issued_at_ms = 0, expires_at_ms = 0;
+    std::uint64_t version = 0, key_epoch = 0, command_counter = 0, issued_at_ms = 0, expires_at_ms = 0;
     std::string envelope_device_id;
     if (!parse_json_u64(body, "version", version) || version != 1 ||
         !parse_json_string(body, "deviceId", envelope_device_id) ||
         envelope_device_id != device_id_.data() ||
         !parse_json_string(body, "command", command) ||
         !parse_json_string(body, "actor", actor) ||
+        !parse_json_u64(body, "keyEpoch", key_epoch) || key_epoch == 0 ||
         !parse_json_u64(body, "counter", command_counter) || command_counter == 0 ||
         !parse_json_u64(body, "issuedAtMs", issued_at_ms) ||
         !parse_json_u64(body, "expiresAtMs", expires_at_ms) ||
@@ -554,8 +555,15 @@ void CloudLink::handle_command(const char* data, std::size_t size)
 
     CloudCommandTrust trust;
     CloudTrustStore trust_store;
-    if (trust_store.load(trust) != ESP_OK || trust.version != 1U || trust.public_key_pem.empty()) {
+    if (trust_store.load(trust) != ESP_OK || trust.version == 0U || trust.public_key_pem.empty()) {
         publish_response(false, "command_trust_unavailable");
+        return;
+    }
+    // Bind every signed command to the currently active trust/key generation.
+    // Protocol version and key epoch are intentionally independent: rotating
+    // credentials must invalidate old signed envelopes without changing v1.
+    if (key_epoch != trust.version) {
+        publish_response(false, "key_epoch_rejected");
         return;
     }
     const std::string canonical =
@@ -564,6 +572,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         "requestId=" + request_id + "\n" +
         "actor=" + actor + "\n" +
         "command=" + command + "\n" +
+        "keyEpoch=" + std::to_string(key_epoch) + "\n" +
         "counter=" + std::to_string(command_counter) + "\n" +
         "issuedAtMs=" + std::to_string(issued_at_ms) + "\n" +
         "expiresAtMs=" + std::to_string(expires_at_ms) + "\n" +
