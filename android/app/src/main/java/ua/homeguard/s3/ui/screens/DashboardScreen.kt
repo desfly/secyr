@@ -69,8 +69,10 @@ fun DashboardScreen(
     onImportSettings: () -> Unit,
     onFactoryReset: () -> Unit,
     onCommand: (CommandType) -> Unit,
+    onPanic: () -> Unit,
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
+    var confirmPanic by remember { mutableStateOf(false) }
     var confirmClearHistory by remember { mutableStateOf(false) }
     var confirmFactoryReset by remember { mutableStateOf(false) }
     var factoryResetPhrase by remember { mutableStateOf("") }
@@ -86,6 +88,21 @@ fun DashboardScreen(
     val canCommand: (CommandType) -> Boolean = { command -> accessSession?.allows(command) == true }
     val sourceFilter = eventSourceText.trim().toIntOrNull()
     val filteredEvents = EventLogFilterEngine.apply(events, EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter))
+
+    if (confirmPanic) {
+        AlertDialog(
+            onDismissRequest = { confirmPanic = false },
+            title = { Text("Підтвердити паніку") },
+            text = { Text("Ця дія передасть тривожну команду контролеру через BLE. Продовжити?") },
+            confirmButton = {
+                TextButton(enabled = accessSession?.capabilities?.panic == true, onClick = {
+                    confirmPanic = false
+                    onPanic()
+                }) { Text("Надіслати паніку") }
+            },
+            dismissButton = { TextButton(onClick = { confirmPanic = false }) { Text("Скасувати") } },
+        )
+    }
 
     pendingDangerousCommand?.let { command ->
         AlertDialog(
@@ -293,6 +310,7 @@ fun DashboardScreen(
                 Button(enabled = canCommand(CommandType.ARM_HOME), onClick = { onCommand(CommandType.ARM_HOME) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: дім") }
                 Button(enabled = canCommand(CommandType.ARM_AWAY), onClick = { onCommand(CommandType.ARM_AWAY) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: повна") }
                 OutlinedButton(enabled = canCommand(CommandType.DISARM), onClick = { pendingDangerousCommand = CommandType.DISARM }, modifier = Modifier.fillMaxWidth()) { Text("Зняти з охорони") }
+                Button(enabled = accessSession?.capabilities?.panic == true, onClick = { confirmPanic = true }, modifier = Modifier.fillMaxWidth()) { Text("Паніка (BLE)") }
                 OutlinedButton(enabled = canCommand(CommandType.SILENCE), onClick = { onCommand(CommandType.SILENCE) }, modifier = Modifier.fillMaxWidth()) { Text("Тиша") }
                 OutlinedButton(enabled = canCommand(CommandType.RESET_ALARM), onClick = { pendingDangerousCommand = CommandType.RESET_ALARM }, modifier = Modifier.fillMaxWidth()) { Text("Скинути тривогу") }
                 OutlinedButton(enabled = canCommand(CommandType.OPEN_VALVES), onClick = { pendingDangerousCommand = CommandType.OPEN_VALVES }, modifier = Modifier.fillMaxWidth()) { Text("Відкрити клапани") }

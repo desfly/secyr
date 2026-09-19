@@ -30,6 +30,8 @@ public:
 
     esp_err_t publish_state(const char* json, int qos = 1, bool retain = true);
     esp_err_t issue_disarm_challenge();
+    bool begin_trust_rotation();
+    void end_trust_rotation();
 
 private:
     static void mqtt_event_handler(void* handler_args,

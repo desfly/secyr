@@ -9,6 +9,8 @@
 #include "esp_mac.h"
 #include "esp_timer.h"
 #include "esp_random.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "nvs.h"
 #include "homeguard/access_control.hpp"
 #include "homeguard/system_model.hpp"
@@ -35,6 +37,16 @@ constexpr std::size_t kDisarmChallengeLength = 32U;
 constexpr std::uint64_t kDisarmChallengeTtlUs = 60ULL * 1000ULL * 1000ULL;
 std::string g_disarm_challenge;
 std::uint64_t g_disarm_challenge_deadline_us{};
+StaticSemaphore_t g_replay_admission_mutex_storage{};
+SemaphoreHandle_t g_replay_admission_mutex = nullptr;
+
+SemaphoreHandle_t replay_admission_mutex()
+{
+    if (g_replay_admission_mutex == nullptr) {
+        g_replay_admission_mutex = xSemaphoreCreateMutexStatic(&g_replay_admission_mutex_storage);
+    }
+    return g_replay_admission_mutex;
+}
 
 std::string issue_disarm_challenge()
 {
@@ -98,10 +110,12 @@ bool parse_json_u64(const std::string& body, const char* key, std::uint64_t& val
 bool load_command_counter(std::uint64_t& value)
 {
     nvs_handle_t handle{};
-    if (nvs_open(kCloudSecurityNamespace, NVS_READONLY, &handle) != ESP_OK) {
-        value = 0;
+    const auto open_error = nvs_open(kCloudSecurityNamespace, NVS_READONLY, &handle);
+    if (open_error == ESP_ERR_NVS_NOT_FOUND) {
+        value = 0;  // Fresh device: the replay namespace has not been created yet.
         return true;
     }
+    if (open_error != ESP_OK) return false;  // Never reset replay state on an NVS fault.
     const auto error = nvs_get_u64(handle, kCommandCounterKey, &value);
     nvs_close(handle);
     if (error == ESP_ERR_NVS_NOT_FOUND) { value = 0; return true; }
@@ -111,10 +125,12 @@ bool load_command_counter(std::uint64_t& value)
 bool load_last_request_id(std::string& value)
 {
     nvs_handle_t handle{};
-    if (nvs_open(kCloudSecurityNamespace, NVS_READONLY, &handle) != ESP_OK) {
-        value.clear();
+    const auto open_error = nvs_open(kCloudSecurityNamespace, NVS_READONLY, &handle);
+    if (open_error == ESP_ERR_NVS_NOT_FOUND) {
+        value.clear();  // Fresh device only; other NVS failures must reject commands.
         return true;
     }
+    if (open_error != ESP_OK) return false;
     std::size_t size = 0;
     auto error = nvs_get_str(handle, kRequestIdKey, nullptr, &size);
     if (error == ESP_ERR_NVS_NOT_FOUND) {
@@ -451,6 +467,18 @@ void CloudLink::publish_system_event(const hg::SystemEvent& event)
     (void)esp_mqtt_client_publish(client_, event_topic_.data(), payload, length, 1, 0);
 }
 
+bool CloudLink::begin_trust_rotation()
+{
+    const auto mutex = replay_admission_mutex();
+    return mutex != nullptr && xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE;
+}
+
+void CloudLink::end_trust_rotation()
+{
+    const auto mutex = replay_admission_mutex();
+    if (mutex != nullptr) xSemaphoreGive(mutex);
+}
+
 esp_err_t CloudLink::publish_state(const char* json, int qos, bool retain)
 {
     if (client_ == nullptr || !connected_ || json == nullptr) return ESP_ERR_INVALID_STATE;
@@ -498,13 +526,14 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         publish_response(false, "runtime_unavailable");
         return;
     }
-    std::uint64_t version = 0, command_counter = 0, issued_at_ms = 0, expires_at_ms = 0;
+    std::uint64_t version = 0, key_epoch = 0, command_counter = 0, issued_at_ms = 0, expires_at_ms = 0;
     std::string envelope_device_id;
     if (!parse_json_u64(body, "version", version) || version != 1 ||
         !parse_json_string(body, "deviceId", envelope_device_id) ||
         envelope_device_id != device_id_.data() ||
         !parse_json_string(body, "command", command) ||
         !parse_json_string(body, "actor", actor) ||
+        !parse_json_u64(body, "keyEpoch", key_epoch) || key_epoch == 0 ||
         !parse_json_u64(body, "counter", command_counter) || command_counter == 0 ||
         !parse_json_u64(body, "issuedAtMs", issued_at_ms) ||
         !parse_json_u64(body, "expiresAtMs", expires_at_ms) ||
@@ -542,8 +571,15 @@ void CloudLink::handle_command(const char* data, std::size_t size)
 
     CloudCommandTrust trust;
     CloudTrustStore trust_store;
-    if (trust_store.load(trust) != ESP_OK || trust.version != 1U || trust.public_key_pem.empty()) {
+    if (trust_store.load(trust) != ESP_OK || trust.version == 0U || trust.public_key_pem.empty()) {
         publish_response(false, "command_trust_unavailable");
+        return;
+    }
+    // Bind every signed command to the currently active trust/key generation.
+    // Protocol version and key epoch are intentionally independent: rotating
+    // credentials must invalidate old signed envelopes without changing v1.
+    if (key_epoch != trust.version) {
+        publish_response(false, "key_epoch_rejected");
         return;
     }
     const std::string canonical =
@@ -552,6 +588,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         "requestId=" + request_id + "\n" +
         "actor=" + actor + "\n" +
         "command=" + command + "\n" +
+        "keyEpoch=" + std::to_string(key_epoch) + "\n" +
         "counter=" + std::to_string(command_counter) + "\n" +
         "issuedAtMs=" + std::to_string(issued_at_ms) + "\n" +
         "expiresAtMs=" + std::to_string(expires_at_ms) + "\n" +
@@ -584,21 +621,45 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         return;
     }
 
+    // Serialize replay admission across MQTT callbacks/tasks. The lock covers
+    // read -> validate -> durable NVS commit, so two concurrent envelopes cannot
+    // both pass against the same previously stored counter.
+    const auto replay_mutex = replay_admission_mutex();
+    if (replay_mutex == nullptr || xSemaphoreTake(replay_mutex, portMAX_DELAY) != pdTRUE) {
+        publish_response(false, "replay_state_unavailable");
+        return;
+    }
+
+    // A trust rotation can happen while the signature is being verified.
+    // Re-read the active trust after acquiring replay admission and fail closed
+    // if either the epoch or the key changed before the durable replay commit.
+    // This is a defense-in-depth check, not a substitute for serializing the
+    // trust writer with command execution during transactional rotation.
+    CloudCommandTrust admission_trust;
+    if (trust_store.load(admission_trust) != ESP_OK ||
+        admission_trust.version != trust.version ||
+        admission_trust.public_key_pem != trust.public_key_pem) {
+        xSemaphoreGive(replay_mutex);
+        publish_response(false, "key_epoch_changed");
+        return;
+    }
+
     std::uint64_t stored_counter = 0;
-    if (!load_command_counter(stored_counter)) {
+    std::string last_request_id;
+    const bool replay_state_loaded =
+        load_command_counter(stored_counter) && load_last_request_id(last_request_id);
+    if (!replay_state_loaded) {
+        xSemaphoreGive(replay_mutex);
         publish_response(false, "replay_state_unavailable");
         return;
     }
     if (command_counter <= stored_counter) {
+        xSemaphoreGive(replay_mutex);
         publish_response(false, "replay_rejected");
         return;
     }
-    std::string last_request_id;
-    if (!load_last_request_id(last_request_id)) {
-        publish_response(false, "replay_state_unavailable");
-        return;
-    }
     if (request_id == last_request_id) {
+        xSemaphoreGive(replay_mutex);
         publish_response(false, "request_replay_rejected");
         return;
     }
@@ -607,13 +668,27 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // operation. Reuse the same persisted counter/requestId barrier as commands.
     if (command == "security.disarm_challenge") {
         if (!persist_command_replay_state(command_counter, request_id)) {
+            xSemaphoreGive(replay_mutex);
             publish_response(false, "replay_state_persist_failed");
             return;
         }
+        // Keep the lock until challenge issuance is complete.
+        // Challenge issuance is a side effect too: reject an epoch change
+        // detected after the replay counter was durably committed.
+        CloudCommandTrust challenge_trust;
+        if (trust_store.load(challenge_trust) != ESP_OK ||
+            challenge_trust.version != trust.version ||
+            challenge_trust.public_key_pem != trust.public_key_pem) {
+            xSemaphoreGive(replay_mutex);
+            publish_response(false, "key_epoch_changed");
+            return;
+        }
         if (issue_disarm_challenge() != ESP_OK) {
+            xSemaphoreGive(replay_mutex);
             publish_response(false, "challenge_issue_failed");
             return;
         }
+        xSemaphoreGive(replay_mutex);
         publish_response(true, "challenge_issued");
         return;
     }
@@ -632,7 +707,21 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // applying the side effect. An NVS failure must not burn a valid challenge,
     // while a reboot must not reopen the replay window.
     if (!persist_command_replay_state(command_counter, request_id)) {
+        xSemaphoreGive(replay_mutex);
         publish_response(false, "replay_state_persist_failed");
+        return;
+    }
+    // Keep the replay mutex until the security side effect is complete.
+
+    // A rotation may have completed after replay admission was persisted.
+    // Fail closed before any command side effect if its verified trust is no
+    // longer active. The replay counter remains consumed intentionally.
+    CloudCommandTrust execution_trust;
+    if (trust_store.load(execution_trust) != ESP_OK ||
+        execution_trust.version != trust.version ||
+        execution_trust.public_key_pem != trust.public_key_pem) {
+        xSemaphoreGive(replay_mutex);
+        publish_response(false, "key_epoch_changed");
         return;
     }
 
@@ -641,10 +730,12 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     if (command == "security.disarm") consume_disarm_challenge();
 
     if (!model_->set_partition_arm(1, target, 0)) {
+        xSemaphoreGive(replay_mutex);
         publish_response(false, "partition_command_failed");
         return;
     }
     (void)bus_->dispatch_all();
+    xSemaphoreGive(replay_mutex);
     publish_response(true, "accepted", arm_state_name(target));
 }
 
