@@ -200,10 +200,12 @@ void perform_early_boot_factory_reset() {
     const auto report = FactoryResetManager{}.erase_mutable_state();
     if (!report.ok()) {
         ESP_LOGE(kTag,
-                 "Factory Reset failed; request remains pending for retry: access=%d wifi=%d cloud=%d config=%d provisioning=%d commissioning=%d",
+                 "Factory Reset failed; request remains pending for retry: access=%d wifi=%d cloud=%d cloud_trust=%d cloud_security=%d config=%d provisioning=%d commissioning=%d",
                  report.access,
                  report.wifi,
                  report.cloud,
+                 report.cloud_trust,
+                 report.cloud_security,
                  report.controller_config,
                  report.provisioning,
                  report.commissioning);

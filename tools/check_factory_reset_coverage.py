@@ -13,7 +13,7 @@ commissioning = (MAIN / "hg_commissioning_nvs.cpp").read_text(encoding="utf-8")
 config_store = (COMPONENTS / "nvs_config_store" / "nvs_config_store.cpp").read_text(encoding="utf-8")
 
 # Every mutable user-owned namespace must be explicitly erased by factory reset.
-for namespace in ("hg_access", "hg_wifi", "hg_cloud", "hg-config", "hg-provision"):
+for namespace in ("hg_access", "hg_wifi", "hg_cloud", "hg_cloudtrust", "hg-cloud-sec", "hg-config", "hg-provision", "hg_ble_remote"):
     if f'erase_namespace("{namespace}")' not in factory_reset:
         errors.append(f"factory reset must erase mutable namespace {namespace}")
 

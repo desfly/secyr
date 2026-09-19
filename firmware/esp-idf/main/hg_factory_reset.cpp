@@ -38,6 +38,8 @@ FactoryResetReport FactoryResetManager::erase_mutable_state() const {
     }
 
     report.cloud = erase_namespace("hg_cloud");
+    report.cloud_trust = erase_namespace("hg_cloudtrust");
+    report.cloud_security = erase_namespace("hg-cloud-sec");
     report.controller_config = erase_namespace("hg-config");
     report.provisioning = erase_namespace("hg-provision");
     report.ble_remotes = erase_namespace("hg_ble_remote");
