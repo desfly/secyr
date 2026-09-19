@@ -90,6 +90,19 @@ require(execution_reload >= 0 and execution_reject >= 0 and
         execution_reload < execution_reject < execution_disarm < execution_arm,
         "MQTT command side effects must follow the post-commit trust recheck")
 
+# Opening an existing replay namespace may fail for reasons other than first boot.
+# Never interpret an NVS I/O/corruption error as an empty replay history.
+for loader in ("load_command_counter", "load_last_request_id"):
+    begin = link.find("bool " + loader + "(")
+    end = link.find("\n}\n", begin)
+    require(begin >= 0 and end > begin, f"{loader} implementation missing")
+    if begin >= 0 and end > begin:
+        body = link[begin:end]
+        require("open_error == ESP_ERR_NVS_NOT_FOUND" in body and
+                "if (open_error != ESP_OK) return false;" in body and
+                "if (nvs_open(" not in body,
+                f"{loader} must fail closed on NVS open errors other than missing namespace")
+
 require("xSemaphoreCreateMutexStatic" in link and
         "xSemaphoreTake(replay_mutex, portMAX_DELAY)" in link and
         "xSemaphoreGive(replay_mutex)" in link,
