@@ -56,6 +56,20 @@ require("responses" in link and "response_topic_" in link, "MQTT response topic 
 require("handle_command(event->data" in link, "MQTT command payload is not routed")
 require("trusted_time_->ready()" in link and "expires_at_ms" in link and "issued_at_ms" in link,
         "MQTT command freshness is not gated by trusted time")
+require("xSemaphoreCreateMutexStatic" in link and
+        "xSemaphoreTake(replay_mutex, portMAX_DELAY)" in link and
+        "xSemaphoreGive(replay_mutex)" in link,
+        "MQTT replay admission must be serialized by a FreeRTOS mutex")
+replay_lock = link.find("xSemaphoreTake(replay_mutex, portMAX_DELAY)")
+replay_counter_load = link.find("load_command_counter(stored_counter)", replay_lock)
+replay_request_load = link.find("load_last_request_id(last_request_id)", replay_lock)
+replay_counter_check = link.find("if (command_counter <= stored_counter)", replay_lock)
+replay_persist = link.find("persist_command_replay_state(command_counter, request_id)", replay_lock)
+replay_unlock = link.find("xSemaphoreGive(replay_mutex)", replay_persist)
+require(replay_lock >= 0 and replay_counter_load >= 0 and replay_request_load >= 0 and
+        replay_counter_check >= 0 and replay_persist >= 0 and replay_unlock >= 0 and
+        replay_lock < replay_counter_load <= replay_request_load < replay_counter_check < replay_persist < replay_unlock,
+        "MQTT replay admission ordering must be lock -> read -> validate -> durable commit -> unlock")
 challenge_branch = link.find('if (command == "security.disarm_challenge")')
 replay_check = link.find("if (command_counter <= stored_counter)")
 request_replay_check = link.find("if (request_id == last_request_id)")
@@ -123,5 +137,6 @@ print(" - ordinary cloud config isolated from Cloud Command Trust")
 print(" - admin-only monotonic Cloud Command Trust provisioning")
 print(" - signed-actor AccessControl session authorization; no MQTT PIN credential")
 print(" - MQTT responses topic")
+print(" - serialized replay admission: lock -> read/validate -> durable commit -> unlock")
 print(" - replay-protected one-time disarm challenge issuance + durable burn ordering")
 print(" - canonical signed-command contract + trust separation")
