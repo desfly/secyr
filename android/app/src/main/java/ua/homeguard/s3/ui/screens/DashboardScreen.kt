@@ -69,6 +69,7 @@ fun DashboardScreen(
     onImportSettings: () -> Unit,
     onFactoryReset: () -> Unit,
     onCommand: (CommandType) -> Unit,
+    onPanicBle: () -> Unit,
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
     var confirmClearHistory by remember { mutableStateOf(false) }
@@ -297,6 +298,7 @@ fun DashboardScreen(
                 OutlinedButton(enabled = canCommand(CommandType.RESET_ALARM), onClick = { pendingDangerousCommand = CommandType.RESET_ALARM }, modifier = Modifier.fillMaxWidth()) { Text("Скинути тривогу") }
                 OutlinedButton(enabled = canCommand(CommandType.OPEN_VALVES), onClick = { pendingDangerousCommand = CommandType.OPEN_VALVES }, modifier = Modifier.fillMaxWidth()) { Text("Відкрити клапани") }
                 Button(enabled = canCommand(CommandType.CLOSE_VALVES), onClick = { onCommand(CommandType.CLOSE_VALVES) }, modifier = Modifier.fillMaxWidth()) { Text("Закрити клапани") }
+                OutlinedButton(enabled = accessSession?.capabilities?.panic == true, onClick = onPanicBle, modifier = Modifier.fillMaxWidth()) { Text("Паніка (BLE)") }
             }
         }
 
