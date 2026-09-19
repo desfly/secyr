@@ -325,8 +325,19 @@ async function sendSecurityCommand(button) {
   try {
     const reply = await api("/api/v1/system/security-command", { method: "POST", body: JSON.stringify({ command, actor, credential }) });
     if (reply.accepted === false) throw new Error(reply.reason || reply.code || "Команду відхилено");
-    await refresh();
-    showToast("Команду прийнято; перевірте фактичний стан системи");
+    const expectedState = ({
+      "security.arm_away": "away",
+      "security.arm_home": "stay",
+      "security.disarm": "disarmed",
+      "security.panic": "alarm",
+    })[command];
+    if (!expectedState) throw new Error("Невідома команда охорони");
+    const state = await api("/api/v1/system/partitions");
+    const partition = Array.isArray(state.partitions) ? state.partitions.find(item => Number(item.id) === 1) : null;
+    if (!partition || typeof partition.armState !== "string") throw new Error("Немає підтвердженого стану охорони");
+    if (partition.armState !== expectedState) throw new Error("Команду надіслано, але стан охорони ще не підтверджено");
+    renderPartitions(state);
+    showToast("Контролер підтвердив стан охорони; фізичні виконавчі пристрої не перевірено");
   } catch (error) {
     showToast(`Помилка команди: ${error.message}`);
   } finally {
