@@ -66,6 +66,20 @@ replay_lock_for_epoch = link.find("xSemaphoreTake(replay_mutex, portMAX_DELAY)")
 require(key_epoch_check >= 0 and key_epoch_canonical >= 0 and replay_lock_for_epoch >= 0 and
         key_epoch_check < key_epoch_canonical < replay_lock_for_epoch,
         "key epoch must be checked, signed, and rejected before replay admission")
+# Trust must be checked again inside replay admission: a rotation may occur
+# while the original signature verification is in progress.
+admission_lock = link.find("xSemaphoreTake(replay_mutex, portMAX_DELAY)")
+admission_reload = link.find("trust_store.load(admission_trust)", admission_lock)
+admission_epoch = link.find("admission_trust.version != trust.version", admission_reload)
+admission_key = link.find("admission_trust.public_key_pem != trust.public_key_pem", admission_reload)
+admission_reject = link.find('publish_response(false, "key_epoch_changed")', admission_key)
+admission_counter = link.find("load_command_counter(stored_counter)", admission_reject)
+require(admission_lock >= 0 and admission_reload >= 0 and admission_epoch >= 0 and
+        admission_key >= 0 and admission_reject >= 0 and admission_counter >= 0 and
+        admission_lock < admission_reload < admission_epoch < admission_key <
+        admission_reject < admission_counter,
+        "MQTT trust must be revalidated under replay admission before replay state is read")
+
 require("xSemaphoreCreateMutexStatic" in link and
         "xSemaphoreTake(replay_mutex, portMAX_DELAY)" in link and
         "xSemaphoreGive(replay_mutex)" in link,
