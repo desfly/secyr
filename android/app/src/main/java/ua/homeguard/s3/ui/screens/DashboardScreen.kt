@@ -69,6 +69,7 @@ fun DashboardScreen(
     onImportSettings: () -> Unit,
     onFactoryReset: () -> Unit,
     onCommand: (CommandType) -> Unit,
+    onPanic: () -> Unit,
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
     var confirmClearHistory by remember { mutableStateOf(false) }
@@ -293,6 +294,7 @@ fun DashboardScreen(
                 Button(enabled = canCommand(CommandType.ARM_HOME), onClick = { onCommand(CommandType.ARM_HOME) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: дім") }
                 Button(enabled = canCommand(CommandType.ARM_AWAY), onClick = { onCommand(CommandType.ARM_AWAY) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: повна") }
                 OutlinedButton(enabled = canCommand(CommandType.DISARM), onClick = { pendingDangerousCommand = CommandType.DISARM }, modifier = Modifier.fillMaxWidth()) { Text("Зняти з охорони") }
+                Button(enabled = accessSession?.capabilities?.panic == true, onClick = onPanic, modifier = Modifier.fillMaxWidth()) { Text("Паніка (BLE)") }
                 OutlinedButton(enabled = canCommand(CommandType.SILENCE), onClick = { onCommand(CommandType.SILENCE) }, modifier = Modifier.fillMaxWidth()) { Text("Тиша") }
                 OutlinedButton(enabled = canCommand(CommandType.RESET_ALARM), onClick = { pendingDangerousCommand = CommandType.RESET_ALARM }, modifier = Modifier.fillMaxWidth()) { Text("Скинути тривогу") }
                 OutlinedButton(enabled = canCommand(CommandType.OPEN_VALVES), onClick = { pendingDangerousCommand = CommandType.OPEN_VALVES }, modifier = Modifier.fillMaxWidth()) { Text("Відкрити клапани") }
