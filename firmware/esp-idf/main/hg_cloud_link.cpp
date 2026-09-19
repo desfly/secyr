@@ -467,6 +467,18 @@ void CloudLink::publish_system_event(const hg::SystemEvent& event)
     (void)esp_mqtt_client_publish(client_, event_topic_.data(), payload, length, 1, 0);
 }
 
+bool CloudLink::begin_trust_rotation()
+{
+    const auto mutex = replay_admission_mutex();
+    return mutex != nullptr && xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE;
+}
+
+void CloudLink::end_trust_rotation()
+{
+    const auto mutex = replay_admission_mutex();
+    if (mutex != nullptr) xSemaphoreGive(mutex);
+}
+
 esp_err_t CloudLink::publish_state(const char* json, int qos, bool retain)
 {
     if (client_ == nullptr || !connected_ || json == nullptr) return ESP_ERR_INVALID_STATE;
@@ -660,20 +672,23 @@ void CloudLink::handle_command(const char* data, std::size_t size)
             publish_response(false, "replay_state_persist_failed");
             return;
         }
-        xSemaphoreGive(replay_mutex);
+        // Keep the lock until challenge issuance is complete.
         // Challenge issuance is a side effect too: reject an epoch change
         // detected after the replay counter was durably committed.
         CloudCommandTrust challenge_trust;
         if (trust_store.load(challenge_trust) != ESP_OK ||
             challenge_trust.version != trust.version ||
             challenge_trust.public_key_pem != trust.public_key_pem) {
+            xSemaphoreGive(replay_mutex);
             publish_response(false, "key_epoch_changed");
             return;
         }
         if (issue_disarm_challenge() != ESP_OK) {
+            xSemaphoreGive(replay_mutex);
             publish_response(false, "challenge_issue_failed");
             return;
         }
+        xSemaphoreGive(replay_mutex);
         publish_response(true, "challenge_issued");
         return;
     }
@@ -696,7 +711,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         publish_response(false, "replay_state_persist_failed");
         return;
     }
-    xSemaphoreGive(replay_mutex);
+    // Keep the replay mutex until the security side effect is complete.
 
     // A rotation may have completed after replay admission was persisted.
     // Fail closed before any command side effect if its verified trust is no
@@ -705,6 +720,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     if (trust_store.load(execution_trust) != ESP_OK ||
         execution_trust.version != trust.version ||
         execution_trust.public_key_pem != trust.public_key_pem) {
+        xSemaphoreGive(replay_mutex);
         publish_response(false, "key_epoch_changed");
         return;
     }
@@ -714,10 +730,12 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     if (command == "security.disarm") consume_disarm_challenge();
 
     if (!model_->set_partition_arm(1, target, 0)) {
+        xSemaphoreGive(replay_mutex);
         publish_response(false, "partition_command_failed");
         return;
     }
     (void)bus_->dispatch_all();
+    xSemaphoreGive(replay_mutex);
     publish_response(true, "accepted", arm_state_name(target));
 }
 
