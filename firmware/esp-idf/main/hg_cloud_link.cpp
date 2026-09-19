@@ -657,6 +657,15 @@ void CloudLink::handle_command(const char* data, std::size_t size)
             return;
         }
         xSemaphoreGive(replay_mutex);
+        // Challenge issuance is a side effect too: reject an epoch change
+        // detected after the replay counter was durably committed.
+        CloudCommandTrust challenge_trust;
+        if (trust_store.load(challenge_trust) != ESP_OK ||
+            challenge_trust.version != trust.version ||
+            challenge_trust.public_key_pem != trust.public_key_pem) {
+            publish_response(false, "key_epoch_changed");
+            return;
+        }
         if (issue_disarm_challenge() != ESP_OK) {
             publish_response(false, "challenge_issue_failed");
             return;
