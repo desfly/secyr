@@ -685,6 +685,17 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     }
     xSemaphoreGive(replay_mutex);
 
+    // A rotation may have completed after replay admission was persisted.
+    // Fail closed before any command side effect if its verified trust is no
+    // longer active. The replay counter remains consumed intentionally.
+    CloudCommandTrust execution_trust;
+    if (trust_store.load(execution_trust) != ESP_OK ||
+        execution_trust.version != trust.version ||
+        execution_trust.public_key_pem != trust.public_key_pem) {
+        publish_response(false, "key_epoch_changed");
+        return;
+    }
+
     // Signature, authorization, replay checks and durable replay-state update
     // have all succeeded. Only now burn the one-time disarm token.
     if (command == "security.disarm") consume_disarm_challenge();
