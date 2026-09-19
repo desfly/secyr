@@ -298,14 +298,17 @@ async function sendOutputCommand(button) {
   const active = button.dataset.outputActive === "true";
   const { actor, credential } = operatorCredentials();
   if (!Number.isInteger(outputId) || outputId <= 0 || !validOperator(actor, credential)) return;
-  document.querySelectorAll("[data-output-id]").forEach(item => { item.disabled = true; });
+  const buttons = [...document.querySelectorAll("[data-output-id]")];
+  const previousDisabled = new Map(buttons.map(item => [item, item.disabled]));
+  buttons.forEach(item => { item.disabled = true; });
   try {
     await api("/api/v1/system/output-command", { method: "POST", body: JSON.stringify({ outputId, active, actor, credential }) });
-    showToast(active ? "Клапан відкрито" : "Клапан закрито");
+    showToast(active ? "Команду відкриття клапана прийнято" : "Команду закриття клапана прийнято");
   } catch (error) {
     showToast(`Помилка клапана: ${error.message}`);
   } finally {
     document.querySelector("#operatorPin").value = "";
+    buttons.forEach(item => { item.disabled = previousDisabled.get(item) === true; });
     await refresh();
   }
 }
