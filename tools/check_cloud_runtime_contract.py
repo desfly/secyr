@@ -80,6 +80,16 @@ require(admission_lock >= 0 and admission_reload >= 0 and admission_epoch >= 0 a
         admission_reject < admission_counter,
         "MQTT trust must be revalidated under replay admission before replay state is read")
 
+# The post-commit trust check must precede any arm-state side effect.
+execution_reload = link.find("trust_store.load(execution_trust)")
+execution_reject = link.find('publish_response(false, "key_epoch_changed")', execution_reload)
+execution_disarm = link.find('if (command == "security.disarm") consume_disarm_challenge()', execution_reject)
+execution_arm = link.find("model_->set_partition_arm(1, target, 0)", execution_disarm)
+require(execution_reload >= 0 and execution_reject >= 0 and
+        execution_disarm >= 0 and execution_arm >= 0 and
+        execution_reload < execution_reject < execution_disarm < execution_arm,
+        "MQTT command side effects must follow the post-commit trust recheck")
+
 require("xSemaphoreCreateMutexStatic" in link and
         "xSemaphoreTake(replay_mutex, portMAX_DELAY)" in link and
         "xSemaphoreGive(replay_mutex)" in link,
