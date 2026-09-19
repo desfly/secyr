@@ -56,6 +56,16 @@ require("responses" in link and "response_topic_" in link, "MQTT response topic 
 require("handle_command(event->data" in link, "MQTT command payload is not routed")
 require("trusted_time_->ready()" in link and "expires_at_ms" in link and "issued_at_ms" in link,
         "MQTT command freshness is not gated by trusted time")
+require('parse_json_u64(body, "keyEpoch", key_epoch)' in link and
+        'if (key_epoch != trust.version)' in link and
+        'publish_response(false, "key_epoch_rejected")' in link,
+        "MQTT command is not bound to the active Cloud Command Trust key epoch")
+key_epoch_check = link.find("if (key_epoch != trust.version)")
+key_epoch_canonical = link.find('"keyEpoch=" + std::to_string(key_epoch)')
+replay_lock_for_epoch = link.find("xSemaphoreTake(replay_mutex, portMAX_DELAY)")
+require(key_epoch_check >= 0 and key_epoch_canonical >= 0 and replay_lock_for_epoch >= 0 and
+        key_epoch_check < key_epoch_canonical < replay_lock_for_epoch,
+        "key epoch must be checked, signed, and rejected before replay admission")
 require("xSemaphoreCreateMutexStatic" in link and
         "xSemaphoreTake(replay_mutex, portMAX_DELAY)" in link and
         "xSemaphoreGive(replay_mutex)" in link,
@@ -113,7 +123,7 @@ require("deferred to safe command router" not in link, "old deferred MQTT comman
 require("nvs_set_str" in nvs and "nvs_get_str" in nvs and "nvs_commit" in nvs, "cloud credentials are not persisted in NVS")
 
 canonical_fields = [
-    '"version"', '"deviceId"', '"requestId"', '"actor"', '"command"',
+    '"version"', '"deviceId"', '"requestId"', '"actor"', '"command"', '"keyEpoch"',
     '"counter"', '"issuedAtMs"', '"expiresAtMs"', '"challenge"', '"signature"',
 ]
 for field in canonical_fields:
@@ -137,6 +147,7 @@ print(" - ordinary cloud config isolated from Cloud Command Trust")
 print(" - admin-only monotonic Cloud Command Trust provisioning")
 print(" - signed-actor AccessControl session authorization; no MQTT PIN credential")
 print(" - MQTT responses topic")
+print(" - signed command keyEpoch bound to active monotonic Cloud Command Trust version")
 print(" - serialized replay admission: lock -> read/validate -> durable commit -> unlock")
 print(" - replay-protected one-time disarm challenge issuance + durable burn ordering")
 print(" - canonical signed-command contract + trust separation")
