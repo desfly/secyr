@@ -110,10 +110,12 @@ bool parse_json_u64(const std::string& body, const char* key, std::uint64_t& val
 bool load_command_counter(std::uint64_t& value)
 {
     nvs_handle_t handle{};
-    if (nvs_open(kCloudSecurityNamespace, NVS_READONLY, &handle) != ESP_OK) {
-        value = 0;
+    const auto open_error = nvs_open(kCloudSecurityNamespace, NVS_READONLY, &handle);
+    if (open_error == ESP_ERR_NVS_NOT_FOUND) {
+        value = 0;  // Fresh device: the replay namespace has not been created yet.
         return true;
     }
+    if (open_error != ESP_OK) return false;  // Never reset replay state on an NVS fault.
     const auto error = nvs_get_u64(handle, kCommandCounterKey, &value);
     nvs_close(handle);
     if (error == ESP_ERR_NVS_NOT_FOUND) { value = 0; return true; }
@@ -123,10 +125,12 @@ bool load_command_counter(std::uint64_t& value)
 bool load_last_request_id(std::string& value)
 {
     nvs_handle_t handle{};
-    if (nvs_open(kCloudSecurityNamespace, NVS_READONLY, &handle) != ESP_OK) {
-        value.clear();
+    const auto open_error = nvs_open(kCloudSecurityNamespace, NVS_READONLY, &handle);
+    if (open_error == ESP_ERR_NVS_NOT_FOUND) {
+        value.clear();  // Fresh device only; other NVS failures must reject commands.
         return true;
     }
+    if (open_error != ESP_OK) return false;
     std::size_t size = 0;
     auto error = nvs_get_str(handle, kRequestIdKey, nullptr, &size);
     if (error == ESP_ERR_NVS_NOT_FOUND) {
