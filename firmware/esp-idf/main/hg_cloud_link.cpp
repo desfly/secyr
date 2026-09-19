@@ -9,6 +9,8 @@
 #include "esp_mac.h"
 #include "esp_timer.h"
 #include "esp_random.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "nvs.h"
 #include "homeguard/access_control.hpp"
 #include "homeguard/system_model.hpp"
@@ -35,6 +37,16 @@ constexpr std::size_t kDisarmChallengeLength = 32U;
 constexpr std::uint64_t kDisarmChallengeTtlUs = 60ULL * 1000ULL * 1000ULL;
 std::string g_disarm_challenge;
 std::uint64_t g_disarm_challenge_deadline_us{};
+StaticSemaphore_t g_replay_admission_mutex_storage{};
+SemaphoreHandle_t g_replay_admission_mutex = nullptr;
+
+SemaphoreHandle_t replay_admission_mutex()
+{
+    if (g_replay_admission_mutex == nullptr) {
+        g_replay_admission_mutex = xSemaphoreCreateMutexStatic(&g_replay_admission_mutex_storage);
+    }
+    return g_replay_admission_mutex;
+}
 
 std::string issue_disarm_challenge()
 {
@@ -584,21 +596,31 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         return;
     }
 
+    // Serialize replay admission across MQTT callbacks/tasks. The lock covers
+    // read -> validate -> durable NVS commit, so two concurrent envelopes cannot
+    // both pass against the same previously stored counter.
+    const auto replay_mutex = replay_admission_mutex();
+    if (replay_mutex == nullptr || xSemaphoreTake(replay_mutex, portMAX_DELAY) != pdTRUE) {
+        publish_response(false, "replay_state_unavailable");
+        return;
+    }
+
     std::uint64_t stored_counter = 0;
-    if (!load_command_counter(stored_counter)) {
+    std::string last_request_id;
+    const bool replay_state_loaded =
+        load_command_counter(stored_counter) && load_last_request_id(last_request_id);
+    if (!replay_state_loaded) {
+        xSemaphoreGive(replay_mutex);
         publish_response(false, "replay_state_unavailable");
         return;
     }
     if (command_counter <= stored_counter) {
+        xSemaphoreGive(replay_mutex);
         publish_response(false, "replay_rejected");
         return;
     }
-    std::string last_request_id;
-    if (!load_last_request_id(last_request_id)) {
-        publish_response(false, "replay_state_unavailable");
-        return;
-    }
     if (request_id == last_request_id) {
+        xSemaphoreGive(replay_mutex);
         publish_response(false, "request_replay_rejected");
         return;
     }
@@ -607,9 +629,11 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // operation. Reuse the same persisted counter/requestId barrier as commands.
     if (command == "security.disarm_challenge") {
         if (!persist_command_replay_state(command_counter, request_id)) {
+            xSemaphoreGive(replay_mutex);
             publish_response(false, "replay_state_persist_failed");
             return;
         }
+        xSemaphoreGive(replay_mutex);
         if (issue_disarm_challenge() != ESP_OK) {
             publish_response(false, "challenge_issue_failed");
             return;
@@ -632,9 +656,11 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // applying the side effect. An NVS failure must not burn a valid challenge,
     // while a reboot must not reopen the replay window.
     if (!persist_command_replay_state(command_counter, request_id)) {
+        xSemaphoreGive(replay_mutex);
         publish_response(false, "replay_state_persist_failed");
         return;
     }
+    xSemaphoreGive(replay_mutex);
 
     // Signature, authorization, replay checks and durable replay-state update
     // have all succeeded. Only now burn the one-time disarm token.
