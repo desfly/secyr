@@ -614,6 +614,20 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         return;
     }
 
+    // A trust rotation can happen while the signature is being verified.
+    // Re-read the active trust after acquiring replay admission and fail closed
+    // if either the epoch or the key changed before the durable replay commit.
+    // This is a defense-in-depth check, not a substitute for serializing the
+    // trust writer with command execution during transactional rotation.
+    CloudCommandTrust admission_trust;
+    if (trust_store.load(admission_trust) != ESP_OK ||
+        admission_trust.version != trust.version ||
+        admission_trust.public_key_pem != trust.public_key_pem) {
+        xSemaphoreGive(replay_mutex);
+        publish_response(false, "key_epoch_changed");
+        return;
+    }
+
     std::uint64_t stored_counter = 0;
     std::string last_request_id;
     const bool replay_state_loaded =
