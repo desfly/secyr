@@ -112,6 +112,12 @@ challenge_issue = link.find("issue_disarm_challenge()", challenge_branch)
 require(challenge_branch >= 0, "signed disarm challenge issuance path missing")
 require(replay_check >= 0 and request_replay_check >= 0 and replay_check < challenge_branch and request_replay_check < challenge_branch,
         "disarm challenge issuance bypasses persistent replay checks")
+challenge_trust_reload = link.find("trust_store.load(challenge_trust)", challenge_persist)
+challenge_trust_reject = link.find('publish_response(false, "key_epoch_changed")', challenge_trust_reload)
+require(challenge_persist >= 0 and challenge_trust_reload >= 0 and
+        challenge_trust_reject >= 0 and challenge_issue >= 0 and
+        challenge_persist < challenge_trust_reload < challenge_trust_reject < challenge_issue,
+        "disarm challenge must recheck trust after replay commit and before issuance")
 require(challenge_persist >= 0 and challenge_issue >= 0 and challenge_persist < challenge_issue,
         "disarm challenge replay state must persist before token issuance")
 require("kDisarmChallengeLength = 32U" in link and
