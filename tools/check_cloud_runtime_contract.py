@@ -94,18 +94,26 @@ require("cloud_->begin_trust_rotation()" in http and
 challenge_start = link.find('if (command == "security.disarm_challenge")')
 challenge_commit = link.find("persist_command_replay_state(command_counter, request_id)", challenge_start)
 challenge_issue_locked = link.find("if (issue_disarm_challenge() != ESP_OK)", challenge_commit)
+# Error branches must unlock before returning; inspect only the success path
+# between the end of the replay-persist error branch and the side effect.
+challenge_persist_failure = link.find('publish_response(false, "replay_state_persist_failed")', challenge_commit)
+challenge_success_path = link.find("CloudCommandTrust challenge_trust;", challenge_persist_failure)
 challenge_unlock = link.find("xSemaphoreGive(replay_mutex);", challenge_issue_locked)
-require(challenge_commit >= 0 and challenge_issue_locked > challenge_commit and
-        "xSemaphoreGive(replay_mutex);" not in link[challenge_commit:challenge_issue_locked] and
-        challenge_unlock > challenge_issue_locked,
-        "disarm challenge must remain locked from replay commit through issuance")
+require(challenge_commit >= 0 and challenge_persist_failure > challenge_commit and
+        challenge_success_path > challenge_persist_failure and
+        challenge_issue_locked > challenge_success_path and challenge_unlock > challenge_issue_locked and
+        "xSemaphoreGive(replay_mutex);" not in link[challenge_success_path:link.find("if (trust_store.load(challenge_trust)", challenge_success_path)],
+        "disarm challenge must remain locked on its success path through issuance")
 command_commit = link.find("persist_command_replay_state(command_counter, request_id)", challenge_issue_locked)
-command_effect = link.find("model_->set_partition_arm(1, target, 0)", command_commit)
+command_persist_failure = link.find('publish_response(false, "replay_state_persist_failed")', command_commit)
+command_success_path = link.find("CloudCommandTrust execution_trust;", command_persist_failure)
+command_effect = link.find("model_->set_partition_arm(1, target, 0)", command_success_path)
 command_unlock = link.find("xSemaphoreGive(replay_mutex);", command_effect)
-require(command_commit >= 0 and command_effect > command_commit and
-        "xSemaphoreGive(replay_mutex);" not in link[command_commit:command_effect] and
-        command_unlock > command_effect,
-        "security command must remain locked from replay commit through side effect")
+require(command_commit >= 0 and command_persist_failure > command_commit and
+        command_success_path > command_persist_failure and command_effect > command_success_path and
+        command_unlock > command_effect and
+        "xSemaphoreGive(replay_mutex);" not in link[command_success_path:link.find("if (trust_store.load(execution_trust)", command_success_path)],
+        "security command must remain locked on its success path through side effect")
 
 # The post-commit trust check must precede any arm-state side effect.
 execution_reload = link.find("trust_store.load(execution_trust)")
