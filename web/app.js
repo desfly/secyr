@@ -300,8 +300,13 @@ async function sendOutputCommand(button) {
   if (!Number.isInteger(outputId) || outputId <= 0 || !validOperator(actor, credential)) return;
   document.querySelectorAll("[data-output-id]").forEach(item => { item.disabled = true; });
   try {
-    await api("/api/v1/system/output-command", { method: "POST", body: JSON.stringify({ outputId, active, actor, credential }) });
-    showToast(active ? "Клапан відкрито" : "Клапан закрито");
+    const reply = await api("/api/v1/system/output-command", { method: "POST", body: JSON.stringify({ outputId, active, actor, credential }) });
+    if (reply.accepted === false) throw new Error(reply.reason || reply.code || "Команду відхилено");
+    const state = await api("/api/v1/system/outputs");
+    const output = Array.isArray(state.outputs) ? state.outputs.find(item => Number(item.id) === outputId) : null;
+    if (!output || typeof output.active !== "boolean") throw new Error("Немає підтвердженого стану клапана");
+    if (output.active !== active) throw new Error("Команду надіслано, але стан клапана ще не підтверджено");
+    showToast(active ? "Контролер підтвердив відкритий стан" : "Контролер підтвердив закритий стан");
   } catch (error) {
     showToast(`Помилка клапана: ${error.message}`);
   } finally {
@@ -318,9 +323,10 @@ async function sendSecurityCommand(button) {
   const previousDisabled = new Map(buttons.map(item => [item, item.disabled]));
   buttons.forEach(item => { item.disabled = true; });
   try {
-    await api("/api/v1/system/security-command", { method: "POST", body: JSON.stringify({ command, actor, credential }) });
-    showToast("Команду виконано");
+    const reply = await api("/api/v1/system/security-command", { method: "POST", body: JSON.stringify({ command, actor, credential }) });
+    if (reply.accepted === false) throw new Error(reply.reason || reply.code || "Команду відхилено");
     await refresh();
+    showToast("Команду прийнято; перевірте фактичний стан системи");
   } catch (error) {
     showToast(`Помилка команди: ${error.message}`);
   } finally {
