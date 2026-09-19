@@ -80,6 +80,33 @@ require(admission_lock >= 0 and admission_reload >= 0 and admission_epoch >= 0 a
         admission_reject < admission_counter,
         "MQTT trust must be revalidated under replay admission before replay state is read")
 
+# Trust provisioning and command execution must share the same mutex. The
+# replay mutex must not be released between durable admission and side effects.
+require("bool CloudLink::begin_trust_rotation()" in link and
+        "xSemaphoreTake(mutex, portMAX_DELAY)" in link and
+        "void CloudLink::end_trust_rotation()" in link,
+        "cloud trust rotation gate must use the command admission mutex")
+require("cloud_->begin_trust_rotation()" in http and
+        "cloud_->end_trust_rotation()" in http and
+        http.find("cloud_->begin_trust_rotation()") < http.find("trust_store_->save(trust)") <
+        http.find("cloud_->end_trust_rotation()"),
+        "trust writer must hold the shared gate while persisting a new key")
+challenge_start = link.find('if (command == "security.disarm_challenge")')
+challenge_commit = link.find("persist_command_replay_state(command_counter, request_id)", challenge_start)
+challenge_issue_locked = link.find("if (issue_disarm_challenge() != ESP_OK)", challenge_commit)
+challenge_unlock = link.find("xSemaphoreGive(replay_mutex);", challenge_issue_locked)
+require(challenge_commit >= 0 and challenge_issue_locked > challenge_commit and
+        "xSemaphoreGive(replay_mutex);" not in link[challenge_commit:challenge_issue_locked] and
+        challenge_unlock > challenge_issue_locked,
+        "disarm challenge must remain locked from replay commit through issuance")
+command_commit = link.find("persist_command_replay_state(command_counter, request_id)", challenge_issue_locked)
+command_effect = link.find("model_->set_partition_arm(1, target, 0)", command_commit)
+command_unlock = link.find("xSemaphoreGive(replay_mutex);", command_effect)
+require(command_commit >= 0 and command_effect > command_commit and
+        "xSemaphoreGive(replay_mutex);" not in link[command_commit:command_effect] and
+        command_unlock > command_effect,
+        "security command must remain locked from replay commit through side effect")
+
 # The post-commit trust check must precede any arm-state side effect.
 execution_reload = link.find("trust_store.load(execution_trust)")
 execution_reject = link.find('publish_response(false, "key_epoch_changed")', execution_reload)
