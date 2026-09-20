@@ -321,9 +321,9 @@ async function sendOutputCommand(button) {
     await api("/api/v1/system/output-command", { method: "POST", body: JSON.stringify({ outputId, active, actor, credential }) });
     try {
       const confirmed = await confirmOutputState(outputId, active);
-      showToast(confirmed ? (active ? "Стан підтверджено: клапан відкрито" : "Стан підтверджено: клапан закрито") : "Команду прийнято; стан клапана ще не підтверджено");
+      showToast(confirmed ? (active ? "Стан виходу підтверджено: команда відкрити кран" : "Стан виходу підтверджено: команда закрити кран") : "Команду прийнято; стан виходу ще не підтверджено");
     } catch (_) {
-      showToast("Команду прийнято; перевірити стан клапана не вдалося");
+      showToast("Команду прийнято; перевірити стан виходу не вдалося");
     }
   } catch (error) {
     showToast(`Помилка клапана: ${error.message}`);
