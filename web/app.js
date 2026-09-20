@@ -293,6 +293,24 @@ function validOperator(actor, credential) {
   return false;
 }
 
+async function confirmOutputState(outputId, expectedActive) {
+  const state = await api("/api/v1/system/outputs");
+  const output = Array.isArray(state.outputs) ? state.outputs.find(item => Number(item.id) === outputId) : null;
+  return output != null && output.active === expectedActive;
+}
+
+async function confirmSecurityState(command) {
+  const expected = {
+    "security.arm_away": "away",
+    "security.arm_home": "stay",
+    "security.disarm": "disarmed"
+  }[command];
+  // Panic may be reported through an alarm/event rather than armState.
+  if (!expected) return null;
+  const state = await api("/api/v1/system/partitions");
+  return Array.isArray(state.partitions) && state.partitions[0]?.armState === expected;
+}
+
 async function sendOutputCommand(button) {
   const outputId = Number(button.dataset.outputId);
   const active = button.dataset.outputActive === "true";
@@ -301,7 +319,12 @@ async function sendOutputCommand(button) {
   document.querySelectorAll("[data-output-id]").forEach(item => { item.disabled = true; });
   try {
     await api("/api/v1/system/output-command", { method: "POST", body: JSON.stringify({ outputId, active, actor, credential }) });
-    showToast(active ? "Клапан відкрито" : "Клапан закрито");
+    try {
+      const confirmed = await confirmOutputState(outputId, active);
+      showToast(confirmed ? (active ? "Стан підтверджено: клапан відкрито" : "Стан підтверджено: клапан закрито") : "Команду прийнято; стан клапана ще не підтверджено");
+    } catch (_) {
+      showToast("Команду прийнято; перевірити стан клапана не вдалося");
+    }
   } catch (error) {
     showToast(`Помилка клапана: ${error.message}`);
   } finally {
@@ -319,13 +342,18 @@ async function sendSecurityCommand(button) {
   buttons.forEach(item => { item.disabled = true; });
   try {
     await api("/api/v1/system/security-command", { method: "POST", body: JSON.stringify({ command, actor, credential }) });
-    showToast("Команду виконано");
-    await refresh();
+    try {
+      const confirmed = await confirmSecurityState(command);
+      showToast(confirmed === true ? "Стан охорони підтверджено" : "Команду прийнято; стан охорони або тривоги ще не підтверджено");
+    } catch (_) {
+      showToast("Команду прийнято; перевірити стан охорони не вдалося");
+    }
   } catch (error) {
     showToast(`Помилка команди: ${error.message}`);
   } finally {
     document.querySelector("#operatorPin").value = "";
     buttons.forEach(item => { item.disabled = previousDisabled.get(item) === true; });
+    await refresh();
   }
 }
 
