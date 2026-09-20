@@ -107,6 +107,14 @@ HARNESS = r"""
   for (const command of ['security.arm_away', 'security.disarm', 'security.arm_home']) {
     (await waitEnabled(`[data-command="${command}"]`)).click();
     await sleep(450);
+    // Mock partition always reports disarmed: arm commands must not claim confirmation.
+    const message = document.querySelector('#toast')?.textContent || '';
+    if (command !== 'security.disarm' && !message.includes('ще не підтверджено')) {
+      throw new Error(`unconfirmed ${command} reported success: ${message}`);
+    }
+    if (command === 'security.disarm' && !message.includes('Стан охорони підтверджено')) {
+      throw new Error(`disarm state not confirmed: ${message}`);
+    }
   }
   if (!document.querySelector('[data-command="security.panic"]')?.disabled) throw new Error('panic unexpectedly enabled for user');
   if (!document.querySelector('#wifiConnect')?.disabled) throw new Error('Wi-Fi connect unexpectedly enabled for user');
@@ -114,8 +122,14 @@ HARNESS = r"""
 
   (await waitEnabled('[data-output-id="2"][data-output-active="true"]')).click();
   await sleep(650);
+  if (!document.querySelector('#toast')?.textContent.includes('Стан виходу підтверджено: команда відкрити кран')) {
+    throw new Error('valve output activation not confirmed or incorrectly labeled');
+  }
   (await waitEnabled('[data-output-id="2"][data-output-active="false"]')).click();
   await sleep(650);
+  if (!document.querySelector('#toast')?.textContent.includes('Стан виходу підтверджено: команда закрити кран')) {
+    throw new Error('valve output deactivation not confirmed or incorrectly labeled');
+  }
   await logout();
 
   // Guest: monitoring only; every command control remains disabled.
