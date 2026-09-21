@@ -574,8 +574,11 @@ class MainActivity : ComponentActivity() {
             val result = runCatching { commands.panicOverBle() }
             commandStatus.value = result.fold(
                 { reply ->
-                    if (reply.accepted || reply.duplicate) "Паніка: OK (${reply.code})"
-                    else "Паніка: відхилено (${reply.code})"
+                    when {
+                        reply.duplicate -> "Паніка: повторну команду розпізнано (${reply.code}); нове спрацювання не підтверджено"
+                        reply.accepted -> "Паніка: команду прийнято контролером (${reply.code}); спрацювання тривоги ще не підтверджено"
+                        else -> "Паніка: відхилено (${reply.code})"
+                    }
                 },
                 { error -> "Паніка: помилка (${error.message ?: "BLE"})" },
             )
