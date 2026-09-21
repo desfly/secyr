@@ -293,10 +293,31 @@ function validOperator(actor, credential) {
   return false;
 }
 
+// A command acknowledgement is not proof of an observed state transition.
+async function waitForReportedState(readState, timeoutMs = 1800, intervalMs = 150) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  do {
+    try {
+      if (await readState()) return true;
+      lastError = null;
+    } catch (error) {
+      lastError = error;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise(resolve => setTimeout(resolve, Math.min(intervalMs, remaining)));
+  } while (true);
+  if (lastError) throw lastError;
+  return false;
+}
+
 async function confirmOutputState(outputId, expectedActive) {
-  const state = await api("/api/v1/system/outputs");
-  const output = Array.isArray(state.outputs) ? state.outputs.find(item => Number(item.id) === outputId) : null;
-  return output != null && output.active === expectedActive;
+  return waitForReportedState(async () => {
+    const state = await api("/api/v1/system/outputs");
+    const output = Array.isArray(state.outputs) ? state.outputs.find(item => Number(item.id) === outputId) : null;
+    return output != null && output.active === expectedActive;
+  });
 }
 
 async function confirmSecurityState(command) {
@@ -305,10 +326,12 @@ async function confirmSecurityState(command) {
     "security.arm_home": "stay",
     "security.disarm": "disarmed"
   }[command];
-  // Panic may be reported through an alarm/event rather than armState.
+  // Panic needs alarm/event telemetry; armState cannot confirm it.
   if (!expected) return null;
-  const state = await api("/api/v1/system/partitions");
-  return Array.isArray(state.partitions) && state.partitions[0]?.armState === expected;
+  return waitForReportedState(async () => {
+    const state = await api("/api/v1/system/partitions");
+    return Array.isArray(state.partitions) && state.partitions[0]?.armState === expected;
+  });
 }
 
 async function sendOutputCommand(button) {
