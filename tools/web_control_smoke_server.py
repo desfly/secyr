@@ -60,6 +60,30 @@ HARNESS = r"""
   };
 
   await waitFor('html[data-homeguard-ui="ready"]');
+  // Exercise delayed success, timeout and transient read failure without hardware.
+  let delayedReads = 0;
+  if (!await waitForReportedState(async () => ++delayedReads >= 3, 350, 20) || delayedReads !== 3) {
+    throw new Error('delayed state transition was not confirmed');
+  }
+  let timeoutReads = 0;
+  if (await waitForReportedState(async () => { ++timeoutReads; return false; }, 90, 20) || timeoutReads < 2) {
+    throw new Error('unchanged state was incorrectly confirmed');
+  }
+  let recoveryReads = 0;
+  if (!await waitForReportedState(async () => {
+    if (++recoveryReads === 1) throw new Error('temporary read failure');
+    return true;
+  }, 200, 20)) {
+    throw new Error('transient read failure did not recover');
+  }
+  let persistentFailure = false;
+  try {
+    await waitForReportedState(async () => { throw new Error('read unavailable'); }, 90, 20);
+  } catch (error) {
+    persistentFailure = error.message === 'read unavailable';
+  }
+  if (!persistentFailure) throw new Error('persistent read failure was not reported');
+
 
   // Factory-fresh setup must not pre-load authenticated dashboard telemetry.
   await waitFor('#hgSetupId');
@@ -106,7 +130,7 @@ HARNESS = r"""
   await login('smoke-user', '1234');
   for (const command of ['security.arm_away', 'security.disarm', 'security.arm_home']) {
     (await waitEnabled(`[data-command="${command}"]`)).click();
-    await sleep(450);
+    await sleep(2100);
     // Mock partition always reports disarmed: arm commands must not claim confirmation.
     const message = document.querySelector('#toast')?.textContent || '';
     if (command !== 'security.disarm' && !message.includes('ще не підтверджено')) {
