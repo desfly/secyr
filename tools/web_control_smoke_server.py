@@ -116,6 +116,11 @@ HARNESS = r"""
   await sleep(650);
   (await waitEnabled('[data-output-id="2"][data-output-active="false"]')).click();
   await sleep(650);
+  // Exercise the second valve independently, including the refreshed state.
+  (await waitEnabled('[data-output-id="3"][data-output-active="true"]')).click();
+  await sleep(650);
+  (await waitEnabled('[data-output-id="3"][data-output-active="false"]')).click();
+  await sleep(650);
   await logout();
 
   // Guest: monitoring only; every command control remains disabled.
@@ -142,7 +147,7 @@ class SmokeState:
     def __init__(self, log_path: Path) -> None:
         self.log_path = log_path
         self.lock = threading.Lock()
-        self.valve_active = False
+        self.valve_active = {2: False, 3: False}
         self.network_ssid = "InitialNet"
         self.users: list[dict[str, object]] = []
         self.credentials: dict[str, str] = {}
@@ -232,7 +237,7 @@ class SmokeHandler(BaseHTTPRequestHandler):
             self._json({"ok": True, "partitions": [{"id": 1, "armState": "disarmed"}]})
             return
         if path == "/api/v1/system/outputs":
-            self._json({"ok": True, "outputs": [{"id": 1, "type": "siren", "active": False}, {"id": 2, "type": "valve", "active": self.state.valve_active}, {"id": 3, "type": "valve", "active": False}]})
+            self._json({"ok": True, "outputs": [{"id": 1, "type": "siren", "active": False}, {"id": 2, "type": "valve", "active": self.state.valve_active[2]}, {"id": 3, "type": "valve", "active": self.state.valve_active[3]}]})
             return
         if path == "/api/v1/system/events":
             self._json({"ok": True, "events": [{"sequence": self.state.sequence, "event": "smoke.boot", "severity": "info"}]})
@@ -332,8 +337,8 @@ class SmokeHandler(BaseHTTPRequestHandler):
             self._json({"ok": True})
             return
         if path == "/api/v1/system/output-command":
-            if body.get("outputId") == 2 and isinstance(body.get("active"), bool):
-                self.state.valve_active = bool(body["active"])
+            if body.get("outputId") in (2, 3) and isinstance(body.get("active"), bool):
+                self.state.valve_active[int(body["outputId"])] = bool(body["active"])
                 self._json({"ok": True})
             else:
                 self._json({"ok": False, "reason": "bad_output"}, 400)
@@ -419,6 +424,8 @@ def verify(args: argparse.Namespace) -> int:
     expected_outputs = [
         {"outputId": 2, "active": True, "actor": "smoke-user"},
         {"outputId": 2, "active": False, "actor": "smoke-user"},
+        {"outputId": 3, "active": True, "actor": "smoke-user"},
+        {"outputId": 3, "active": False, "actor": "smoke-user"},
     ]
     if outputs != expected_outputs:
         errors.append(f"valve button payload mismatch: {outputs}")
