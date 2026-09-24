@@ -54,7 +54,10 @@ private val AccessFieldBorder = Color(0xFFB8A7E8)
 private fun requiredBleRuntimePermissions(): List<String> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
     listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
 } else {
-    emptyList()
+    // Android 6–11 gate BLE scan results behind runtime location permission.
+    // BleProvisioningScanner enforces the same contract, so the login screen
+    // must request it before starting the opportunistic/runtime BLE session.
+    listOf(Manifest.permission.ACCESS_FINE_LOCATION)
 }
 
 @Composable
