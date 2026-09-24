@@ -293,24 +293,69 @@ function validOperator(actor, credential) {
   return false;
 }
 
+// A command acknowledgement is not proof of an observed state transition.
+async function waitForReportedState(readState, timeoutMs = 1800, intervalMs = 150) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  do {
+    try {
+      if (await readState()) return true;
+      lastError = null;
+    } catch (error) {
+      lastError = error;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise(resolve => setTimeout(resolve, Math.min(intervalMs, remaining)));
+  } while (true);
+  if (lastError) throw lastError;
+  return false;
+}
+
+async function confirmOutputState(outputId, expectedActive) {
+  return waitForReportedState(async () => {
+    const state = await api("/api/v1/system/outputs");
+    const output = Array.isArray(state.outputs) ? state.outputs.find(item => Number(item.id) === outputId) : null;
+    return output != null && output.active === expectedActive;
+  });
+}
+
+async function confirmSecurityState(command) {
+  const expected = {
+    "security.arm_away": "away",
+    "security.arm_home": "stay",
+    "security.disarm": "disarmed"
+  }[command];
+  // Panic needs alarm/event telemetry; armState cannot confirm it.
+  if (!expected) return null;
+  return waitForReportedState(async () => {
+    const state = await api("/api/v1/system/partitions");
+    return Array.isArray(state.partitions) && state.partitions[0]?.armState === expected;
+  });
+}
+
 async function sendOutputCommand(button) {
   const outputId = Number(button.dataset.outputId);
   const active = button.dataset.outputActive === "true";
   const { actor, credential } = operatorCredentials();
   if (!Number.isInteger(outputId) || outputId <= 0 || !validOperator(actor, credential)) return;
-  document.querySelectorAll("[data-output-id]").forEach(item => { item.disabled = true; });
+  const buttons = [...document.querySelectorAll("[data-output-id]")];
+  const previousDisabled = new Map(buttons.map(item => [item, item.disabled]));
+  buttons.forEach(item => { item.disabled = true; });
   try {
     const reply = await api("/api/v1/system/output-command", { method: "POST", body: JSON.stringify({ outputId, active, actor, credential }) });
     if (reply.accepted === false) throw new Error(reply.reason || reply.code || "Команду відхилено");
-    const state = await api("/api/v1/system/outputs");
-    const output = Array.isArray(state.outputs) ? state.outputs.find(item => Number(item.id) === outputId) : null;
-    if (!output || typeof output.active !== "boolean") throw new Error("Немає підтвердженого стану клапана");
-    if (output.active !== active) throw new Error("Команду надіслано, але стан клапана ще не підтверджено");
-    showToast(active ? "Контролер підтвердив відкритий стан" : "Контролер підтвердив закритий стан");
+    try {
+      const confirmed = await confirmOutputState(outputId, active);
+      showToast(confirmed ? (active ? "Стан виходу підтверджено: команда відкрити кран" : "Стан виходу підтверджено: команда закрити кран") : "Команду прийнято; стан виходу ще не підтверджено");
+    } catch (_) {
+      showToast("Команду прийнято; перевірити стан виходу не вдалося");
+    }
   } catch (error) {
     showToast(`Помилка клапана: ${error.message}`);
   } finally {
     document.querySelector("#operatorPin").value = "";
+    buttons.forEach(item => { item.disabled = previousDisabled.get(item) === true; });
     await refresh();
   }
 }
@@ -325,24 +370,18 @@ async function sendSecurityCommand(button) {
   try {
     const reply = await api("/api/v1/system/security-command", { method: "POST", body: JSON.stringify({ command, actor, credential }) });
     if (reply.accepted === false) throw new Error(reply.reason || reply.code || "Команду відхилено");
-    const expectedState = ({
-      "security.arm_away": "away",
-      "security.arm_home": "stay",
-      "security.disarm": "disarmed",
-      "security.panic": "alarm",
-    })[command];
-    if (!expectedState) throw new Error("Невідома команда охорони");
-    const state = await api("/api/v1/system/partitions");
-    const partition = Array.isArray(state.partitions) ? state.partitions.find(item => Number(item.id) === 1) : null;
-    if (!partition || typeof partition.armState !== "string") throw new Error("Немає підтвердженого стану охорони");
-    if (partition.armState !== expectedState) throw new Error("Команду надіслано, але стан охорони ще не підтверджено");
-    renderPartitions(state);
-    showToast("Контролер підтвердив стан охорони; фізичні виконавчі пристрої не перевірено");
+    try {
+      const confirmed = await confirmSecurityState(command);
+      showToast(confirmed === true ? "Стан охорони підтверджено" : "Команду прийнято; стан охорони або тривоги ще не підтверджено");
+    } catch (_) {
+      showToast("Команду прийнято; перевірити стан охорони не вдалося");
+    }
   } catch (error) {
     showToast(`Помилка команди: ${error.message}`);
   } finally {
     document.querySelector("#operatorPin").value = "";
     buttons.forEach(item => { item.disabled = previousDisabled.get(item) === true; });
+    await refresh();
   }
 }
 
