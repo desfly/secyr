@@ -69,10 +69,10 @@ fun DashboardScreen(
     onImportSettings: () -> Unit,
     onFactoryReset: () -> Unit,
     onCommand: (CommandType) -> Unit,
-    onPanic: () -> Unit,
+    onPanicBle: () -> Unit,
 ) {
     var pendingDangerousCommand by remember { mutableStateOf<CommandType?>(null) }
-    var confirmPanic by remember { mutableStateOf(false) }
+    var confirmPanicBle by remember { mutableStateOf(false) }
     var confirmClearHistory by remember { mutableStateOf(false) }
     var confirmFactoryReset by remember { mutableStateOf(false) }
     var factoryResetPhrase by remember { mutableStateOf("") }
@@ -89,18 +89,18 @@ fun DashboardScreen(
     val sourceFilter = eventSourceText.trim().toIntOrNull()
     val filteredEvents = EventLogFilterEngine.apply(events, EventLogFilter(category = eventCategory, query = eventQuery, sourceId = sourceFilter))
 
-    if (confirmPanic) {
+    if (confirmPanicBle) {
         AlertDialog(
-            onDismissRequest = { confirmPanic = false },
+            onDismissRequest = { confirmPanicBle = false },
             title = { Text("Підтвердити паніку") },
-            text = { Text("Ця дія передасть тривожну команду контролеру через BLE. Продовжити?") },
+            text = { Text("Надіслати тривожну команду через BLE? Прийняття команди ще не підтверджує спрацювання тривоги.") },
             confirmButton = {
                 TextButton(enabled = accessSession?.capabilities?.panic == true, onClick = {
-                    confirmPanic = false
-                    onPanic()
+                    confirmPanicBle = false
+                    onPanicBle()
                 }) { Text("Надіслати паніку") }
             },
-            dismissButton = { TextButton(onClick = { confirmPanic = false }) { Text("Скасувати") } },
+            dismissButton = { TextButton(onClick = { confirmPanicBle = false }) { Text("Скасувати") } },
         )
     }
 
@@ -315,6 +315,7 @@ fun DashboardScreen(
                 OutlinedButton(enabled = canCommand(CommandType.RESET_ALARM), onClick = { pendingDangerousCommand = CommandType.RESET_ALARM }, modifier = Modifier.fillMaxWidth()) { Text("Скинути тривогу") }
                 OutlinedButton(enabled = canCommand(CommandType.OPEN_VALVES), onClick = { pendingDangerousCommand = CommandType.OPEN_VALVES }, modifier = Modifier.fillMaxWidth()) { Text("Відкрити клапани") }
                 Button(enabled = canCommand(CommandType.CLOSE_VALVES), onClick = { onCommand(CommandType.CLOSE_VALVES) }, modifier = Modifier.fillMaxWidth()) { Text("Закрити клапани") }
+                OutlinedButton(enabled = accessSession?.capabilities?.panic == true, onClick = { confirmPanicBle = true }, modifier = Modifier.fillMaxWidth()) { Text("Паніка (BLE)") }
             }
         }
 
