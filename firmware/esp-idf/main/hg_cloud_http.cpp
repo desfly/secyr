@@ -169,7 +169,15 @@ esp_err_t CloudHttp::handle_trust(httpd_req_t* request)
     }
     http_util::scrub(body);
     CloudCommandTrust trust{version, public_key};
+    // Share the command admission/side-effect gate with the trust writer.
+    if (!cloud_->begin_trust_rotation()) {
+        http_util::scrub(public_key);
+        http_util::scrub(trust.public_key_pem);
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return send_json(request, "{\"ok\":false,\"reason\":\"trust_rotation_unavailable\"}");
+    }
     const auto error = trust_store_->save(trust);
+    cloud_->end_trust_rotation();
     http_util::scrub(public_key);
     http_util::scrub(trust.public_key_pem);
     if (error == ESP_ERR_INVALID_STATE) {

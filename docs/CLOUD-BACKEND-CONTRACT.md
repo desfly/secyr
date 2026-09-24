@@ -23,6 +23,7 @@ There is one command schema for firmware, backend and CI. The backend must accep
   "requestId": "01K5EXAMPLE",
   "actor": "account-or-user-id",
   "command": "security.arm_away",
+  "keyEpoch": 1,
   "counter": 42,
   "issuedAtMs": 1785740000000,
   "expiresAtMs": 1785740120000,
@@ -31,18 +32,19 @@ There is one command schema for firmware, backend and CI. The backend must accep
 }
 ```
 
-The signature covers, in fixed canonical order, `version`, `deviceId`, `requestId`, `actor`, `command`, `counter`, `issuedAtMs`, `expiresAtMs` and `challenge`. The signature field itself is never part of the signed bytes. `challenge` is always a JSON string: use `""` for commands that do not require a challenge; `security.disarm` uses the currently issued 32-character hexadecimal one-time challenge. `null` is not valid.
+The signature covers, in fixed canonical order, `version`, `deviceId`, `requestId`, `actor`, `command`, `keyEpoch`, `counter`, `issuedAtMs`, `expiresAtMs` and `challenge`. The signature field itself is never part of the signed bytes. `challenge` is always a JSON string: use `""` for commands that do not require a challenge; `security.disarm` uses the currently issued 32-character hexadecimal one-time challenge. `null` is not valid.
 
 Before any command side effect, firmware must fail closed unless all applicable checks succeed:
 
 1. schema/version and field bounds are valid;
 2. `deviceId` exactly matches the local stable device identity;
-3. the signature verifies against the enrolled Cloud Command Trust public key;
-4. the command is fresh: `issuedAtMs` is acceptable and `expiresAtMs` has not passed;
-5. `requestId` has not already been accepted;
-6. `counter` is greater than the persisted monotonic counter, which is persisted before the side effect;
-7. the actor is authorized for the requested command;
-8. dangerous actions satisfy their required challenge/presence policy.
+3. `keyEpoch` exactly matches the active monotonic Cloud Command Trust version, so rotation invalidates envelopes signed for an older key generation;
+4. the signature verifies against the enrolled Cloud Command Trust public key;
+5. the command is fresh: `issuedAtMs` is acceptable and `expiresAtMs` has not passed;
+6. `requestId` has not already been accepted;
+7. `counter` is greater than the persisted monotonic counter, which is persisted before the side effect;
+8. the actor is authorized for the requested command;
+9. dangerous actions satisfy their required challenge/presence policy.
 
 The firmware enforces signed-command verification, trusted-time freshness, local actor authorization, persistent monotonic counter/request-ID replay barriers, and one-time challenge enforcement for remote disarm; these contracts are guarded by CI.
 

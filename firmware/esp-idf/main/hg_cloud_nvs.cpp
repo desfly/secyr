@@ -51,6 +51,12 @@ esp_err_t CloudNvsStore::load(CloudConfig& config) const
     nvs_close(handle);
     if (error != ESP_OK) return error;
 
+    // Reject corrupted or partially persisted enabled configurations instead
+    // of silently treating them as disabled or starting MQTT with no broker.
+    if (enabled > 1 || (enabled == 1 && config.broker_uri.empty())) {
+        config = {};
+        return ESP_ERR_INVALID_STATE;
+    }
     config.enabled = enabled != 0;
     if (config.broker_uri.size() > 256 || config.username.size() > 128 || config.password.size() > 128) {
         config = {};

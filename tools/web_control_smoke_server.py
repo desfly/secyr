@@ -60,6 +60,30 @@ HARNESS = r"""
   };
 
   await waitFor('html[data-homeguard-ui="ready"]');
+  // Exercise delayed success, timeout and transient read failure without hardware.
+  let delayedReads = 0;
+  if (!await waitForReportedState(async () => ++delayedReads >= 3, 350, 20) || delayedReads !== 3) {
+    throw new Error('delayed state transition was not confirmed');
+  }
+  let timeoutReads = 0;
+  if (await waitForReportedState(async () => { ++timeoutReads; return false; }, 90, 20) || timeoutReads < 2) {
+    throw new Error('unchanged state was incorrectly confirmed');
+  }
+  let recoveryReads = 0;
+  if (!await waitForReportedState(async () => {
+    if (++recoveryReads === 1) throw new Error('temporary read failure');
+    return true;
+  }, 200, 20)) {
+    throw new Error('transient read failure did not recover');
+  }
+  let persistentFailure = false;
+  try {
+    await waitForReportedState(async () => { throw new Error('read unavailable'); }, 90, 20);
+  } catch (error) {
+    persistentFailure = error.message === 'read unavailable';
+  }
+  if (!persistentFailure) throw new Error('persistent read failure was not reported');
+
 
   // Factory-fresh setup must not pre-load authenticated dashboard telemetry.
   await waitFor('#hgSetupId');
@@ -106,7 +130,15 @@ HARNESS = r"""
   await login('smoke-user', '1234');
   for (const command of ['security.arm_away', 'security.disarm', 'security.arm_home']) {
     (await waitEnabled(`[data-command="${command}"]`)).click();
-    await sleep(450);
+    await sleep(2100);
+    // Mock partition always reports disarmed: arm commands must not claim confirmation.
+    const message = document.querySelector('#toast')?.textContent || '';
+    if (command !== 'security.disarm' && !message.includes('ще не підтверджено')) {
+      throw new Error(`unconfirmed ${command} reported success: ${message}`);
+    }
+    if (command === 'security.disarm' && !message.includes('Стан охорони підтверджено')) {
+      throw new Error(`disarm state not confirmed: ${message}`);
+    }
   }
   if (!document.querySelector('[data-command="security.panic"]')?.disabled) throw new Error('panic unexpectedly enabled for user');
   if (!document.querySelector('#wifiConnect')?.disabled) throw new Error('Wi-Fi connect unexpectedly enabled for user');
@@ -114,8 +146,25 @@ HARNESS = r"""
 
   (await waitEnabled('[data-output-id="2"][data-output-active="true"]')).click();
   await sleep(650);
+  if (!document.querySelector('#toast')?.textContent.includes('Стан виходу підтверджено: команда відкрити кран')) {
+    throw new Error('valve output activation not confirmed or incorrectly labeled');
+  }
   (await waitEnabled('[data-output-id="2"][data-output-active="false"]')).click();
   await sleep(650);
+  if (!document.querySelector('#toast')?.textContent.includes('Стан виходу підтверджено: команда закрити кран')) {
+    throw new Error('valve output deactivation not confirmed or incorrectly labeled');
+  }
+  // Exercise the second valve independently, including the refreshed state.
+  (await waitEnabled('[data-output-id="3"][data-output-active="true"]')).click();
+  await sleep(650);
+  if (!document.querySelector('#toast')?.textContent.includes('Стан виходу підтверджено: команда відкрити кран')) {
+    throw new Error('second valve output activation not confirmed or incorrectly labeled');
+  }
+  (await waitEnabled('[data-output-id="3"][data-output-active="false"]')).click();
+  await sleep(650);
+  if (!document.querySelector('#toast')?.textContent.includes('Стан виходу підтверджено: команда закрити кран')) {
+    throw new Error('second valve output deactivation not confirmed or incorrectly labeled');
+  }
   await logout();
 
   // Guest: monitoring only; every command control remains disabled.
@@ -142,7 +191,7 @@ class SmokeState:
     def __init__(self, log_path: Path) -> None:
         self.log_path = log_path
         self.lock = threading.Lock()
-        self.valve_active = False
+        self.valve_active = {2: False, 3: False}
         self.network_ssid = "InitialNet"
         self.users: list[dict[str, object]] = []
         self.credentials: dict[str, str] = {}
@@ -232,7 +281,7 @@ class SmokeHandler(BaseHTTPRequestHandler):
             self._json({"ok": True, "partitions": [{"id": 1, "armState": "disarmed"}]})
             return
         if path == "/api/v1/system/outputs":
-            self._json({"ok": True, "outputs": [{"id": 1, "type": "siren", "active": False}, {"id": 2, "type": "valve", "active": self.state.valve_active}, {"id": 3, "type": "valve", "active": False}]})
+            self._json({"ok": True, "outputs": [{"id": 1, "type": "siren", "active": False}, {"id": 2, "type": "valve", "active": self.state.valve_active[2]}, {"id": 3, "type": "valve", "active": self.state.valve_active[3]}]})
             return
         if path == "/api/v1/system/events":
             self._json({"ok": True, "events": [{"sequence": self.state.sequence, "event": "smoke.boot", "severity": "info"}]})
@@ -332,8 +381,8 @@ class SmokeHandler(BaseHTTPRequestHandler):
             self._json({"ok": True})
             return
         if path == "/api/v1/system/output-command":
-            if body.get("outputId") == 2 and isinstance(body.get("active"), bool):
-                self.state.valve_active = bool(body["active"])
+            if body.get("outputId") in (2, 3) and isinstance(body.get("active"), bool):
+                self.state.valve_active[int(body["outputId"])] = bool(body["active"])
                 self._json({"ok": True})
             else:
                 self._json({"ok": False, "reason": "bad_output"}, 400)
@@ -419,6 +468,8 @@ def verify(args: argparse.Namespace) -> int:
     expected_outputs = [
         {"outputId": 2, "active": True, "actor": "smoke-user"},
         {"outputId": 2, "active": False, "actor": "smoke-user"},
+        {"outputId": 3, "active": True, "actor": "smoke-user"},
+        {"outputId": 3, "active": False, "actor": "smoke-user"},
     ]
     if outputs != expected_outputs:
         errors.append(f"valve button payload mismatch: {outputs}")
