@@ -95,11 +95,19 @@ def dump_dom(chrome: str, url: str, budget_ms: int = 3500) -> str:
         "--no-sandbox",
         "--disable-gpu",
         "--disable-dev-shm-usage",
+        "--disable-background-networking",
+        "--disable-component-update",
+        "--disable-default-apps",
+        "--disable-extensions",
+        "--disable-sync",
+        "--metrics-recording-only",
+        "--no-first-run",
+        "--no-default-browser-check",
         f"--virtual-time-budget={budget_ms}",
         "--dump-dom",
         url,
     ]
-    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=25)
+    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=45)
     if result.returncode != 0:
         raise RuntimeError(f"Chromium failed for {url}: {result.stderr[-1200:]}")
     return result.stdout
