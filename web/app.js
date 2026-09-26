@@ -47,6 +47,86 @@ const dashboardSections = [document.querySelector(".status-grid"), document.quer
 const networkPage = document.querySelector("#networkPage");
 const systemPage = document.querySelector("#system");
 
+const zoneAlarmRuntime = {
+  armed: false,
+  active: false,
+  lastAlarmSequence: 0,
+  audio: null,
+  timer: 0,
+};
+
+function ensureZoneAlarmStyle() {
+  if (document.getElementById("homeguard-zone-alarm-style")) return;
+  const style = document.createElement("style");
+  style.id = "homeguard-zone-alarm-style";
+  style.textContent = `
+    @keyframes hgZoneAlarmFlash { 0%,100% { background:#8a0000; } 50% { background:#ff1d1d; } }
+    body.hg-zone-alarm:before {
+      content:"ТРИВОГА"; position:fixed; z-index:99999; left:0; right:0; top:0; height:58px;
+      display:flex; align-items:center; justify-content:center; color:white; font-size:28px;
+      font-weight:900; letter-spacing:3px; animation:hgZoneAlarmFlash .55s infinite;
+      box-shadow:0 4px 18px rgba(0,0,0,.4);
+    }
+    body.hg-zone-alarm { padding-top:58px!important; }
+    body.hg-zone-alarm .app { outline:8px solid #d00000; outline-offset:-8px; }
+  `;
+  document.head.appendChild(style);
+}
+
+function ensureZoneAlarmAudio() {
+  if (zoneAlarmRuntime.audio) return zoneAlarmRuntime.audio;
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+  try { zoneAlarmRuntime.audio = new AudioCtx(); } catch (_) { return null; }
+  return zoneAlarmRuntime.audio;
+}
+
+function primeZoneAlarmAudio() {
+  const ctx = ensureZoneAlarmAudio();
+  if (ctx?.state === "suspended") ctx.resume().catch(() => {});
+}
+
+function zoneAlarmBeep() {
+  const ctx = ensureZoneAlarmAudio();
+  if (!ctx || ctx.state !== "running") return;
+  try {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.38);
+  } catch (_) {}
+}
+
+function setZoneAlarmActive(active) {
+  ensureZoneAlarmStyle();
+  zoneAlarmRuntime.active = active === true;
+  document.body.classList.toggle("hg-zone-alarm", zoneAlarmRuntime.active);
+  if (zoneAlarmRuntime.active) {
+    primeZoneAlarmAudio();
+    zoneAlarmBeep();
+    if (!zoneAlarmRuntime.timer) {
+      zoneAlarmRuntime.timer = window.setInterval(zoneAlarmBeep, 900);
+    }
+  } else if (zoneAlarmRuntime.timer) {
+    window.clearInterval(zoneAlarmRuntime.timer);
+    zoneAlarmRuntime.timer = 0;
+  }
+}
+
+function isZoneAlarmEvent(item) {
+  const event = String(item?.event || "").toLowerCase();
+  const sourceId = Number(item?.sourceId) || 0;
+  return sourceId >= 1 && sourceId <= 4 &&
+    (event === "alarm" || event === "zone.open" || event === "tamper");
+}
+
 function authenticatedUi() {
   return window.HomeGuardAuth?.authenticated?.() === true;
 }
@@ -98,7 +178,10 @@ function renderZones(data) {
 
 function renderPartitions(data) {
   const partition = Array.isArray(data?.partitions) ? data.partitions[0] : null;
-  document.querySelector("#securityMode").textContent = armLabel(partition?.armState);
+  const armState = partition?.armState;
+  zoneAlarmRuntime.armed = armState === "stay" || armState === "away" || armState === "alarm";
+  if (!zoneAlarmRuntime.armed) setZoneAlarmActive(false);
+  document.querySelector("#securityMode").textContent = armLabel(armState);
 }
 
 function eventTimeLabel(timestampMs) {
@@ -127,7 +210,14 @@ function eventLabel(item) {
 }
 
 function renderEvents(data) {
-  const events = Array.isArray(data?.events) ? data.events.slice(-6).reverse() : [];
+  const allEvents = Array.isArray(data?.events) ? data.events : [];
+  const latestAlarm = [...allEvents].reverse().find(isZoneAlarmEvent);
+  const latestSequence = Number(latestAlarm?.sequence) || 0;
+  if (zoneAlarmRuntime.armed && latestAlarm && latestSequence > zoneAlarmRuntime.lastAlarmSequence) {
+    zoneAlarmRuntime.lastAlarmSequence = latestSequence;
+    setZoneAlarmActive(true);
+  }
+  const events = allEvents.slice(-6).reverse();
   document.querySelector("#eventList").innerHTML = events.length ? events.map(item => `
     <div><i></i><time>${escapeHtml(eventTimeLabel(item.timestampMs))}</time><span>${escapeHtml(eventLabel(item))}</span><a>${escapeHtml(item.severity || "info")}</a></div>`).join("") : "<div><i></i><time>—</time><span>Подій ще немає</span><a>Інформація ›</a></div>";
 }
@@ -722,6 +812,9 @@ async function schedulerStep() {
 }
 
 function bootUi() {
+  ensureZoneAlarmStyle();
+  document.addEventListener("pointerdown", primeZoneAlarmAudio, { once: true, capture: true });
+  document.addEventListener("keydown", primeZoneAlarmAudio, { once: true, capture: true });
   ensureNetworkAuthPanel();
   ensureAccessPanel();
   document.querySelector("#wifiScan").onclick = scanWifi;
