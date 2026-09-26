@@ -131,6 +131,52 @@ function renderEvents(data) {
   document.querySelector("#eventList").innerHTML = events.length ? events.map(item => `
     <div><i></i><time>${escapeHtml(eventTimeLabel(item.timestampMs))}</time><span>${escapeHtml(eventLabel(item))}</span><a>${escapeHtml(item.severity || "info")}</a></div>`).join("") : "<div><i></i><time>—</time><span>Подій ще немає</span><a>Інформація ›</a></div>";
 }
+function ensureHistoryDialog() {
+  let overlay = document.querySelector("#historyOverlay");
+  if (overlay) return overlay;
+  overlay = document.createElement("div");
+  overlay.id = "historyOverlay";
+  overlay.hidden = true;
+  overlay.style.cssText = "position:fixed;inset:0;z-index:5000;background:rgba(5,17,28,.72);padding:24px;overflow:auto";
+  overlay.innerHTML = `
+    <section style="max-width:1050px;margin:24px auto;background:#fff;border-radius:14px;padding:18px;box-shadow:0 20px 70px rgba(0,0,0,.35)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px">
+        <div><h3 style="margin:0">Повна історія подій</h3><small id="historySummary">Завантаження…</small></div>
+        <button id="historyClose" type="button">Закрити</button>
+      </div>
+      <div id="historyFullList" style="display:grid;gap:6px"></div>
+    </section>`;
+  document.body.appendChild(overlay);
+  const close = () => { overlay.hidden = true; };
+  overlay.querySelector("#historyClose").onclick = close;
+  overlay.addEventListener("click", event => { if (event.target === overlay) close(); });
+  return overlay;
+}
+
+function renderFullHistory(data) {
+  const overlay = ensureHistoryDialog();
+  const events = Array.isArray(data?.events) ? [...data.events].reverse() : [];
+  overlay.querySelector("#historySummary").textContent = `Подій: ${events.length} із максимум 128`;
+  overlay.querySelector("#historyFullList").innerHTML = events.length ? events.map(item => `
+    <div style="display:grid;grid-template-columns:145px 1fr 90px;gap:12px;align-items:center;padding:9px 10px;border:1px solid #e1e7ee;border-radius:8px">
+      <time>${escapeHtml(eventTimeLabel(item.timestampMs))}</time>
+      <span>${escapeHtml(eventLabel(item))}</span>
+      <strong class="${stateClass(item.severity)}">${escapeHtml(item.severity || "info")}</strong>
+    </div>`).join("") : "<div>Подій ще немає</div>";
+  overlay.hidden = false;
+}
+
+async function openFullHistory() {
+  const overlay = ensureHistoryDialog();
+  overlay.querySelector("#historySummary").textContent = "Завантаження…";
+  overlay.querySelector("#historyFullList").innerHTML = "";
+  overlay.hidden = false;
+  try {
+    renderFullHistory(await api("/api/v1/system/events"));
+  } catch (error) {
+    overlay.querySelector("#historySummary").textContent = `Помилка: ${error.message}`;
+  }
+}
 
 function renderOutputs(data) {
   const outputs = Array.isArray(data?.outputs) ? data.outputs : [];
@@ -593,10 +639,27 @@ function routeFromHash() {
 }
 
 function bindNavigation() {
+  const historyLink = document.querySelector("#history");
+  if (historyLink) {
+    historyLink.style.cursor = "pointer";
+    historyLink.setAttribute("role", "button");
+    historyLink.setAttribute("tabindex", "0");
+    historyLink.onclick = openFullHistory;
+    historyLink.onkeydown = event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openFullHistory();
+      }
+    };
+  }
   document.querySelectorAll(".sidebar nav a").forEach(link => {
     link.addEventListener("click", event => {
       event.preventDefault();
       const href = link.getAttribute("href") || "#overview";
+      if (href === "#history") {
+        openFullHistory();
+        return;
+      }
       if (window.location.hash === href) routeFromHash(); else window.location.hash = href;
     });
   });
