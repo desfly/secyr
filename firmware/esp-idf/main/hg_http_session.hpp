@@ -15,7 +15,10 @@
 
 namespace homeguard::idf::http_session {
 
-inline constexpr std::int64_t kLifetimeUs = 15LL * 60LL * 1'000'000LL;
+// Authenticated sessions are revocation-bound rather than time-bound. Every
+// authorization still re-checks that the actor exists, is enabled and keeps
+// the same role. Admin disable/change and explicit logout revoke immediately.
+inline constexpr std::int64_t kLifetimeUs = 0LL;
 inline constexpr std::size_t kCapacity = 4U;
 inline std::array<hg::BearerTokenVerifier, kCapacity> g_tokens{};
 inline std::array<std::int64_t, kCapacity> g_issued_us{};
@@ -64,7 +67,11 @@ inline bool authorized_impl(std::string_view authorization, homeguard::AccessCon
         auto& token = g_tokens[i];
         if (!token.configured()) continue;
         const auto issued = g_issued_us[i];
-        if (issued <= 0 || now < issued || now - issued > kLifetimeUs) {
+        if (issued <= 0 || now < issued) {
+            clear_slot(i);
+            continue;
+        }
+        if (kLifetimeUs > 0 && now - issued > kLifetimeUs) {
             clear_slot(i);
             continue;
         }
