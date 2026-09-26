@@ -85,6 +85,16 @@ void sample_zone_adc(Ads1115& adc, std::size_t first_zone, std::array<hg::ZoneSt
     }
 }
 
+std::uint64_t event_timestamp_ms(std::uint64_t uptime_ms)
+{
+    struct timespec ts {};
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0 && ts.tv_sec >= 1735689600) {
+        return static_cast<std::uint64_t>(ts.tv_sec) * 1000ULL +
+               static_cast<std::uint64_t>(ts.tv_nsec / 1000000L);
+    }
+    return uptime_ms;
+}
+
 std::uint64_t rtc_epoch(Ds3231& rtc, bool& valid)
 {
     std::tm value{};
@@ -266,7 +276,7 @@ void TelemetryRuntime::run()
         zones.fill(hg::ZoneState::Disabled);
         sample_zone_adc(hardware_->zone_adc(), 0, zones);
         sample_zone_adc(hardware_->telemetry_adc(), 4, zones);
-        update_zone_model(zones, now_ms);
+        update_zone_model(zones, event_timestamp_ms(now_ms));
         update_zone_light(zones, now_ms);
 
         std::array<hg::PressureState, 2> pressures{};
