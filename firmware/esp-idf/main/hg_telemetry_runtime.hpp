@@ -8,6 +8,7 @@
 
 namespace hg {
 class SystemModel;
+class SystemEventBus;
 }
 
 class WebsocketTelemetry;
@@ -23,17 +24,20 @@ public:
         HardwareBootstrap* hardware,
         WebsocketTelemetry* websocket,
         hg::SystemModel* system_model,
+        hg::SystemEventBus* system_bus,
         BleTransport* ble_transport = nullptr);
 
 private:
     static void task_entry(void* context);
     void run();
+    void update_zone_model(const std::array<hg::ZoneState, 8>& zones, std::uint64_t now_ms);
     void update_zone_light(const std::array<hg::ZoneState, 8>& zones, std::uint64_t now_ms);
     bool set_light_output(bool active, std::uint64_t now_ms);
 
     HardwareBootstrap* hardware_{nullptr};
     WebsocketTelemetry* websocket_{nullptr};
     hg::SystemModel* system_model_{nullptr};
+    hg::SystemEventBus* system_bus_{nullptr};
     BleTransport* ble_transport_{nullptr};
     hg::TelemetryBuilder builder_{};
     hg::HealthMonitor health_{};
