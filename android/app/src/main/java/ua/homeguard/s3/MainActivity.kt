@@ -205,6 +205,13 @@ class MainActivity : ComponentActivity() {
         discovery.start()
         session.start()
 
+        lifecycleScope.launch {
+            delay(600)
+            if (settings.settings.value.deviceId.isNotBlank()) {
+                tryPersistentLogin(showFailure = false)
+            }
+        }
+
         setContent {
             val appSettings by settings.settings.collectAsState()
             val devices by discovery.devices.collectAsState()
@@ -292,6 +299,7 @@ class MainActivity : ComponentActivity() {
                             lifecycleScope.launch {
                                 registeredDevices.remove(device.deviceId)
                                 if (settings.settings.value.deviceId == device.deviceId) {
+                                    settings.clearSavedLogin(device.deviceId)
                                     commands.logout()
                                     settings.selectDevice("")
                                     accessSession.value = null
@@ -412,8 +420,14 @@ class MainActivity : ComponentActivity() {
                     accessLifecycle.value = state
                     accessGateMessage.value = when (state) {
                         AccessLifecycleState.SETUP_REQUIRED -> "Первинний setup відкритий до успішного створення першого Admin."
-                        AccessLifecycleState.LOGIN_REQUIRED -> "Контролер захищений. Увійдіть."
+                        AccessLifecycleState.LOGIN_REQUIRED -> "Контролер захищений. Перевірка збереженого входу…"
                         AccessLifecycleState.UNAVAILABLE -> "Контролер не повернув валідний стан доступу."
+                    }
+                    if (state == AccessLifecycleState.LOGIN_REQUIRED) {
+                        val restored = tryPersistentLogin(showFailure = false)
+                        if (!restored && accessSession.value == null) {
+                            accessGateMessage.value = "Контролер захищений. Увійдіть."
+                        }
                     }
                 }
                 .onFailure { error ->
@@ -422,6 +436,41 @@ class MainActivity : ComponentActivity() {
                 }
             accessGateBusy.value = false
         }
+    }
+
+    private suspend fun tryPersistentLogin(showFailure: Boolean): Boolean {
+        if (accessSession.value != null) return true
+        val deviceId = settings.settings.value.deviceId
+        val saved = settings.savedLogin(deviceId) ?: return false
+        return runCatching { commands.login(saved.actor, saved.pin) }
+            .fold(
+                onSuccess = { authenticated ->
+                    operatorId.value = authenticated.actor
+                    operatorPin.value = ""
+                    accessSession.value = authenticated
+                    accessLifecycle.value = AccessLifecycleState.LOGIN_REQUIRED
+                    commandStatus.value = "Автовхід: ${authenticated.name} · ${authenticated.role.name.lowercase()}"
+                    accessGateMessage.value = ""
+                    true
+                },
+                onFailure = { error ->
+                    val reason = error.message.orEmpty()
+                    val revoked = reason.contains("401") ||
+                        reason.contains("invalid_credentials", true) ||
+                        reason.contains("unknown_user", true) ||
+                        reason.contains("user_unavailable", true)
+                    if (revoked) {
+                        settings.clearSavedLogin(deviceId)
+                        commands.logout()
+                        accessSession.value = null
+                        if (showFailure) {
+                            commandStatus.value = "Збережений вхід деактивовано адміністратором"
+                            accessGateMessage.value = commandStatus.value
+                        }
+                    }
+                    false
+                },
+            )
     }
 
     private fun scanSetupWifi() {
@@ -526,7 +575,13 @@ class MainActivity : ComponentActivity() {
             accessGateMessage.value = commandStatus.value
             runCatching { commands.login(actor, credential) }
                 .onSuccess { authenticated ->
-                    // v2 security boundary: erase UI copy of PIN immediately.
+                    settings.saveLogin(
+                        deviceId = settings.settings.value.deviceId,
+                        actor = authenticated.actor,
+                        pin = credential,
+                    )
+                    // UI copy is still erased immediately; the persistent copy
+                    // lives only in Android Keystore-backed SecureTokenStore.
                     operatorPin.value = ""
                     operatorId.value = authenticated.actor
                     accessSession.value = authenticated
@@ -543,6 +598,16 @@ class MainActivity : ComponentActivity() {
                 }
             accessGateBusy.value = false
         }
+    }
+
+    private fun invalidateSavedAuthorization() {
+        settings.clearSavedLogin(settings.settings.value.deviceId)
+        commands.logout()
+        accessSession.value = null
+        operatorPin.value = ""
+        accessLifecycle.value = AccessLifecycleState.LOGIN_REQUIRED
+        commandStatus.value = "Авторизацію відкликано. Потрібен повторний вхід."
+        accessGateMessage.value = commandStatus.value
     }
 
     private fun logoutOperator() {
@@ -582,7 +647,10 @@ class MainActivity : ComponentActivity() {
                 FactoryResetResult.REJECTED -> commandStatus.value = "Factory Reset відхилено контролером"
                 FactoryResetResult.ACCEPTED,
                 FactoryResetResult.CONNECTION_LOST -> {
-                    if (selectedId.isNotBlank()) registeredDevices.markAuthorization(selectedId, false)
+                    if (selectedId.isNotBlank()) {
+                        registeredDevices.markAuthorization(selectedId, false)
+                        settings.clearSavedLogin(selectedId)
+                    }
                     commands.logout()
                     settings.selectDevice("")
                     accessSession.value = null
@@ -706,12 +774,12 @@ class MainActivity : ComponentActivity() {
             commandStatus.value = result.fold(
                 { reply ->
                     if (reply.accepted || reply.duplicate) "OK: ${reply.code}" else {
-                        if (reply.code.contains("unauthorized", true) || reply.code.contains("session", true) || reply.code.contains("authorization", true)) logoutOperator()
+                        if (reply.code.contains("unauthorized", true) || reply.code.contains("session", true) || reply.code.contains("authorization", true)) invalidateSavedAuthorization()
                         "Відхилено: ${reply.code}"
                     }
                 },
                 { error ->
-                    if (error.message?.contains("401") == true) logoutOperator()
+                    if (error.message?.contains("401") == true) invalidateSavedAuthorization()
                     "Помилка: ${error.message ?: "network"}"
                 },
             )
@@ -753,8 +821,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         stopForegroundAlarm()
-        commands.logout()
-        accessSession.value = null
         operatorPin.value = ""
         session.stop()
         discovery.stop()
