@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -17,19 +19,33 @@ import ua.homeguard.s3.storage.AppSettings
 
 class HomeGuardNotifications(private val context: Context) {
     companion object {
-        const val CHANNEL_CRITICAL = "homeguard_critical"
+        const val CHANNEL_CRITICAL = "homeguard_critical_alarm_v2"
         const val CHANNEL_STATUS = "homeguard_status"
     }
 
     fun createChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
+        val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_CRITICAL,
-                "HomeGuard critical alerts",
+                "HomeGuard · ТРИВОГА",
                 NotificationManager.IMPORTANCE_HIGH,
-            ).apply { description = "Alarm, tamper, battery and sensor-offline alerts" }
+            ).apply {
+                description = "Тривога HomeGuard: звук і вібрація"
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 500, 250, 500, 250, 900)
+                setSound(
+                    alarmSound,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build(),
+                )
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
         )
         manager.createNotificationChannel(
             NotificationChannel(
@@ -58,16 +74,25 @@ class HomeGuardNotifications(private val context: Context) {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val notification = NotificationCompat.Builder(context, channel)
+        val builder = NotificationCompat.Builder(context, channel)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(alert.title)
             .setContentText(alert.text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(alert.text))
             .setPriority(if (critical) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(if (critical) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_STATUS)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
-            .build()
+
+        if (critical && Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            builder
+                .setSound(alarmSound)
+                .setVibrate(longArrayOf(0, 500, 250, 500, 250, 900))
+        }
+        val notification = builder.build()
 
         NotificationManagerCompat.from(context).notify(notificationId(event), notification)
     }

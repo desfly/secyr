@@ -18,6 +18,11 @@ function apiTimeoutMs(input) {
   if (url.includes("/network/scan")) return 15000;
   if (url.includes("/network/connect")) return 10000;
   if (url.includes("/lan/scan")) return 10000;
+  // Reconfiguring an already-started MQTT client may block in
+  // esp_mqtt_client_stop() until the current TLS/connect attempt unwinds.
+  // Do not abort the browser request at the generic 6 s timeout while the
+  // controller is legitimately applying the new cloud settings.
+  if (url.includes("/cloud/config")) return 20000;
   return 6000;
 }
 
@@ -46,6 +51,94 @@ const toast = document.querySelector("#toast");
 const dashboardSections = [document.querySelector(".status-grid"), document.querySelector(".two-col")].filter(Boolean);
 const networkPage = document.querySelector("#networkPage");
 const systemPage = document.querySelector("#system");
+
+const zoneAlarmRuntime = {
+  armed: false,
+  active: false,
+  lastAlarmSequence: 0,
+  audio: null,
+  timer: 0,
+};
+
+function ensureZoneAlarmStyle() {
+  if (document.getElementById("homeguard-zone-alarm-style")) return;
+  const style = document.createElement("style");
+  style.id = "homeguard-zone-alarm-style";
+  style.textContent = `
+    @keyframes hgZoneAlarmFlash { 0%,100% { background:#8a0000; } 50% { background:#ff1d1d; } }
+    body.hg-zone-alarm:before {
+      content:"ТРИВОГА"; position:fixed; z-index:99999; left:0; right:0; top:0; height:58px;
+      display:flex; align-items:center; justify-content:center; color:white; font-size:28px;
+      font-weight:900; letter-spacing:3px; animation:hgZoneAlarmFlash .55s infinite;
+      box-shadow:0 4px 18px rgba(0,0,0,.4);
+    }
+    body.hg-zone-alarm { padding-top:58px!important; }
+    body.hg-zone-alarm .app { outline:8px solid #d00000; outline-offset:-8px; }
+  `;
+  document.head.appendChild(style);
+}
+
+function ensureZoneAlarmAudio() {
+  if (zoneAlarmRuntime.audio) return zoneAlarmRuntime.audio;
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+  try { zoneAlarmRuntime.audio = new AudioCtx(); } catch (_) { return null; }
+  return zoneAlarmRuntime.audio;
+}
+
+function primeZoneAlarmAudio() {
+  const ctx = ensureZoneAlarmAudio();
+  if (ctx?.state === "suspended") ctx.resume().catch(() => {});
+}
+
+function zoneAlarmBeep() {
+  const ctx = ensureZoneAlarmAudio();
+  if (!ctx || ctx.state !== "running") return;
+  try {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.38);
+  } catch (_) {}
+}
+
+function setZoneAlarmActive(active) {
+  ensureZoneAlarmStyle();
+  zoneAlarmRuntime.active = active === true;
+  document.body.classList.toggle("hg-zone-alarm", zoneAlarmRuntime.active);
+  if (zoneAlarmRuntime.active) {
+    primeZoneAlarmAudio();
+    zoneAlarmBeep();
+    const scheduleBeep = () => {
+      if (!zoneAlarmRuntime.active) {
+        zoneAlarmRuntime.timer = 0;
+        return;
+      }
+      zoneAlarmBeep();
+      zoneAlarmRuntime.timer = window.setTimeout(scheduleBeep, 900);
+    };
+    if (!zoneAlarmRuntime.timer) {
+      zoneAlarmRuntime.timer = window.setTimeout(scheduleBeep, 900);
+    }
+  } else if (zoneAlarmRuntime.timer) {
+    window.clearTimeout(zoneAlarmRuntime.timer);
+    zoneAlarmRuntime.timer = 0;
+  }
+}
+
+function isZoneAlarmEvent(item) {
+  const event = String(item?.event || "").toLowerCase();
+  const sourceId = Number(item?.sourceId) || 0;
+  return sourceId >= 1 && sourceId <= 4 &&
+    (event === "alarm" || event === "zone.open" || event === "tamper");
+}
 
 function authenticatedUi() {
   return window.HomeGuardAuth?.authenticated?.() === true;
@@ -98,13 +191,94 @@ function renderZones(data) {
 
 function renderPartitions(data) {
   const partition = Array.isArray(data?.partitions) ? data.partitions[0] : null;
-  document.querySelector("#securityMode").textContent = armLabel(partition?.armState);
+  const armState = partition?.armState;
+  zoneAlarmRuntime.armed = armState === "stay" || armState === "away" || armState === "alarm";
+  if (!zoneAlarmRuntime.armed) setZoneAlarmActive(false);
+  document.querySelector("#securityMode").textContent = armLabel(armState);
+}
+
+function eventTimeLabel(timestampMs) {
+  const value = Number(timestampMs) || 0;
+  if (value >= Date.UTC(2025, 0, 1)) {
+    return new Date(value).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+  return value > 0 ? `+${Math.floor(value / 1000)}с` : "—";
+}
+
+function eventLabel(item) {
+  const event = String(item?.event || "");
+  const sourceId = Number(item?.sourceId) || 0;
+  const value = Number(item?.value) || 0;
+  if (event === "partition.armed") {
+    if (value === 3) return "ТРИВОГА системи";
+    if (value === 1) return "Охорона: нічний режим";
+    return "Охорона: поставлено";
+  }
+  if (event === "partition.disarmed") return "Охорона: знято";
+  if (event === "alarm") return sourceId ? `ТРИВОГА: зона ${sourceId}` : "ТРИВОГА";
+  if (event === "zone.open") return sourceId ? `Зона ${sourceId}: спрацювання / обрив` : "Спрацювання зони";
+  if (event === "zone.closed") return sourceId ? `Зона ${sourceId}: відновлено НОРМА` : "Зона відновлена";
+  if (event === "tamper") return sourceId ? `Зона ${sourceId}: КЗ / тампер` : "Тампер";
+  return event || "Подія";
 }
 
 function renderEvents(data) {
-  const events = Array.isArray(data?.events) ? data.events.slice(-6).reverse() : [];
+  const allEvents = Array.isArray(data?.events) ? data.events : [];
+  const latestAlarm = [...allEvents].reverse().find(isZoneAlarmEvent);
+  const latestSequence = Number(latestAlarm?.sequence) || 0;
+  if (zoneAlarmRuntime.armed && latestAlarm && latestSequence > zoneAlarmRuntime.lastAlarmSequence) {
+    zoneAlarmRuntime.lastAlarmSequence = latestSequence;
+    setZoneAlarmActive(true);
+  }
+  const events = allEvents.slice(-6).reverse();
   document.querySelector("#eventList").innerHTML = events.length ? events.map(item => `
-    <div><i></i><time>#${escapeHtml(item.sequence ?? "—")}</time><span>${escapeHtml(item.event || "Подія")}</span><a>${escapeHtml(item.severity || "info")}</a></div>`).join("") : "<div><i></i><time>—</time><span>Подій ще немає</span><a>Інформація ›</a></div>";
+    <div><i></i><time>${escapeHtml(eventTimeLabel(item.timestampMs))}</time><span>${escapeHtml(eventLabel(item))}</span><a>${escapeHtml(item.severity || "info")}</a></div>`).join("") : "<div><i></i><time>—</time><span>Подій ще немає</span><a>Інформація ›</a></div>";
+}
+function ensureHistoryDialog() {
+  let overlay = document.querySelector("#historyOverlay");
+  if (overlay) return overlay;
+  overlay = document.createElement("div");
+  overlay.id = "historyOverlay";
+  overlay.hidden = true;
+  overlay.style.cssText = "position:fixed;inset:0;z-index:5000;background:rgba(5,17,28,.72);padding:24px;overflow:auto";
+  overlay.innerHTML = `
+    <section style="max-width:1050px;margin:24px auto;background:#fff;border-radius:14px;padding:18px;box-shadow:0 20px 70px rgba(0,0,0,.35)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px">
+        <div><h3 style="margin:0">Повна історія подій</h3><small id="historySummary">Завантаження…</small></div>
+        <button id="historyClose" type="button">Закрити</button>
+      </div>
+      <div id="historyFullList" style="display:grid;gap:6px"></div>
+    </section>`;
+  document.body.appendChild(overlay);
+  const close = () => { overlay.hidden = true; };
+  overlay.querySelector("#historyClose").onclick = close;
+  overlay.addEventListener("click", event => { if (event.target === overlay) close(); });
+  return overlay;
+}
+
+function renderFullHistory(data) {
+  const overlay = ensureHistoryDialog();
+  const events = Array.isArray(data?.events) ? [...data.events].reverse() : [];
+  overlay.querySelector("#historySummary").textContent = `Подій: ${events.length} із максимум 128`;
+  overlay.querySelector("#historyFullList").innerHTML = events.length ? events.map(item => `
+    <div style="display:grid;grid-template-columns:145px 1fr 90px;gap:12px;align-items:center;padding:9px 10px;border:1px solid #e1e7ee;border-radius:8px">
+      <time>${escapeHtml(eventTimeLabel(item.timestampMs))}</time>
+      <span>${escapeHtml(eventLabel(item))}</span>
+      <strong class="${stateClass(item.severity)}">${escapeHtml(item.severity || "info")}</strong>
+    </div>`).join("") : "<div>Подій ще немає</div>";
+  overlay.hidden = false;
+}
+
+async function openFullHistory() {
+  const overlay = ensureHistoryDialog();
+  overlay.querySelector("#historySummary").textContent = "Завантаження…";
+  overlay.querySelector("#historyFullList").innerHTML = "";
+  overlay.hidden = false;
+  try {
+    renderFullHistory(await api("/api/v1/system/events"));
+  } catch (error) {
+    overlay.querySelector("#historySummary").textContent = `Помилка: ${error.message}`;
+  }
 }
 
 function renderOutputs(data) {
@@ -568,11 +742,26 @@ function routeFromHash() {
 }
 
 function bindNavigation() {
+  const historyLink = document.querySelector("#history");
+  if (historyLink) {
+    historyLink.style.cursor = "pointer";
+    historyLink.setAttribute("role", "button");
+    historyLink.setAttribute("tabindex", "0");
+    historyLink.onkeydown = event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        const href = "#history";
+        if (window.location.hash === href) routeFromHash(); else window.location.hash = href;
+        openFullHistory();
+      }
+    };
+  }
   document.querySelectorAll(".sidebar nav a").forEach(link => {
     link.addEventListener("click", event => {
       event.preventDefault();
       const href = link.getAttribute("href") || "#overview";
       if (window.location.hash === href) routeFromHash(); else window.location.hash = href;
+      if (href === "#history") openFullHistory();
     });
   });
   document.querySelector("#networkCard").addEventListener("click", () => { window.location.hash = "#networkPage"; });
@@ -636,6 +825,9 @@ async function schedulerStep() {
 }
 
 function bootUi() {
+  ensureZoneAlarmStyle();
+  document.addEventListener("pointerdown", primeZoneAlarmAudio, { once: true, capture: true });
+  document.addEventListener("keydown", primeZoneAlarmAudio, { once: true, capture: true });
   ensureNetworkAuthPanel();
   ensureAccessPanel();
   document.querySelector("#wifiScan").onclick = scanWifi;

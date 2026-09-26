@@ -68,6 +68,30 @@ class SettingsStore(context: Context) {
         selectDevice(device.deviceId, device.baseUrl)
     }
 
+    data class SavedLogin(val actor: String, val pin: String)
+
+    private fun loginKey(kind: String, deviceId: String): String =
+        "saved_login_" + kind + "_" + deviceId
+
+    fun saveLogin(deviceId: String = settings.value.deviceId, actor: String, pin: String) {
+        if (deviceId.isBlank() || actor.isBlank() || pin.length !in 4..12 || !pin.all(Char::isDigit)) return
+        secure.put(loginKey("actor", deviceId), actor)
+        secure.put(loginKey("pin", deviceId), pin)
+    }
+
+    fun savedLogin(deviceId: String = settings.value.deviceId): SavedLogin? {
+        if (deviceId.isBlank()) return null
+        val actor = secure.get(loginKey("actor", deviceId))
+        val pin = secure.get(loginKey("pin", deviceId))
+        return if (actor.isNotBlank() && pin.length in 4..12 && pin.all(Char::isDigit)) SavedLogin(actor, pin) else null
+    }
+
+    fun clearSavedLogin(deviceId: String = settings.value.deviceId) {
+        if (deviceId.isBlank()) return
+        secure.put(loginKey("actor", deviceId), "")
+        secure.put(loginKey("pin", deviceId), "")
+    }
+
     private fun load() = AppSettings(
         deviceId = preferences.getString("device_id", "").orEmpty(),
         apiToken = secure.get("api_token"),

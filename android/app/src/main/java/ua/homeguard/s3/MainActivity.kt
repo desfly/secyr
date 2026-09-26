@@ -1,10 +1,15 @@
 package ua.homeguard.s3
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.media.AudioManager
+import android.media.ToneGenerator
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +20,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -25,6 +31,7 @@ import ua.homeguard.s3.model.AccessLifecycleState
 import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
+import ua.homeguard.s3.model.SystemMode
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.network.ControllerIdentity
 import ua.homeguard.s3.network.DeviceEndpointResolver
@@ -68,6 +75,8 @@ class MainActivity : ComponentActivity() {
     private val accessSession = MutableStateFlow<AccessSession?>(null)
     private val accessLifecycle = MutableStateFlow(AccessLifecycleState.UNAVAILABLE)
     private val accessGateBusy = MutableStateFlow(false)
+    private val alarmUiActive = MutableStateFlow(false)
+    private val alarmSourceId = MutableStateFlow(0)
     private val accessGateMessage = MutableStateFlow("")
     private val setupWifiNetworks = MutableStateFlow<List<SetupWifiChoice>>(emptyList())
     private val addDeviceOpen = MutableStateFlow(false)
@@ -75,6 +84,9 @@ class MainActivity : ComponentActivity() {
     private val deviceListOpen = MutableStateFlow(true)
     private var pendingExportText: String = ""
     private var pendingSettingsBackupText: String = ""
+    @Volatile private var zoneAlarmArmed: Boolean = false
+    private var alarmToneJob: Job? = null
+    private var alarmTone: ToneGenerator? = null
 
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null && pendingExportText.isNotEmpty()) runCatching {
@@ -141,9 +153,29 @@ class MainActivity : ComponentActivity() {
         requestLocalNetworkPermission()
 
         lifecycleScope.launch {
+            telemetry.snapshots().collect { snapshot ->
+                zoneAlarmArmed = snapshot.mode == SystemMode.ARMED_HOME ||
+                    snapshot.mode == SystemMode.ARMED_AWAY ||
+                    snapshot.mode == SystemMode.ALARM
+                if (!zoneAlarmArmed) stopForegroundAlarm()
+            }
+        }
+
+        lifecycleScope.launch {
             telemetry.liveEvents().collect { event ->
                 eventHistory.append(event)
-                notifications.notify(event, settings.settings.value)
+                val type = event.event.uppercase()
+                val zoneAlarm = zoneAlarmArmed &&
+                    event.sourceId in 1..4 &&
+                    (type == "ALARM" || type == "ZONE_OPEN" || type == "TAMPER")
+                if (zoneAlarm) {
+                    alarmUiActive.value = true
+                    alarmSourceId.value = event.sourceId
+                    startForegroundAlarm()
+                    notifications.notify(event.copy(event = "ALARM"), settings.settings.value)
+                } else if (type != "ALARM") {
+                    notifications.notify(event, settings.settings.value)
+                }
             }
         }
 
@@ -173,6 +205,13 @@ class MainActivity : ComponentActivity() {
         discovery.start()
         session.start()
 
+        lifecycleScope.launch {
+            delay(600)
+            if (settings.settings.value.deviceId.isNotBlank()) {
+                tryPersistentLogin(showFailure = false)
+            }
+        }
+
         setContent {
             val appSettings by settings.settings.collectAsState()
             val devices by discovery.devices.collectAsState()
@@ -191,6 +230,8 @@ class MainActivity : ComponentActivity() {
             val lifecycleState by accessLifecycle.collectAsState()
             val gateBusy by accessGateBusy.collectAsState()
             val gateMessage by accessGateMessage.collectAsState()
+            val alarmActive by alarmUiActive.collectAsState()
+            val alarmZone by alarmSourceId.collectAsState()
             val gateNetworks by setupWifiNetworks.collectAsState()
             val showAddDevice by addDeviceOpen.collectAsState()
             val showProvisioning by provisioningOpen.collectAsState()
@@ -258,6 +299,7 @@ class MainActivity : ComponentActivity() {
                             lifecycleScope.launch {
                                 registeredDevices.remove(device.deviceId)
                                 if (settings.settings.value.deviceId == device.deviceId) {
+                                    settings.clearSavedLogin(device.deviceId)
                                     commands.logout()
                                     settings.selectDevice("")
                                     accessSession.value = null
@@ -304,6 +346,8 @@ class MainActivity : ComponentActivity() {
                         criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled,
                         statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
                         zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
+                        alarmActive = alarmActive,
+                        alarmSourceId = alarmZone,
                         onBackToDevices = {
                             logoutOperator()
                             deviceListOpen.value = true
@@ -338,6 +382,8 @@ class MainActivity : ComponentActivity() {
                         onExportSettings = { pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings); settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName()) },
                         onImportSettings = { settingsRestoreLauncher.launch("application/json") },
                         onFactoryReset = ::factoryResetController,
+                        onLightChange = ::executeLight,
+                        onLockPulse = ::executeLockPulse,
                         onCommand = ::executeCommand,
                         onPanicBle = ::executePanicBle,
                     )
@@ -374,8 +420,14 @@ class MainActivity : ComponentActivity() {
                     accessLifecycle.value = state
                     accessGateMessage.value = when (state) {
                         AccessLifecycleState.SETUP_REQUIRED -> "Первинний setup відкритий до успішного створення першого Admin."
-                        AccessLifecycleState.LOGIN_REQUIRED -> "Контролер захищений. Увійдіть."
+                        AccessLifecycleState.LOGIN_REQUIRED -> "Контролер захищений. Перевірка збереженого входу…"
                         AccessLifecycleState.UNAVAILABLE -> "Контролер не повернув валідний стан доступу."
+                    }
+                    if (state == AccessLifecycleState.LOGIN_REQUIRED) {
+                        val restored = tryPersistentLogin(showFailure = false)
+                        if (!restored && accessSession.value == null) {
+                            accessGateMessage.value = "Контролер захищений. Увійдіть."
+                        }
                     }
                 }
                 .onFailure { error ->
@@ -384,6 +436,41 @@ class MainActivity : ComponentActivity() {
                 }
             accessGateBusy.value = false
         }
+    }
+
+    private suspend fun tryPersistentLogin(showFailure: Boolean): Boolean {
+        if (accessSession.value != null) return true
+        val deviceId = settings.settings.value.deviceId
+        val saved = settings.savedLogin(deviceId) ?: return false
+        return runCatching { commands.login(saved.actor, saved.pin) }
+            .fold(
+                onSuccess = { authenticated ->
+                    operatorId.value = authenticated.actor
+                    operatorPin.value = ""
+                    accessSession.value = authenticated
+                    accessLifecycle.value = AccessLifecycleState.LOGIN_REQUIRED
+                    commandStatus.value = "Автовхід: ${authenticated.name} · ${authenticated.role.name.lowercase()}"
+                    accessGateMessage.value = ""
+                    true
+                },
+                onFailure = { error ->
+                    val reason = error.message.orEmpty()
+                    val revoked = reason.contains("401") ||
+                        reason.contains("invalid_credentials", true) ||
+                        reason.contains("unknown_user", true) ||
+                        reason.contains("user_unavailable", true)
+                    if (revoked) {
+                        settings.clearSavedLogin(deviceId)
+                        commands.logout()
+                        accessSession.value = null
+                        if (showFailure) {
+                            commandStatus.value = "Збережений вхід деактивовано адміністратором"
+                            accessGateMessage.value = commandStatus.value
+                        }
+                    }
+                    false
+                },
+            )
     }
 
     private fun scanSetupWifi() {
@@ -488,7 +575,13 @@ class MainActivity : ComponentActivity() {
             accessGateMessage.value = commandStatus.value
             runCatching { commands.login(actor, credential) }
                 .onSuccess { authenticated ->
-                    // v2 security boundary: erase UI copy of PIN immediately.
+                    settings.saveLogin(
+                        deviceId = settings.settings.value.deviceId,
+                        actor = authenticated.actor,
+                        pin = credential,
+                    )
+                    // UI copy is still erased immediately; the persistent copy
+                    // lives only in Android Keystore-backed SecureTokenStore.
                     operatorPin.value = ""
                     operatorId.value = authenticated.actor
                     accessSession.value = authenticated
@@ -505,6 +598,16 @@ class MainActivity : ComponentActivity() {
                 }
             accessGateBusy.value = false
         }
+    }
+
+    private fun invalidateSavedAuthorization() {
+        settings.clearSavedLogin(settings.settings.value.deviceId)
+        commands.logout()
+        accessSession.value = null
+        operatorPin.value = ""
+        accessLifecycle.value = AccessLifecycleState.LOGIN_REQUIRED
+        commandStatus.value = "Авторизацію відкликано. Потрібен повторний вхід."
+        accessGateMessage.value = commandStatus.value
     }
 
     private fun logoutOperator() {
@@ -544,7 +647,10 @@ class MainActivity : ComponentActivity() {
                 FactoryResetResult.REJECTED -> commandStatus.value = "Factory Reset відхилено контролером"
                 FactoryResetResult.ACCEPTED,
                 FactoryResetResult.CONNECTION_LOST -> {
-                    if (selectedId.isNotBlank()) registeredDevices.markAuthorization(selectedId, false)
+                    if (selectedId.isNotBlank()) {
+                        registeredDevices.markAuthorization(selectedId, false)
+                        settings.clearSavedLogin(selectedId)
+                    }
                     commands.logout()
                     settings.selectDevice("")
                     accessSession.value = null
@@ -560,6 +666,73 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    private fun startForegroundAlarm() {
+        if (alarmToneJob?.isActive == true) return
+
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator?.vibrate(
+                VibrationEffect.createWaveform(longArrayOf(0, 500, 250, 500, 250, 900), 0)
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator?.vibrate(longArrayOf(0, 500, 250, 500, 250, 900), 0)
+        }
+
+        alarmTone = ToneGenerator(AudioManager.STREAM_ALARM, 100)
+        alarmToneJob = lifecycleScope.launch {
+            while (alarmUiActive.value) {
+                alarmTone?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 650)
+                delay(900)
+            }
+        }
+    }
+
+    private fun stopForegroundAlarm() {
+        if (!alarmUiActive.value && alarmToneJob == null) return
+        alarmUiActive.value = false
+        alarmSourceId.value = 0
+        alarmToneJob?.cancel()
+        alarmToneJob = null
+        alarmTone?.stopTone()
+        alarmTone?.release()
+        alarmTone = null
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        vibrator?.cancel()
+    }
+
+    private fun executeLight(active: Boolean) {
+        val authenticated = accessSession.value
+        if (authenticated == null) {
+            commandStatus.value = "Світло: спочатку увійдіть"
+            return
+        }
+        lifecycleScope.launch {
+            commandStatus.value = if (active) "Світло: увімкнення…" else "Світло: вимкнення…"
+            val result = runCatching { commands.setLight(active, authenticated.actor) }
+            commandStatus.value = result.fold(
+                { reply -> if (reply.accepted) "Світло: " + (if (active) "УВІМКНЕНО" else "ВИМКНЕНО") else "Світло: відхилено (" + reply.code + ")" },
+                { error -> "Світло: помилка (" + (error.message ?: "network") + ")" },
+            )
+        }
+    }
+
+    private fun executeLockPulse() {
+        val authenticated = accessSession.value
+        if (authenticated == null) {
+            commandStatus.value = "Замок: спочатку увійдіть"
+            return
+        }
+        lifecycleScope.launch {
+            commandStatus.value = "Замок: відкриття на 5 секунд…"
+            val result = runCatching { commands.pulseLock(authenticated.actor) }
+            commandStatus.value = result.fold(
+                { reply -> if (reply.accepted) "Замок: імпульс 5 с завершено" else "Замок: відхилено (" + reply.code + ")" },
+                { error -> "Замок: помилка (" + (error.message ?: "network") + ")" },
+            )
         }
     }
 
@@ -601,12 +774,12 @@ class MainActivity : ComponentActivity() {
             commandStatus.value = result.fold(
                 { reply ->
                     if (reply.accepted || reply.duplicate) "OK: ${reply.code}" else {
-                        if (reply.code.contains("unauthorized", true) || reply.code.contains("session", true) || reply.code.contains("authorization", true)) logoutOperator()
+                        if (reply.code.contains("unauthorized", true) || reply.code.contains("session", true) || reply.code.contains("authorization", true)) invalidateSavedAuthorization()
                         "Відхилено: ${reply.code}"
                     }
                 },
                 { error ->
-                    if (error.message?.contains("401") == true) logoutOperator()
+                    if (error.message?.contains("401") == true) invalidateSavedAuthorization()
                     "Помилка: ${error.message ?: "network"}"
                 },
             )
@@ -647,8 +820,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        commands.logout()
-        accessSession.value = null
+        stopForegroundAlarm()
         operatorPin.value = ""
         session.stop()
         discovery.stop()

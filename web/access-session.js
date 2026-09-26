@@ -4,6 +4,40 @@
   const originalFetch = window.fetch.bind(window);
   let session = null;
   let gateMode = "loading";
+  const browserSessionKey = "homeguard.web.session.v1";
+
+  function saveBrowserSession() {
+    try {
+      if (session) sessionStorage.setItem(browserSessionKey, JSON.stringify(session));
+      else sessionStorage.removeItem(browserSessionKey);
+    } catch (_) {}
+  }
+
+  function restoreBrowserSession() {
+    try {
+      const raw = sessionStorage.getItem(browserSessionKey);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return false;
+      const token = String(parsed.token || "");
+      const actor = String(parsed.actor || "");
+      if (!/^[0-9a-f]{64}$/.test(token) || !actor) {
+        sessionStorage.removeItem(browserSessionKey);
+        return false;
+      }
+      session = {
+        actor,
+        token,
+        name: String(parsed.name || actor),
+        role: String(parsed.role || "guest"),
+        capabilities: parsed.capabilities || {},
+      };
+      return true;
+    } catch (_) {
+      try { sessionStorage.removeItem(browserSessionKey); } catch (_) {}
+      return false;
+    }
+  }
 
   const style = document.createElement("style");
   style.textContent = `
@@ -338,12 +372,12 @@
     let credential=form.querySelector("#hgLoginPin")?.value.trim()||"";
     if(!actor||!/^\d{4,12}$/.test(credential)){message.textContent="Введіть користувача та PIN 4–12 цифр.";return;}
     const button=form.querySelector("button");button.disabled=true;message.textContent="Перевірка…";
-    try {const response=await originalFetch("/api/v1/access/login",{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({actor,credential})});const body=await apiBody(response);if(!response.ok||body.ok===false)throw new Error(body.reason||String(response.status));const token=String(body.sessionToken||"");if(!/^[0-9a-f]{64}$/.test(token))throw new Error("session_unavailable");form.querySelector("#hgLoginPin").value="";credential="";session={actor:String(body.actor||actor),token,name:String(body.name||actor),role:String(body.role||"guest"),capabilities:body.capabilities||{}};document.documentElement.classList.remove("hg-auth-locked");gate.hidden=true;syncActorFields();applyRoleUi();if(typeof refresh==="function")await refresh();applyRoleUi();ensureLogoutButton();}
+    try {const response=await originalFetch("/api/v1/access/login",{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({actor,credential})});const body=await apiBody(response);if(!response.ok||body.ok===false)throw new Error(body.reason||String(response.status));const token=String(body.sessionToken||"");if(!/^[0-9a-f]{64}$/.test(token))throw new Error("session_unavailable");form.querySelector("#hgLoginPin").value="";credential="";session={actor:String(body.actor||actor),token,name:String(body.name||actor),role:String(body.role||"guest"),capabilities:body.capabilities||{}};saveBrowserSession();document.documentElement.classList.remove("hg-auth-locked");gate.hidden=true;syncActorFields();applyRoleUi();if(typeof refresh==="function")await refresh();applyRoleUi();ensureLogoutButton();}
     catch(error){credential="";session=null;message.textContent=error.message==="setup_required"?"Спочатку виконайте первинне налаштування.":`Вхід відхилено: ${error.message}`;if(error.message==="setup_required")showSetup();else button.disabled=false;}
   }
 
   function logout(reason="") {
-    session=null;["#operatorId","#operatorPin","#networkActor","#networkCredential","#accessActor","#accessCredential","#cloudActor","#cloudCredential","#factoryResetActor","#factoryResetCredential"].forEach(selector=>{const field=document.querySelector(selector);if(field)field.value="";});
+    session=null;saveBrowserSession();["#operatorId","#operatorPin","#networkActor","#networkCredential","#accessActor","#accessCredential","#cloudActor","#cloudCredential","#factoryResetActor","#factoryResetCredential"].forEach(selector=>{const field=document.querySelector(selector);if(field)field.value="";});
     document.querySelector("#hgSessionLogout")?.remove();gate.hidden=false;document.documentElement.classList.add("hg-auth-locked");showLogin();if(reason)message.textContent=reason;
   }
 
@@ -358,5 +392,22 @@
   legacyObserver.observe(document.body,{childList:true,subtree:true});
 
   window.HomeGuardAuth={authenticated:()=>Boolean(session),actor:()=>session?.actor||"",role:()=>session?.role||"",logout};
-  loadAccessState();
+
+  if (restoreBrowserSession()) {
+    document.documentElement.classList.remove("hg-auth-locked");
+    gate.hidden = true;
+    syncActorFields();
+    applyRoleUi();
+    ensureLogoutButton();
+    Promise.resolve().then(async () => {
+      try {
+        if (typeof refresh === "function") await refresh();
+        applyRoleUi();
+      } catch (_) {
+        // Protected fetch handles 401 and clears an invalid/revoked session.
+      }
+    });
+  } else {
+    loadAccessState();
+  }
 })();

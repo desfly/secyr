@@ -85,6 +85,16 @@ void sample_zone_adc(Ads1115& adc, std::size_t first_zone, std::array<hg::ZoneSt
     }
 }
 
+std::uint64_t event_timestamp_ms(std::uint64_t uptime_ms)
+{
+    struct timespec ts {};
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0 && ts.tv_sec >= 1735689600) {
+        return static_cast<std::uint64_t>(ts.tv_sec) * 1000ULL +
+               static_cast<std::uint64_t>(ts.tv_nsec / 1000000L);
+    }
+    return uptime_ms;
+}
+
 std::uint64_t rtc_epoch(Ds3231& rtc, bool& valid)
 {
     std::tm value{};
@@ -101,12 +111,14 @@ esp_err_t TelemetryRuntime::start(
     HardwareBootstrap* hardware,
     WebsocketTelemetry* websocket,
     hg::SystemModel* system_model,
+    hg::SystemEventBus* system_bus,
     BleTransport* ble_transport)
 {
-    if (hardware == nullptr || websocket == nullptr || system_model == nullptr) return ESP_ERR_INVALID_ARG;
+    if (hardware == nullptr || websocket == nullptr || system_model == nullptr || system_bus == nullptr) return ESP_ERR_INVALID_ARG;
     hardware_ = hardware;
     websocket_ = websocket;
     system_model_ = system_model;
+    system_bus_ = system_bus;
     ble_transport_ = ble_transport;
     const auto result = xTaskCreate(&TelemetryRuntime::task_entry, "hg_telemetry", 7168, this, 6, nullptr);
     return result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
@@ -134,6 +146,55 @@ bool TelemetryRuntime::set_light_output(bool active, std::uint64_t now_ms)
         return false;
     }
     return true;
+}
+
+void TelemetryRuntime::update_zone_model(
+    const std::array<hg::ZoneState, 8>& zones,
+    std::uint64_t now_ms)
+{
+    if (system_model_ == nullptr || system_bus_ == nullptr) return;
+
+    const auto* partition = system_model_->partition(1);
+    const bool armed = partition != nullptr &&
+        (partition->arm_state == hg::PartitionArmState::Stay ||
+         partition->arm_state == hg::PartitionArmState::Away);
+
+    bool alarm_triggered = false;
+    for (std::size_t index = 0; index < zones.size(); ++index) {
+        hg::ModelZoneState model_state = hg::ModelZoneState::Normal;
+        switch (zones[index]) {
+            case hg::ZoneState::Normal:
+                model_state = hg::ModelZoneState::Normal;
+                break;
+            case hg::ZoneState::Open:
+                model_state = armed ? hg::ModelZoneState::Alarm : hg::ModelZoneState::Open;
+                alarm_triggered = alarm_triggered || armed;
+                break;
+            case hg::ZoneState::Tamper:
+            case hg::ZoneState::Short:
+                model_state = hg::ModelZoneState::Tamper;
+                alarm_triggered = alarm_triggered || armed;
+                break;
+            case hg::ZoneState::Disabled:
+            default:
+                model_state = hg::ModelZoneState::Fault;
+                break;
+        }
+        (void)system_model_->set_zone_state(
+            static_cast<std::uint16_t>(index + 1U),
+            model_state,
+            now_ms);
+    }
+
+    if (alarm_triggered && partition != nullptr &&
+        partition->arm_state != hg::PartitionArmState::Alarm) {
+        (void)system_model_->set_partition_arm(1, hg::PartitionArmState::Alarm, now_ms);
+    }
+
+    // Zone transitions originate in the telemetry task. Dispatch them here so
+    // the HTTP event log/WebSocket subscribers and Android-visible state are
+    // updated immediately instead of waiting for a later command request.
+    (void)system_bus_->dispatch_all();
 }
 
 void TelemetryRuntime::update_zone_light(
@@ -215,6 +276,7 @@ void TelemetryRuntime::run()
         zones.fill(hg::ZoneState::Disabled);
         sample_zone_adc(hardware_->zone_adc(), 0, zones);
         sample_zone_adc(hardware_->telemetry_adc(), 4, zones);
+        update_zone_model(zones, event_timestamp_ms(now_ms));
         update_zone_light(zones, now_ms);
 
         std::array<hg::PressureState, 2> pressures{};

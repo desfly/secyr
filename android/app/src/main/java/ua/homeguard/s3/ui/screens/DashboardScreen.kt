@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,11 +18,13 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -53,6 +56,8 @@ fun DashboardScreen(
     criticalNotificationsEnabled: Boolean,
     statusNotificationsEnabled: Boolean,
     zoneNotificationsEnabled: Boolean,
+    alarmActive: Boolean,
+    alarmSourceId: Int,
     onBackToDevices: () -> Unit,
     onAddDevice: () -> Unit,
     onOperatorIdChange: (String) -> Unit,
@@ -68,6 +73,8 @@ fun DashboardScreen(
     onExportSettings: () -> Unit,
     onImportSettings: () -> Unit,
     onFactoryReset: () -> Unit,
+    onLightChange: (Boolean) -> Unit,
+    onLockPulse: () -> Unit,
     onCommand: (CommandType) -> Unit,
     onPanicBle: () -> Unit,
 ) {
@@ -81,6 +88,17 @@ fun DashboardScreen(
     var eventSourceText by remember { mutableStateOf("") }
     var pinVisible by remember { mutableStateOf(false) }
     var zonesExpanded by remember { mutableStateOf(false) }
+    var alarmFlashOn by remember { mutableStateOf(true) }
+    LaunchedEffect(alarmActive) {
+        if (!alarmActive) {
+            alarmFlashOn = false
+        } else {
+            while (true) {
+                alarmFlashOn = !alarmFlashOn
+                kotlinx.coroutines.delay(450)
+            }
+        }
+    }
     val credentialsReady = operatorId.isNotBlank() && operatorPin.length in 4..12 && operatorPin.all(Char::isDigit)
     val authenticated = accessSession != null
     val adminAuthenticated = accessSession?.role?.name == "ADMIN"
@@ -164,6 +182,33 @@ fun DashboardScreen(
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (alarmActive) {
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(if (alarmFlashOn) Color(0xFFD50000) else Color(0xFF5A0000)),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(if (alarmFlashOn) Color(0xFFD50000) else Color(0xFF5A0000))
+                            .padding(18.dp),
+                    ) {
+                        Text(
+                            "ТРИВОГА",
+                            color = Color.White,
+                            style = MaterialTheme.typography.headlineMedium,
+                        )
+                        Text(
+                            if (alarmSourceId in 1..4) "Зона $alarmSourceId · система під охороною" else "Система під охороною",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+                }
+            }
+        }
         item {
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(onClick = onBackToDevices, modifier = Modifier.fillMaxWidth()) { Text("← Пристрої") }
@@ -307,6 +352,11 @@ fun DashboardScreen(
             Text("Керування", style = MaterialTheme.typography.titleMedium)
             if (!authenticated) Text("Увійдіть, щоб активувати дозволені команди", style = MaterialTheme.typography.bodySmall)
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(enabled = authenticated, onClick = { onLightChange(true) }, modifier = Modifier.weight(1f)) { Text("Світло ON") }
+                    OutlinedButton(enabled = authenticated, onClick = { onLightChange(false) }, modifier = Modifier.weight(1f)) { Text("Світло OFF") }
+                }
+                Button(enabled = authenticated, onClick = onLockPulse, modifier = Modifier.fillMaxWidth()) { Text("Замок · 5 секунд") }
                 Button(enabled = canCommand(CommandType.ARM_HOME), onClick = { onCommand(CommandType.ARM_HOME) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: дім") }
                 Button(enabled = canCommand(CommandType.ARM_AWAY), onClick = { onCommand(CommandType.ARM_AWAY) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: повна") }
                 OutlinedButton(enabled = canCommand(CommandType.DISARM), onClick = { pendingDangerousCommand = CommandType.DISARM }, modifier = Modifier.fillMaxWidth()) { Text("Зняти з охорони") }
