@@ -18,6 +18,11 @@ function apiTimeoutMs(input) {
   if (url.includes("/network/scan")) return 15000;
   if (url.includes("/network/connect")) return 10000;
   if (url.includes("/lan/scan")) return 10000;
+  // Reconfiguring an already-started MQTT client may block in
+  // esp_mqtt_client_stop() until the current TLS/connect attempt unwinds.
+  // Do not abort the browser request at the generic 6 s timeout while the
+  // controller is legitimately applying the new cloud settings.
+  if (url.includes("/cloud/config")) return 20000;
   return 6000;
 }
 
