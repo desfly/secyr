@@ -5,11 +5,13 @@
 #include "homeguard/system_api.hpp"
 
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <sstream>
 #include <string>
 
@@ -57,6 +59,16 @@ const char* arm_state_name(hg::PartitionArmState state) {
         case hg::PartitionArmState::Alarm: return "alarm";
         default: return "disarmed";
     }
+}
+
+std::uint64_t journal_now_ms() {
+    struct timespec ts {};
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0 && ts.tv_sec >= 1735689600) {
+        return static_cast<std::uint64_t>(ts.tv_sec) * 1000ULL +
+               static_cast<std::uint64_t>(ts.tv_nsec / 1000000L);
+    }
+    const auto micros = esp_timer_get_time();
+    return micros > 0 ? static_cast<std::uint64_t>(micros / 1000) : 0U;
 }
 }
 
@@ -238,7 +250,7 @@ esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
         return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"unsupported_command\"}",-1);
     }
 
-    if (!model_->set_partition_arm(1,target,0)) {
+    if (!model_->set_partition_arm(1,target,journal_now_ms())) {
         httpd_resp_set_status(request,"409 Conflict");
         return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"partition_command_failed\"}",-1);
     }
@@ -276,7 +288,7 @@ void SystemHttp::on_event(const hg::SystemEvent& event,void* context) {
 }
 
 void SystemHttp::record(const hg::SystemEvent& event) {
-    event_log_.append(event.timestamp_ms,severity_for(event.type),static_cast<std::uint16_t>(event.type),hg::system_event_type_name(event.type));
+    event_log_.append(event.timestamp_ms,severity_for(event.type),static_cast<std::uint16_t>(event.type),hg::system_event_type_name(event.type),event.source_id,event.value);
 }
 
 std::string SystemHttp::events_json() const {
@@ -287,6 +299,7 @@ std::string SystemHttp::events_json() const {
         const auto& item = event_log_.at_oldest(i);
         out << "{\"sequence\":" << item.sequence << ",\"timestampMs\":" << item.timestamp_ms
             << ",\"severity\":\"" << severity_name(item.severity) << "\",\"code\":" << item.code
+            << ",\"sourceId\":" << item.source_id << ",\"value\":" << item.value
             << ",\"event\":\"" << item.text.data() << "\"}";
     }
     out << "]}";
