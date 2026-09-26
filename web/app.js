@@ -644,10 +644,11 @@ function bindNavigation() {
     historyLink.style.cursor = "pointer";
     historyLink.setAttribute("role", "button");
     historyLink.setAttribute("tabindex", "0");
-    historyLink.onclick = openFullHistory;
     historyLink.onkeydown = event => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
+        const href = "#history";
+        if (window.location.hash === href) routeFromHash(); else window.location.hash = href;
         openFullHistory();
       }
     };
@@ -656,11 +657,8 @@ function bindNavigation() {
     link.addEventListener("click", event => {
       event.preventDefault();
       const href = link.getAttribute("href") || "#overview";
-      if (href === "#history") {
-        openFullHistory();
-        return;
-      }
       if (window.location.hash === href) routeFromHash(); else window.location.hash = href;
+      if (href === "#history") openFullHistory();
     });
   });
   document.querySelector("#networkCard").addEventListener("click", () => { window.location.hash = "#networkPage"; });
