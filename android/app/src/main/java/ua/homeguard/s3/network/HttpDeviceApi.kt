@@ -147,6 +147,26 @@ class HttpDeviceApi(
         return CommandReply(accepted = accepted, code = if (accepted) "accepted" else json.optString("reason", "rejected"))
     }
 
+    suspend fun runtimeOutputCommand(outputId: Int, active: Boolean, actor: String): CommandReply {
+        require(outputId in 1..65535) { "outputId is invalid" }
+        val normalizedActor = actor.trim()
+        if (normalizedActor.isBlank() || tokenProvider().isBlank()) return CommandReply(false, code = "authorization_required")
+        val json = execute(
+            RuntimeApiContract.OUTPUT_COMMAND_PATH,
+            "POST",
+            JSONObject()
+                .put("outputId", outputId)
+                .put("active", active)
+                .put("alarmActive", false)
+                .put("actor", normalizedActor),
+        )
+        val accepted = json.optBoolean("ok", false)
+        return CommandReply(
+            accepted = accepted,
+            code = if (accepted) "accepted" else json.optString("reason", json.optString("status", "rejected")),
+        )
+    }
+
     private suspend fun runtimeValveCommand(active: Boolean, actor: String): CommandReply {
         for (outputId in 2..3) {
             val json = execute(RuntimeApiContract.OUTPUT_COMMAND_PATH, "POST", JSONObject().put("outputId", outputId).put("active", active).put("alarmActive", false).put("actor", actor))
