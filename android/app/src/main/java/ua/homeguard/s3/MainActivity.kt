@@ -25,6 +25,7 @@ import ua.homeguard.s3.model.AccessLifecycleState
 import ua.homeguard.s3.model.AccessSession
 import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
+import ua.homeguard.s3.model.SystemMode
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.network.ControllerIdentity
 import ua.homeguard.s3.network.DeviceEndpointResolver
@@ -75,6 +76,7 @@ class MainActivity : ComponentActivity() {
     private val deviceListOpen = MutableStateFlow(true)
     private var pendingExportText: String = ""
     private var pendingSettingsBackupText: String = ""
+    @Volatile private var zoneAlarmArmed: Boolean = false
 
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null && pendingExportText.isNotEmpty()) runCatching {
@@ -141,9 +143,25 @@ class MainActivity : ComponentActivity() {
         requestLocalNetworkPermission()
 
         lifecycleScope.launch {
+            telemetry.snapshots().collect { snapshot ->
+                zoneAlarmArmed = snapshot.mode == SystemMode.ARMED_HOME ||
+                    snapshot.mode == SystemMode.ARMED_AWAY ||
+                    snapshot.mode == SystemMode.ALARM
+            }
+        }
+
+        lifecycleScope.launch {
             telemetry.liveEvents().collect { event ->
                 eventHistory.append(event)
-                notifications.notify(event, settings.settings.value)
+                val type = event.event.uppercase()
+                val zoneAlarm = zoneAlarmArmed &&
+                    event.sourceId in 1..4 &&
+                    (type == "ALARM" || type == "ZONE_OPEN" || type == "TAMPER")
+                if (zoneAlarm) {
+                    notifications.notify(event.copy(event = "ALARM"), settings.settings.value)
+                } else if (type != "ALARM") {
+                    notifications.notify(event, settings.settings.value)
+                }
             }
         }
 
