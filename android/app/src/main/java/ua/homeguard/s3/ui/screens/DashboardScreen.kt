@@ -68,6 +68,8 @@ fun DashboardScreen(
     onExportSettings: () -> Unit,
     onImportSettings: () -> Unit,
     onFactoryReset: () -> Unit,
+    onLightChange: (Boolean) -> Unit,
+    onLockPulse: () -> Unit,
     onCommand: (CommandType) -> Unit,
     onPanicBle: () -> Unit,
 ) {
@@ -307,6 +309,11 @@ fun DashboardScreen(
             Text("Керування", style = MaterialTheme.typography.titleMedium)
             if (!authenticated) Text("Увійдіть, щоб активувати дозволені команди", style = MaterialTheme.typography.bodySmall)
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(enabled = authenticated, onClick = { onLightChange(true) }, modifier = Modifier.weight(1f)) { Text("Світло ON") }
+                    OutlinedButton(enabled = authenticated, onClick = { onLightChange(false) }, modifier = Modifier.weight(1f)) { Text("Світло OFF") }
+                }
+                Button(enabled = authenticated, onClick = onLockPulse, modifier = Modifier.fillMaxWidth()) { Text("Замок · 5 секунд") }
                 Button(enabled = canCommand(CommandType.ARM_HOME), onClick = { onCommand(CommandType.ARM_HOME) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: дім") }
                 Button(enabled = canCommand(CommandType.ARM_AWAY), onClick = { onCommand(CommandType.ARM_AWAY) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: повна") }
                 OutlinedButton(enabled = canCommand(CommandType.DISARM), onClick = { pendingDangerousCommand = CommandType.DISARM }, modifier = Modifier.fillMaxWidth()) { Text("Зняти з охорони") }
