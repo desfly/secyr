@@ -338,6 +338,8 @@ class MainActivity : ComponentActivity() {
                         onExportSettings = { pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings); settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName()) },
                         onImportSettings = { settingsRestoreLauncher.launch("application/json") },
                         onFactoryReset = ::factoryResetController,
+                        onLightChange = ::executeLight,
+                        onLockPulse = ::executeLockPulse,
                         onCommand = ::executeCommand,
                         onPanicBle = ::executePanicBle,
                     )
@@ -560,6 +562,38 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    private fun executeLight(active: Boolean) {
+        val authenticated = accessSession.value
+        if (authenticated == null) {
+            commandStatus.value = "Світло: спочатку увійдіть"
+            return
+        }
+        lifecycleScope.launch {
+            commandStatus.value = if (active) "Світло: увімкнення…" else "Світло: вимкнення…"
+            val result = runCatching { commands.setLight(active, authenticated.actor) }
+            commandStatus.value = result.fold(
+                { reply -> if (reply.accepted) "Світло: " + (if (active) "УВІМКНЕНО" else "ВИМКНЕНО") else "Світло: відхилено (" + reply.code + ")" },
+                { error -> "Світло: помилка (" + (error.message ?: "network") + ")" },
+            )
+        }
+    }
+
+    private fun executeLockPulse() {
+        val authenticated = accessSession.value
+        if (authenticated == null) {
+            commandStatus.value = "Замок: спочатку увійдіть"
+            return
+        }
+        lifecycleScope.launch {
+            commandStatus.value = "Замок: відкриття на 5 секунд…"
+            val result = runCatching { commands.pulseLock(authenticated.actor) }
+            commandStatus.value = result.fold(
+                { reply -> if (reply.accepted) "Замок: імпульс 5 с завершено" else "Замок: відхилено (" + reply.code + ")" },
+                { error -> "Замок: помилка (" + (error.message ?: "network") + ")" },
+            )
         }
     }
 
