@@ -101,10 +101,35 @@ function renderPartitions(data) {
   document.querySelector("#securityMode").textContent = armLabel(partition?.armState);
 }
 
+function eventTimeLabel(timestampMs) {
+  const value = Number(timestampMs) || 0;
+  if (value >= Date.UTC(2025, 0, 1)) {
+    return new Date(value).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+  return value > 0 ? `+${Math.floor(value / 1000)}с` : "—";
+}
+
+function eventLabel(item) {
+  const event = String(item?.event || "");
+  const sourceId = Number(item?.sourceId) || 0;
+  const value = Number(item?.value) || 0;
+  if (event === "partition.armed") {
+    if (value === 3) return "ТРИВОГА системи";
+    if (value === 1) return "Охорона: нічний режим";
+    return "Охорона: поставлено";
+  }
+  if (event === "partition.disarmed") return "Охорона: знято";
+  if (event === "alarm") return sourceId ? `ТРИВОГА: зона ${sourceId}` : "ТРИВОГА";
+  if (event === "zone.open") return sourceId ? `Зона ${sourceId}: спрацювання / обрив` : "Спрацювання зони";
+  if (event === "zone.closed") return sourceId ? `Зона ${sourceId}: відновлено НОРМА` : "Зона відновлена";
+  if (event === "tamper") return sourceId ? `Зона ${sourceId}: КЗ / тампер` : "Тампер";
+  return event || "Подія";
+}
+
 function renderEvents(data) {
   const events = Array.isArray(data?.events) ? data.events.slice(-6).reverse() : [];
   document.querySelector("#eventList").innerHTML = events.length ? events.map(item => `
-    <div><i></i><time>#${escapeHtml(item.sequence ?? "—")}</time><span>${escapeHtml(item.event || "Подія")}</span><a>${escapeHtml(item.severity || "info")}</a></div>`).join("") : "<div><i></i><time>—</time><span>Подій ще немає</span><a>Інформація ›</a></div>";
+    <div><i></i><time>${escapeHtml(eventTimeLabel(item.timestampMs))}</time><span>${escapeHtml(eventLabel(item))}</span><a>${escapeHtml(item.severity || "info")}</a></div>`).join("") : "<div><i></i><time>—</time><span>Подій ще немає</span><a>Інформація ›</a></div>";
 }
 
 function renderOutputs(data) {
