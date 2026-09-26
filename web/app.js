@@ -111,11 +111,19 @@ function setZoneAlarmActive(active) {
   if (zoneAlarmRuntime.active) {
     primeZoneAlarmAudio();
     zoneAlarmBeep();
+    const scheduleBeep = () => {
+      if (!zoneAlarmRuntime.active) {
+        zoneAlarmRuntime.timer = 0;
+        return;
+      }
+      zoneAlarmBeep();
+      zoneAlarmRuntime.timer = window.setTimeout(scheduleBeep, 900);
+    };
     if (!zoneAlarmRuntime.timer) {
-      zoneAlarmRuntime.timer = window.setInterval(zoneAlarmBeep, 900);
+      zoneAlarmRuntime.timer = window.setTimeout(scheduleBeep, 900);
     }
   } else if (zoneAlarmRuntime.timer) {
-    window.clearInterval(zoneAlarmRuntime.timer);
+    window.clearTimeout(zoneAlarmRuntime.timer);
     zoneAlarmRuntime.timer = 0;
   }
 }
