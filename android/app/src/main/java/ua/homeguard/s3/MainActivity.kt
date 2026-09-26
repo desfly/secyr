@@ -1,10 +1,15 @@
 package ua.homeguard.s3
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.media.AudioManager
+import android.media.ToneGenerator
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +20,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -69,6 +75,8 @@ class MainActivity : ComponentActivity() {
     private val accessSession = MutableStateFlow<AccessSession?>(null)
     private val accessLifecycle = MutableStateFlow(AccessLifecycleState.UNAVAILABLE)
     private val accessGateBusy = MutableStateFlow(false)
+    private val alarmUiActive = MutableStateFlow(false)
+    private val alarmSourceId = MutableStateFlow(0)
     private val accessGateMessage = MutableStateFlow("")
     private val setupWifiNetworks = MutableStateFlow<List<SetupWifiChoice>>(emptyList())
     private val addDeviceOpen = MutableStateFlow(false)
@@ -77,6 +85,8 @@ class MainActivity : ComponentActivity() {
     private var pendingExportText: String = ""
     private var pendingSettingsBackupText: String = ""
     @Volatile private var zoneAlarmArmed: Boolean = false
+    private var alarmToneJob: Job? = null
+    private var alarmTone: ToneGenerator? = null
 
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null && pendingExportText.isNotEmpty()) runCatching {
@@ -147,6 +157,7 @@ class MainActivity : ComponentActivity() {
                 zoneAlarmArmed = snapshot.mode == SystemMode.ARMED_HOME ||
                     snapshot.mode == SystemMode.ARMED_AWAY ||
                     snapshot.mode == SystemMode.ALARM
+                if (!zoneAlarmArmed) stopForegroundAlarm()
             }
         }
 
@@ -158,6 +169,9 @@ class MainActivity : ComponentActivity() {
                     event.sourceId in 1..4 &&
                     (type == "ALARM" || type == "ZONE_OPEN" || type == "TAMPER")
                 if (zoneAlarm) {
+                    alarmUiActive.value = true
+                    alarmSourceId.value = event.sourceId
+                    startForegroundAlarm()
                     notifications.notify(event.copy(event = "ALARM"), settings.settings.value)
                 } else if (type != "ALARM") {
                     notifications.notify(event, settings.settings.value)
@@ -209,6 +223,8 @@ class MainActivity : ComponentActivity() {
             val lifecycleState by accessLifecycle.collectAsState()
             val gateBusy by accessGateBusy.collectAsState()
             val gateMessage by accessGateMessage.collectAsState()
+            val alarmActive by alarmUiActive.collectAsState()
+            val alarmZone by alarmSourceId.collectAsState()
             val gateNetworks by setupWifiNetworks.collectAsState()
             val showAddDevice by addDeviceOpen.collectAsState()
             val showProvisioning by provisioningOpen.collectAsState()
@@ -322,6 +338,8 @@ class MainActivity : ComponentActivity() {
                         criticalNotificationsEnabled = appSettings.criticalNotificationsEnabled,
                         statusNotificationsEnabled = appSettings.statusNotificationsEnabled,
                         zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
+                        alarmActive = alarmActive,
+                        alarmSourceId = alarmZone,
                         onBackToDevices = {
                             logoutOperator()
                             deviceListOpen.value = true
@@ -583,6 +601,41 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun startForegroundAlarm() {
+        if (alarmToneJob?.isActive == true) return
+
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator?.vibrate(
+                VibrationEffect.createWaveform(longArrayOf(0, 500, 250, 500, 250, 900), 0)
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator?.vibrate(longArrayOf(0, 500, 250, 500, 250, 900), 0)
+        }
+
+        alarmTone = ToneGenerator(AudioManager.STREAM_ALARM, 100)
+        alarmToneJob = lifecycleScope.launch {
+            while (alarmUiActive.value) {
+                alarmTone?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 650)
+                delay(900)
+            }
+        }
+    }
+
+    private fun stopForegroundAlarm() {
+        if (!alarmUiActive.value && alarmToneJob == null) return
+        alarmUiActive.value = false
+        alarmSourceId.value = 0
+        alarmToneJob?.cancel()
+        alarmToneJob = null
+        alarmTone?.stopTone()
+        alarmTone?.release()
+        alarmTone = null
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        vibrator?.cancel()
+    }
+
     private fun executeLight(active: Boolean) {
         val authenticated = accessSession.value
         if (authenticated == null) {
@@ -699,6 +752,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        stopForegroundAlarm()
         commands.logout()
         accessSession.value = null
         operatorPin.value = ""
