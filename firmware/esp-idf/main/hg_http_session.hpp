@@ -78,6 +78,11 @@ inline bool authorized_impl(std::string_view authorization, homeguard::AccessCon
         }
         if (!expected_actor.empty() && session_actor != expected_actor) return false;
         if (expected_role != nullptr && g_roles[i] != *expected_role) return false;
+
+        // Sliding session lifetime: an actively used authenticated session must
+        // not expire underneath Web UI / Android. Disabled users and role
+        // changes are still rejected above and revoke the slot immediately.
+        g_issued_us[i] = now;
         return true;
     }
     return false;
