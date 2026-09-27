@@ -90,6 +90,18 @@ class HttpDeviceApi(
 
     suspend fun networkStatus(): JSONObject = execute(RuntimeApiContract.NETWORK_STATUS_PATH)
 
+    suspend fun runtimeOutputActive(outputId: Int): Boolean? {
+        require(outputId in 1..65535) { "outputId is invalid" }
+        val json = execute(RuntimeApiContract.OUTPUTS_PATH)
+        val outputs = json.optJSONArray("outputs") ?: return null
+        for (index in 0 until outputs.length()) {
+            val item = outputs.optJSONObject(index) ?: continue
+            if (item.optInt("id", -1) == outputId) return item.optBoolean("active", false)
+        }
+        return null
+    }
+
+
     suspend fun configureWifi(ssid: String, password: String, actor: String): JSONObject {
         require(ssid.isNotBlank() && ssid.length <= 32) { "SSID is invalid" }
         require(password.isEmpty() || password.length in 8..64) { "Wi-Fi password is invalid" }
