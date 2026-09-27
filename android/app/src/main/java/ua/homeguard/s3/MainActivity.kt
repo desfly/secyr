@@ -33,6 +33,7 @@ import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ProvisioningPhase
 import ua.homeguard.s3.model.SystemMode
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.network.ControllerIdentity
 import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
@@ -77,6 +78,7 @@ class MainActivity : ComponentActivity() {
     private val accessGateBusy = MutableStateFlow(false)
     private val alarmUiActive = MutableStateFlow(false)
     private val alarmSourceId = MutableStateFlow(0)
+    private val lightOutputActive = MutableStateFlow<Boolean?>(null)
     private val accessGateMessage = MutableStateFlow("")
     private val setupWifiNetworks = MutableStateFlow<List<SetupWifiChoice>>(emptyList())
     private val addDeviceOpen = MutableStateFlow(false)
@@ -157,7 +159,28 @@ class MainActivity : ComponentActivity() {
                 zoneAlarmArmed = snapshot.mode == SystemMode.ARMED_HOME ||
                     snapshot.mode == SystemMode.ARMED_AWAY ||
                     snapshot.mode == SystemMode.ALARM
-                if (!zoneAlarmArmed) stopForegroundAlarm()
+
+                // The telemetry stream itself is authoritative for alarm state.
+                // Do not depend on a separate event frame: the ESP publishes
+                // snapshots continuously even when the event websocket path is
+                // unavailable. Entering ALARM must therefore wake the phone.
+                if (snapshot.mode == SystemMode.ALARM && !alarmUiActive.value) {
+                    alarmUiActive.value = true
+                    alarmSourceId.value = 0
+                    startForegroundAlarm()
+                    notifications.notify(
+                        SystemEventRecord(
+                            sequence = snapshot.sequence,
+                            timestampMs = System.currentTimeMillis(),
+                            event = "ALARM",
+                            sourceId = 0,
+                            value = 1,
+                        ),
+                        settings.settings.value,
+                    )
+                } else if (!zoneAlarmArmed) {
+                    stopForegroundAlarm()
+                }
             }
         }
 
@@ -169,10 +192,12 @@ class MainActivity : ComponentActivity() {
                     event.sourceId in 1..4 &&
                     (type == "ALARM" || type == "ZONE_OPEN" || type == "TAMPER")
                 if (zoneAlarm) {
-                    alarmUiActive.value = true
                     alarmSourceId.value = event.sourceId
-                    startForegroundAlarm()
-                    notifications.notify(event.copy(event = "ALARM"), settings.settings.value)
+                    if (!alarmUiActive.value) {
+                        alarmUiActive.value = true
+                        startForegroundAlarm()
+                        notifications.notify(event.copy(event = "ALARM"), settings.settings.value)
+                    }
                 } else if (type != "ALARM") {
                     notifications.notify(event, settings.settings.value)
                 }
@@ -205,6 +230,19 @@ class MainActivity : ComponentActivity() {
         discovery.start()
         session.start()
 
+        // Keep the light button tied to the controller's actual output #4
+        // state, including changes made from the web UI or automatic zone logic.
+        lifecycleScope.launch {
+            while (true) {
+                lightOutputActive.value = if (accessSession.value != null) {
+                    commands.outputActive(4)
+                } else {
+                    null
+                }
+                delay(1_000L)
+            }
+        }
+
         lifecycleScope.launch {
             delay(600)
             if (settings.settings.value.deviceId.isNotBlank()) {
@@ -232,6 +270,7 @@ class MainActivity : ComponentActivity() {
             val gateMessage by accessGateMessage.collectAsState()
             val alarmActive by alarmUiActive.collectAsState()
             val alarmZone by alarmSourceId.collectAsState()
+            val lightActive by lightOutputActive.collectAsState()
             val gateNetworks by setupWifiNetworks.collectAsState()
             val showAddDevice by addDeviceOpen.collectAsState()
             val showProvisioning by provisioningOpen.collectAsState()
@@ -348,6 +387,7 @@ class MainActivity : ComponentActivity() {
                         zoneNotificationsEnabled = appSettings.zoneNotificationsEnabled,
                         alarmActive = alarmActive,
                         alarmSourceId = alarmZone,
+                        lightActive = lightActive,
                         onBackToDevices = {
                             logoutOperator()
                             deviceListOpen.value = true
@@ -717,6 +757,7 @@ class MainActivity : ComponentActivity() {
                 { reply -> if (reply.accepted) "Світло: " + (if (active) "УВІМКНЕНО" else "ВИМКНЕНО") else "Світло: відхилено (" + reply.code + ")" },
                 { error -> "Світло: помилка (" + (error.message ?: "network") + ")" },
             )
+            lightOutputActive.value = commands.outputActive(4)
         }
     }
 
