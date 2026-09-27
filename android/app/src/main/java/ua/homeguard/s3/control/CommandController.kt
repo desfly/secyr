@@ -186,6 +186,15 @@ class CommandController(
             .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
     }
 
+    suspend fun outputActive(outputId: Int): Boolean? {
+        val target = endpoint.value
+        if (target.path == ControlPath.OFFLINE || target.path == ControlPath.CLOUD ||
+            target.apiBaseUrl.isBlank() || localHttpSessionToken.isBlank()) {
+            return null
+        }
+        return runCatching { createApi(target).runtimeOutputActive(outputId) }.getOrNull()
+    }
+
     suspend fun setLight(active: Boolean, actor: String): CommandReply {
         val target = endpoint.value
         if (target.path != ControlPath.OFFLINE && target.path != ControlPath.CLOUD &&
