@@ -88,7 +88,21 @@ class HttpDeviceApi(
         )
     }
 
+    suspend fun cloudClientConfig(): JSONObject = execute(RuntimeApiContract.CLOUD_CLIENT_CONFIG_PATH)
+
     suspend fun networkStatus(): JSONObject = execute(RuntimeApiContract.NETWORK_STATUS_PATH)
+
+    suspend fun runtimeOutputActive(outputId: Int): Boolean? {
+        require(outputId in 1..65535) { "outputId is invalid" }
+        val json = execute(RuntimeApiContract.OUTPUTS_PATH)
+        val outputs = json.optJSONArray("outputs") ?: return null
+        for (index in 0 until outputs.length()) {
+            val item = outputs.optJSONObject(index) ?: continue
+            if (item.optInt("id", -1) == outputId) return item.optBoolean("active", false)
+        }
+        return null
+    }
+
 
     suspend fun configureWifi(ssid: String, password: String, actor: String): JSONObject {
         require(ssid.isNotBlank() && ssid.length <= 32) { "SSID is invalid" }
@@ -145,6 +159,26 @@ class HttpDeviceApi(
         val json = execute(RuntimeApiContract.SECURITY_COMMAND_PATH, "POST", JSONObject().put("command", command).put("actor", actor))
         val accepted = json.optBoolean("ok", false)
         return CommandReply(accepted = accepted, code = if (accepted) "accepted" else json.optString("reason", "rejected"))
+    }
+
+    suspend fun runtimeOutputCommand(outputId: Int, active: Boolean, actor: String): CommandReply {
+        require(outputId in 1..65535) { "outputId is invalid" }
+        val normalizedActor = actor.trim()
+        if (normalizedActor.isBlank() || tokenProvider().isBlank()) return CommandReply(false, code = "authorization_required")
+        val json = execute(
+            RuntimeApiContract.OUTPUT_COMMAND_PATH,
+            "POST",
+            JSONObject()
+                .put("outputId", outputId)
+                .put("active", active)
+                .put("alarmActive", false)
+                .put("actor", normalizedActor),
+        )
+        val accepted = json.optBoolean("ok", false)
+        return CommandReply(
+            accepted = accepted,
+            code = if (accepted) "accepted" else json.optString("reason", json.optString("status", "rejected")),
+        )
     }
 
     private suspend fun runtimeValveCommand(active: Boolean, actor: String): CommandReply {

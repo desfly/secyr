@@ -9,12 +9,14 @@
 
 namespace hg {
 
-void EventLog::append(uint64_t ts, Severity sev, uint16_t code, std::string_view text) {
+void EventLog::append(uint64_t ts, Severity sev, uint16_t code, std::string_view text, uint16_t source_id, int32_t value) {
     Event e{};
     e.sequence = next_sequence_++;
     e.timestamp_ms = ts;
     e.severity = sev;
     e.code = code;
+    e.source_id = source_id;
+    e.value = value;
 
     const auto n = std::min(text.size(), e.text.size() - 1);
     std::copy_n(text.begin(), n, e.text.begin());

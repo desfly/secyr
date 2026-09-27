@@ -66,6 +66,25 @@ bool valid_public_key_pem(const std::string& public_key)
     return allowed;
 }
 
+std::string json_escape_string(const std::string& value)
+{
+    std::string out;
+    out.reserve(value.size() + 8U);
+    for (const char ch : value) {
+        switch (ch) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(ch) >= 0x20U) out.push_back(ch);
+                break;
+        }
+    }
+    return out;
+}
+
 void scrub_cloud_password(CloudConfig& config)
 {
     http_util::scrub(config.password);
@@ -94,6 +113,7 @@ esp_err_t CloudHttp::register_handlers(
     access_control_ = access_control;
     const httpd_uri_t routes[] = {
         {.uri = "/api/v1/cloud/status", .method = HTTP_GET, .handler = &CloudHttp::status_get, .user_ctx = this},
+        {.uri = "/api/v1/cloud/client-config", .method = HTTP_GET, .handler = &CloudHttp::client_config_get, .user_ctx = this},
         {.uri = "/api/v1/cloud/config", .method = HTTP_POST, .handler = &CloudHttp::config_post, .user_ctx = this},
         {.uri = "/api/v1/cloud/trust", .method = HTTP_POST, .handler = &CloudHttp::trust_post, .user_ctx = this},
     };
@@ -123,6 +143,38 @@ esp_err_t CloudHttp::status_get(httpd_req_t* request)
         ",\"deviceId\":\"" + self->cloud_->device_id() +
         "\",\"connectCount\":" + std::to_string(self->cloud_->connect_count()) +
         ",\"disconnectCount\":" + std::to_string(self->cloud_->disconnect_count()) + "}";
+    return send_json(request, body);
+}
+
+esp_err_t CloudHttp::client_config_get(httpd_req_t* request)
+{
+    if (request == nullptr || request->user_ctx == nullptr) return ESP_ERR_INVALID_ARG;
+    auto* self = static_cast<CloudHttp*>(request->user_ctx);
+    if (self->store_ == nullptr || self->access_control_ == nullptr) return ESP_FAIL;
+    if (!request_auth::authenticated(request, *self->access_control_)) {
+        return request_auth::send_login_required(request);
+    }
+
+    CloudConfig config{};
+    const auto error = self->store_->load(config);
+    if (error == ESP_ERR_NVS_NOT_FOUND) {
+        return send_json(request, "{\"ok\":true,\"configured\":false}");
+    }
+    if (error != ESP_OK) {
+        httpd_resp_set_status(request, "500 Internal Server Error");
+        return send_json(request, "{\"ok\":false,\"reason\":\"cloud_config_unreadable\"}");
+    }
+
+    // BENCH enrollment bridge: an already authenticated local session may
+    // bootstrap the Android MQTT listener. The password is returned only by
+    // this explicit endpoint, never by status/diagnostics, and the response is
+    // no-store. Android persists it only in Keystore-backed storage.
+    const std::string body =
+        std::string{"{\"ok\":true,\"configured\":"} + (config.enabled ? "true" : "false") +
+        ",\"brokerUri\":\"" + json_escape_string(config.broker_uri) +
+        "\",\"username\":\"" + json_escape_string(config.username) +
+        "\",\"password\":\"" + json_escape_string(config.password) + "\"}";
+    scrub_cloud_password(config);
     return send_json(request, body);
 }
 
