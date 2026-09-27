@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceEndpoint
@@ -36,6 +37,7 @@ class DeviceSession(
     private var ticketRefreshJob: Job? = null
     private var bleTelemetryJob: Job? = null
     private var bleStateJob: Job? = null
+    private var mqttSettingsJob: Job? = null
     @Volatile private var activeTarget: SessionTarget? = null
 
     fun cloudState(): StateFlow<CloudRuntime.State> = remoteTransports.cloudState()
@@ -47,6 +49,13 @@ class DeviceSession(
     fun start() {
         if (job != null) return
         remoteTransports.start()
+        applyPersistedMqtt()
+        mqttSettingsJob = scope.launch {
+            settings.settings
+                .map { Triple(it.mqttBrokerUri, it.mqttUsername, it.deviceId) }
+                .distinctUntilChanged()
+                .collect { applyPersistedMqtt() }
+        }
         job = scope.launch {
             combine(endpointProvider, settings.settings) { endpoint, appSettings ->
                 when (endpoint.path) {
@@ -108,17 +117,33 @@ class DeviceSession(
         ticketRefreshJob?.cancel()
         bleTelemetryJob?.cancel()
         bleStateJob?.cancel()
+        mqttSettingsJob?.cancel()
         job?.cancel()
         authorizationJob?.cancel()
         reconnectJob = null
         ticketRefreshJob = null
         bleTelemetryJob = null
         bleStateJob = null
+        mqttSettingsJob = null
         job = null
         authorizationJob = null
         remoteTransports.stop()
         telemetry.clearFallbackSnapshot()
         telemetry.disconnect()
+    }
+
+    private fun applyPersistedMqtt() {
+        val appSettings = settings.settings.value
+        val deviceId = appSettings.deviceId
+        remoteTransports.configureMqtt(
+            MqttConnectionConfig(
+                brokerUri = appSettings.mqttBrokerUri,
+                username = appSettings.mqttUsername,
+                deviceId = deviceId,
+                enabled = appSettings.mqttBrokerUri.isNotBlank() && deviceId.isNotBlank(),
+            ),
+            settings.mqttPassword(),
+        )
     }
 
     private fun connectTarget(target: SessionTarget) {
