@@ -1,7 +1,7 @@
 "use strict";
 
 const nativeFetch = window.fetch.bind(window);
-let apiQueueTail = Promise.resolve();
+// Preserve the real browser fetch for bootstrap/login flows. These requests must\n// never sit behind the operational API queue or inherit its AbortController timeout.\nwindow.__homeguardNativeFetch = nativeFetch;\nlet apiQueueTail = Promise.resolve();
 
 function requestUrl(input) {
   if (typeof input === "string") return input;
