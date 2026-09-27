@@ -88,6 +88,8 @@ class HttpDeviceApi(
         )
     }
 
+    suspend fun cloudClientConfig(): JSONObject = execute(RuntimeApiContract.CLOUD_CLIENT_CONFIG_PATH)
+
     suspend fun networkStatus(): JSONObject = execute(RuntimeApiContract.NETWORK_STATUS_PATH)
 
     suspend fun runtimeOutputActive(outputId: Int): Boolean? {
