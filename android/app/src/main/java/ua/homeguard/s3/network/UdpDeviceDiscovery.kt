@@ -149,8 +149,8 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
                             .getOrNull()
                         if (parsed != null) {
                             accepted++
-                            found[parsed.deviceId] = parsed
-                            _devices.value = found.values.sortedBy { it.deviceId }
+                            found["${parsed.deviceId}|${parsed.host}"] = parsed
+                            _devices.value = found.values.sortedWith(compareBy<DiscoveredDevice> { it.deviceId }.thenBy { it.host })
                             Log.i(TAG, "HomeGuard found: id=${parsed.deviceId} host=${parsed.host} port=${parsed.port}")
                         }
                         _status.value = _status.value.copy(
@@ -174,7 +174,7 @@ class UdpDeviceDiscovery(context: Context, private val scope: CoroutineScope) {
 
             val expiry = System.currentTimeMillis() - 30_000L
             found.entries.removeIf { it.value.seenAtMs < expiry }
-            _devices.value = found.values.sortedBy { it.deviceId }
+            _devices.value = found.values.sortedWith(compareBy<DiscoveredDevice> { it.deviceId }.thenBy { it.host })
         }
     }
 
