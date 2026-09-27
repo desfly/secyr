@@ -341,7 +341,9 @@ async function refreshNetwork() {
 
 async function refreshCloudStatus() {
   try {
-    renderCloudStatus(await api("/api/v1/cloud/status"));
+    const status = await api("/api/v1/cloud/status");
+    renderCloudStatus(status);
+    return status;
   } catch (_) {
     const state = document.querySelector("#cloudState");
     const detail = document.querySelector("#cloudDetail");
@@ -708,9 +710,24 @@ async function applyCloudConfig(forceDisable = false) {
   result.textContent = forceDisable ? "Вимкнення…" : "Застосування…";
   try {
     await api("/api/v1/cloud/config", { method: "POST", body: JSON.stringify(payload) });
-    result.textContent = enabled ? "Налаштування збережено, MQTT підключається" : "Cloud/MQTT вимкнено";
     document.querySelector("#cloudEnabled").checked = enabled;
-    await refreshCloudStatus();
+    if (!enabled) {
+      result.textContent = "Cloud/MQTT вимкнено";
+      await refreshCloudStatus();
+    } else {
+      result.textContent = "Налаштування збережено, MQTT підключається…";
+      let connected = false;
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const status = await refreshCloudStatus();
+        if (status?.connected === true) {
+          result.textContent = "MQTT підключено";
+          connected = true;
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      if (!connected) result.textContent = "Налаштування збережено, MQTT ще підключається";
+    }
   } catch (error) {
     result.textContent = `Помилка: ${error.message}`;
   } finally {
