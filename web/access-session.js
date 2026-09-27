@@ -1,7 +1,7 @@
 "use strict";
 
 (() => {
-  const originalFetch = window.fetch.bind(window);
+  const originalFetch = window.__homeguardNativeFetch || window.fetch.bind(window);
   let session = null;
   let gateMode = "loading";
   const browserSessionKey = "homeguard.web.session.v1";
@@ -158,7 +158,7 @@
     }
 
     return originalFetch(input, nextInit).then(response => {
-      if (response.status === 401 && session) logout("Сеанс завершено. Увійдіть знову.");
+      if (response.status === 401 && session) recoverAccessGate("Сеанс завершено.");
       return response;
     });
   };
@@ -374,6 +374,20 @@
     const button=form.querySelector("button");button.disabled=true;message.textContent="Перевірка…";
     try {const response=await originalFetch("/api/v1/access/login",{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({actor,credential})});const body=await apiBody(response);if(!response.ok||body.ok===false)throw new Error(body.reason||String(response.status));const token=String(body.sessionToken||"");if(!/^[0-9a-f]{64}$/.test(token))throw new Error("session_unavailable");form.querySelector("#hgLoginPin").value="";credential="";session={actor:String(body.actor||actor),token,name:String(body.name||actor),role:String(body.role||"guest"),capabilities:body.capabilities||{}};saveBrowserSession();document.documentElement.classList.remove("hg-auth-locked");gate.hidden=true;syncActorFields();applyRoleUi();if(typeof refresh==="function")await refresh();applyRoleUi();ensureLogoutButton();}
     catch(error){credential="";session=null;message.textContent=error.message==="setup_required"?"Спочатку виконайте первинне налаштування.":`Вхід відхилено: ${error.message}`;if(error.message==="setup_required")showSetup();else button.disabled=false;}
+  }
+
+  async function recoverAccessGate(reason="") {
+    session=null;
+    saveBrowserSession();
+    ["#operatorId","#operatorPin","#networkActor","#networkCredential","#accessActor","#accessCredential","#cloudActor","#cloudCredential","#factoryResetActor","#factoryResetCredential"].forEach(selector=>{const field=document.querySelector(selector);if(field)field.value="";});
+    document.querySelector("#hgSessionLogout")?.remove();
+    gate.hidden=false;
+    document.documentElement.classList.add("hg-auth-locked");
+    title.textContent="HomeGuard-S3";
+    hint.textContent="Перевірка стану доступу…";
+    message.textContent=reason;
+    form.innerHTML="";
+    await loadAccessState();
   }
 
   function logout(reason="") {
