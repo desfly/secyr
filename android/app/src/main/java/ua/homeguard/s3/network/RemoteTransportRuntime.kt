@@ -20,9 +20,9 @@ import ua.homeguard.s3.model.SystemEventRecord
  * other as an implementation detail.
  */
 class RemoteTransportRuntime(
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
     endpointProvider: StateFlow<ua.homeguard.s3.model.DeviceEndpoint>,
-    telemetry: TelemetrySocket,
+    private val telemetry: TelemetrySocket,
 ) {
     private val cloud = CloudRuntime(scope, endpointProvider, telemetry)
     private val mqttClient = MqttRuntimeClient(scope)
