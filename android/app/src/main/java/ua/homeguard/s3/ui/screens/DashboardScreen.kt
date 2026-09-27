@@ -58,6 +58,7 @@ fun DashboardScreen(
     zoneNotificationsEnabled: Boolean,
     alarmActive: Boolean,
     alarmSourceId: Int,
+    lightActive: Boolean?,
     onBackToDevices: () -> Unit,
     onAddDevice: () -> Unit,
     onOperatorIdChange: (String) -> Unit,
@@ -352,9 +353,18 @@ fun DashboardScreen(
             Text("Керування", style = MaterialTheme.typography.titleMedium)
             if (!authenticated) Text("Увійдіть, щоб активувати дозволені команди", style = MaterialTheme.typography.bodySmall)
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(enabled = authenticated, onClick = { onLightChange(true) }, modifier = Modifier.weight(1f)) { Text("Світло ON") }
-                    OutlinedButton(enabled = authenticated, onClick = { onLightChange(false) }, modifier = Modifier.weight(1f)) { Text("Світло OFF") }
+                Button(
+                    enabled = authenticated,
+                    onClick = { onLightChange(!(lightActive ?: false)) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        when (lightActive) {
+                            true -> "Світло · УВІМКНЕНО"
+                            false -> "Світло · ВИМКНЕНО"
+                            null -> "Світло · стан невідомий"
+                        },
+                    )
                 }
                 Button(enabled = authenticated, onClick = onLockPulse, modifier = Modifier.fillMaxWidth()) { Text("Замок · 5 секунд") }
                 Button(enabled = canCommand(CommandType.ARM_HOME), onClick = { onCommand(CommandType.ARM_HOME) }, modifier = Modifier.fillMaxWidth()) { Text("Охорона: дім") }
