@@ -37,6 +37,8 @@ class SettingsStore(context: Context) {
             .putString("cloud_base_url", normalized.cloudBaseUrl)
             .putString("last_local_url", normalized.lastKnownLocalUrl)
             .putString("local_cert_sha256", normalized.localCertificateSha256)
+            .putString("mqtt_broker_uri", normalized.mqttBrokerUri)
+            .putString("mqtt_username", normalized.mqttUsername)
             .putBoolean("notifications_critical", normalized.criticalNotificationsEnabled)
             .putBoolean("notifications_status", normalized.statusNotificationsEnabled)
             .putBoolean("notifications_zones", normalized.zoneNotificationsEnabled)
@@ -92,6 +94,18 @@ class SettingsStore(context: Context) {
         secure.put(loginKey("pin", deviceId), "")
     }
 
+    suspend fun saveMqttClientConfig(brokerUri: String, username: String, password: String) {
+        secure.put("mqtt_password", password)
+        update(
+            settings.value.copy(
+                mqttBrokerUri = brokerUri.trim(),
+                mqttUsername = username.trim(),
+            ),
+        )
+    }
+
+    fun mqttPassword(): String = secure.get("mqtt_password")
+
     private fun load() = AppSettings(
         deviceId = preferences.getString("device_id", "").orEmpty(),
         apiToken = secure.get("api_token"),
@@ -101,6 +115,8 @@ class SettingsStore(context: Context) {
         cloudBaseUrl = preferences.getString("cloud_base_url", "").orEmpty(),
         lastKnownLocalUrl = preferences.getString("last_local_url", "").orEmpty(),
         localCertificateSha256 = preferences.getString("local_cert_sha256", "").orEmpty(),
+        mqttBrokerUri = preferences.getString("mqtt_broker_uri", "").orEmpty(),
+        mqttUsername = preferences.getString("mqtt_username", "").orEmpty(),
         criticalNotificationsEnabled = preferences.getBoolean("notifications_critical", true),
         statusNotificationsEnabled = preferences.getBoolean("notifications_status", true),
         zoneNotificationsEnabled = preferences.getBoolean("notifications_zones", true),
