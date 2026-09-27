@@ -188,9 +188,11 @@ class MainActivity : ComponentActivity() {
             telemetry.liveEvents().collect { event ->
                 eventHistory.append(event)
                 val type = event.event.uppercase()
-                val zoneAlarm = zoneAlarmArmed &&
-                    event.sourceId in 1..4 &&
-                    (type == "ALARM" || type == "ZONE_OPEN" || type == "TAMPER")
+                val zoneAlarm = type == "ALARM" || (
+                    zoneAlarmArmed &&
+                        event.sourceId in 1..4 &&
+                        (type == "ZONE_OPEN" || type == "TAMPER")
+                )
                 if (zoneAlarm) {
                     alarmSourceId.value = event.sourceId
                     if (!alarmUiActive.value) {
@@ -491,6 +493,7 @@ class MainActivity : ComponentActivity() {
                     accessLifecycle.value = AccessLifecycleState.LOGIN_REQUIRED
                     commandStatus.value = "Автовхід: ${authenticated.name} · ${authenticated.role.name.lowercase()}"
                     accessGateMessage.value = ""
+                    syncMqttEnrollment()
                     true
                 },
                 onFailure = { error ->
@@ -628,6 +631,7 @@ class MainActivity : ComponentActivity() {
                     accessLifecycle.value = AccessLifecycleState.LOGIN_REQUIRED
                     commandStatus.value = "Вхід: ${authenticated.name} · ${authenticated.role.name.lowercase()}"
                     accessGateMessage.value = ""
+                    syncMqttEnrollment()
                 }
                 .onFailure { error ->
                     operatorPin.value = ""
@@ -638,6 +642,16 @@ class MainActivity : ComponentActivity() {
                 }
             accessGateBusy.value = false
         }
+    }
+
+    private suspend fun syncMqttEnrollment() {
+        val json = runCatching { commands.cloudClientConfig() }.getOrNull() ?: return
+        if (!json.optBoolean("ok", false) || !json.optBoolean("configured", false)) return
+        val brokerUri = json.optString("brokerUri", "").trim()
+        val username = json.optString("username", "").trim()
+        val password = json.optString("password", "")
+        if (brokerUri.isBlank() || password.isBlank()) return
+        settings.saveMqttClientConfig(brokerUri, username, password)
     }
 
     private fun invalidateSavedAuthorization() {
