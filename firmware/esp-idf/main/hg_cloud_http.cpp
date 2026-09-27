@@ -66,6 +66,25 @@ bool valid_public_key_pem(const std::string& public_key)
     return allowed;
 }
 
+std::string json_escape_string(const std::string& value)
+{
+    std::string out;
+    out.reserve(value.size() + 8U);
+    for (const char ch : value) {
+        switch (ch) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(ch) >= 0x20U) out.push_back(ch);
+                break;
+        }
+    }
+    return out;
+}
+
 void scrub_cloud_password(CloudConfig& config)
 {
     http_util::scrub(config.password);
@@ -152,9 +171,9 @@ esp_err_t CloudHttp::client_config_get(httpd_req_t* request)
     // no-store. Android persists it only in Keystore-backed storage.
     const std::string body =
         std::string{"{\"ok\":true,\"configured\":"} + (config.enabled ? "true" : "false") +
-        ",\"brokerUri\":\"" + config.broker_uri +
-        "\",\"username\":\"" + config.username +
-        "\",\"password\":\"" + config.password + "\"}";
+        ",\"brokerUri\":\"" + json_escape_string(config.broker_uri) +
+        "\",\"username\":\"" + json_escape_string(config.username) +
+        "\",\"password\":\"" + json_escape_string(config.password) + "\"}";
     scrub_cloud_password(config);
     return send_json(request, body);
 }
