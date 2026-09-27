@@ -1,6 +1,8 @@
 package ua.homeguard.s3.network
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -8,6 +10,7 @@ import ua.homeguard.s3.network.cloud.CloudRuntime
 import ua.homeguard.s3.network.mqtt.MqttConnectionConfig
 import ua.homeguard.s3.network.mqtt.MqttRuntime
 import ua.homeguard.s3.network.mqtt.MqttRuntimeClient
+import ua.homeguard.s3.model.SystemEventRecord
 
 /**
  * Coordinates remote transports without coupling them.
@@ -24,6 +27,7 @@ class RemoteTransportRuntime(
     private val cloud = CloudRuntime(scope, endpointProvider, telemetry)
     private val mqttClient = MqttRuntimeClient(scope)
     private val mqtt = MqttRuntime(scope, mqttClient)
+    private var mqttEventsJob: Job? = null
 
     private val mqttConfig = MutableStateFlow(MqttConnectionConfig())
 
@@ -35,12 +39,33 @@ class RemoteTransportRuntime(
 
     fun start() {
         cloud.start()
+        if (mqttEventsJob == null) {
+            mqttEventsJob = scope.launch {
+                mqttClient.events().collect { json ->
+                    val eventName = json.optString("event", "unknown")
+                    val source = if (json.has("sourceId")) json.optInt("sourceId", 0) else json.optInt("source", 0)
+                    val timestamp = if (json.has("timestampMs")) json.optLong("timestampMs", 0L) else json.optLong("ts", 0L)
+                    val sequence = if (json.has("sequence")) json.optLong("sequence", 0L) else json.optLong("seq", 0L)
+                    telemetry.acceptExternalEvent(
+                        SystemEventRecord(
+                            sequence = sequence,
+                            timestampMs = timestamp,
+                            event = eventName,
+                            sourceId = source,
+                            value = json.optInt("value", 0),
+                        ),
+                    )
+                }
+            }
+        }
         applyMqttConfig(mqttConfig.value)
     }
 
     fun stop() {
         cloud.stop()
         mqtt.stop()
+        mqttEventsJob?.cancel()
+        mqttEventsJob = null
     }
 
     fun configureMqtt(config: MqttConnectionConfig, credential: String = "") {
