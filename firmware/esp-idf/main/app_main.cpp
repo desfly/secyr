@@ -286,7 +286,16 @@ esp_err_t start_http_server()
 
 void start_authenticated_telemetry_websocket()
 {
-    if (g_https_server == nullptr) return;
+    // Telemetry must be registered on the same operational server that Android
+    // can actually reach. Bench/dev units without factory TLS identity run the
+    // operational API on the HTTP fallback server; previously we returned when
+    // HTTPS was unavailable, leaving /ws/telemetry completely unregistered.
+    httpd_handle_t server = g_https_server != nullptr ? g_https_server : g_http_server;
+    if (server == nullptr) {
+        ESP_LOGE(kTag, "Authenticated telemetry websocket unavailable: no operational HTTP server");
+        return;
+    }
+
     std::string token;
     hg::ProvisioningPayload provisioning{};
     if (g_provisioning_store.load_provisioning(provisioning) && provisioning.valid({})) {
@@ -296,7 +305,7 @@ void start_authenticated_telemetry_websocket()
     }
     provisioning.clear_secrets();
 
-    const bool started = g_websocket_telemetry.begin(g_https_server, token);
+    const bool started = g_websocket_telemetry.begin(server, token);
     std::fill(token.begin(), token.end(), '\0');
     token.clear();
 
@@ -304,7 +313,10 @@ void start_authenticated_telemetry_websocket()
         ESP_LOGE(kTag, "Authenticated telemetry websocket registration failed");
         return;
     }
-    ESP_LOGI(kTag, "Authenticated telemetry WSS ready at /ws/telemetry");
+    ESP_LOGI(
+        kTag,
+        "Authenticated telemetry %s ready at /ws/telemetry",
+        g_https_server != nullptr ? "WSS" : "WS");
 }
 
 void start_device_discovery()
@@ -418,9 +430,9 @@ extern "C" void app_main()
         ESP_LOGE(kTag, "HTTP server failed: %s", esp_err_to_name(http_error));
     }
 
-    if (https_error == ESP_OK) {
-        start_authenticated_telemetry_websocket();
-    }
+    // Register telemetry on HTTPS when available, otherwise on the already
+    // enabled HTTP operational fallback used by BENCH/dev units.
+    start_authenticated_telemetry_websocket();
     if (cloud_identity_error == ESP_OK) {
         start_device_discovery();
     }
