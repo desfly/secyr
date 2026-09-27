@@ -44,7 +44,11 @@ class SettingsStore(context: Context) {
             .putBoolean("notifications_zones", normalized.zoneNotificationsEnabled)
             .apply()
         secure.put("api_token", normalized.apiToken)
-        secure.put("telemetry_token", normalized.telemetryToken)
+        // Telemetry tickets are short-lived, single-use WebSocket handshake
+        // credentials. Persisting one across process restarts guarantees a stale
+        // 401 on the next launch and can incorrectly mark the controller as
+        // unauthorized. Keep the current ticket only in memory.
+        secure.put("telemetry_token", "")
         settings.emit(normalized)
     }
 
@@ -109,7 +113,8 @@ class SettingsStore(context: Context) {
     private fun load() = AppSettings(
         deviceId = preferences.getString("device_id", "").orEmpty(),
         apiToken = secure.get("api_token"),
-        telemetryToken = secure.get("telemetry_token"),
+        // Never restore a one-shot telemetry ticket from durable storage.
+        telemetryToken = "",
         autoReconnect = preferences.getBoolean("auto_reconnect", true),
         remoteAccessEnabled = preferences.getBoolean("remote_access", false),
         cloudBaseUrl = preferences.getString("cloud_base_url", "").orEmpty(),
