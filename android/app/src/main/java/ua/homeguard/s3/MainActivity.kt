@@ -645,13 +645,37 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun syncMqttEnrollment() {
-        val json = runCatching { commands.cloudClientConfig() }.getOrNull() ?: return
-        if (!json.optBoolean("ok", false) || !json.optBoolean("configured", false)) return
-        val brokerUri = json.optString("brokerUri", "").trim()
-        val username = json.optString("username", "").trim()
-        val password = json.optString("password", "")
-        if (brokerUri.isBlank() || password.isBlank()) return
-        settings.saveMqttClientConfig(brokerUri, username, password)
+        var lastError = "невідомо"
+        repeat(3) { attempt ->
+            val result = runCatching { commands.cloudClientConfig() }
+            val json = result.getOrNull()
+            if (json != null) {
+                when {
+                    !json.optBoolean("ok", false) -> {
+                        lastError = json.optString("reason", "відхилено контролером")
+                    }
+                    !json.optBoolean("configured", false) -> {
+                        commandStatus.value += " · MQTT не налаштовано"
+                        return
+                    }
+                    else -> {
+                        val brokerUri = json.optString("brokerUri", "").trim()
+                        val username = json.optString("username", "").trim()
+                        val password = json.optString("password", "")
+                        if (brokerUri.isNotBlank() && password.isNotBlank()) {
+                            settings.saveMqttClientConfig(brokerUri, username, password)
+                            commandStatus.value += " · MQTT готовий"
+                            return
+                        }
+                        lastError = "неповні MQTT credentials"
+                    }
+                }
+            } else {
+                lastError = result.exceptionOrNull()?.message ?: "мережева помилка"
+            }
+            delay(500L * (attempt + 1))
+        }
+        commandStatus.value += " · MQTT enrollment помилка: $lastError"
     }
 
     private fun invalidateSavedAuthorization() {
