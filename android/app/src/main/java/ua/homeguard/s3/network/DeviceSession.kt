@@ -68,10 +68,26 @@ class DeviceSession(
                     )
                 }
             }.distinctUntilChanged().collect { target: SessionTarget ->
+                val previous = activeTarget
                 activeTarget = target
                 reconnectJob?.cancel()
                 reconnectJob = null
-                connectTarget(target)
+
+                // A telemetry ticket is consumed by the WebSocket upgrade. If
+                // local routing fails over between Wi-Fi and W5500, never reuse
+                // the ticket that authenticated the old socket. Mint a fresh
+                // ticket on the newly selected route before reconnecting.
+                val localRouteChanged =
+                    previous != null &&
+                        isLocal(previous.endpoint) &&
+                        isLocal(target.endpoint) &&
+                        previous.endpoint.apiBaseUrl != target.endpoint.apiBaseUrl
+
+                if (localRouteChanged && target.oneShotTicket) {
+                    refreshLocalTicket(settings.settings.value.deviceId, allowDurableFallback = false)
+                } else {
+                    connectTarget(target)
+                }
             }
         }
 
@@ -160,11 +176,16 @@ class DeviceSession(
         reconnectJob?.cancel()
         reconnectJob = null
         val target = activeTarget ?: return
-        if (!isLocal(target.endpoint) || !target.oneShotTicket) {
-            RegisteredDeviceStore.markActiveAuthorization(deviceId, false)
+        if (isLocal(target.endpoint) && target.oneShotTicket) {
+            // A rejected/expired one-shot telemetry ticket is not evidence that
+            // the user's saved login was revoked. Refresh it through the
+            // authenticated HTTP session and keep authorization intact.
+            refreshLocalTicket(deviceId, allowDurableFallback = false)
             return
         }
-        refreshLocalTicket(deviceId, allowDurableFallback = true)
+        if (!isLocal(target.endpoint)) {
+            RegisteredDeviceStore.markActiveAuthorization(deviceId, false)
+        }
     }
 
     private fun scheduleReconnect() {
@@ -181,11 +202,10 @@ class DeviceSession(
                 if (isLocal(target.endpoint) && target.oneShotTicket) {
                     val refreshed = runCatching { LocalTelemetryTicketBroker.refresh() }
                     if (refreshed.isSuccess) return@launch
-                    val message = refreshed.exceptionOrNull()?.message.orEmpty()
-                    if (message.contains("401") || message.contains("403") || message.contains("authenticated local HTTP session unavailable")) {
-                        refreshLocalTicket(settings.settings.value.deviceId, allowDurableFallback = true)
-                        return@launch
-                    }
+                    // No authenticated HTTP session yet usually means app
+                    // startup is still restoring the saved login. Do not
+                    // mislabel the controller as revoked; the login path will
+                    // issue a fresh ticket and update settings.
                     continue
                 }
 
@@ -204,9 +224,11 @@ class DeviceSession(
             val current = settings.settings.value
             if (allowDurableFallback && current.telemetryToken.isNotBlank() && current.apiToken.isNotBlank()) {
                 settings.update(current.copy(telemetryToken = ""))
-            } else {
-                RegisteredDeviceStore.markActiveAuthorization(deviceId, false)
             }
+            // A telemetry refresh failure is transport/session state, not proof
+            // that the saved account was revoked. Authorization is changed only
+            // by an explicit login/command 401 path.
+            if (deviceId.isBlank()) telemetry.disconnect()
         }
     }
 
