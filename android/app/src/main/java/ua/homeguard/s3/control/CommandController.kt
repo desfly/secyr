@@ -128,6 +128,14 @@ class CommandController(
         return issueFreshTelemetryTicket(target)
     }
 
+    suspend fun cloudClientConfig(): JSONObject {
+        val target = localTarget()
+        require(localHttpSessionToken.isNotBlank()) {
+            "authenticated local HTTP session unavailable"
+        }
+        return createApi(target).cloudClientConfig()
+    }
+
     fun logout() {
         clearLocalSession()
         ble.disconnect()
