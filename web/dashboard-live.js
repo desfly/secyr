@@ -249,7 +249,9 @@
     button.dataset.active = active ? "true" : "false";
     button.setAttribute("aria-pressed", active ? "true" : "false");
     const small = button.querySelector("small");
+    const icon = button.querySelector("b");
     if (!small) return;
+    if (id === "quickLight" && icon) icon.style.setProperty("color", active ? "#f2b500" : "#111827", "important");
     if (id === "quickLight") small.textContent = active ? "УВІМКНЕНО" : "ВИМКНЕНО";
     else small.textContent = active ? "ВІДКРИТО" : "ЗАКРИТО";
   }
