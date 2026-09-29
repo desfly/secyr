@@ -68,15 +68,16 @@ function ensureZoneAlarmStyle() {
   const style = document.createElement("style");
   style.id = "homeguard-zone-alarm-style";
   style.textContent = `
-    @keyframes hgZoneAlarmFlash { 0%,100% { background:#8a0000; } 50% { background:#ff1d1d; } }
-    body.hg-zone-alarm:before {
-      content:"ТРИВОГА"; position:fixed; z-index:99999; left:0; right:0; top:0; height:58px;
-      display:flex; align-items:center; justify-content:center; color:white; font-size:28px;
-      font-weight:900; letter-spacing:3px; animation:hgZoneAlarmFlash .55s infinite;
-      box-shadow:0 4px 18px rgba(0,0,0,.4);
+    @keyframes hgZoneAlarmFlash { 0%,100% { background:#8a0000; box-shadow:0 0 0 4px rgba(208,0,0,.28); } 50% { background:#ff1d1d; box-shadow:0 0 24px 8px rgba(255,29,29,.55); } }
+    body.hg-zone-alarm #securityCard {
+      animation:hgZoneAlarmFlash .55s infinite;
+      color:#fff;
+      border-color:#b00000;
     }
-    body.hg-zone-alarm { padding-top:58px!important; }
-    body.hg-zone-alarm .app { outline:8px solid #d00000; outline-offset:-8px; }
+    body.hg-zone-alarm #securityCard span,
+    body.hg-zone-alarm #securityCard strong,
+    body.hg-zone-alarm #securityCard small { color:#fff!important; }
+    body.hg-zone-alarm #securityCard .round { background:#fff; color:#d00000; }
   `;
   document.head.appendChild(style);
 }
@@ -141,7 +142,7 @@ function isZoneAlarmEvent(item) {
   const sourceId = Number(item?.sourceId) || 0;
   const value = Number(item?.value) || 0;
   if (event === "partition.armed" && value === 3) return true;
-  return sourceId >= 1 && sourceId <= 8 &&
+  return sourceId >= 1 && sourceId <= 4 &&
     (event === "alarm" || event === "zone.open" || event === "tamper");
 }
 
