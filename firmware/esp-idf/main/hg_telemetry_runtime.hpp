@@ -45,6 +45,7 @@ private:
     bool light_cycle_active_{false};
     bool light_restore_active_{false};
     std::uint64_t light_cycle_deadline_ms_{0};
+    std::uint64_t next_telemetry_ms_{0};
 };
 
 }  // namespace homeguard::idf
