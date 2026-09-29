@@ -73,3 +73,7 @@ print(" - armed physical Open/Short/Tamper can promote partition to ALARM")
 print(" - event bus dispatch remains immediate")
 print(" - canonical Web UI is embedded in firmware")
 print(" - Web security card flashes red with audio on alarm and clears on disarm")
+
+# Stable alarm UI contract
+require(web_app, 'document.querySelector("#securitySummary")', "Alarm summary must use stable explicit node")
+require(web_index, 'id="securitySummary"', "Security summary DOM id missing")
