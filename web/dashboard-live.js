@@ -23,8 +23,8 @@
     .zone.hg-zone-short:before{color:#e0a000!important}.zone.hg-zone-short strong{color:#b98000!important}
     .zone.hg-zone-unavailable:before{color:#8a94a6!important}.zone.hg-zone-unavailable strong{color:#6d778c!important}
     #quickLight[data-active="true"],#quickLock[data-active="true"]{border-color:#0aaa42!important;background:#edf9f1!important}
-    #quickLight b{color:#111827!important}
-    #quickLight[data-active="true"] b{color:#f2b500!important}
+    #quickLight b,#quickLight b.orange-text{color:#111827!important}
+    #quickLight[data-active="true"] b,#quickLight[data-active="true"] b.orange-text{color:#f2b500!important}
     #quickLight[data-active="true"] small,#quickLock[data-active="true"] small{color:#078c37!important;font-weight:800}
     #quickLight[data-active="false"] small,#quickLock[data-active="false"] small{font-weight:700}
     #quickLight:disabled,#quickLock:disabled{opacity:.7;cursor:wait}
