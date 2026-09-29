@@ -158,7 +158,11 @@
     }
 
     return originalFetch(input, nextInit).then(response => {
-      if (response.status === 401 && session) recoverAccessGate("Сеанс завершено.");
+      if (response.status === 401 && session) {
+        // A single protected-request failure must never destroy the browser session.
+        // Explicit logout or an authoritative access-state check owns session teardown.
+        console.warn("HomeGuard API returned 401; preserving browser session", url);
+      }
       return response;
     });
   };
