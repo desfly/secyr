@@ -16,6 +16,7 @@ telemetry = (MAIN / "hg_telemetry_runtime.cpp").read_text(encoding="utf-8")
 web = (WEB / "app.js").read_text(encoding="utf-8")
 web_index = (WEB / "index.html").read_text(encoding="utf-8")
 cmake = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
+web_http = (MAIN / "hg_web_http.cpp").read_text(encoding="utf-8")
 
 # Firmware: an armed physical zone transition must be promoted to partition ALARM
 # and dispatched immediately to event/WebSocket consumers.
@@ -67,6 +68,10 @@ require('document.querySelector("#securitySummary")' in web,
         "Alarm summary must use stable explicit node")
 require('id="securitySummary"' in web_index,
         "Security summary DOM id missing")
+require('HOMEGUARD_WEB_ASSET_REV = "alarm-ui-20260929-r2"' in web_http,
+        "served app.js revision stamp missing")
+require('securityCard.classList.toggle("hg-security-alarm", alarm)' in web,
+        "partition renderer must atomically own alarm card presentation")
 
 if errors:
     print("Physical zone -> Web alarm regression gate FAIL")
