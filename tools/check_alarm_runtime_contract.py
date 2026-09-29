@@ -46,7 +46,7 @@ for needle in (
     "function setZoneAlarmActive(active)",
     "function isZoneAlarmEvent(item)",
     'armState === "stay" || armState === "away" || armState === "alarm"',
-    "if (!zoneAlarmRuntime.armed) setZoneAlarmActive(false)",
+    "else setZoneAlarmActive(false);",
     'event === "partition.armed" && value === 3',
     "sourceId >= 1 && sourceId <= 4",
     'event === "alarm" || event === "zone.open" || event === "tamper"',
@@ -58,6 +58,7 @@ for needle in (
     'securityCard.classList.toggle("hg-security-alarm", zoneAlarmRuntime.active)',
     '#securityCard.hg-security-alarm',
     "primeZoneAlarmAudio",
+    "const CORE_POLL_MS = 1000;",
 ):
     require(needle in web, f"Web alarm reaction missing: {needle}")
 
