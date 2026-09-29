@@ -160,7 +160,15 @@ void TelemetryRuntime::update_zone_model(
          partition->arm_state == hg::PartitionArmState::Away);
 
     bool alarm_triggered = false;
+    constexpr std::size_t kActiveSecurityZones = 4;
     for (std::size_t index = 0; index < zones.size(); ++index) {
+        if (index >= kActiveSecurityZones) {
+            (void)system_model_->set_zone_state(
+                static_cast<std::uint16_t>(index + 1U),
+                hg::ModelZoneState::Fault,
+                now_ms);
+            continue;
+        }
         hg::ModelZoneState model_state = hg::ModelZoneState::Normal;
         switch (zones[index]) {
             case hg::ZoneState::Normal:
@@ -274,8 +282,10 @@ void TelemetryRuntime::run()
 
         std::array<hg::ZoneState, 8> zones{};
         zones.fill(hg::ZoneState::Disabled);
+        // Current bench hardware has only zones 1-4 commissioned on the zone ADS1115.
+        // Keep zones 5-8 disabled until their physical frontend is installed/configured;
+        // the telemetry ADS1115 must never be interpreted as security zones.
         sample_zone_adc(hardware_->zone_adc(), 0, zones);
-        sample_zone_adc(hardware_->telemetry_adc(), 4, zones);
         update_zone_model(zones, event_timestamp_ms(now_ms));
         update_zone_light(zones, now_ms);
 
