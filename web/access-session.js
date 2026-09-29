@@ -4,6 +4,7 @@
   const originalFetch = window.__homeguardNativeFetch || window.fetch.bind(window);
   let session = null;
   let gateMode = "loading";
+  let authRecoveryPromise = null;
   const browserSessionKey = "homeguard.web.session.v1";
 
   function saveBrowserSession() {
@@ -159,9 +160,26 @@
 
     return originalFetch(input, nextInit).then(response => {
       if (response.status === 401 && session) {
-        // A single protected-request failure must never destroy the browser session.
-        // Explicit logout or an authoritative access-state check owns session teardown.
-        console.warn("HomeGuard API returned 401; preserving browser session", url);
+        // Do not destroy a browser session because one protected request failed.
+        // Coalesce concurrent 401s and let the authoritative access-state endpoint
+        // decide whether the server-side session really disappeared (for example,
+        // after a controller reboot).
+        console.warn("HomeGuard API returned 401; verifying browser session", url);
+        if (!authRecoveryPromise) {
+          authRecoveryPromise = (async () => {
+            try {
+              const stateResponse = await originalFetch("/api/v1/access/state", {cache:"no-store"});
+              const stateBody = await apiBody(stateResponse);
+              if (stateResponse.ok && stateBody.ok !== false && stateBody.state === "login_required" && session) {
+                await recoverAccessGate("Сесію контролера завершено. Увійдіть повторно.");
+              }
+            } catch (_) {
+              // A network/transient failure is not proof that the session ended.
+            } finally {
+              authRecoveryPromise = null;
+            }
+          })();
+        }
       }
       return response;
     });
