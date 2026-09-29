@@ -34,7 +34,7 @@ std::size_t text_asset_size(const uint8_t* start, const uint8_t* end)
 esp_err_t send_bounded_chunks(httpd_req_t* request, const uint8_t* data, std::size_t size)
 {
     if (request == nullptr || (data == nullptr && size != 0U)) return ESP_ERR_INVALID_ARG;
-    constexpr std::size_t kChunkBytes = 1024U;
+    constexpr std::size_t kChunkBytes = 4096U;
     std::size_t offset = 0;
     while (offset < size) {
         const auto count = std::min(kChunkBytes, size - offset);
