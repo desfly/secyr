@@ -53,7 +53,7 @@ for needle in (
     "sourceId >= 1 && sourceId <= 4",
     'event === "alarm" || event === "zone.open" || event === "tamper"',
     'if (armState === "alarm") setZoneAlarmActive(true)',
-    'armState === "alarm" ? "Зафіксовано тривогу" : "Система в нормі"',
+    'securitySummary.textContent = alarm ? "Зафіксовано тривогу" : "Система в нормі"',
     "latestSequence > zoneAlarmRuntime.lastAlarmSequence",
     "setZoneAlarmActive(true)",
     'document.body.classList.remove("hg-zone-alarm")',
