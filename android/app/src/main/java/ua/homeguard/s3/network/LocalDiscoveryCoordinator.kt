@@ -24,22 +24,47 @@ class LocalDiscoveryCoordinator(context: Context, private val scope: CoroutineSc
         .map { it.phase == "sending" || it.phase == "listening" }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
-    val devices: StateFlow<List<DiscoveredDevice>> = combine(nsd.devices, udp.devices, http.devices) { mdns, udpFallback, httpFallback ->
-        mergePhysicalControllers(mdns + udpFallback + httpFallback)
-            .mapNotNull { candidates ->
-                candidates.maxWithOrNull(
-                    compareBy<DiscoveredDevice> { it.seenAtMs }
-                        .thenBy {
-                            when (it.source) {
-                                DiscoverySource.MDNS -> 2
-                                DiscoverySource.UDP -> 1
-                                DiscoverySource.HTTP -> 0
-                            }
-                        },
+    /**
+     * All currently reachable local routes, not just one representative per
+     * controller. A HomeGuard may legitimately answer on both Wi-Fi and W5500.
+     * Keeping both candidates lets the endpoint resolver hold the current route
+     * steady and fail over only when that route disappears.
+     */
+    val routeCandidates: StateFlow<List<DiscoveredDevice>> =
+        combine(nsd.devices, udp.devices, http.devices) { mdns, udpFallback, httpFallback ->
+            (mdns + udpFallback + httpFallback)
+                .distinctBy {
+                    listOf(
+                        it.deviceId.trim().lowercase(),
+                        it.host.trim().trim('[', ']').substringBefore('%').trimEnd('.').lowercase(),
+                        it.port.toString(),
+                    ).joinToString("|")
+                }
+                .sortedWith(
+                    compareBy<DiscoveredDevice> { it.deviceId }
+                        .thenBy { it.host }
+                        .thenBy { it.port },
                 )
-            }
-            .sortedBy { it.deviceId }
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    val devices: StateFlow<List<DiscoveredDevice>> = routeCandidates
+        .map { routes ->
+            mergePhysicalControllers(routes)
+                .mapNotNull { candidates ->
+                    candidates.maxWithOrNull(
+                        compareBy<DiscoveredDevice> { it.seenAtMs }
+                            .thenBy {
+                                when (it.source) {
+                                    DiscoverySource.MDNS -> 2
+                                    DiscoverySource.UDP -> 1
+                                    DiscoverySource.HTTP -> 0
+                                }
+                            },
+                    )
+                }
+                .sortedBy { it.deviceId }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     fun start() {
         nsd.start()

@@ -72,6 +72,8 @@ jobs:
           ctest --test-dir build-host --output-on-failure
       - name: Web UI contract
         run: python tools/check_web_ui_contract.py
+      - name: Physical zone to Web alarm regression gate
+        run: python tools/check_alarm_runtime_contract.py
       - name: Setup UI source contract
         run: python tools/check_setup_ui_contract.py
       - name: Setup password-eye runtime smoke — desktop + mobile

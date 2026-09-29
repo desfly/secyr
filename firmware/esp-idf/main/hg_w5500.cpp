@@ -155,6 +155,15 @@ esp_err_t W5500::initialize()
         return error;
     }
 
+    // ESP_NETIF_DEFAULT_ETH normally enables DHCP, but make the client startup
+    // explicit for this board so LINK UP cannot remain indefinitely without an
+    // IPv4 lease after a boot or cable replug.
+    error = esp_netif_dhcpc_start(netif_);
+    if (error != ESP_OK && error != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+        ESP_LOGE(kTag, "Ethernet DHCP client start failed: %s", esp_err_to_name(error));
+        return error;
+    }
+
     error = esp_event_handler_register(
         ETH_EVENT,
         ESP_EVENT_ANY_ID,
@@ -214,7 +223,13 @@ void W5500::on_eth_event(
 
     if (id == ETHERNET_EVENT_CONNECTED) {
         self->status_.link_up = true;
-        ESP_LOGI(kTag, "LINK UP");
+        if (self->netif_ != nullptr) {
+            const auto dhcp_error = esp_netif_dhcpc_start(self->netif_);
+            if (dhcp_error != ESP_OK && dhcp_error != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+                ESP_LOGW(kTag, "LINK UP but DHCP client start failed: %s", esp_err_to_name(dhcp_error));
+            }
+        }
+        ESP_LOGI(kTag, "LINK UP; waiting for IPv4");
     } else if (id == ETHERNET_EVENT_DISCONNECTED) {
         self->status_.link_up = false;
         self->status_.has_ip = false;

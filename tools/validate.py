@@ -146,7 +146,12 @@ policy = {
     'factory_certificate_covers_setup_and_mdns': factory_san_pass,
     'no_factory_secrets_in_tree': not secret_files,
     'host_idf_core_source_parity': host_core_sources == idf_firmware_core_sources,
-    'android_cleartext_disabled': 'android:usesCleartextTraffic="false"' in manifest,
+    # BENCH firmware currently exposes the operational LAN API through the
+    # explicit HTTP fallback when factory TLS identity is unavailable. The
+    # Android bench client must therefore permit cleartext so it can open the
+    # discovered controller on the same LAN. This is a BENCH-only contract and
+    # must be tightened again when production TLS identity is provisioned.
+    'android_bench_http_fallback_enabled': 'android:usesCleartextTraffic="true"' in manifest,
     'android_backup_disabled': 'android:allowBackup="false"' in manifest,
     'api_token_kept_out_of_plain_preferences': '.putString("api_token"' not in settings_store and 'SecureTokenStore' in settings_store,
     'exact_certificate_digest_pinning': 'MessageDigest.getInstance("SHA-256")' in android_text and 'CertificatePinner' not in android_text,

@@ -22,6 +22,7 @@ public:
 
 private:
     static esp_err_t status_get(httpd_req_t* request);
+    static esp_err_t client_config_get(httpd_req_t* request);
     static esp_err_t config_post(httpd_req_t* request);
     static esp_err_t trust_post(httpd_req_t* request);
     esp_err_t handle_config(httpd_req_t* request);

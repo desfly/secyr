@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceEndpoint
+import ua.homeguard.s3.model.DiscoveredDevice
+import ua.homeguard.s3.model.DiscoverySource
 import ua.homeguard.s3.storage.RegisteredDeviceStore
 import ua.homeguard.s3.storage.SettingsStore
 
@@ -16,18 +18,37 @@ class DeviceEndpointResolver(
     discovery: LocalDiscoveryCoordinator,
     scope: CoroutineScope
 ) {
-    val endpoint: StateFlow<DeviceEndpoint> = combine(settings.settings, discovery.devices) { config, devices ->
-        val eligible = devices.filter { it.apiVersion == 1 }
-        val directLocal = eligible.firstOrNull { it.deviceId == config.deviceId }
-        val manualLocal = if (config.deviceId.startsWith("manual-") && config.lastKnownLocalUrl.isNotBlank()) {
-            val expected = EndpointUrlBuilder.normalizeBaseUrl(config.lastKnownLocalUrl)
-            eligible.firstOrNull { EndpointUrlBuilder.normalizeBaseUrl(it.baseUrl) == expected }
+    val endpoint: StateFlow<DeviceEndpoint> = combine(settings.settings, discovery.routeCandidates) { config, routes ->
+        val eligible = routes.filter { it.apiVersion == 1 }
+        val rememberedUrl = config.lastKnownLocalUrl
+            .takeIf { it.isNotBlank() }
+            ?.let(EndpointUrlBuilder::normalizeBaseUrl)
+            .orEmpty()
+
+        val controllerRoutes = eligible.filter { candidate ->
+            candidate.deviceId.equals(config.deviceId, ignoreCase = true)
+        }
+
+        val rememberedDirect = controllerRoutes.firstOrNull {
+            EndpointUrlBuilder.normalizeBaseUrl(it.baseUrl) == rememberedUrl
+        }
+
+        val directLocal = rememberedDirect ?: bestRoute(controllerRoutes)
+
+        val manualLocal = if (config.deviceId.startsWith("manual-") && rememberedUrl.isNotBlank()) {
+            eligible.firstOrNull { EndpointUrlBuilder.normalizeBaseUrl(it.baseUrl) == rememberedUrl }
         } else {
             null
         }
+
         val local = directLocal
             ?: manualLocal
-            ?: if (config.deviceId.isBlank() && eligible.size == 1) eligible.first() else null
+            ?: if (config.deviceId.isBlank()) {
+                val groups = eligible.groupBy { it.deviceId.lowercase() }
+                if (groups.size == 1) bestRoute(groups.values.first()) else null
+            } else {
+                null
+            }
 
         if (manualLocal != null) {
             scope.launch {
@@ -37,12 +58,11 @@ class DeviceEndpointResolver(
             }
         }
 
+        // Keep the currently working .252/.253 route stable while it is still
+        // discoverable. Only remember a different route when the previous one
+        // disappeared and failover actually happened.
         if (directLocal != null) {
             val discoveredUrl = EndpointUrlBuilder.normalizeBaseUrl(directLocal.baseUrl)
-            val rememberedUrl = config.lastKnownLocalUrl
-                .takeIf { it.isNotBlank() }
-                ?.let(EndpointUrlBuilder::normalizeBaseUrl)
-                .orEmpty()
             if (discoveredUrl != rememberedUrl) {
                 scope.launch {
                     RegisteredDeviceStore.refreshActiveDiscovered(directLocal)
@@ -98,4 +118,16 @@ class DeviceEndpointResolver(
             ControlPath.OFFLINE -> DeviceEndpoint(config.deviceId, "", "", ControlPath.OFFLINE)
         }
     }.stateIn(scope, SharingStarted.Eagerly, DeviceEndpoint("", "", "", ControlPath.OFFLINE))
+
+    private fun bestRoute(routes: List<DiscoveredDevice>): DiscoveredDevice? =
+        routes.maxWithOrNull(
+            compareBy<DiscoveredDevice> { it.seenAtMs }
+                .thenBy {
+                    when (it.source) {
+                        DiscoverySource.MDNS -> 2
+                        DiscoverySource.UDP -> 1
+                        DiscoverySource.HTTP -> 0
+                    }
+                },
+        )
 }
