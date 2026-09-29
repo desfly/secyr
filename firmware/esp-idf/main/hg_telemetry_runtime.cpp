@@ -196,12 +196,14 @@ void TelemetryRuntime::update_zone_model(
 
     if (alarm_triggered && partition != nullptr &&
         partition->arm_state != hg::PartitionArmState::Alarm) {
+        ESP_LOGW(kTag, "SECURITY ALARM: physical zone transition -> partition 1 ALARM at %llu ms", static_cast<unsigned long long>(now_ms));
         (void)system_model_->set_partition_arm(1, hg::PartitionArmState::Alarm, now_ms);
     }
 
     // Zone transitions originate in the telemetry task. Dispatch them here so
     // the HTTP event log/WebSocket subscribers and Android-visible state are
     // updated immediately instead of waiting for a later command request.
+    ESP_LOGI(kTag, "Security state dispatch at %llu ms; alarm_triggered=%d", static_cast<unsigned long long>(now_ms), alarm_triggered ? 1 : 0);
     (void)system_bus_->dispatch_all();
 }
 
