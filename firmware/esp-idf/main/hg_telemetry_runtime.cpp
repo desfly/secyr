@@ -121,13 +121,44 @@ esp_err_t TelemetryRuntime::start(
     system_model_ = system_model;
     system_bus_ = system_bus;
     ble_transport_ = ble_transport;
-    const auto result = xTaskCreate(&TelemetryRuntime::task_entry, "hg_telemetry", 7168, this, 6, nullptr);
+    auto result = xTaskCreate(&TelemetryRuntime::zone_task_entry, "hg_zones", 4096, this, 7, nullptr);
+    if (result != pdPASS) return ESP_ERR_NO_MEM;
+    result = xTaskCreate(&TelemetryRuntime::task_entry, "hg_telemetry", 7168, this, 6, nullptr);
     return result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
 void TelemetryRuntime::task_entry(void* context)
 {
     static_cast<TelemetryRuntime*>(context)->run();
+}
+
+void TelemetryRuntime::zone_task_entry(void* context)
+{
+    static_cast<TelemetryRuntime*>(context)->run_zones();
+}
+
+void TelemetryRuntime::run_zones()
+{
+    std::array<hg::ZoneState, 8> previous{};
+    previous.fill(hg::ZoneState::Disabled);
+
+    while (true) {
+        std::array<hg::ZoneState, 8> zones{};
+        zones.fill(hg::ZoneState::Disabled);
+        sample_zone_adc(hardware_->zone_adc(), 0, zones);
+
+        const bool changed = zones != previous;
+        const bool light_trigger =
+            zone_triggers_light(zones[0]) || zone_triggers_light(zones[1]);
+        if (changed || light_trigger || light_cycle_active_) {
+            const auto now_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+            update_zone_model(zones, event_timestamp_ms(now_ms));
+            update_zone_light(zones, now_ms);
+            previous = zones;
+        }
+
+        vTaskDelay(kZonePollPeriod);
+    }
 }
 
 bool TelemetryRuntime::set_light_output(bool active, std::uint64_t now_ms)
@@ -289,8 +320,6 @@ void TelemetryRuntime::run()
         // slower Web/telemetry publication cycle. A short pulse must not disappear
         // between two one-second telemetry frames.
         sample_zone_adc(hardware_->zone_adc(), 0, zones);
-        update_zone_model(zones, event_timestamp_ms(now_ms));
-        update_zone_light(zones, now_ms);
 
         // Publish the heavier telemetry frame only once per second. Zone sampling,
         // alarm promotion and the Zone 1/2 light trigger continue every fast loop.
