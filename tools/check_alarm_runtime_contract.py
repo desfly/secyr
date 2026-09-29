@@ -29,7 +29,12 @@ for needle in (
 ):
     require(needle in telemetry, f"physical alarm propagation missing: {needle}")
 
-require("constexpr std::size_t kActiveSecurityZones = 4;" in telemetry,\n        "zones 5-8 must remain excluded until commissioned")\nrequire("sample_zone_adc(hardware_->telemetry_adc(), 4, zones);" not in telemetry,\n        "telemetry ADS1115 must not be interpreted as zones 5-8")\n\nrequire('"hg_telemetry_runtime.cpp"' in cmake,
+require("constexpr std::size_t kActiveSecurityZones = 4;" in telemetry,
+        "zones 5-8 must remain excluded until commissioned")
+require("sample_zone_adc(hardware_->telemetry_adc(), 4, zones);" not in telemetry,
+        "telemetry ADS1115 must not be interpreted as zones 5-8")
+
+require('"hg_telemetry_runtime.cpp"' in cmake,
         "ESP-IDF build no longer compiles hg_telemetry_runtime.cpp")
 require('file(READ "${CMAKE_CURRENT_LIST_DIR}/../../../web/app.js" HG_WEB_APP_JS)' in cmake,
         "ESP-IDF build no longer embeds the canonical web/app.js")
