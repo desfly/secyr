@@ -142,6 +142,7 @@ void TelemetryRuntime::run_zones()
     std::array<hg::ZoneState, 8> previous{};
     previous.fill(hg::ZoneState::Disabled);
 
+    TickType_t next_wake = xTaskGetTickCount();
     while (true) {
         std::array<hg::ZoneState, 8> zones{};
         zones.fill(hg::ZoneState::Disabled);
@@ -150,14 +151,17 @@ void TelemetryRuntime::run_zones()
         const bool changed = zones != previous;
         const bool light_trigger =
             zone_triggers_light(zones[0]) || zone_triggers_light(zones[1]);
-        if (changed || light_trigger || light_cycle_active_) {
-            const auto now_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+        const auto now_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+
+        if (changed) {
             update_zone_model(zones, event_timestamp_ms(now_ms));
-            update_zone_light(zones, now_ms);
             previous = zones;
         }
+        if (changed || light_trigger || light_cycle_active_) {
+            update_zone_light(zones, now_ms);
+        }
 
-        vTaskDelay(kZonePollPeriod);
+        vTaskDelayUntil(&next_wake, kZonePollPeriod);
     }
 }
 
