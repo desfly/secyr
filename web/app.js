@@ -139,7 +139,9 @@ function setZoneAlarmActive(active) {
 function isZoneAlarmEvent(item) {
   const event = String(item?.event || "").toLowerCase();
   const sourceId = Number(item?.sourceId) || 0;
-  return sourceId >= 1 && sourceId <= 4 &&
+  const value = Number(item?.value) || 0;
+  if (event === "partition.armed" && value === 3) return true;
+  return sourceId >= 1 && sourceId <= 8 &&
     (event === "alarm" || event === "zone.open" || event === "tamper");
 }
 
@@ -196,8 +198,12 @@ function renderPartitions(data) {
   const partition = Array.isArray(data?.partitions) ? data.partitions[0] : null;
   const armState = partition?.armState;
   zoneAlarmRuntime.armed = armState === "stay" || armState === "away" || armState === "alarm";
-  if (!zoneAlarmRuntime.armed) setZoneAlarmActive(false);
-  document.querySelector("#securityMode").textContent = armLabel(armState);
+  if (armState === "alarm") setZoneAlarmActive(true);
+  else if (!zoneAlarmRuntime.armed) setZoneAlarmActive(false);
+  const securityMode = document.querySelector("#securityMode");
+  securityMode.textContent = armLabel(armState);
+  const securitySummary = securityMode?.parentElement?.querySelector("small");
+  if (securitySummary) securitySummary.textContent = armState === "alarm" ? "Зафіксовано тривогу" : "Система в нормі";
 }
 
 function eventTimeLabel(timestampMs) {
