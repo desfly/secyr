@@ -6,6 +6,8 @@
 #include <sys/types.h>
 
 #include "esp_log.h"
+#include "esp_heap_caps.h"
+#include <cstring>
 
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[] asm("_binary_index_html_end");
@@ -31,27 +33,6 @@ std::size_t text_asset_size(const uint8_t* start, const uint8_t* end)
     return size;
 }
 
-esp_err_t send_bounded_chunks(httpd_req_t* request, const uint8_t* data, std::size_t size)
-{
-    if (request == nullptr || (data == nullptr && size != 0U)) return ESP_ERR_INVALID_ARG;
-    constexpr std::size_t kChunkBytes = 4096U;
-    std::size_t offset = 0;
-    while (offset < size) {
-        const auto count = std::min(kChunkBytes, size - offset);
-        const auto error = httpd_resp_send_chunk(
-            request,
-            reinterpret_cast<const char*>(data + offset),
-            static_cast<ssize_t>(count));
-        if (error != ESP_OK) {
-            ESP_LOGE("hg_web_http", "asset send failed at offset=%u/%u: %s",
-                     static_cast<unsigned>(offset), static_cast<unsigned>(size), esp_err_to_name(error));
-            return error;
-        }
-        offset += count;
-    }
-    return ESP_OK;
-}
-
 void set_no_cache_headers(httpd_req_t* request, const char* content_type)
 {
     httpd_resp_set_hdr(request, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
@@ -71,17 +52,24 @@ esp_err_t send_text_with_suffix(httpd_req_t* request,
     set_no_cache_headers(request, content_type);
 
     const auto base_size = text_asset_size(start, end);
-    auto error = send_bounded_chunks(request, start, base_size);
-    if (error != ESP_OK) return error;
-
-    if (suffix != nullptr && suffix_size > 0) {
-        error = send_bounded_chunks(
-            request,
-            reinterpret_cast<const uint8_t*>(suffix),
-            suffix_size);
-        if (error != ESP_OK) return error;
+    const auto total_size = base_size + suffix_size;
+    if (suffix == nullptr || suffix_size == 0) {
+        return httpd_resp_send(request, reinterpret_cast<const char*>(start), static_cast<ssize_t>(base_size));
     }
-    return httpd_resp_send_chunk(request, nullptr, 0);
+
+    auto* payload = static_cast<char*>(heap_caps_malloc(total_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (payload == nullptr) {
+        ESP_LOGE("hg_web_http", "asset PSRAM allocation failed: %u bytes", static_cast<unsigned>(total_size));
+        return ESP_ERR_NO_MEM;
+    }
+    std::memcpy(payload, start, base_size);
+    std::memcpy(payload + base_size, suffix, suffix_size);
+    const auto error = httpd_resp_send(request, payload, static_cast<ssize_t>(total_size));
+    heap_caps_free(payload);
+    if (error != ESP_OK) {
+        ESP_LOGE("hg_web_http", "fixed-length asset send failed: %s", esp_err_to_name(error));
+    }
+    return error;
 }
 
 }  // namespace
@@ -112,9 +100,10 @@ esp_err_t WebHttp::send_asset(httpd_req_t* request,
 {
     if (request == nullptr || start == nullptr || end == nullptr || end < start) return ESP_ERR_INVALID_ARG;
     set_no_cache_headers(request, content_type);
-    const auto error = send_bounded_chunks(request, start, static_cast<std::size_t>(end - start));
-    if (error != ESP_OK) return error;
-    return httpd_resp_send_chunk(request, nullptr, 0);
+    return httpd_resp_send(
+        request,
+        reinterpret_cast<const char*>(start),
+        static_cast<ssize_t>(end - start));
 }
 
 esp_err_t WebHttp::index_get(httpd_req_t* request)
