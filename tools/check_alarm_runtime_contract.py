@@ -54,8 +54,9 @@ for needle in (
     'armState === "alarm" ? "Зафіксовано тривогу" : "Система в нормі"',
     "latestSequence > zoneAlarmRuntime.lastAlarmSequence",
     "setZoneAlarmActive(true)",
-    'document.body.classList.toggle("hg-zone-alarm", zoneAlarmRuntime.active)',
-    'body.hg-zone-alarm #securityCard',
+    'document.body.classList.remove("hg-zone-alarm")',
+    'securityCard.classList.toggle("hg-security-alarm", zoneAlarmRuntime.active)',
+    '#securityCard.hg-security-alarm',
     "primeZoneAlarmAudio",
 ):
     require(needle in web, f"Web alarm reaction missing: {needle}")
