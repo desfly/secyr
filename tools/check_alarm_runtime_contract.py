@@ -14,6 +14,7 @@ def require(condition: bool, message: str) -> None:
 
 telemetry = (MAIN / "hg_telemetry_runtime.cpp").read_text(encoding="utf-8")
 web = (WEB / "app.js").read_text(encoding="utf-8")
+web_index = (WEB / "index.html").read_text(encoding="utf-8")
 cmake = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
 
 # Firmware: an armed physical zone transition must be promoted to partition ALARM
@@ -62,6 +63,11 @@ for needle in (
 ):
     require(needle in web, f"Web alarm reaction missing: {needle}")
 
+require('document.querySelector("#securitySummary")' in web,
+        "Alarm summary must use stable explicit node")
+require('id="securitySummary"' in web_index,
+        "Security summary DOM id missing")
+
 if errors:
     print("Physical zone -> Web alarm regression gate FAIL")
     for error in errors:
@@ -73,7 +79,3 @@ print(" - armed physical Open/Short/Tamper can promote partition to ALARM")
 print(" - event bus dispatch remains immediate")
 print(" - canonical Web UI is embedded in firmware")
 print(" - Web security card flashes red with audio on alarm and clears on disarm")
-
-# Stable alarm UI contract
-require(web_app, 'document.querySelector("#securitySummary")', "Alarm summary must use stable explicit node")
-require(web_index, 'id="securitySummary"', "Security summary DOM id missing")
