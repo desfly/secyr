@@ -16,7 +16,7 @@ constexpr std::uint8_t kConfigRegister = 0x01;
 constexpr std::uint16_t kStart = 0x8000;
 constexpr std::uint16_t kSingleShot = 0x0100;
 constexpr std::uint16_t kPga4096 = 0x0200;
-constexpr std::uint16_t kDataRate128 = 0x0080;
+constexpr std::uint16_t kDataRate860 = 0x00E0;
 constexpr std::uint16_t kComparatorDisabled = 0x0003;
 constexpr TickType_t kAccessTimeout = pdMS_TO_TICKS(250);
 
@@ -134,11 +134,13 @@ esp_err_t Ads1115::read_single_ended_mv(
         static_cast<std::uint16_t>(0x4000 + (channel << 12));
     const std::uint16_t config =
         kStart | mux | kPga4096 | kSingleShot |
-        kDataRate128 | kComparatorDisabled;
+        kDataRate860 | kComparatorDisabled;
 
     auto error = write_register(kConfigRegister, config);
     if (error == ESP_OK) {
-        vTaskDelay(pdMS_TO_TICKS(10));
+        // ADS1115 at 860 SPS completes a single-shot conversion in about 1.2 ms.
+        // Wait 2 ms so the conversion is complete before reading the register.
+        vTaskDelay(pdMS_TO_TICKS(2));
 
         std::uint16_t raw_unsigned = 0;
         error = read_register(kConversionRegister, &raw_unsigned);
