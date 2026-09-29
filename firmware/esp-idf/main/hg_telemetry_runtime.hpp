@@ -29,7 +29,9 @@ public:
 
 private:
     static void task_entry(void* context);
+    static void zone_task_entry(void* context);
     void run();
+    void run_zones();
     void update_zone_model(const std::array<hg::ZoneState, 8>& zones, std::uint64_t now_ms);
     void update_zone_light(const std::array<hg::ZoneState, 8>& zones, std::uint64_t now_ms);
     bool set_light_output(bool active, std::uint64_t now_ms);
