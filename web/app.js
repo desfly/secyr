@@ -117,6 +117,7 @@ function setZoneAlarmActive(active) {
   ensureZoneAlarmStyle();
   zoneAlarmRuntime.active = active === true;
   document.body.classList.remove("hg-zone-alarm");
+  document.querySelectorAll(".hg-alarm-banner,[data-alarm-banner]").forEach((node) => node.remove());
   const securityCard = document.querySelector("#securityCard");
   if (securityCard) {
     securityCard.classList.toggle("hg-security-alarm", zoneAlarmRuntime.active);
@@ -211,6 +212,7 @@ function renderPartitions(data) {
   securityMode.textContent = armLabel(armState);
   const securitySummary = securityMode?.parentElement?.querySelector("small");
   if (securitySummary) securitySummary.textContent = armState === "alarm" ? "Зафіксовано тривогу" : "Система в нормі";
+  if (securityMode) securityMode.classList.toggle("red", armState === "alarm");
 }
 
 function eventTimeLabel(timestampMs) {
