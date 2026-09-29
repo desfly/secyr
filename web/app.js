@@ -118,7 +118,11 @@ function setZoneAlarmActive(active) {
   zoneAlarmRuntime.active = active === true;
   document.body.classList.remove("hg-zone-alarm");
   const securityCard = document.querySelector("#securityCard");
-  if (securityCard) securityCard.classList.toggle("hg-security-alarm", zoneAlarmRuntime.active);
+  if (securityCard) {
+    securityCard.classList.toggle("hg-security-alarm", zoneAlarmRuntime.active);
+    securityCard.style.setProperty("animation", zoneAlarmRuntime.active ? "hgZoneAlarmFlash .55s infinite" : "", "important");
+    securityCard.style.setProperty("background", zoneAlarmRuntime.active ? "#d00000" : "", "important");
+  }
   if (zoneAlarmRuntime.active) {
     primeZoneAlarmAudio();
     zoneAlarmBeep();
@@ -202,7 +206,7 @@ function renderPartitions(data) {
   const armState = partition?.armState;
   zoneAlarmRuntime.armed = armState === "stay" || armState === "away" || armState === "alarm";
   if (armState === "alarm") setZoneAlarmActive(true);
-  else if (!zoneAlarmRuntime.armed) setZoneAlarmActive(false);
+  else setZoneAlarmActive(false);
   const securityMode = document.querySelector("#securityMode");
   securityMode.textContent = armLabel(armState);
   const securitySummary = securityMode?.parentElement?.querySelector("small");
@@ -817,7 +821,7 @@ const scheduler = {
   nextLan: 0
 };
 
-const CORE_POLL_MS = 5000;
+const CORE_POLL_MS = 1000;
 const CLOUD_POLL_MS = 10000;
 const LAN_POLL_MS = 15000;
 
