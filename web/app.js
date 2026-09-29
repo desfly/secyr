@@ -209,10 +209,20 @@ function renderPartitions(data) {
   if (armState === "alarm") setZoneAlarmActive(true);
   else setZoneAlarmActive(false);
   const securityMode = document.querySelector("#securityMode");
-  securityMode.textContent = armLabel(armState);
-  const securitySummary = document.querySelector("#securitySummary");
-  if (securitySummary) securitySummary.textContent = armState === "alarm" ? "Зафіксовано тривогу" : "Система в нормі";
-  if (securityMode) securityMode.classList.toggle("red", armState === "alarm");
+  const securityCard = document.getElementById("securityCard");
+  const securitySummary = document.querySelector("#securitySummary") || securityCard?.querySelector("small");
+  const alarm = armState === "alarm";
+  if (securityMode) {
+    securityMode.textContent = armLabel(armState);
+    securityMode.classList.toggle("red", alarm);
+    securityMode.style.setProperty("color", alarm ? "#ffffff" : "", "important");
+  }
+  if (securitySummary) securitySummary.textContent = alarm ? "Зафіксовано тривогу" : "Система в нормі";
+  if (securityCard) {
+    securityCard.classList.toggle("hg-security-alarm", alarm);
+    securityCard.style.setProperty("animation", alarm ? "hgZoneAlarmFlash .55s infinite" : "", "important");
+    securityCard.style.setProperty("background", alarm ? "#d00000" : "", "important");
+  }
 }
 
 function eventTimeLabel(timestampMs) {
