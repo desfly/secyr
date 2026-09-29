@@ -69,15 +69,15 @@ function ensureZoneAlarmStyle() {
   style.id = "homeguard-zone-alarm-style";
   style.textContent = `
     @keyframes hgZoneAlarmFlash { 0%,100% { background:#8a0000; box-shadow:0 0 0 4px rgba(208,0,0,.28); } 50% { background:#ff1d1d; box-shadow:0 0 24px 8px rgba(255,29,29,.55); } }
-    body.hg-zone-alarm #securityCard {
+    #securityCard.hg-security-alarm {
       animation:hgZoneAlarmFlash .55s infinite;
       color:#fff;
       border-color:#b00000;
     }
-    body.hg-zone-alarm #securityCard span,
-    body.hg-zone-alarm #securityCard strong,
-    body.hg-zone-alarm #securityCard small { color:#fff!important; }
-    body.hg-zone-alarm #securityCard .round { background:#fff; color:#d00000; }
+    #securityCard.hg-security-alarm span,
+    #securityCard.hg-security-alarm strong,
+    #securityCard.hg-security-alarm small { color:#fff!important; }
+    #securityCard.hg-security-alarm .round { background:#fff; color:#d00000; }
   `;
   document.head.appendChild(style);
 }
@@ -116,7 +116,9 @@ function zoneAlarmBeep() {
 function setZoneAlarmActive(active) {
   ensureZoneAlarmStyle();
   zoneAlarmRuntime.active = active === true;
-  document.body.classList.toggle("hg-zone-alarm", zoneAlarmRuntime.active);
+  document.body.classList.remove("hg-zone-alarm");
+  const securityCard = document.querySelector("#securityCard");
+  if (securityCard) securityCard.classList.toggle("hg-security-alarm", zoneAlarmRuntime.active);
   if (zoneAlarmRuntime.active) {
     primeZoneAlarmAudio();
     zoneAlarmBeep();
