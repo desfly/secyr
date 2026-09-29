@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <sys/types.h>
 
+#include "esp_log.h"
+
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[] asm("_binary_index_html_end");
 extern const uint8_t app_css_start[] asm("_binary_app_css_start");
@@ -40,7 +42,11 @@ esp_err_t send_bounded_chunks(httpd_req_t* request, const uint8_t* data, std::si
             request,
             reinterpret_cast<const char*>(data + offset),
             static_cast<ssize_t>(count));
-        if (error != ESP_OK) return error;
+        if (error != ESP_OK) {
+            ESP_LOGE("hg_web_http", "asset send failed at offset=%u/%u: %s",
+                     static_cast<unsigned>(offset), static_cast<unsigned>(size), esp_err_to_name(error));
+            return error;
+        }
         offset += count;
     }
     return ESP_OK;
