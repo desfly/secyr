@@ -1,8 +1,13 @@
 #include "hg_web_http.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <sys/types.h>
+
+#include "esp_log.h"
+#include "esp_heap_caps.h"
+#include <cstring>
 
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[] asm("_binary_index_html_end");
@@ -47,17 +52,24 @@ esp_err_t send_text_with_suffix(httpd_req_t* request,
     set_no_cache_headers(request, content_type);
 
     const auto base_size = text_asset_size(start, end);
-    auto error = httpd_resp_send_chunk(
-        request,
-        reinterpret_cast<const char*>(start),
-        static_cast<ssize_t>(base_size));
-    if (error != ESP_OK) return error;
-
-    if (suffix != nullptr && suffix_size > 0) {
-        error = httpd_resp_send_chunk(request, suffix, static_cast<ssize_t>(suffix_size));
-        if (error != ESP_OK) return error;
+    const auto total_size = base_size + suffix_size;
+    if (suffix == nullptr || suffix_size == 0) {
+        return httpd_resp_send(request, reinterpret_cast<const char*>(start), static_cast<ssize_t>(base_size));
     }
-    return httpd_resp_send_chunk(request, nullptr, 0);
+
+    auto* payload = static_cast<char*>(heap_caps_malloc(total_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (payload == nullptr) {
+        ESP_LOGE("hg_web_http", "asset PSRAM allocation failed: %u bytes", static_cast<unsigned>(total_size));
+        return ESP_ERR_NO_MEM;
+    }
+    std::memcpy(payload, start, base_size);
+    std::memcpy(payload + base_size, suffix, suffix_size);
+    const auto error = httpd_resp_send(request, payload, static_cast<ssize_t>(total_size));
+    heap_caps_free(payload);
+    if (error != ESP_OK) {
+        ESP_LOGE("hg_web_http", "fixed-length asset send failed: %s", esp_err_to_name(error));
+    }
+    return error;
 }
 
 }  // namespace
@@ -88,7 +100,10 @@ esp_err_t WebHttp::send_asset(httpd_req_t* request,
 {
     if (request == nullptr || start == nullptr || end == nullptr || end < start) return ESP_ERR_INVALID_ARG;
     set_no_cache_headers(request, content_type);
-    return httpd_resp_send(request, reinterpret_cast<const char*>(start), static_cast<ssize_t>(end - start));
+    return httpd_resp_send(
+        request,
+        reinterpret_cast<const char*>(start),
+        static_cast<ssize_t>(end - start));
 }
 
 esp_err_t WebHttp::index_get(httpd_req_t* request)
@@ -146,6 +161,8 @@ esp_err_t WebHttp::css_get(httpd_req_t* request)
 esp_err_t WebHttp::js_get(httpd_req_t* request)
 {
     static constexpr char kEmbeddedViewFix[] = R"JS(
+
+;window.HOMEGUARD_WEB_ASSET_REV = "alarm-ui-20260929-r2";
 
 ;(() => {
   const dashboardStatus = document.querySelector(".status-grid");

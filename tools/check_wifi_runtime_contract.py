@@ -78,13 +78,17 @@ if "esp_wifi_set_storage(WIFI_STORAGE_RAM)" not in network:
 if "kCandidateNvsKey" not in network or "clear_candidate_credentials()" not in network:
     errors.append("candidate transaction record lifecycle is incomplete")
 
-# Browser/API load must be bounded: API fetches are serialized and timed out,
-# while firmware asset delivery is streamed without a full-size temporary copy.
+# Browser/API load must be bounded: API fetches are serialized and timed out.
+# Embedded text assets must use one fixed-length HTTP response. On real ESP32-S3
+# hardware the former repeated chunked sends stalled after the TCP send window
+# filled, truncating index.html/app.js after a cold boot.
 for snippet in ("apiQueueTail", "AbortController", "apiTimeoutMs"):
     if snippet not in web_app:
         errors.append(f"Web API socket bound missing: {snippet}")
-if "httpd_resp_send_chunk" not in web_http:
-    errors.append("firmware text assets must use chunked streaming")
+if "httpd_resp_send(request" not in web_http:
+    errors.append("firmware text assets must use fixed-length httpd_resp_send")
+if "httpd_resp_send_chunk" in web_http:
+    errors.append("firmware text assets must not use chunked streaming")
 if "std::string body(reinterpret_cast<const char*>(start)" in web_http:
     errors.append("firmware Web assets must not be copied into a full temporary std::string")
 if "installWifiConnectHandoverFetchGuard" in web_http or "new Response(" in web_http:
@@ -109,3 +113,4 @@ print(" - handover acknowledges HTTP before intentional STA disconnect")
 print(" - candidate credentials commit only after matching-SSID GOT_IP")
 print(" - delayed reconnect restores committed NVS credentials")
 print(" - Web API concurrency/timeouts and LWIP/HTTPD socket budget are bounded")
+print(" - embedded Web assets use fixed-length HTTP responses")
