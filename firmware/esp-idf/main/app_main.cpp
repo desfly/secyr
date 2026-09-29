@@ -217,6 +217,7 @@ esp_err_t start_https_server()
     config.httpd.max_uri_handlers = 48;
     config.httpd.stack_size = 8192;
     config.httpd.lru_purge_enable = true;
+    config.httpd.send_wait_timeout = 30;
     config.servercert = reinterpret_cast<const unsigned char*>(identity.certificate_pem.c_str());
     config.servercert_len = identity.certificate_pem.size() + 1U;
     config.prvtkey_pem = reinterpret_cast<const unsigned char*>(identity.private_key_pem.c_str());
@@ -249,9 +250,10 @@ esp_err_t start_https_server()
 esp_err_t start_http_server()
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 16;
+    config.max_uri_handlers = g_https_server == nullptr ? 48 : 16;
     config.stack_size = 8192;
     config.lru_purge_enable = true;
+    config.send_wait_timeout = 30;
 
     ESP_RETURN_ON_ERROR(httpd_start(&g_http_server, &config), kTag, "httpd_start");
 
@@ -272,12 +274,30 @@ esp_err_t start_http_server()
     if (error != ESP_OK) return rollback_http(error, "web bootstrap routes");
     error = g_network_http.register_handlers(g_http_server);
     if (error != ESP_OK) return rollback_http(error, "network bootstrap routes");
+
+    // Bench/dev units may not have a provisioned factory TLS identity yet.
+    // Keep HTTPS as the preferred operational transport, but do not leave the
+    // UI with a dead relative API on port 80 when TLS cannot start.
+    if (g_https_server == nullptr) {
+        ESP_LOGW(kTag, "HTTPS unavailable; enabling local HTTP operational API fallback");
+        error = register_operational_handlers(g_http_server);
+        if (error != ESP_OK) return rollback_http(error, "HTTP operational fallback routes");
+    }
     return ESP_OK;
 }
 
 void start_authenticated_telemetry_websocket()
 {
-    if (g_https_server == nullptr) return;
+    // Telemetry must be registered on the same operational server that Android
+    // can actually reach. Bench/dev units without factory TLS identity run the
+    // operational API on the HTTP fallback server; previously we returned when
+    // HTTPS was unavailable, leaving /ws/telemetry completely unregistered.
+    httpd_handle_t server = g_https_server != nullptr ? g_https_server : g_http_server;
+    if (server == nullptr) {
+        ESP_LOGE(kTag, "Authenticated telemetry websocket unavailable: no operational HTTP server");
+        return;
+    }
+
     std::string token;
     hg::ProvisioningPayload provisioning{};
     if (g_provisioning_store.load_provisioning(provisioning) && provisioning.valid({})) {
@@ -287,7 +307,7 @@ void start_authenticated_telemetry_websocket()
     }
     provisioning.clear_secrets();
 
-    const bool started = g_websocket_telemetry.begin(g_https_server, token);
+    const bool started = g_websocket_telemetry.begin(server, token);
     std::fill(token.begin(), token.end(), '\0');
     token.clear();
 
@@ -295,7 +315,10 @@ void start_authenticated_telemetry_websocket()
         ESP_LOGE(kTag, "Authenticated telemetry websocket registration failed");
         return;
     }
-    ESP_LOGI(kTag, "Authenticated telemetry WSS ready at /ws/telemetry");
+    ESP_LOGI(
+        kTag,
+        "Authenticated telemetry %s ready at /ws/telemetry",
+        g_https_server != nullptr ? "WSS" : "WS");
 }
 
 void start_device_discovery()
@@ -409,12 +432,14 @@ extern "C" void app_main()
         ESP_LOGE(kTag, "HTTP server failed: %s", esp_err_to_name(http_error));
     }
 
-    if (https_error == ESP_OK) {
-        start_authenticated_telemetry_websocket();
-        if (cloud_identity_error == ESP_OK) start_device_discovery();
+    // Register telemetry on HTTPS when available, otherwise on the already
+    // enabled HTTP operational fallback used by BENCH/dev units.
+    start_authenticated_telemetry_websocket();
+    if (cloud_identity_error == ESP_OK) {
+        start_device_discovery();
     }
 
-    const auto telemetry_error = g_telemetry.start(&g_hardware, &g_websocket_telemetry, &g_system_model, &g_ble_transport);
+    const auto telemetry_error = g_telemetry.start(&g_hardware, &g_websocket_telemetry, &g_system_model, &g_system_bus, &g_ble_transport);
     if (telemetry_error != ESP_OK) ESP_LOGE(kTag, "Telemetry task failed: %s", esp_err_to_name(telemetry_error));
 
     const auto build = homeguard::idf::current_build_info();

@@ -38,6 +38,13 @@ class TelemetrySocket {
         eventState.value = events.distinctBy { it.sequence }.sortedByDescending { it.sequence }.take(MAX_EVENT_HISTORY)
     }
 
+    fun acceptExternalEvent(event: SystemEventRecord) {
+        eventState.value = (listOf(event) + eventState.value)
+            .distinctBy { it.sequence }
+            .take(MAX_EVENT_HISTORY)
+        liveEventState.tryEmit(event)
+    }
+
     fun clearEvents() { eventState.value = emptyList() }
 
     /**

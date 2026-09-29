@@ -4,9 +4,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-Write-Warning "THIS ERASES THE ENTIRE ESP32-S3 FLASH."
-$Answer = Read-Host "Type ERASE to continue"
-if ($Answer -ne "ERASE") {
+Write-Warning "DANGEROUS FACTORY WIPE: THIS ERASES THE ENTIRE ESP32-S3 FLASH, INCLUDING NVS, WI-FI CREDENTIALS, COMMISSIONING, ACCESS DATA AND HARDWARE VERIFICATION."
+$Answer = Read-Host "Type ERASE-ALL-NVS to continue"
+if ($Answer -ne "ERASE-ALL-NVS") {
     Write-Host "Cancelled."
     exit 0
 }

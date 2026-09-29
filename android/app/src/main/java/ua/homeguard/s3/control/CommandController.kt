@@ -1,5 +1,6 @@
 package ua.homeguard.s3.control
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONObject
 import ua.homeguard.s3.model.AccessCapabilities
@@ -127,6 +128,14 @@ class CommandController(
         return issueFreshTelemetryTicket(target)
     }
 
+    suspend fun cloudClientConfig(): JSONObject {
+        val target = localTarget()
+        require(localHttpSessionToken.isNotBlank()) {
+            "authenticated local HTTP session unavailable"
+        }
+        return createApi(target).cloudClientConfig()
+    }
+
     fun logout() {
         clearLocalSession()
         ble.disconnect()
@@ -183,6 +192,43 @@ class CommandController(
         if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
         return runCatching { mapBleReply(ble.pulseLock()) }
             .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
+    }
+
+    suspend fun outputActive(outputId: Int): Boolean? {
+        val target = endpoint.value
+        if (target.path == ControlPath.OFFLINE || target.path == ControlPath.CLOUD ||
+            target.apiBaseUrl.isBlank() || localHttpSessionToken.isBlank()) {
+            return null
+        }
+        return runCatching { createApi(target).runtimeOutputActive(outputId) }.getOrNull()
+    }
+
+    suspend fun setLight(active: Boolean, actor: String): CommandReply {
+        val target = endpoint.value
+        if (target.path != ControlPath.OFFLINE && target.path != ControlPath.CLOUD &&
+            target.apiBaseUrl.isNotBlank() && localHttpSessionToken.isNotBlank()) {
+            val reply = runCatching { createApi(target).runtimeOutputCommand(4, active, actor) }.getOrNull()
+            if (reply != null && reply.code != "authorization_required") return reply
+        }
+        return setLightOverBle(active)
+    }
+
+    suspend fun pulseLock(actor: String): CommandReply {
+        val target = endpoint.value
+        if (target.path != ControlPath.OFFLINE && target.path != ControlPath.CLOUD &&
+            target.apiBaseUrl.isNotBlank() && localHttpSessionToken.isNotBlank()) {
+            val api = createApi(target)
+            val on = runCatching { api.runtimeOutputCommand(5, true, actor) }.getOrNull()
+            if (on != null && on.accepted) {
+                delay(5_000L)
+                val off = runCatching { api.runtimeOutputCommand(5, false, actor) }
+                    .getOrElse { return CommandReply(false, code = "lock_off_failed") }
+                return if (off.accepted) CommandReply(true, code = "accepted_5s") else off
+            }
+            runCatching { api.runtimeOutputCommand(5, false, actor) }
+            if (on != null && on.code != "authorization_required") return on
+        }
+        return pulseLockOverBle()
     }
 
     private suspend fun executeHttp(type: CommandType, actor: String, credential: String): CommandReply {

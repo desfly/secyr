@@ -9,6 +9,8 @@ data class AppSettings(
     val cloudBaseUrl: String = "",
     val lastKnownLocalUrl: String = "",
     val localCertificateSha256: String = "",
+    val mqttBrokerUri: String = "",
+    val mqttUsername: String = "",
     val criticalNotificationsEnabled: Boolean = true,
     val statusNotificationsEnabled: Boolean = true,
     val zoneNotificationsEnabled: Boolean = true,
