@@ -167,6 +167,8 @@ esp_err_t WebHttp::js_get(httpd_req_t* request)
 {
     static constexpr char kEmbeddedViewFix[] = R"JS(
 
+;window.HOMEGUARD_WEB_ASSET_REV = "alarm-ui-20260929-r2";
+
 ;(() => {
   const dashboardStatus = document.querySelector(".status-grid");
   const dashboardBody = document.querySelector(".two-col");
