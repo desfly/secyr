@@ -24,7 +24,8 @@ namespace homeguard::idf {
 namespace {
 
 constexpr const char* kTag = "hg_telemetry";
-constexpr TickType_t kTelemetryPeriod = pdMS_TO_TICKS(1000);
+constexpr TickType_t kZonePollPeriod = pdMS_TO_TICKS(50);
+constexpr std::uint64_t kTelemetryPeriodMs = 1000ULL;
 constexpr std::uint16_t kLightOutputId = 4;
 constexpr std::uint64_t kLightCycleMs = 60'000ULL;
 
@@ -284,12 +285,20 @@ void TelemetryRuntime::run()
 
         std::array<hg::ZoneState, 8> zones{};
         zones.fill(hg::ZoneState::Disabled);
-        // Current bench hardware has only zones 1-4 commissioned on the zone ADS1115.
-        // Keep zones 5-8 disabled until their physical frontend is installed/configured;
-        // the telemetry ADS1115 must never be interpreted as security zones.
+        // Zones 1-4 are security inputs and must be sampled independently of the
+        // slower Web/telemetry publication cycle. A short pulse must not disappear
+        // between two one-second telemetry frames.
         sample_zone_adc(hardware_->zone_adc(), 0, zones);
         update_zone_model(zones, event_timestamp_ms(now_ms));
         update_zone_light(zones, now_ms);
+
+        // Publish the heavier telemetry frame only once per second. Zone sampling,
+        // alarm promotion and the Zone 1/2 light trigger continue every fast loop.
+        if (now_ms < next_telemetry_ms_) {
+            vTaskDelay(kZonePollPeriod);
+            continue;
+        }
+        next_telemetry_ms_ = now_ms + kTelemetryPeriodMs;
 
         std::array<hg::PressureState, 2> pressures{};
         std::array<float, 2> pressure_values{};
@@ -347,7 +356,7 @@ void TelemetryRuntime::run()
                  static_cast<unsigned>(frame.temperature_count), frame.battery_valid ? "ok" : "fault",
                  ble_transport_ != nullptr && ble_transport_->connected() ? "connected" : "offline");
 
-        vTaskDelay(kTelemetryPeriod);
+        vTaskDelay(kZonePollPeriod);
     }
 }
 
