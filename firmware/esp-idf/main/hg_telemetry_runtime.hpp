@@ -2,6 +2,7 @@
 
 #include "homeguard/telemetry.hpp"
 #include "esp_err.h"
+#include "freertos/FreeRTOS.h"
 
 #include <array>
 #include <cstdint>
