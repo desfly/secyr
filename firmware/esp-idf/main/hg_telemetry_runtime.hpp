@@ -36,6 +36,9 @@ private:
     void update_zone_light(const std::array<hg::ZoneState, 8>& zones, std::uint64_t now_ms);
     bool set_light_output(bool active, std::uint64_t now_ms);
 
+    std::array<hg::ZoneState, 8> zone_snapshot_{};
+    portMUX_TYPE zone_snapshot_lock_ = portMUX_INITIALIZER_UNLOCKED;
+
     HardwareBootstrap* hardware_{nullptr};
     WebsocketTelemetry* websocket_{nullptr};
     hg::SystemModel* system_model_{nullptr};
