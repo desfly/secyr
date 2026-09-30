@@ -318,22 +318,11 @@ void TelemetryRuntime::run()
         const auto transport = ethernet_status.link_up && ethernet_status.has_ip ? hg::Transport::Ethernet : (wifi_connected ? hg::Transport::WifiSta : hg::Transport::EmergencyAp);
         health_.set(hg::Component::Wifi, wifi_connected ? hg::HealthState::Ok : hg::HealthState::Degraded, now_ms);
 
-        // Zone ADC is owned exclusively by hg_zones. Do not start a second
-        // single-shot conversion sequence here; publish the SystemModel state
-        // produced by the fast zone task instead.
         std::array<hg::ZoneState, 8> zones{};
         zones.fill(hg::ZoneState::Disabled);
-        for (std::size_t index = 0; index < 4; ++index) {
-            const auto* zone = system_model_->zone(static_cast<std::uint16_t>(index + 1U));
-            if (zone == nullptr) continue;
-            switch (zone->state) {
-                case hg::ModelZoneState::Normal: zones[index] = hg::ZoneState::Normal; break;
-                case hg::ModelZoneState::Open: zones[index] = hg::ZoneState::Open; break;
-                case hg::ModelZoneState::Alarm: zones[index] = hg::ZoneState::Open; break;
-                case hg::ModelZoneState::Tamper: zones[index] = hg::ZoneState::Tamper; break;
-                default: zones[index] = hg::ZoneState::Disabled; break;
-            }
-        }
+        // Keep the proven raw ADS1115 -> ZoneState telemetry path. Do not
+        // reconstruct physical input state from SystemModel.
+        sample_zone_adc(hardware_->zone_adc(), 0, zones);
 
         // Publish the heavier telemetry frame only once per second. Zone sampling,
         // alarm promotion and the Zone 1/2 light trigger continue every fast loop.
