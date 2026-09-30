@@ -416,7 +416,6 @@ extern "C" void app_main()
 
     initialize_system_model();
     g_cloud_link.set_command_runtime(&g_system_model, &g_system_bus, &g_access_control, &g_cloud_time);
-    if (cloud_identity_error == ESP_OK) restore_cloud_config();
     initialize_physical_outputs();
     start_ble_transport();
 
@@ -437,6 +436,10 @@ extern "C" void app_main()
     start_authenticated_telemetry_websocket();
     if (cloud_identity_error == ESP_OK) {
         start_device_discovery();
+        // Start persisted MQTT only after the network stack and physical
+        // interfaces have had a chance to obtain IPv4/DNS. Starting it during
+        // early boot races DNS/TLS and can leave the client reconnecting.
+        restore_cloud_config();
     }
 
     const auto telemetry_error = g_telemetry.start(&g_hardware, &g_websocket_telemetry, &g_system_model, &g_system_bus, &g_ble_transport);
