@@ -37,6 +37,11 @@ CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
 CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
 CONFIG_BT_NIMBLE_SM_SC=y
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3
+# HomeGuard GATT DB: GAP + GATT + custom service with encrypted RX/TX.
+# Explicitly reserve enough attribute/service slots so ble_gatts_count_cfg()
+# cannot fail with BLE_HS_ENOMEM (rc=3) on the production transport.
+CONFIG_BT_NIMBLE_GATT_MAX_PROCS=8
+CONFIG_BT_NIMBLE_MAX_CCCDS=8
 
 # Bench-test safety profile: do not enable HMAC-backed NVS encryption until
 # the production eFuse allocation has been verified on the target module.
