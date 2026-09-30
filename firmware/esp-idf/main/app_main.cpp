@@ -48,6 +48,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <string>
 
 namespace {
@@ -133,6 +134,8 @@ void restore_commissioning_state()
         ESP_LOGI(kTag, "Verified commissioning state restored; physical output gate is ready");
     }
 }
+
+void restore_cloud_config();
 
 bool operational_ipv4_ready()
 {
