@@ -136,13 +136,30 @@ esp_err_t BleTransport::start(const char* device_name) {
     if (g_owner && g_owner != this) return ESP_ERR_INVALID_STATE;
     g_owner = this;
     auto error = nimble_port_init();
-    if (error != ESP_OK) return error;
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag, "nimble_port_init failed: %s (%d)", esp_err_to_name(error), static_cast<int>(error));
+        return error;
+    }
+    ESP_LOGI(kTag, "NimBLE port initialized");
     ble_svc_gap_init();
     ble_svc_gatt_init();
-    if (ble_svc_gap_device_name_set(device_name) != 0) return ESP_FAIL;
-    int rc = ble_gatts_count_cfg(kServices);
-    if (rc == 0) rc = ble_gatts_add_svcs(kServices);
-    if (rc != 0) return ESP_FAIL;
+    int rc = ble_svc_gap_device_name_set(device_name);
+    if (rc != 0) {
+        ESP_LOGE(kTag, "GAP device-name setup failed: rc=%d", rc);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(kTag, "GAP device name ready: %s", device_name);
+    rc = ble_gatts_count_cfg(kServices);
+    if (rc != 0) {
+        ESP_LOGE(kTag, "GATT service sizing failed: rc=%d", rc);
+        return ESP_FAIL;
+    }
+    rc = ble_gatts_add_svcs(kServices);
+    if (rc != 0) {
+        ESP_LOGE(kTag, "GATT service registration failed: rc=%d", rc);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(kTag, "GATT HomeGuard service registered");
     ble_hs_cfg.sync_cb = stack_sync;
     ble_hs_cfg.sm_bonding = 1;
     ble_hs_cfg.sm_sc = 1;
