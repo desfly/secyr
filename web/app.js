@@ -574,12 +574,11 @@ async function sendSecurityCommand(button) {
   try {
     const reply = await api("/api/v1/system/security-command", { method: "POST", body: JSON.stringify({ command, actor, credential }) });
     if (reply.accepted === false) throw new Error(reply.reason || reply.code || "Команду відхилено");
-    try {
-      const confirmed = await confirmSecurityState(command);
-      showToast(confirmed === true ? "Стан охорони підтверджено" : "Команду прийнято; стан охорони або тривоги ще не підтверджено");
-    } catch (_) {
-      showToast("Команду прийнято; перевірити стан охорони не вдалося");
-    }
+    // The controller has accepted the command. Do not keep the UI blocked for
+    // up to 1.8 s while polling for confirmation; refresh immediately and let
+    // the normal scheduler reconcile the authoritative state in background.
+    showToast("Команду прийнято");
+    await refresh();
   } catch (error) {
     showToast(`Помилка команди: ${error.message}`);
   } finally {
