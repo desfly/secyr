@@ -132,6 +132,44 @@ void restore_commissioning_state()
     }
 }
 
+bool operational_ipv4_ready()
+{
+    esp_netif_t* netif = nullptr;
+    while ((netif = esp_netif_next(netif)) != nullptr) {
+        esp_netif_ip_info_t ip{};
+        if (esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0U) {
+            const char* key = esp_netif_get_ifkey(netif);
+            if (key != nullptr && (std::strstr(key, "WIFI_STA") != nullptr || std::strstr(key, "ETH") != nullptr)) return true;
+        }
+    }
+    return false;
+}
+
+void cloud_start_task(void*)
+{
+    constexpr int kPollMs = 100;
+    constexpr int kTimeoutMs = 30000;
+    int waited = 0;
+    while (!operational_ipv4_ready() && waited < kTimeoutMs) {
+        vTaskDelay(pdMS_TO_TICKS(kPollMs));
+        waited += kPollMs;
+    }
+    if (!operational_ipv4_ready()) {
+        ESP_LOGW(kTag, "Cloud MQTT deferred: no operational IPv4 after %d ms", kTimeoutMs);
+    } else {
+        ESP_LOGI(kTag, "Operational IPv4 ready; starting persisted Cloud MQTT");
+        restore_cloud_config();
+    }
+    vTaskDelete(nullptr);
+}
+
+void schedule_cloud_start()
+{
+    if (xTaskCreate(cloud_start_task, "hg_cloud_start", 4096, nullptr, 4, nullptr) != pdPASS) {
+        ESP_LOGE(kTag, "Unable to create deferred Cloud MQTT start task");
+    }
+}
+
 void restore_cloud_config()
 {
     homeguard::idf::CloudConfig config{};
@@ -436,10 +474,9 @@ extern "C" void app_main()
     start_authenticated_telemetry_websocket();
     if (cloud_identity_error == ESP_OK) {
         start_device_discovery();
-        // Start persisted MQTT only after the network stack and physical
-        // interfaces have had a chance to obtain IPv4/DNS. Starting it during
-        // early boot races DNS/TLS and can leave the client reconnecting.
-        restore_cloud_config();
+        // Start persisted MQTT only after Wi-Fi STA or Ethernet has an actual IPv4 address.
+        // Network initialization alone is not sufficient: DHCP completes asynchronously.
+        schedule_cloud_start();
     }
 
     const auto telemetry_error = g_telemetry.start(&g_hardware, &g_websocket_telemetry, &g_system_model, &g_system_bus, &g_ble_transport);
