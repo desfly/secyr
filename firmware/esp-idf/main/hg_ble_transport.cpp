@@ -50,6 +50,11 @@ int rx_access(std::uint16_t, std::uint16_t, ble_gatt_access_ctxt* ctxt, void*) {
     return g_owner->accept_rx_fragment(value.data(),copied);
 }
 
+int tx_access(std::uint16_t, std::uint16_t, ble_gatt_access_ctxt* ctxt, void*) {
+    if (ctxt == nullptr || ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) return BLE_ATT_ERR_UNLIKELY;
+    return 0;
+}
+
 const ble_gatt_chr_def kCharacteristics[] = {
     {
         .uuid = &kRxUuid.u,
@@ -58,8 +63,8 @@ const ble_gatt_chr_def kCharacteristics[] = {
     },
     {
         .uuid = &kTxUuid.u,
-        .access_cb = nullptr,
-        .flags = BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_READ_ENC,
+        .access_cb = tx_access,
+        .flags = BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC,
         .val_handle = &g_tx_value_handle,
     },
     {0}
