@@ -147,6 +147,9 @@ void TelemetryRuntime::run_zones()
         std::array<hg::ZoneState, 8> zones{};
         zones.fill(hg::ZoneState::Disabled);
         sample_zone_adc(hardware_->zone_adc(), 0, zones);
+        portENTER_CRITICAL(&zone_snapshot_lock_);
+        zone_snapshot_ = zones;
+        portEXIT_CRITICAL(&zone_snapshot_lock_);
 
         const bool changed = zones != previous;
         const bool light_trigger =
@@ -318,11 +321,12 @@ void TelemetryRuntime::run()
         const auto transport = ethernet_status.link_up && ethernet_status.has_ip ? hg::Transport::Ethernet : (wifi_connected ? hg::Transport::WifiSta : hg::Transport::EmergencyAp);
         health_.set(hg::Component::Wifi, wifi_connected ? hg::HealthState::Ok : hg::HealthState::Degraded, now_ms);
 
+        // The high-priority zone task is the only owner of the security ADS1115.
+        // Telemetry consumes its latest snapshot instead of starting a second ADC scan.
         std::array<hg::ZoneState, 8> zones{};
-        zones.fill(hg::ZoneState::Disabled);
-        // Keep the proven raw ADS1115 -> ZoneState telemetry path. Do not
-        // reconstruct physical input state from SystemModel.
-        sample_zone_adc(hardware_->zone_adc(), 0, zones);
+        portENTER_CRITICAL(&zone_snapshot_lock_);
+        zones = zone_snapshot_;
+        portEXIT_CRITICAL(&zone_snapshot_lock_);
 
         // Publish the heavier telemetry frame only once per second. Zone sampling,
         // alarm promotion and the Zone 1/2 light trigger continue every fast loop.
