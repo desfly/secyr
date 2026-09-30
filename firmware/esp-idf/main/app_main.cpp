@@ -41,6 +41,8 @@
 #include "esp_https_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "nvs_flash.h"
 
 #include <algorithm>
