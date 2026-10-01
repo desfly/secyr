@@ -141,6 +141,21 @@ class CommandController(
         ble.disconnect()
     }
 
+    suspend fun ensureBleSession(deviceId: String, actor: String, pin: String): Boolean {
+        if (ble.isReady()) return true
+        if (deviceId.isBlank() || actor.isBlank() || pin.isBlank()) return false
+        return runCatching {
+            ble.connectAndAuthenticate(
+                deviceId = deviceId,
+                actor = actor,
+                pin = pin,
+                connectTimeoutMs = 12_000L,
+                authTimeoutMs = 8_000L,
+            )
+            ble.isReady()
+        }.getOrDefault(false)
+    }
+
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
         // For local security controls prefer the already-authenticated BLE link.
         // This keeps Arm Home/Away and Disarm responsive even when LAN/MQTT is
