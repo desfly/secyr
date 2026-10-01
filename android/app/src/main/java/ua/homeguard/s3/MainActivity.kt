@@ -463,11 +463,9 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
             }
-            val reply = if (commands.bleState().value == ua.homeguard.s3.network.ble.BleHomeGuardClient.State.READY) {
-                commands.pulseLockOverBle()
-            } else {
-                commands.pulseLock(accessSession.value?.actor.orEmpty())
-            }
+            // Universal quick action: CommandController chooses BLE first and
+            // falls back to the available network transport.
+            val reply = commands.pulseLock(accessSession.value?.actor.orEmpty())
             commandStatus.value = if (reply.accepted) "Замок · 5 с · ${device.name}" else "Замок не виконано · ${reply.code}"
         }
     }
