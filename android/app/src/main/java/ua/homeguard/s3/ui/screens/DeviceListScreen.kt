@@ -207,7 +207,10 @@ fun DeviceListScreen(
                         // credential is validated when a command is sent; hiding the controls behind
                         // this cached flag makes the door workflow impossible after a transient
                         // session/reboot state.
-                        val armed = active && snapshot.mode.name != "DISARMED"
+                        // Do not let transient/empty snapshots flip the security action.
+                        // Only a valid active-controller snapshot is authoritative.
+                        val hasAuthoritativeSecurityState = active && snapshot.sequence > 0
+                        val armed = hasAuthoritativeSecurityState && snapshot.mode.name != "DISARMED"
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -215,7 +218,7 @@ fun DeviceListScreen(
                             Button(
                                 onClick = { onQuickToggleSecurity(device, armed) },
                                 modifier = Modifier.weight(1f),
-                            ) { Text(if (armed) "Зняти" else "Охорона") }
+                            ) { Text(if (!hasAuthoritativeSecurityState) "Охорона" else if (armed) "Зняти" else "Охорона") }
                             Button(
                                 onClick = { onQuickLock(device) },
                                 modifier = Modifier.weight(1f),
