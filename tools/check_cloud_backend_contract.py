@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-import importlib.util
+import sys
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
-modpath=ROOT/"cloud-backend"/"homeguard_cloud"/"envelope.py"
-spec=importlib.util.spec_from_file_location("hg_envelope",modpath)
-m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-e=m.unsigned_envelope(device_id="HG-TEST",actor="user-1",command="output.lock",key_epoch=7,counter=42,now_ms=1000,ttl_ms=5000)
+sys.path.insert(0,str(ROOT/"cloud-backend"))
+from homeguard_cloud.envelope import unsigned_envelope
+e=unsigned_envelope(device_id="HG-TEST",actor="user-1",command="output.lock",key_epoch=7,counter=42,now_ms=1000,ttl_ms=5000)
 expected=(
 "version=1\n"
 "deviceId=HG-TEST\n"
