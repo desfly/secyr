@@ -350,6 +350,10 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onOpenDevice = { device -> openController(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() }) },
+                        onQuickArmHome = { device -> executeQuickDeviceCommand(device, CommandType.ARM_HOME) },
+                        onQuickArmAway = { device -> executeQuickDeviceCommand(device, CommandType.ARM_AWAY) },
+                        onQuickDisarm = { device -> executeQuickDeviceCommand(device, CommandType.DISARM) },
+                        onQuickLock = { device -> executeQuickDeviceLock(device) },
                     )
 
                     currentAccessSession == null -> AccessGateScreen(
@@ -431,6 +435,40 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+    }
+
+    private fun executeQuickDeviceCommand(device: ua.homeguard.s3.storage.RegisteredDevice, type: CommandType) {
+        lifecycleScope.launch {
+            settings.selectDevice(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() })
+            delay(250)
+            if (accessSession.value == null || !settings.settings.value.deviceId.equals(device.deviceId, true)) {
+                if (!tryPersistentLogin(showFailure = false)) {
+                    commandStatus.value = "Потрібна авторизація · ${device.name}"
+                    return@launch
+                }
+            }
+            val reply = commands.execute(type, accessSession.value?.actor.orEmpty())
+            commandStatus.value = if (reply.accepted) "Виконано · ${device.name}" else "Не виконано · ${reply.code}"
+        }
+    }
+
+    private fun executeQuickDeviceLock(device: ua.homeguard.s3.storage.RegisteredDevice) {
+        lifecycleScope.launch {
+            settings.selectDevice(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() })
+            delay(250)
+            if (accessSession.value == null || !settings.settings.value.deviceId.equals(device.deviceId, true)) {
+                if (!tryPersistentLogin(showFailure = false)) {
+                    commandStatus.value = "Потрібна авторизація · ${device.name}"
+                    return@launch
+                }
+            }
+            val reply = if (commands.bleState().value == ua.homeguard.s3.network.ble.BleHomeGuardClient.State.READY) {
+                commands.pulseLockOverBle()
+            } else {
+                commands.pulseLock(accessSession.value?.actor.orEmpty())
+            }
+            commandStatus.value = if (reply.accepted) "Замок · 5 с · ${device.name}" else "Замок не виконано · ${reply.code}"
         }
     }
 
