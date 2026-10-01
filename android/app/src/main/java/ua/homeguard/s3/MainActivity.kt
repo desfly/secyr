@@ -262,6 +262,8 @@ class MainActivity : ComponentActivity() {
             val endpoint by resolver.endpoint.collectAsState()
             val provisioningState by provisioning.state.collectAsState()
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
+            var lastValidDeviceListSnapshot by remember { mutableStateOf(SystemSnapshot()) }
+            if (snapshot.sequence > 0) lastValidDeviceListSnapshot = snapshot
             val events by telemetry.events().collectAsState(initial = emptyList())
             val commandMessage by commandStatus.collectAsState()
             val maintenanceMessage by backupStatus.collectAsState()
@@ -334,7 +336,7 @@ class MainActivity : ComponentActivity() {
                         devices = registered,
                         discovered = devices,
                         activeDeviceId = appSettings.deviceId,
-                        snapshot = snapshot,
+                        snapshot = lastValidDeviceListSnapshot,
                         onAddDevice = { addDeviceOpen.value = true; lifecycleScope.launch { discovery.rescan() } },
                         onRenameDevice = { device, newName -> lifecycleScope.launch { registeredDevices.rename(device.deviceId, newName) } },
                         onDeleteDevice = { device ->
