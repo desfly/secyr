@@ -61,6 +61,10 @@ fun DeviceListScreen(
     onRenameDevice: (RegisteredDevice, String) -> Unit,
     onDeleteDevice: (RegisteredDevice) -> Unit,
     onOpenDevice: (RegisteredDevice) -> Unit,
+    onQuickArmHome: (RegisteredDevice) -> Unit,
+    onQuickArmAway: (RegisteredDevice) -> Unit,
+    onQuickDisarm: (RegisteredDevice) -> Unit,
+    onQuickLock: (RegisteredDevice) -> Unit,
 ) {
     val context = LocalContext.current
     val profilePrefs = remember { context.getSharedPreferences("myfist_profile", Context.MODE_PRIVATE) }
@@ -201,6 +205,17 @@ fun DeviceListScreen(
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Text(device.name, style = MaterialTheme.typography.titleMedium, color = titleColor)
                         DeviceStatePicons(online = online, authorized = device.authorized, active = active, snapshot = snapshot)
+                        if (device.authorized) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                OutlinedButton(onClick = { onQuickArmHome(device) }, modifier = Modifier.weight(1f)) { Text("Вдома") }
+                                OutlinedButton(onClick = { onQuickArmAway(device) }, modifier = Modifier.weight(1f)) { Text("Відсутній") }
+                                OutlinedButton(onClick = { onQuickDisarm(device) }, modifier = Modifier.weight(1f)) { Text("Зняти") }
+                            }
+                            Button(onClick = { onQuickLock(device) }, modifier = Modifier.fillMaxWidth()) { Text("🔒 Замок · 5 с") }
+                        }
                         if (!device.authorized) Text("Авторизацію втрачено", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         if (expanded) {
                             if (active) {
