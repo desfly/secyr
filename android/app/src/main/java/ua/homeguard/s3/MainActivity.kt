@@ -351,9 +351,9 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onOpenDevice = { device -> openController(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() }) },
-                        onQuickArmHome = { device -> executeQuickDeviceCommand(device, CommandType.ARM_HOME) },
-                        onQuickArmAway = { device -> executeQuickDeviceCommand(device, CommandType.ARM_AWAY) },
-                        onQuickDisarm = { device -> executeQuickDeviceCommand(device, CommandType.DISARM) },
+                        onQuickToggleSecurity = { device, armed ->
+                            executeQuickDeviceCommand(device, if (armed) CommandType.DISARM else CommandType.ARM_AWAY)
+                        },
                         onQuickLock = { device -> executeQuickDeviceLock(device) },
                     )
 
