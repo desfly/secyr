@@ -541,11 +541,20 @@ class MainActivity : ComponentActivity() {
                         reason.contains("unknown_user", true) ||
                         reason.contains("user_unavailable", true)
                     if (revoked) {
+                        // An authoritative credential/user rejection means this phone no
+                        // longer owns access to the controller. Remove the object itself;
+                        // transport failures/timeouts never enter this branch.
+                        registeredDevices.remove(deviceId)
                         settings.clearSavedLogin(deviceId)
                         commands.logout()
+                        if (settings.settings.value.deviceId.equals(deviceId, ignoreCase = true)) {
+                            settings.selectDevice("")
+                        }
                         accessSession.value = null
+                        accessLifecycle.value = AccessLifecycleState.UNAVAILABLE
+                        deviceListOpen.value = true
                         if (showFailure) {
-                            commandStatus.value = "Збережений вхід деактивовано адміністратором"
+                            commandStatus.value = "Доступ відкликано адміністратором · об’єкт видалено"
                             accessGateMessage.value = commandStatus.value
                         }
                     }
