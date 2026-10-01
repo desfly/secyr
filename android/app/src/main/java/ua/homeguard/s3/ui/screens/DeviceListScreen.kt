@@ -61,9 +61,7 @@ fun DeviceListScreen(
     onRenameDevice: (RegisteredDevice, String) -> Unit,
     onDeleteDevice: (RegisteredDevice) -> Unit,
     onOpenDevice: (RegisteredDevice) -> Unit,
-    onQuickArmHome: (RegisteredDevice) -> Unit,
-    onQuickArmAway: (RegisteredDevice) -> Unit,
-    onQuickDisarm: (RegisteredDevice) -> Unit,
+    onQuickToggleSecurity: (RegisteredDevice, Boolean) -> Unit,
     onQuickLock: (RegisteredDevice) -> Unit,
 ) {
     val context = LocalContext.current
@@ -209,15 +207,20 @@ fun DeviceListScreen(
                         // credential is validated when a command is sent; hiding the controls behind
                         // this cached flag makes the door workflow impossible after a transient
                         // session/reboot state.
+                        val armed = active && snapshot.mode.name != "DISARMED"
                         Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                OutlinedButton(onClick = { onQuickArmHome(device) }, modifier = Modifier.weight(1f)) { Text("Вдома") }
-                                OutlinedButton(onClick = { onQuickArmAway(device) }, modifier = Modifier.weight(1f)) { Text("Відсутній") }
-                                OutlinedButton(onClick = { onQuickDisarm(device) }, modifier = Modifier.weight(1f)) { Text("Зняти") }
-                            }
-                        Button(onClick = { onQuickLock(device) }, modifier = Modifier.fillMaxWidth()) { Text("🔒 Замок · 5 с") }
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Button(
+                                onClick = { onQuickToggleSecurity(device, armed) },
+                                modifier = Modifier.weight(1f),
+                            ) { Text(if (armed) "Зняти" else "Охорона") }
+                            Button(
+                                onClick = { onQuickLock(device) },
+                                modifier = Modifier.weight(1f),
+                            ) { Text("🔒 Замок") }
+                        }
                         if (!device.authorized) Text("Потрібна перевірка авторизації", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         if (expanded) {
                             if (active) {
