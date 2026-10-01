@@ -142,15 +142,16 @@ class CommandController(
     }
 
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
-        val httpResult = runCatching { executeHttp(type, actor, credential) }
-        val httpReply = httpResult.getOrNull()
-        if (httpReply != null && httpReply.code != "offline" && httpReply.code != "authorization_required") return httpReply
-
+        // For local security controls prefer the already-authenticated BLE link.
+        // This keeps Arm Home/Away and Disarm responsive even when LAN/MQTT is
+        // unavailable; the controller remains authoritative for authorization.
         if (supportsBle(type) && ble.isReady()) {
             val bleReply = runCatching { ble.execute(type) }.getOrNull()
             if (bleReply != null) return mapBleReply(bleReply)
         }
 
+        val httpResult = runCatching { executeHttp(type, actor, credential) }
+        val httpReply = httpResult.getOrNull()
         return httpReply ?: CommandReply(accepted = false, code = "offline")
     }
 
