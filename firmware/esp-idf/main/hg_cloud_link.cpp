@@ -13,6 +13,7 @@
 #include "freertos/semphr.h"
 #include "nvs.h"
 #include "homeguard/access_control.hpp"
+#include "homeguard/output_command.hpp"
 #include "homeguard/system_model.hpp"
 
 #include <algorithm>
@@ -690,6 +691,23 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         }
         xSemaphoreGive(replay_mutex);
         publish_response(true, "challenge_issued");
+        return;
+    }
+
+    // The lock is a first-class signed cloud command.  Apply it through the
+    // same SystemModel output command path used by local HTTP; the existing
+    // runtime synchronization loop is responsible for mirroring output #5 to
+    // the direct lock relay.  Keep replay persistence above this side effect.
+    if (command == "output.lock") {
+        const auto result = hg::apply_output_command(*model_, {}, {5, true, false, 0});
+        if (result.status != hg::OutputCommandStatus::Applied) {
+            xSemaphoreGive(replay_mutex);
+            publish_response(false, hg::to_string(result.status));
+            return;
+        }
+        (void)bus_->dispatch_all();
+        xSemaphoreGive(replay_mutex);
+        publish_response(true, "accepted");
         return;
     }
 
