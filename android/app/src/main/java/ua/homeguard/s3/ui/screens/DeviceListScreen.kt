@@ -205,8 +205,11 @@ fun DeviceListScreen(
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Text(device.name, style = MaterialTheme.typography.titleMedium, color = titleColor)
                         DeviceStatePicons(online = online, authorized = device.authorized, active = active, snapshot = snapshot)
-                        if (device.authorized) {
-                            Row(
+                        // Daily controls must stay visible on the object card.  The saved
+                        // credential is validated when a command is sent; hiding the controls behind
+                        // this cached flag makes the door workflow impossible after a transient
+                        // session/reboot state.
+                        Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
@@ -214,9 +217,8 @@ fun DeviceListScreen(
                                 OutlinedButton(onClick = { onQuickArmAway(device) }, modifier = Modifier.weight(1f)) { Text("Відсутній") }
                                 OutlinedButton(onClick = { onQuickDisarm(device) }, modifier = Modifier.weight(1f)) { Text("Зняти") }
                             }
-                            Button(onClick = { onQuickLock(device) }, modifier = Modifier.fillMaxWidth()) { Text("🔒 Замок · 5 с") }
-                        }
-                        if (!device.authorized) Text("Авторизацію втрачено", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        Button(onClick = { onQuickLock(device) }, modifier = Modifier.fillMaxWidth()) { Text("🔒 Замок · 5 с") }
+                        if (!device.authorized) Text("Потрібна перевірка авторизації", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         if (expanded) {
                             if (active) {
                                 val problemZones = snapshot.zones.filter { it.state.contains("alarm", true) || it.state.contains("open", true) || it.state.contains("tamper", true) || it.state.contains("fault", true) }
