@@ -236,8 +236,7 @@ class CommandController(
         // The object-card lock is a universal action, not a BLE-only control.
         // Prefer an already-authorized nearby BLE session for door latency,
         // then fall back to the resolved local network path.  Cloud lock output
-        // control is not part of the current controller API contract, so do not
-        // pretend it is supported until the protocol exposes it.
+        // control is routed as the semantic output.lock command through the authenticated cloud backend.
         if (ble.isReady()) {
             val bleReply = runCatching { mapBleReply(ble.pulseLock()) }.getOrNull()
             if (bleReply != null && (bleReply.accepted || bleReply.duplicate)) return bleReply
@@ -257,7 +256,13 @@ class CommandController(
             runCatching { api.runtimeOutputCommand(5, false, actor) }
             if (on != null && on.code != "authorization_required") return on
         }
-        return CommandReply(false, code = if (target.path == ControlPath.CLOUD) "cloud_lock_unsupported" else "offline")
+        if (target.path == ControlPath.CLOUD && target.apiBaseUrl.isNotBlank()) {
+            val appSettings = settings.settings.value
+            if (appSettings.apiToken.isBlank()) return CommandReply(false, code = "authorization_required")
+            return runCatching { createApi(target).cloudSemanticCommand("output.lock") }
+                .getOrElse { CommandReply(false, code = "cloud_error") }
+        }
+        return CommandReply(false, code = "offline")
     }
 
     private suspend fun executeHttp(type: CommandType, actor: String, credential: String): CommandReply {
