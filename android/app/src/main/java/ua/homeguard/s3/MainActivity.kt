@@ -74,6 +74,7 @@ class MainActivity : ComponentActivity() {
     // submitting login and is cleared immediately after success/failure.
     private val operatorPin = MutableStateFlow("")
     private val accessSession = MutableStateFlow<AccessSession?>(null)
+    @Volatile private var activeAccessDeviceId: String = ""
     private val accessLifecycle = MutableStateFlow(AccessLifecycleState.UNAVAILABLE)
     private val accessGateBusy = MutableStateFlow(false)
     private val alarmUiActive = MutableStateFlow(false)
@@ -517,8 +518,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun tryPersistentLogin(showFailure: Boolean): Boolean {
-        if (accessSession.value != null) return true
         val deviceId = settings.settings.value.deviceId
+        // A session belongs to exactly one selected controller. Never reuse an
+        // in-memory session merely because some previous object was logged in.
+        if (accessSession.value != null &&
+            activeAccessDeviceId.equals(deviceId, ignoreCase = true)) return true
+        if (accessSession.value != null) {
+            commands.logout()
+            accessSession.value = null
+            activeAccessDeviceId = ""
+        }
         val saved = settings.savedLogin(deviceId) ?: return false
         return runCatching { commands.login(saved.actor, saved.pin) }
             .fold(
@@ -526,6 +535,7 @@ class MainActivity : ComponentActivity() {
                     operatorId.value = authenticated.actor
                     operatorPin.value = ""
                     accessSession.value = authenticated
+                    activeAccessDeviceId = deviceId
                     accessLifecycle.value = AccessLifecycleState.LOGIN_REQUIRED
                     commandStatus.value = "Автовхід: ${authenticated.name} · ${authenticated.role.name.lowercase()}"
                     accessGateMessage.value = ""
@@ -534,9 +544,12 @@ class MainActivity : ComponentActivity() {
                 },
                 onFailure = { error ->
                     val reason = error.message.orEmpty()
-                    val revoked = reason.contains("401") ||
-                        reason.contains("invalid_credentials", true) ||
-                        reason.contains("unknown_user", true) ||
+                    // Bare HTTP 401 means an expired/reboot-lost transport
+                    // session, not revoked object ownership. A changed PIN is
+                    // likewise recoverable. Remove the object only when the
+                    // controller explicitly says the user itself no longer exists.
+                    val revoked = reason.contains("unknown_user", true) ||
+                        reason.contains("denied_unknown_user", true) ||
                         reason.contains("user_unavailable", true)
                     if (revoked) {
                         // An authoritative credential/user rejection means this phone no
@@ -549,6 +562,7 @@ class MainActivity : ComponentActivity() {
                             settings.selectDevice("")
                         }
                         accessSession.value = null
+                        activeAccessDeviceId = ""
                         accessLifecycle.value = AccessLifecycleState.UNAVAILABLE
                         deviceListOpen.value = true
                         if (showFailure) {
