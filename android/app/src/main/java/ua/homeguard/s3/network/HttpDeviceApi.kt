@@ -181,6 +181,17 @@ class HttpDeviceApi(
         )
     }
 
+    suspend fun cloudSemanticCommand(command: String): CommandReply {
+        require(command.matches(Regex("^[a-z0-9_.-]{1,64}$"))) { "Cloud command is invalid" }
+        if (runtimeV1 || tokenProvider().isBlank()) return CommandReply(false, code = "authorization_required")
+        val json = execute(LegacyApiContract.COMMAND_PATH, "POST", JSONObject().put("command", command))
+        val accepted = json.optBoolean("ok", json.optBoolean("accepted", false))
+        return CommandReply(
+            accepted = accepted,
+            code = if (accepted) "accepted" else json.optString("reason", json.optString("code", "rejected")),
+        )
+    }
+
     private suspend fun runtimeValveCommand(active: Boolean, actor: String): CommandReply {
         for (outputId in 2..3) {
             val json = execute(RuntimeApiContract.OUTPUT_COMMAND_PATH, "POST", JSONObject().put("outputId", outputId).put("active", active).put("alarmActive", false).put("actor", actor))
