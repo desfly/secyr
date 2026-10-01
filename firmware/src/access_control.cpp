@@ -160,6 +160,7 @@ bool AccessControl::role_allows(AccessRole role, std::string_view command) const
     return command == "security.arm_home" || command == "arm_home" ||
            command == "security.arm_away" || command == "arm_away" ||
            command == "security.disarm" || command == "disarm" ||
+           command == "output.lock" ||
            command == "valve.close" || command == "close_valves" ||
            command == "valve.open" || command == "open_valves";
 }
