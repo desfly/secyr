@@ -449,6 +449,8 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
             }
+            val saved = settings.savedLogin(device.deviceId)
+            if (saved != null) commands.ensureBleSession(device.deviceId, saved.actor, saved.pin)
             val reply = commands.execute(type, accessSession.value?.actor.orEmpty())
             commandStatus.value = if (reply.accepted) "Виконано · ${device.name}" else "Не виконано · ${reply.code}"
         }
@@ -464,8 +466,10 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
             }
-            // Universal quick action: CommandController chooses BLE first and
-            // falls back to the available network transport.
+            // Door workflow: establish the saved per-device BLE session on demand
+            // even when Wi-Fi/LAN is unavailable, then let the universal router fall back.
+            val saved = settings.savedLogin(device.deviceId)
+            if (saved != null) commands.ensureBleSession(device.deviceId, saved.actor, saved.pin)
             val reply = commands.pulseLock(accessSession.value?.actor.orEmpty())
             commandStatus.value = if (reply.accepted) "Замок · 5 с · ${device.name}" else "Замок не виконано · ${reply.code}"
         }
