@@ -28,3 +28,7 @@ class PushTokenStore:
         with sqlite3.connect(self.path) as db:
             db.execute("UPDATE push_token SET active=0 WHERE token=?",(token,))
             db.commit()
+    def revoke_for(self,*,actor:str,device_id:str,token:str)->None:
+        with sqlite3.connect(self.path) as db:
+            db.execute("UPDATE push_token SET active=0 WHERE actor=? AND device_id=? AND token=?",(actor,device_id,token))
+            db.commit()
