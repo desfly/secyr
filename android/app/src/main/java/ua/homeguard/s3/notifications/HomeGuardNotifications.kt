@@ -76,7 +76,7 @@ class HomeGuardNotifications(private val context: Context) {
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
 
-        // Alarm audio/vibration are owned by MainActivity.startForegroundAlarm().
+        // Alarm audio and vibration are owned by MainActivity.startForegroundAlarm().
         // Keeping the notification silent avoids a second, uncancellable ringtone.
         if (critical) {
             builder.setSilent(true)
