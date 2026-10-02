@@ -29,6 +29,9 @@ class AlarmMonitorService : Service() {
     companion object {
         private const val CHANNEL_MONITOR = "homeguard_alarm_monitor"
         private const val MONITOR_NOTIFICATION_ID = 41001
+        const val ACTION_PUSH_ALARM = "ua.homeguard.s3.action.PUSH_ALARM"
+        const val EXTRA_DEVICE_ID = "device_id"
+        const val EXTRA_EVENT = "event"
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -72,7 +75,23 @@ class AlarmMonitorService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_PUSH_ALARM && !alarmActive) {
+            alarmActive = true
+            startAlarmSignal()
+            notifications.notify(
+                SystemEventRecord(
+                    sequence = System.currentTimeMillis(),
+                    timestampMs = System.currentTimeMillis(),
+                    event = intent.getStringExtra(EXTRA_EVENT)?.uppercase() ?: "ALARM",
+                    sourceId = 0,
+                    value = 1,
+                ),
+                HomeGuardRuntime.settings.settings.value,
+            )
+        }
+        return START_STICKY
+    }
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
