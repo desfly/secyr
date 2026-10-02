@@ -118,6 +118,8 @@ jobs:
         run: python tools/check_cloud_backend_counter.py
       - name: Cloud backend lock end-to-end
         run: python tools/check_cloud_backend_lock_e2e.py
+      - name: Cloud alarm push routing contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_event_push.py
       - name: Web UI JavaScript syntax
         run: node --check web/app.js && node --check web/access-session.js && node --check web/factory-reset.js
       - name: Web UI browser boot smoke
