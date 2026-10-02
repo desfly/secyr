@@ -122,6 +122,8 @@ jobs:
         run: PYTHONPATH=cloud-backend python tools/check_cloud_event_push.py
       - name: Cloud push token endpoint contract
         run: PYTHONPATH=cloud-backend python tools/check_cloud_push_endpoint.py
+      - name: FCM HTTP v1 sender contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_fcm_sender.py
       - name: Web UI JavaScript syntax
         run: node --check web/app.js && node --check web/access-session.js && node --check web/factory-reset.js
       - name: Web UI browser boot smoke
