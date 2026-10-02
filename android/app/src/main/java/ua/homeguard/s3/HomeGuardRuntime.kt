@@ -4,6 +4,11 @@ import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import com.google.firebase.messaging.FirebaseMessaging
+import ua.homeguard.s3.push.PushTokenRegistrar
 import ua.homeguard.s3.network.DeviceEndpointResolver
 import ua.homeguard.s3.network.DeviceSession
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
@@ -39,5 +44,20 @@ object HomeGuardRuntime {
         session = DeviceSession(scope, resolver.endpoint, settings, telemetry)
         discovery.start()
         session.start()
+        scope.launch {
+            settings.settings
+                .map { Triple(it.deviceId.trim(), it.apiToken.trim(), it.cloudBaseUrl.trim()) }
+                .distinctUntilChanged()
+                .collect { (deviceId, apiToken, cloudBaseUrl) ->
+                    if (deviceId.isBlank() || apiToken.isBlank() || cloudBaseUrl.isBlank()) return@collect
+                    FirebaseMessaging.getInstance().token
+                        .addOnSuccessListener { token ->
+                            if (token.isBlank()) return@addOnSuccessListener
+                            scope.launch {
+                                runCatching { PushTokenRegistrar.register(settings.settings.value, token) }
+                            }
+                        }
+                }
+        }
     }
 }
