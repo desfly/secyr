@@ -455,8 +455,10 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
             }
-            val saved = settings.savedLogin(device.deviceId)
-            if (saved != null) commands.ensureBleSession(device.deviceId, saved.actor, saved.pin)
+            // Do not synchronously establish BLE here. A cold BLE connection can block
+            // the object-card action for up to 20 seconds even when LAN is already
+            // available. CommandController.execute() already prefers BLE when it is
+            // ready and otherwise immediately uses the resolved LAN/cloud route.
             val reply = commands.execute(type, accessSession.value?.actor.orEmpty())
             commandStatus.value = if (reply.accepted) "Виконано · ${device.name}" else "Не виконано · ${reply.code}"
         }
@@ -472,10 +474,9 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
             }
-            // Door workflow: establish the saved per-device BLE session on demand
-            // even when Wi-Fi/LAN is unavailable, then let the universal router fall back.
-            val saved = settings.savedLogin(device.deviceId)
-            if (saved != null) commands.ensureBleSession(device.deviceId, saved.actor, saved.pin)
+            // Do not block the door action on a cold BLE connection. pulseLock()
+            // already prefers an authenticated BLE link when ready, then falls back
+            // immediately to the resolved LAN/cloud route.
             val reply = commands.pulseLock(accessSession.value?.actor.orEmpty())
             commandStatus.value = if (reply.accepted) "Замок · 5 с · ${device.name}" else "Замок не виконано · ${reply.code}"
         }
