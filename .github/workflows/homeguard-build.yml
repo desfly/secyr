@@ -124,6 +124,8 @@ jobs:
         run: PYTHONPATH=cloud-backend python tools/check_cloud_push_endpoint.py
       - name: FCM HTTP v1 sender contract
         run: PYTHONPATH=cloud-backend python tools/check_cloud_fcm_sender.py
+      - name: MQTT event to push bridge contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_mqtt_event_bridge.py
       - name: Web UI JavaScript syntax
         run: node --check web/app.js && node --check web/access-session.js && node --check web/factory-reset.js
       - name: Web UI browser boot smoke
