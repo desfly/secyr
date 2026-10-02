@@ -3,17 +3,27 @@ package ua.homeguard.s3
 import android.content.Intent
 import android.util.Log
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import ua.homeguard.s3.push.PushTokenRegistrar
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
 class HomeGuardMessagingService : FirebaseMessagingService() {
     companion object { private const val TAG = "HomeGuardPush" }
+    private val pushScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        // Registration with the authenticated HomeGuard backend is wired next.
-        // Never print the token itself into shared logs.
-        Log.i(TAG, "FCM token refreshed")
+        HomeGuardRuntime.ensureStarted(this)
+        val settings = HomeGuardRuntime.settings.settings.value
+        pushScope.launch {
+            runCatching { PushTokenRegistrar.register(settings, token) }
+                .onSuccess { Log.i(TAG, "FCM token registered") }
+                .onFailure { error -> Log.w(TAG, "FCM token registration deferred: ${error.message}") }
+        }
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
