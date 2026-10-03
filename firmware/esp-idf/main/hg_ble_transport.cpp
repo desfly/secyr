@@ -171,7 +171,7 @@ esp_err_t BleTransport::start(const char* device_name) {
     ble_hs_cfg.sm_mitm = 0;
     ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
     ble_store_config_init();
-    if (xTaskCreate(host_task,"hg_ble_host",4096,nullptr,5,nullptr) != pdPASS) return ESP_ERR_NO_MEM;
+    if (xTaskCreate(host_task,"hg_ble_host",8192,nullptr,5,nullptr) != pdPASS) return ESP_ERR_NO_MEM;
     ESP_LOGI(kTag,"NimBLE HomeGuard transport started");
     return ESP_OK;
 }
@@ -245,6 +245,18 @@ esp_err_t BleTransport::advertise() {
     fields.num_uuids128=1;
     fields.uuids128_is_complete=1;
     if (ble_gap_adv_set_fields(&fields) != 0) return ESP_FAIL;
+
+    // Keep the 128-bit service UUID in the primary advertisement and put the
+    // full HomeGuard device name in the scan response to stay within 31 bytes.
+    ble_hs_adv_fields response{};
+    const auto* name = ble_svc_gap_device_name();
+    if (name != nullptr && name[0] != '\0') {
+        response.name = reinterpret_cast<const std::uint8_t*>(name);
+        response.name_len = static_cast<std::uint8_t>(std::min<std::size_t>(std::strlen(name), 29U));
+        response.name_is_complete = 1;
+        if (ble_gap_adv_rsp_set_fields(&response) != 0) return ESP_FAIL;
+    }
+
     ble_gap_adv_params params{};
     params.conn_mode=BLE_GAP_CONN_MODE_UND;
     params.disc_mode=BLE_GAP_DISC_MODE_GEN;
