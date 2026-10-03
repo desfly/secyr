@@ -6,7 +6,9 @@ http=(ROOT/"android/app/src/main/java/ua/homeguard/s3/network/HttpDeviceApi.kt")
 assert 'cloud_lock_unsupported' not in controller
 assert 'cloudSemanticCommand("output.lock")' in controller
 assert 'target.path == ControlPath.CLOUD' in controller
-assert 'appSettings.apiToken.isBlank()' in controller
+assert 'CloudAccountAuth.signedIn()' in controller
+assert 'CloudAccountAuth.idToken()' in controller
+assert 'appSettings.apiToken.isBlank()' not in controller
 assert 'suspend fun cloudSemanticCommand(command: String)' in http
 assert 'LegacyApiContract.COMMAND_PATH' in http
 assert 'JSONObject().put("command", command)' in http
