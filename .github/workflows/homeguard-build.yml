@@ -35,6 +35,10 @@ jobs:
           g++ --version
           cmake --version
           ninja --version
+      - name: Install cloud backend production dependencies
+        run: python -m pip install -r cloud-backend/requirements.txt
+      - name: Verify cloud backend production imports
+        run: python -c "import firebase_admin, google.auth, paho.mqtt.client; print('cloud production imports: ok')"
       - name: Project preflight
         run: python tools/preflight_firmware.py
       - name: Generate BENCH validation report
