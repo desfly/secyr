@@ -1,5 +1,7 @@
 package ua.homeguard.s3.network.ble
 
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
 import android.content.Context
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -99,6 +101,7 @@ class BleRuntimeSession(context: Context) {
 
         accessFlow.value = BleSessionAccess()
         val device = scanner.find(deviceId, timeoutMs.coerceAtMost(12_000L))
+        ensureBonded(device, timeoutMs.coerceAtMost(12_000L))
         client.connect(device)
         withTimeout(timeoutMs) {
             client.state().filter { state ->
@@ -110,6 +113,25 @@ class BleRuntimeSession(context: Context) {
                     else -> false
                 }
             }.first()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun ensureBonded(device: BluetoothDevice, timeoutMs: Long) {
+        if (device.bondState == BluetoothDevice.BOND_BONDED) return
+        require(device.createBond()) { "BLE bonding could not start" }
+        withTimeout(timeoutMs) {
+            var bondingSeen = false
+            while (true) {
+                when (device.bondState) {
+                    BluetoothDevice.BOND_BONDED -> return@withTimeout
+                    BluetoothDevice.BOND_BONDING -> bondingSeen = true
+                    BluetoothDevice.BOND_NONE -> if (bondingSeen) {
+                        throw IllegalStateException("BLE bonding failed")
+                    }
+                }
+                delay(100L)
+            }
         }
     }
 
