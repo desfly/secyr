@@ -15,7 +15,10 @@ data class ProvisioningForm(
     val wifiPassword: String = "",
     val ownerLabel: String = "",
     val cloudEndpoint: String = "",
-    val cloudClaimToken: String = ""
+    val cloudClaimToken: String = "",
+    val cloudApiUrl: String = "",
+    val cloudAccountEmail: String = "",
+    val cloudAccountPassword: String = ""
 )
 
 enum class ProvisioningTransport { BLE, SETUP_AP }
