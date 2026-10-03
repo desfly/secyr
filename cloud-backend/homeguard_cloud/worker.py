@@ -23,7 +23,7 @@ def main()->None:
     port=int(os.environ.get("HOMEGUARD_MQTT_PORT","8883"))
     username=os.environ.get("HOMEGUARD_MQTT_USERNAME","").strip()
     password=os.environ.get("HOMEGUARD_MQTT_PASSWORD","")
-    push_db=Path(os.environ.get("HOMEGUARD_PUSH_DB","homeguard-push.db"))
+    push_db=Path(os.environ.get("HOMEGUARD_CLOUD_DB",os.environ.get("HOMEGUARD_PUSH_DB","homeguard-cloud.db")))
 
     credentials,adc_project=google.auth.default(scopes=["https://www.googleapis.com/auth/firebase.messaging"])
     if not project_id and adc_project:
