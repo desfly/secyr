@@ -126,6 +126,8 @@ jobs:
         run: PYTHONPATH=cloud-backend python tools/check_cloud_claim_endpoint.py
       - name: Cloud HTTP API router contract
         run: PYTHONPATH=cloud-backend python tools/check_cloud_api_router.py
+      - name: Authenticated cloud API runtime
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_api_runtime.py
       - name: FCM HTTP v1 sender contract
         run: PYTHONPATH=cloud-backend python tools/check_cloud_fcm_sender.py
       - name: MQTT event to push bridge contract
