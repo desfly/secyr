@@ -47,6 +47,9 @@ kotlin = sorted((root / 'android').rglob('*.kt'))
 esp_sources = sorted((root / 'firmware/esp-idf').rglob('*.cpp'))
 esp_syntax_files_passed = len(esp_sources)
 
+stage('android cloud account contract')
+subprocess.run([sys.executable, str(root / 'tools/check_android_cloud_account_contract.py')], check=True)
+
 stage('generate factory identity test bundle')
 with tempfile.TemporaryDirectory(prefix='homeguard-factory-test-') as temporary:
     factory_dir = Path(temporary) / 'factory'
