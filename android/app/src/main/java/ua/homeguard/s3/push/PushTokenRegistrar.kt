@@ -17,10 +17,10 @@ object PushTokenRegistrar {
     suspend fun register(settings: AppSettings, fcmToken: String) = withContext(Dispatchers.IO) {
         val root = settings.cloudBaseUrl.trimEnd('/')
         val deviceId = settings.deviceId.trim()
-        val bearer = CloudAccountAuth.idToken()
         if (root.isBlank() || deviceId.isBlank() || fcmToken.isBlank()) {
             throw IOException("push_registration_not_configured")
         }
+        val bearer = CloudAccountAuth.idToken()
         val body = JSONObject().put("token", fcmToken).toString()
             .toRequestBody("application/json; charset=utf-8".toMediaType())
         val request = Request.Builder()
