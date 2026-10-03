@@ -239,7 +239,7 @@ fun ProvisioningScreen(
         )
         Button(
             onClick = { onProvision(form) },
-            enabled = state.qr != null && form.wifiSsid.isNotBlank() && form.wifiPassword.length in 8..64 && !busy,
+            enabled = state.qr != null && form.wifiSsid.isNotBlank() && form.wifiPassword.length in 8..64 && !busy && (form.cloudApiUrl.isBlank() || (form.cloudApiUrl.startsWith("https://") && form.cloudAccountEmail.isNotBlank() && form.cloudAccountPassword.isNotBlank())),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Підключити HomeGuard до Wi-Fi")
