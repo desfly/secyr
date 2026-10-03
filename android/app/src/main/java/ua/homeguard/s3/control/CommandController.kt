@@ -3,6 +3,7 @@ package ua.homeguard.s3.control
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONObject
+import ua.homeguard.s3.auth.CloudAccountAuth
 import ua.homeguard.s3.model.AccessCapabilities
 import ua.homeguard.s3.model.AccessLifecycleState
 import ua.homeguard.s3.model.AccessRole
@@ -258,7 +259,7 @@ class CommandController(
         }
         if (target.path == ControlPath.CLOUD && target.apiBaseUrl.isNotBlank()) {
             val appSettings = settings.settings.value
-            if (appSettings.apiToken.isBlank()) return CommandReply(false, code = "authorization_required")
+            if (!CloudAccountAuth.signedIn()) return CommandReply(false, code = "authorization_required")
             return runCatching { createApi(target).cloudSemanticCommand("output.lock") }
                 .getOrElse { CommandReply(false, code = "cloud_error") }
         }
@@ -269,7 +270,7 @@ class CommandController(
         val target = endpoint.value
         val appSettings = settings.settings.value
         if (target.path == ControlPath.OFFLINE || target.apiBaseUrl.isBlank()) return CommandReply(accepted = false, code = "offline")
-        if (target.path == ControlPath.CLOUD && appSettings.apiToken.isBlank()) return CommandReply(accepted = false, code = "offline")
+        if (target.path == ControlPath.CLOUD && !CloudAccountAuth.signedIn()) return CommandReply(accepted = false, code = "authorization_required")
         if (target.path != ControlPath.CLOUD && (actor.isBlank() || localHttpSessionToken.isBlank())) {
             return CommandReply(accepted = false, code = "authorization_required")
         }
@@ -364,7 +365,7 @@ class CommandController(
         val pin = if (target.path == ControlPath.CLOUD) "" else target.certificateSha256
         return HttpDeviceApi(
             baseUrl = target.apiBaseUrl,
-            tokenProvider = { if (localRuntime) localHttpSessionToken else settings.settings.value.apiToken },
+            tokenProvider = { if (localRuntime) localHttpSessionToken else CloudAccountAuth.idToken() },
             certificatePin = pin,
             runtimeV1 = localRuntime,
         )
