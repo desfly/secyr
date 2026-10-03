@@ -241,16 +241,25 @@ void BleTransport::on_notify_subscription(bool enabled) {
 esp_err_t BleTransport::advertise() {
     ble_hs_adv_fields fields{};
     fields.flags=BLE_HS_ADV_F_DISC_GEN|BLE_HS_ADV_F_BREDR_UNSUP;
-    const auto* name = ble_svc_gap_device_name();
-    if (name != nullptr && name[0] != '\0') {
-        fields.name = reinterpret_cast<const std::uint8_t*>(name);
-        fields.name_len = static_cast<std::uint8_t>(std::min<std::size_t>(std::strlen(name), 255U));
-        fields.name_is_complete = 1;
-    }
     fields.uuids128=const_cast<ble_uuid128_t*>(&kServiceUuid);
     fields.num_uuids128=1;
     fields.uuids128_is_complete=1;
     if (ble_gap_adv_set_fields(&fields) != 0) return ESP_FAIL;
+
+    // A legacy advertising PDU is only 31 bytes. Flags + the complete 128-bit
+    // HomeGuard service UUID already consume most of it, so putting the full
+    // HOMEGUARD-S3-* name here makes ble_gap_adv_set_fields fail. Keep the UUID
+    // in the primary advertisement (Android filters on it) and publish the full
+    // device name in the scan response (Android validates that name afterwards).
+    ble_hs_adv_fields response{};
+    const auto* name = ble_svc_gap_device_name();
+    if (name != nullptr && name[0] != '\0') {
+        response.name = reinterpret_cast<const std::uint8_t*>(name);
+        response.name_len = static_cast<std::uint8_t>(std::min<std::size_t>(std::strlen(name), 29U));
+        response.name_is_complete = 1;
+        if (ble_gap_adv_rsp_set_fields(&response) != 0) return ESP_FAIL;
+    }
+
     ble_gap_adv_params params{};
     params.conn_mode=BLE_GAP_CONN_MODE_UND;
     params.disc_mode=BLE_GAP_DISC_MODE_GEN;
