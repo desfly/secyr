@@ -7,6 +7,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import ua.homeguard.s3.auth.CloudAccountAuth
 import ua.homeguard.s3.storage.AppSettings
 import java.io.IOException
 
@@ -16,8 +17,8 @@ object PushTokenRegistrar {
     suspend fun register(settings: AppSettings, fcmToken: String) = withContext(Dispatchers.IO) {
         val root = settings.cloudBaseUrl.trimEnd('/')
         val deviceId = settings.deviceId.trim()
-        val bearer = settings.apiToken.trim()
-        if (root.isBlank() || deviceId.isBlank() || bearer.isBlank() || fcmToken.isBlank()) {
+        val bearer = CloudAccountAuth.idToken()
+        if (root.isBlank() || deviceId.isBlank() || fcmToken.isBlank()) {
             throw IOException("push_registration_not_configured")
         }
         val body = JSONObject().put("token", fcmToken).toString()
