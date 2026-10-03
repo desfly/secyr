@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from .api_runtime import build_cloud_api
 from .http_server import serve
-from .oidc_verifier import OidcTokenVerifier
+from .oidc_verifier import FirebaseTokenVerifier
 
 def _required(name:str)->str:
     value=os.environ.get(name,"").strip()
@@ -19,10 +19,8 @@ class _MqttPublisher:
 
 def main()->None:
     import paho.mqtt.client as mqtt
-    verifier=OidcTokenVerifier(
-        issuer=_required("HOMEGUARD_OIDC_ISSUER"),
-        audience=_required("HOMEGUARD_OIDC_AUDIENCE"),
-        jwks_uri=_required("HOMEGUARD_OIDC_JWKS_URI"),
+    verifier=FirebaseTokenVerifier(
+        project_id=_required("HOMEGUARD_FIREBASE_PROJECT_ID"),
     )
     db=Path(os.environ.get("HOMEGUARD_CLOUD_DB","homeguard-cloud.db"))
     mqtt_host=_required("HOMEGUARD_MQTT_HOST")
