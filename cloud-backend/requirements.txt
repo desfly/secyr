@@ -1,0 +1,3 @@
+firebase-admin>=6.5,<8
+google-auth>=2.35,<3
+paho-mqtt>=2.1,<3
