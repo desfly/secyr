@@ -128,6 +128,8 @@ jobs:
         run: PYTHONPATH=cloud-backend python tools/check_cloud_mqtt_event_bridge.py
       - name: Persistent MQTT event runtime contract
         run: PYTHONPATH=cloud-backend python tools/check_cloud_mqtt_runtime.py
+      - name: Alarm push runtime composition
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_alarm_push_runtime.py
       - name: Web UI JavaScript syntax
         run: node --check web/app.js && node --check web/access-session.js && node --check web/factory-reset.js
       - name: Web UI browser boot smoke
