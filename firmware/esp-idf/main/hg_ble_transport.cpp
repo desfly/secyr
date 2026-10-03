@@ -171,7 +171,7 @@ esp_err_t BleTransport::start(const char* device_name) {
     ble_hs_cfg.sm_mitm = 0;
     ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
     ble_store_config_init();
-    if (xTaskCreate(host_task,"hg_ble_host",4096,nullptr,5,nullptr) != pdPASS) return ESP_ERR_NO_MEM;
+    if (xTaskCreate(host_task,"hg_ble_host",8192,nullptr,5,nullptr) != pdPASS) return ESP_ERR_NO_MEM;
     ESP_LOGI(kTag,"NimBLE HomeGuard transport started");
     return ESP_OK;
 }
