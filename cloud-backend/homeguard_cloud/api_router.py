@@ -8,12 +8,13 @@ import json
 import re
 from .http_endpoint import HttpResult
 
-_ROUTE=re.compile(r"^/v1/devices/([^/]+)/(claim|push-tokens)$")
+_ROUTE=re.compile(r"^/v1/devices/([^/]+)/(claim|push-tokens|api/command)$")
 
 class CloudApiRouter:
-    def __init__(self,*,claim_endpoint,push_endpoint):
+    def __init__(self,*,claim_endpoint,push_endpoint,command_endpoint=None):
         self.claim_endpoint=claim_endpoint
         self.push_endpoint=push_endpoint
+        self.command_endpoint=command_endpoint
 
     def handle(self,*,method:str,path:str,headers:dict[str,str],body:bytes)->HttpResult:
         match=_ROUTE.fullmatch(path)
@@ -48,4 +49,6 @@ class CloudApiRouter:
             return self.push_endpoint.post(bearer_token=bearer,device_id=device_id,body=payload)
         if route=="push-tokens" and verb=="DELETE":
             return self.push_endpoint.delete(bearer_token=bearer,device_id=device_id,body=payload)
+        if route=="api/command" and verb=="POST" and self.command_endpoint is not None:
+            return self.command_endpoint.post(bearer_token=bearer,device_id=device_id,body=payload)
         return HttpResult(405,{"ok":False,"reason":"method_not_allowed"})
