@@ -246,11 +246,8 @@ esp_err_t BleTransport::advertise() {
     fields.uuids128_is_complete=1;
     if (ble_gap_adv_set_fields(&fields) != 0) return ESP_FAIL;
 
-    // A legacy advertising PDU is only 31 bytes. Flags + the complete 128-bit
-    // HomeGuard service UUID already consume most of it, so putting the full
-    // HOMEGUARD-S3-* name here makes ble_gap_adv_set_fields fail. Keep the UUID
-    // in the primary advertisement (Android filters on it) and publish the full
-    // device name in the scan response (Android validates that name afterwards).
+    // Keep the 128-bit service UUID in the primary advertisement and put the
+    // full HomeGuard device name in the scan response to stay within 31 bytes.
     ble_hs_adv_fields response{};
     const auto* name = ble_svc_gap_device_name();
     if (name != nullptr && name[0] != '\0') {

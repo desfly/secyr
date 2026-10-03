@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "214828722921",
+    "project_id": "homeguard-s3",
+    "storage_bucket": "homeguard-s3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:214828722921:android:582e3fe22454f8fa2fde78",
+        "android_client_info": {
+          "package_name": "ua.homeguard.s3.test55"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBXMMQD8H367ATVXjO-RkWRud7UQZB8KpQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

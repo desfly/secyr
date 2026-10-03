@@ -35,6 +35,12 @@ jobs:
           g++ --version
           cmake --version
           ninja --version
+      - name: Install cloud backend production dependencies
+        run: python -m pip install -r cloud-backend/requirements.txt
+      - name: Verify cloud backend production imports
+        shell: bash
+        run: |
+          python -c "import firebase_admin, google.auth, paho.mqtt.client; print('cloud production imports: ok')"
       - name: Project preflight
         run: python tools/preflight_firmware.py
       - name: Generate BENCH validation report
@@ -104,8 +110,44 @@ jobs:
         run: python tools/check_android_discovery_contract.py
       - name: Android access lifecycle audit
         run: python tools/check_android_access_contract.py
+      - name: Android cloud lock regression audit
+        run: python tools/check_android_cloud_lock_contract.py
+      - name: Web alarm session regression audit
+        run: python tools/check_web_alarm_session_contract.py
       - name: Cloud runtime contract
         run: python tools/check_cloud_runtime_contract.py
+      - name: Cloud backend command contract
+        run: python tools/check_cloud_backend_contract.py
+      - name: Cloud backend signature compatibility
+        run: python tools/check_cloud_backend_signer.py
+      - name: Cloud backend durable replay counter
+        run: python tools/check_cloud_backend_counter.py
+      - name: Cloud backend lock end-to-end
+        run: python tools/check_cloud_backend_lock_e2e.py
+      - name: Cloud alarm push routing contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_event_push.py
+      - name: Cloud push token endpoint contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_push_endpoint.py
+      - name: Cloud device claim endpoint contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_claim_endpoint.py
+      - name: Cloud HTTP API router contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_api_router.py
+      - name: Authenticated cloud API runtime
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_api_runtime.py
+      - name: Cloud OIDC verifier contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_oidc_verifier.py
+      - name: Production cloud API worker contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_api_worker.py
+      - name: FCM HTTP v1 sender contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_fcm_sender.py
+      - name: MQTT event to push bridge contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_mqtt_event_bridge.py
+      - name: Persistent MQTT event runtime contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_mqtt_runtime.py
+      - name: Alarm push runtime composition
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_alarm_push_runtime.py
+      - name: Production alarm push worker contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_alarm_push_worker.py
       - name: Web UI JavaScript syntax
         run: node --check web/app.js && node --check web/access-session.js && node --check web/factory-reset.js
       - name: Web UI browser boot smoke

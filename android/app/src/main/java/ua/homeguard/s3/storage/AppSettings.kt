@@ -7,6 +7,7 @@ data class AppSettings(
     val autoReconnect: Boolean = true,
     val remoteAccessEnabled: Boolean = false,
     val cloudBaseUrl: String = "",
+    val cloudAccountEmail: String = "",
     val lastKnownLocalUrl: String = "",
     val localCertificateSha256: String = "",
     val mqttBrokerUri: String = "",

@@ -6,8 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.media.RingtoneManager
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -19,31 +17,24 @@ import ua.homeguard.s3.storage.AppSettings
 
 class HomeGuardNotifications(private val context: Context) {
     companion object {
-        const val CHANNEL_CRITICAL = "homeguard_critical_alarm_v2"
+        // New channel ID is intentional: Android notification-channel sound settings
+        // are immutable after creation. v3 replaces the old alarm-sound channel.
+        const val CHANNEL_CRITICAL = "homeguard_critical_alarm_v3"
         const val CHANNEL_STATUS = "homeguard_status"
     }
 
     fun createChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
-        val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_CRITICAL,
                 "HomeGuard · ТРИВОГА",
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "Тривога HomeGuard: звук і вібрація"
-                enableVibration(true)
-                vibrationPattern = longArrayOf(0, 500, 250, 500, 250, 900)
-                setSound(
-                    alarmSound,
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build(),
-                )
+                description = "Тривога HomeGuard: керований сигнал у застосунку"
+                enableVibration(false)
+                setSound(null, null)
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
         )
@@ -85,12 +76,10 @@ class HomeGuardNotifications(private val context: Context) {
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
 
-        if (critical && Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            builder
-                .setSound(alarmSound)
-                .setVibrate(longArrayOf(0, 500, 250, 500, 250, 900))
+        // Alarm audio and vibration are owned by MainActivity.startForegroundAlarm().
+        // Keeping the notification silent avoids a second, uncancellable ringtone.
+        if (critical) {
+            builder.setSilent(true)
         }
         val notification = builder.build()
 

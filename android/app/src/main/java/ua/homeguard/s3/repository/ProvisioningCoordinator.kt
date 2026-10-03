@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import ua.homeguard.s3.auth.CloudAccountAuth
 import ua.homeguard.s3.model.DiscoveredDevice
 import ua.homeguard.s3.model.ProvisioningForm
 import ua.homeguard.s3.model.ProvisioningPhase
@@ -62,6 +63,10 @@ class ProvisioningCoordinator(
                 require(form.wifiSsid.isNotBlank()) { "Вкажіть домашню Wi-Fi мережу" }
                 require(form.wifiPassword.length in 8..64) { "Перевірте пароль домашньої Wi-Fi мережі" }
                 val localApiToken = randomToken()
+                if (form.cloudApiUrl.isNotBlank()) {
+                    require(form.cloudApiUrl.startsWith("https://")) { "Cloud API має використовувати HTTPS" }
+                    CloudAccountAuth.signIn(form.cloudAccountEmail, form.cloudAccountPassword)
+                }
                 val handoff = ProvisioningHandoff(qr.deviceId, 60_000L)
 
                 val provisionedOverBle = if (ble.isAvailable()) {
@@ -124,7 +129,8 @@ class ProvisioningCoordinator(
                         apiToken = localApiToken,
                         autoReconnect = true,
                         remoteAccessEnabled = form.cloudEndpoint.isNotBlank(),
-                        cloudBaseUrl = "",
+                        cloudBaseUrl = form.cloudApiUrl.trimEnd('/'),
+                        cloudAccountEmail = form.cloudAccountEmail.trim(),
                         lastKnownLocalUrl = "",
                         localCertificateSha256 = qr.certificateSha256
                     )

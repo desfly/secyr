@@ -16,7 +16,7 @@ import kotlin.coroutines.resumeWithException
 
 class HttpDeviceApi(
     baseUrl: String,
-    private val tokenProvider: () -> String,
+    private val tokenProvider: suspend () -> String,
     certificatePin: String = "",
     private val runtimeV1: Boolean = false,
 ) : DeviceApi {
@@ -178,6 +178,17 @@ class HttpDeviceApi(
         return CommandReply(
             accepted = accepted,
             code = if (accepted) "accepted" else json.optString("reason", json.optString("status", "rejected")),
+        )
+    }
+
+    suspend fun cloudSemanticCommand(command: String): CommandReply {
+        require(command.matches(Regex("^[a-z0-9_.-]{1,64}$"))) { "Cloud command is invalid" }
+        if (runtimeV1 || tokenProvider().isBlank()) return CommandReply(false, code = "authorization_required")
+        val json = execute(LegacyApiContract.COMMAND_PATH, "POST", JSONObject().put("command", command))
+        val accepted = json.optBoolean("ok", json.optBoolean("accepted", false))
+        return CommandReply(
+            accepted = accepted,
+            code = if (accepted) "accepted" else json.optString("reason", json.optString("code", "rejected")),
         )
     }
 

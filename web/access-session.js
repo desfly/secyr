@@ -168,9 +168,17 @@
         if (!authRecoveryPromise) {
           authRecoveryPromise = (async () => {
             try {
-              const stateResponse = await originalFetch("/api/v1/access/state", {cache:"no-store"});
-              const stateBody = await apiBody(stateResponse);
-              if (stateResponse.ok && stateBody.ok !== false && stateBody.state === "login_required" && session) {
+              // /api/v1/access/state is intentionally public and reports
+              // login_required even while another bearer session is valid. It
+              // cannot prove that this browser token was revoked. Probe a
+              // protected read with the current bearer instead.
+              const probeResponse = await originalFetch("/api/v1/access/users", {
+                method:"POST",
+                cache:"no-store",
+                headers:{"Content-Type":"application/json","Authorization":authHeader()},
+                body:JSON.stringify({action:"list",actor:session.actor})
+              });
+              if (probeResponse.status === 401 && session) {
                 await recoverAccessGate("Сесію контролера завершено. Увійдіть повторно.");
               }
             } catch (_) {

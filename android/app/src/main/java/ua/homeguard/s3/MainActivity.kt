@@ -146,17 +146,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        settings = SettingsStore(this)
+        HomeGuardRuntime.ensureStarted(this)
+        settings = HomeGuardRuntime.settings
+        discovery = HomeGuardRuntime.discovery
+        resolver = HomeGuardRuntime.resolver
+        telemetry = HomeGuardRuntime.telemetry
+        session = HomeGuardRuntime.session
         registeredDevices = RegisteredDeviceStore(this)
         eventHistory = EventHistoryStore(this)
-        discovery = LocalDiscoveryCoordinator(this, lifecycleScope)
-        resolver = DeviceEndpointResolver(settings, discovery, lifecycleScope)
+        telemetry.seedEvents(eventHistory.load())
         provisioning = ProvisioningCoordinator(this, settings, discovery, lifecycleScope)
-        telemetry = TelemetrySocket().apply { seedEvents(eventHistory.load()) }
-        session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry)
         commands = CommandController(resolver.endpoint, settings)
         notifications = HomeGuardNotifications(this)
         notifications.createChannels()
+        ContextCompat.startForegroundService(this, Intent(this, AlarmMonitorService::class.java))
         requestLocalNetworkPermission()
 
         lifecycleScope.launch {
@@ -172,19 +175,9 @@ class MainActivity : ComponentActivity() {
                 if (snapshot.mode == SystemMode.ALARM && !alarmUiActive.value) {
                     alarmUiActive.value = true
                     alarmSourceId.value = 0
-                    startForegroundAlarm()
-                    notifications.notify(
-                        SystemEventRecord(
-                            sequence = snapshot.sequence,
-                            timestampMs = System.currentTimeMillis(),
-                            event = "ALARM",
-                            sourceId = 0,
-                            value = 1,
-                        ),
-                        settings.settings.value,
-                    )
                 } else if (!zoneAlarmArmed) {
-                    stopForegroundAlarm()
+                    alarmUiActive.value = false
+                    alarmSourceId.value = 0
                 }
             }
         }
@@ -202,8 +195,7 @@ class MainActivity : ComponentActivity() {
                     alarmSourceId.value = event.sourceId
                     if (!alarmUiActive.value) {
                         alarmUiActive.value = true
-                        startForegroundAlarm()
-                        notifications.notify(event.copy(event = "ALARM"), settings.settings.value)
+                        // Alarm audio/vibration/notification are owned by AlarmMonitorService.
                     }
                 } else if (type != "ALARM") {
                     notifications.notify(event, settings.settings.value)
@@ -234,9 +226,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        discovery.start()
-        session.start()
-
         // Keep the light button tied to the controller's actual output #4
         // state, including changes made from the web UI or automatic zone logic.
         lifecycleScope.launch {
@@ -455,16 +444,10 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
             }
-            val saved = settings.savedLogin(device.deviceId)
-            if (saved == null) {
-                commandStatus.value = "BLE: немає збереженого входу · ${device.name}"
-                return@launch
-            }
-            commandStatus.value = "BLE: підключення · ${device.name}…"
-            if (!commands.ensureBleSession(device.deviceId, saved.actor, saved.pin)) {
-                commandStatus.value = "BLE: не вдалося підключитися · ${device.name}"
-                return@launch
-            }
+            // Do not synchronously establish BLE here. A cold BLE connection can block
+            // the object-card action for up to 20 seconds even when LAN is already
+            // available. CommandController.execute() already prefers BLE when it is
+            // ready and otherwise immediately uses the resolved LAN/cloud route.
             val reply = commands.execute(type, accessSession.value?.actor.orEmpty())
             commandStatus.value = if (reply.accepted) "Виконано · ${device.name}" else "Не виконано · ${reply.code}"
         }
@@ -480,18 +463,9 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
             }
-            // Door workflow: establish the saved per-device BLE session on demand
-            // even when Wi-Fi/LAN is unavailable, then let the universal router fall back.
-            val saved = settings.savedLogin(device.deviceId)
-            if (saved == null) {
-                commandStatus.value = "BLE: немає збереженого входу · ${device.name}"
-                return@launch
-            }
-            commandStatus.value = "BLE: підключення · ${device.name}…"
-            if (!commands.ensureBleSession(device.deviceId, saved.actor, saved.pin)) {
-                commandStatus.value = "BLE: не вдалося підключитися · ${device.name}"
-                return@launch
-            }
+            // Do not block the door action on a cold BLE connection. pulseLock()
+            // already prefers an authenticated BLE link when ready, then falls back
+            // immediately to the resolved LAN/cloud route.
             val reply = commands.pulseLock(accessSession.value?.actor.orEmpty())
             commandStatus.value = if (reply.accepted) "Замок · 5 с · ${device.name}" else "Замок не виконано · ${reply.code}"
         }
