@@ -50,6 +50,15 @@ esp_syntax_files_passed = len(esp_sources)
 stage('android cloud account contract')
 subprocess.run([sys.executable, str(root / 'tools/check_android_cloud_account_contract.py')], check=True)
 
+stage('cloud Firebase verifier contract')
+subprocess.run([sys.executable, str(root / 'tools/check_cloud_oidc_verifier.py')], check=True)
+
+stage('cloud API runtime contract')
+subprocess.run([sys.executable, str(root / 'tools/check_cloud_api_runtime.py')], check=True)
+
+stage('cloud API worker contract')
+subprocess.run([sys.executable, str(root / 'tools/check_cloud_api_worker.py')], check=True)
+
 stage('generate factory identity test bundle')
 with tempfile.TemporaryDirectory(prefix='homeguard-factory-test-') as temporary:
     factory_dir = Path(temporary) / 'factory'
