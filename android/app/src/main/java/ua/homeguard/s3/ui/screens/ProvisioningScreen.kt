@@ -118,6 +118,7 @@ fun ProvisioningScreen(
     var manualAddressTouched by remember { mutableStateOf(false) }
     var wifiPasswordVisible by remember { mutableStateOf(false) }
     var cloudTokenVisible by remember { mutableStateOf(false) }
+    var cloudPasswordVisible by remember { mutableStateOf(false) }
     var wifiScanBusy by remember { mutableStateOf(false) }
     var wifiScanError by remember { mutableStateOf("") }
     var wifiNetworks by remember { mutableStateOf(emptyList<HomeGuardWifiNetwork>()) }
@@ -269,6 +270,42 @@ fun ProvisioningScreen(
                 }
             },
         )
+        OutlinedTextField(
+            form.cloudApiUrl,
+            { form = form.copy(cloudApiUrl = it) },
+            label = { Text("HTTPS адреса HomeGuard Cloud API") },
+            supportingText = { Text("Окремо від MQTTS брокера; потрібна для команд і push.") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            form.cloudAccountEmail,
+            { form = form.copy(cloudAccountEmail = it) },
+            label = { Text("Email акаунта HomeGuard") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            form.cloudAccountPassword,
+            { form = form.copy(cloudAccountPassword = it) },
+            label = { Text("Пароль акаунта HomeGuard") },
+            visualTransformation = if (cloudPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                TextButton(onClick = { cloudPasswordVisible = !cloudPasswordVisible }) {
+                    Text(if (cloudPasswordVisible) "Сховати" else "Показати")
+                }
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (form.cloudApiUrl.isNotBlank() &&
+            (!form.cloudApiUrl.startsWith("https://") ||
+             form.cloudAccountEmail.isBlank() ||
+             form.cloudAccountPassword.isBlank())) {
+            Text("Для Cloud API потрібні HTTPS адреса, email і пароль.")
+        }
 
         HorizontalDivider()
         Text("Якщо HomeGuard уже підключений до Wi-Fi")
