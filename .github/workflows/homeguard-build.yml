@@ -130,6 +130,8 @@ jobs:
         run: PYTHONPATH=cloud-backend python tools/check_cloud_api_runtime.py
       - name: Cloud OIDC verifier contract
         run: PYTHONPATH=cloud-backend python tools/check_cloud_oidc_verifier.py
+      - name: Production cloud API worker contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_api_worker.py
       - name: FCM HTTP v1 sender contract
         run: PYTHONPATH=cloud-backend python tools/check_cloud_fcm_sender.py
       - name: MQTT event to push bridge contract
