@@ -61,6 +61,8 @@ fun DeviceListScreen(
     onRenameDevice: (RegisteredDevice, String) -> Unit,
     onDeleteDevice: (RegisteredDevice) -> Unit,
     onOpenDevice: (RegisteredDevice) -> Unit,
+    onQuickToggleSecurity: (RegisteredDevice, Boolean) -> Unit,
+    onQuickLock: (RegisteredDevice) -> Unit,
 ) {
     val context = LocalContext.current
     val profilePrefs = remember { context.getSharedPreferences("myfist_profile", Context.MODE_PRIVATE) }
@@ -201,7 +203,28 @@ fun DeviceListScreen(
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Text(device.name, style = MaterialTheme.typography.titleMedium, color = titleColor)
                         DeviceStatePicons(online = online, authorized = device.authorized, active = active, snapshot = snapshot)
-                        if (!device.authorized) Text("Авторизацію втрачено", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        // Daily controls must stay visible on the object card.  The saved
+                        // credential is validated when a command is sent; hiding the controls behind
+                        // this cached flag makes the door workflow impossible after a transient
+                        // session/reboot state.
+                        // Do not let transient/empty snapshots flip the security action.
+                        // Only a valid active-controller snapshot is authoritative.
+                        val hasAuthoritativeSecurityState = active && snapshot.sequence > 0
+                        val armed = hasAuthoritativeSecurityState && snapshot.mode.name != "DISARMED"
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Button(
+                                onClick = { onQuickToggleSecurity(device, armed) },
+                                modifier = Modifier.weight(1f),
+                            ) { Text(if (!hasAuthoritativeSecurityState) "Охорона" else if (armed) "Зняти" else "Охорона") }
+                            Button(
+                                onClick = { onQuickLock(device) },
+                                modifier = Modifier.weight(1f),
+                            ) { Text("🔒 Замок") }
+                        }
+                        if (!device.authorized) Text("Потрібна перевірка авторизації", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         if (expanded) {
                             if (active) {
                                 val problemZones = snapshot.zones.filter { it.state.contains("alarm", true) || it.state.contains("open", true) || it.state.contains("tamper", true) || it.state.contains("fault", true) }

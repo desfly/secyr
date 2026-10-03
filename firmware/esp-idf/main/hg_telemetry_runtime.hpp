@@ -2,6 +2,7 @@
 
 #include "homeguard/telemetry.hpp"
 #include "esp_err.h"
+#include "freertos/FreeRTOS.h"
 
 #include <array>
 #include <cstdint>
@@ -29,10 +30,15 @@ public:
 
 private:
     static void task_entry(void* context);
+    static void zone_task_entry(void* context);
     void run();
+    void run_zones();
     void update_zone_model(const std::array<hg::ZoneState, 8>& zones, std::uint64_t now_ms);
     void update_zone_light(const std::array<hg::ZoneState, 8>& zones, std::uint64_t now_ms);
     bool set_light_output(bool active, std::uint64_t now_ms);
+
+    std::array<hg::ZoneState, 8> zone_snapshot_{};
+    portMUX_TYPE zone_snapshot_lock_ = portMUX_INITIALIZER_UNLOCKED;
 
     HardwareBootstrap* hardware_{nullptr};
     WebsocketTelemetry* websocket_{nullptr};
@@ -45,6 +51,7 @@ private:
     bool light_cycle_active_{false};
     bool light_restore_active_{false};
     std::uint64_t light_cycle_deadline_ms_{0};
+    std::uint64_t next_telemetry_ms_{0};
 };
 
 }  // namespace homeguard::idf

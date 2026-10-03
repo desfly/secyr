@@ -50,6 +50,11 @@ int rx_access(std::uint16_t, std::uint16_t, ble_gatt_access_ctxt* ctxt, void*) {
     return g_owner->accept_rx_fragment(value.data(),copied);
 }
 
+int tx_access(std::uint16_t, std::uint16_t, ble_gatt_access_ctxt* ctxt, void*) {
+    if (ctxt == nullptr || ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) return BLE_ATT_ERR_UNLIKELY;
+    return 0;
+}
+
 const ble_gatt_chr_def kCharacteristics[] = {
     {
         .uuid = &kRxUuid.u,
@@ -58,8 +63,8 @@ const ble_gatt_chr_def kCharacteristics[] = {
     },
     {
         .uuid = &kTxUuid.u,
-        .access_cb = nullptr,
-        .flags = BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_READ_ENC,
+        .access_cb = tx_access,
+        .flags = BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC,
         .val_handle = &g_tx_value_handle,
     },
     {0}
@@ -136,20 +141,37 @@ esp_err_t BleTransport::start(const char* device_name) {
     if (g_owner && g_owner != this) return ESP_ERR_INVALID_STATE;
     g_owner = this;
     auto error = nimble_port_init();
-    if (error != ESP_OK) return error;
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag, "nimble_port_init failed: %s (%d)", esp_err_to_name(error), static_cast<int>(error));
+        return error;
+    }
+    ESP_LOGI(kTag, "NimBLE port initialized");
     ble_svc_gap_init();
     ble_svc_gatt_init();
-    if (ble_svc_gap_device_name_set(device_name) != 0) return ESP_FAIL;
-    int rc = ble_gatts_count_cfg(kServices);
-    if (rc == 0) rc = ble_gatts_add_svcs(kServices);
-    if (rc != 0) return ESP_FAIL;
+    int rc = ble_svc_gap_device_name_set(device_name);
+    if (rc != 0) {
+        ESP_LOGE(kTag, "GAP device-name setup failed: rc=%d", rc);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(kTag, "GAP device name ready: %s", device_name);
+    rc = ble_gatts_count_cfg(kServices);
+    if (rc != 0) {
+        ESP_LOGE(kTag, "GATT service sizing failed: rc=%d", rc);
+        return ESP_FAIL;
+    }
+    rc = ble_gatts_add_svcs(kServices);
+    if (rc != 0) {
+        ESP_LOGE(kTag, "GATT service registration failed: rc=%d", rc);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(kTag, "GATT HomeGuard service registered");
     ble_hs_cfg.sync_cb = stack_sync;
     ble_hs_cfg.sm_bonding = 1;
     ble_hs_cfg.sm_sc = 1;
     ble_hs_cfg.sm_mitm = 0;
     ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
     ble_store_config_init();
-    if (xTaskCreate(host_task,"hg_ble_host",4096,nullptr,5,nullptr) != pdPASS) return ESP_ERR_NO_MEM;
+    if (xTaskCreate(host_task,"hg_ble_host",8192,nullptr,5,nullptr) != pdPASS) return ESP_ERR_NO_MEM;
     ESP_LOGI(kTag,"NimBLE HomeGuard transport started");
     return ESP_OK;
 }
@@ -223,6 +245,21 @@ esp_err_t BleTransport::advertise() {
     fields.num_uuids128=1;
     fields.uuids128_is_complete=1;
     if (ble_gap_adv_set_fields(&fields) != 0) return ESP_FAIL;
+
+    // A legacy advertising PDU is only 31 bytes. Flags + the complete 128-bit
+    // HomeGuard service UUID already consume most of it, so putting the full
+    // HOMEGUARD-S3-* name here makes ble_gap_adv_set_fields fail. Keep the UUID
+    // in the primary advertisement (Android filters on it) and publish the full
+    // device name in the scan response (Android validates that name afterwards).
+    ble_hs_adv_fields response{};
+    const auto* name = ble_svc_gap_device_name();
+    if (name != nullptr && name[0] != '\0') {
+        response.name = reinterpret_cast<const std::uint8_t*>(name);
+        response.name_len = static_cast<std::uint8_t>(std::min<std::size_t>(std::strlen(name), 29U));
+        response.name_is_complete = 1;
+        if (ble_gap_adv_rsp_set_fields(&response) != 0) return ESP_FAIL;
+    }
+
     ble_gap_adv_params params{};
     params.conn_mode=BLE_GAP_CONN_MODE_UND;
     params.disc_mode=BLE_GAP_DISC_MODE_GEN;

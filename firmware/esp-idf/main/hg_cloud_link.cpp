@@ -11,8 +11,10 @@
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "nvs.h"
 #include "homeguard/access_control.hpp"
+#include "homeguard/output_command.hpp"
 #include "homeguard/system_model.hpp"
 
 #include <algorithm>
@@ -690,6 +692,44 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         }
         xSemaphoreGive(replay_mutex);
         publish_response(true, "challenge_issued");
+        return;
+    }
+
+    // The lock is a first-class signed cloud command.  Apply it through the
+    // same SystemModel output command path used by local HTTP; the existing
+    // runtime synchronization loop is responsible for mirroring output #5 to
+    // the direct lock relay.  Keep replay persistence above this side effect.
+    if (command == "output.lock") {
+        // Output #5 is the direct lock relay.  Keep the cloud action bounded:
+        // ON is accepted only through the normal interlock, then an independent
+        // task restores OFF after five seconds even if the MQTT client drops.
+        const hg::BootReadinessReport readiness{};
+        const auto result = hg::apply_output_command(*model_, readiness, {5, true, false, 0});
+        if (result.status != hg::OutputCommandStatus::Applied) {
+            xSemaphoreGive(replay_mutex);
+            publish_response(false, hg::to_string(result.status));
+            return;
+        }
+        (void)bus_->dispatch_all();
+        xSemaphoreGive(replay_mutex);
+        const auto task_ok = xTaskCreate(
+            [](void* context) {
+                auto* self = static_cast<CloudLink*>(context);
+                vTaskDelay(pdMS_TO_TICKS(5000));
+                if (self != nullptr && self->model_ != nullptr) {
+                    (void)self->model_->set_output_active(5, false, 0);
+                    if (self->bus_ != nullptr) (void)self->bus_->dispatch_all();
+                }
+                vTaskDelete(nullptr);
+            },
+            "hg_lock_pulse", 2048, this, 5, nullptr);
+        if (task_ok != pdPASS) {
+            (void)model_->set_output_active(5, false, 0);
+            (void)bus_->dispatch_all();
+            publish_response(false, "lock_timer_failed");
+            return;
+        }
+        publish_response(true, "accepted_5s");
         return;
     }
 

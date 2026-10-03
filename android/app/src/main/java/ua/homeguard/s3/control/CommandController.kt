@@ -141,16 +141,35 @@ class CommandController(
         ble.disconnect()
     }
 
-    suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
-        val httpResult = runCatching { executeHttp(type, actor, credential) }
-        val httpReply = httpResult.getOrNull()
-        if (httpReply != null && httpReply.code != "offline" && httpReply.code != "authorization_required") return httpReply
+    suspend fun ensureBleSession(deviceId: String, actor: String, pin: String): Boolean {
+        if (ble.isReady()) return true
+        if (deviceId.isBlank() || actor.isBlank() || pin.isBlank()) return false
+        return runCatching {
+            ble.connectAndAuthenticate(
+                deviceId = deviceId,
+                actor = actor,
+                pin = pin,
+                connectTimeoutMs = 12_000L,
+                authTimeoutMs = 8_000L,
+            )
+            ble.isReady()
+        }.getOrDefault(false)
+    }
 
+    suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
+        // For local security controls prefer the already-authenticated BLE link.
+        // This keeps Arm Home/Away and Disarm responsive even when LAN/MQTT is
+        // unavailable; the controller remains authoritative for authorization.
         if (supportsBle(type) && ble.isReady()) {
             val bleReply = runCatching { ble.execute(type) }.getOrNull()
             if (bleReply != null) return mapBleReply(bleReply)
         }
 
+        // HTTP is transport-agnostic here: DeviceEndpoint may resolve to local
+        // Wi-Fi/Ethernet or CLOUD.  BLE failure therefore falls through to the
+        // currently resolved network/cloud path.
+        val httpResult = runCatching { executeHttp(type, actor, credential) }
+        val httpReply = httpResult.getOrNull()
         return httpReply ?: CommandReply(accepted = false, code = "offline")
     }
 
@@ -214,6 +233,16 @@ class CommandController(
     }
 
     suspend fun pulseLock(actor: String): CommandReply {
+        // The object-card lock is a universal action, not a BLE-only control.
+        // Prefer an already-authorized nearby BLE session for door latency,
+        // then fall back to the resolved local network path.  Cloud lock output
+        // control is not part of the current controller API contract, so do not
+        // pretend it is supported until the protocol exposes it.
+        if (ble.isReady()) {
+            val bleReply = runCatching { mapBleReply(ble.pulseLock()) }.getOrNull()
+            if (bleReply != null && (bleReply.accepted || bleReply.duplicate)) return bleReply
+        }
+
         val target = endpoint.value
         if (target.path != ControlPath.OFFLINE && target.path != ControlPath.CLOUD &&
             target.apiBaseUrl.isNotBlank() && localHttpSessionToken.isNotBlank()) {
@@ -228,7 +257,7 @@ class CommandController(
             runCatching { api.runtimeOutputCommand(5, false, actor) }
             if (on != null && on.code != "authorization_required") return on
         }
-        return pulseLockOverBle()
+        return CommandReply(false, code = if (target.path == ControlPath.CLOUD) "cloud_lock_unsupported" else "offline")
     }
 
     private suspend fun executeHttp(type: CommandType, actor: String, credential: String): CommandReply {

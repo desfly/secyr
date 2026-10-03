@@ -16,6 +16,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.journeyapps.barcodescanner.ScanContract
@@ -74,6 +78,7 @@ class MainActivity : ComponentActivity() {
     // submitting login and is cleared immediately after success/failure.
     private val operatorPin = MutableStateFlow("")
     private val accessSession = MutableStateFlow<AccessSession?>(null)
+    @Volatile private var activeAccessDeviceId: String = ""
     private val accessLifecycle = MutableStateFlow(AccessLifecycleState.UNAVAILABLE)
     private val accessGateBusy = MutableStateFlow(false)
     private val alarmUiActive = MutableStateFlow(false)
@@ -261,6 +266,8 @@ class MainActivity : ComponentActivity() {
             val endpoint by resolver.endpoint.collectAsState()
             val provisioningState by provisioning.state.collectAsState()
             val snapshot by telemetry.snapshots().collectAsState(initial = SystemSnapshot())
+            var lastValidDeviceListSnapshot by remember { mutableStateOf(SystemSnapshot()) }
+            if (snapshot.sequence > 0) lastValidDeviceListSnapshot = snapshot
             val events by telemetry.events().collectAsState(initial = emptyList())
             val commandMessage by commandStatus.collectAsState()
             val maintenanceMessage by backupStatus.collectAsState()
@@ -333,7 +340,7 @@ class MainActivity : ComponentActivity() {
                         devices = registered,
                         discovered = devices,
                         activeDeviceId = appSettings.deviceId,
-                        snapshot = snapshot,
+                        snapshot = lastValidDeviceListSnapshot,
                         onAddDevice = { addDeviceOpen.value = true; lifecycleScope.launch { discovery.rescan() } },
                         onRenameDevice = { device, newName -> lifecycleScope.launch { registeredDevices.rename(device.deviceId, newName) } },
                         onDeleteDevice = { device ->
@@ -350,6 +357,10 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onOpenDevice = { device -> openController(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() }) },
+                        onQuickToggleSecurity = { device, armed ->
+                            executeQuickDeviceCommand(device, if (armed) CommandType.DISARM else CommandType.ARM_AWAY)
+                        },
+                        onQuickLock = { device -> executeQuickDeviceLock(device) },
                     )
 
                     currentAccessSession == null -> AccessGateScreen(
@@ -434,6 +445,58 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun executeQuickDeviceCommand(device: ua.homeguard.s3.storage.RegisteredDevice, type: CommandType) {
+        lifecycleScope.launch {
+            settings.selectDevice(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() })
+            delay(250)
+            if (accessSession.value == null || !settings.settings.value.deviceId.equals(device.deviceId, true)) {
+                if (!tryPersistentLogin(showFailure = false)) {
+                    commandStatus.value = "Потрібна авторизація · ${device.name}"
+                    return@launch
+                }
+            }
+            val saved = settings.savedLogin(device.deviceId)
+            if (saved == null) {
+                commandStatus.value = "BLE: немає збереженого входу · ${device.name}"
+                return@launch
+            }
+            commandStatus.value = "BLE: підключення · ${device.name}…"
+            if (!commands.ensureBleSession(device.deviceId, saved.actor, saved.pin)) {
+                commandStatus.value = "BLE: не вдалося підключитися · ${device.name}"
+                return@launch
+            }
+            val reply = commands.execute(type, accessSession.value?.actor.orEmpty())
+            commandStatus.value = if (reply.accepted) "Виконано · ${device.name}" else "Не виконано · ${reply.code}"
+        }
+    }
+
+    private fun executeQuickDeviceLock(device: ua.homeguard.s3.storage.RegisteredDevice) {
+        lifecycleScope.launch {
+            settings.selectDevice(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() })
+            delay(250)
+            if (accessSession.value == null || !settings.settings.value.deviceId.equals(device.deviceId, true)) {
+                if (!tryPersistentLogin(showFailure = false)) {
+                    commandStatus.value = "Потрібна авторизація · ${device.name}"
+                    return@launch
+                }
+            }
+            // Door workflow: establish the saved per-device BLE session on demand
+            // even when Wi-Fi/LAN is unavailable, then let the universal router fall back.
+            val saved = settings.savedLogin(device.deviceId)
+            if (saved == null) {
+                commandStatus.value = "BLE: немає збереженого входу · ${device.name}"
+                return@launch
+            }
+            commandStatus.value = "BLE: підключення · ${device.name}…"
+            if (!commands.ensureBleSession(device.deviceId, saved.actor, saved.pin)) {
+                commandStatus.value = "BLE: не вдалося підключитися · ${device.name}"
+                return@launch
+            }
+            val reply = commands.pulseLock(accessSession.value?.actor.orEmpty())
+            commandStatus.value = if (reply.accepted) "Замок · 5 с · ${device.name}" else "Замок не виконано · ${reply.code}"
+        }
+    }
+
     private fun openController(deviceId: String, baseUrl: String?) {
         lifecycleScope.launch {
             commands.logout()
@@ -481,8 +544,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun tryPersistentLogin(showFailure: Boolean): Boolean {
-        if (accessSession.value != null) return true
         val deviceId = settings.settings.value.deviceId
+        // A session belongs to exactly one selected controller. Never reuse an
+        // in-memory session merely because some previous object was logged in.
+        if (accessSession.value != null &&
+            activeAccessDeviceId.equals(deviceId, ignoreCase = true)) return true
+        if (accessSession.value != null) {
+            commands.logout()
+            accessSession.value = null
+            activeAccessDeviceId = ""
+        }
         val saved = settings.savedLogin(deviceId) ?: return false
         return runCatching { commands.login(saved.actor, saved.pin) }
             .fold(
@@ -490,6 +561,7 @@ class MainActivity : ComponentActivity() {
                     operatorId.value = authenticated.actor
                     operatorPin.value = ""
                     accessSession.value = authenticated
+                    activeAccessDeviceId = deviceId
                     accessLifecycle.value = AccessLifecycleState.LOGIN_REQUIRED
                     commandStatus.value = "Автовхід: ${authenticated.name} · ${authenticated.role.name.lowercase()}"
                     accessGateMessage.value = ""
@@ -498,16 +570,29 @@ class MainActivity : ComponentActivity() {
                 },
                 onFailure = { error ->
                     val reason = error.message.orEmpty()
-                    val revoked = reason.contains("401") ||
-                        reason.contains("invalid_credentials", true) ||
-                        reason.contains("unknown_user", true) ||
+                    // Bare HTTP 401 means an expired/reboot-lost transport
+                    // session, not revoked object ownership. A changed PIN is
+                    // likewise recoverable. Remove the object only when the
+                    // controller explicitly says the user itself no longer exists.
+                    val revoked = reason.contains("unknown_user", true) ||
+                        reason.contains("denied_unknown_user", true) ||
                         reason.contains("user_unavailable", true)
                     if (revoked) {
+                        // An authoritative credential/user rejection means this phone no
+                        // longer owns access to the controller. Remove the object itself;
+                        // transport failures/timeouts never enter this branch.
+                        registeredDevices.remove(deviceId)
                         settings.clearSavedLogin(deviceId)
                         commands.logout()
+                        if (settings.settings.value.deviceId.equals(deviceId, ignoreCase = true)) {
+                            settings.selectDevice("")
+                        }
                         accessSession.value = null
+                        activeAccessDeviceId = ""
+                        accessLifecycle.value = AccessLifecycleState.UNAVAILABLE
+                        deviceListOpen.value = true
                         if (showFailure) {
-                            commandStatus.value = "Збережений вхід деактивовано адміністратором"
+                            commandStatus.value = "Доступ відкликано адміністратором · об’єкт видалено"
                             accessGateMessage.value = commandStatus.value
                         }
                     }

@@ -6,6 +6,8 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_timer.h"
+#include "esp_rom_sys.h"
 
 namespace homeguard::idf {
 
@@ -16,7 +18,7 @@ constexpr std::uint8_t kConfigRegister = 0x01;
 constexpr std::uint16_t kStart = 0x8000;
 constexpr std::uint16_t kSingleShot = 0x0100;
 constexpr std::uint16_t kPga4096 = 0x0200;
-constexpr std::uint16_t kDataRate128 = 0x0080;
+constexpr std::uint16_t kDataRate860 = 0x00E0;
 constexpr std::uint16_t kComparatorDisabled = 0x0003;
 constexpr TickType_t kAccessTimeout = pdMS_TO_TICKS(250);
 
@@ -134,14 +136,31 @@ esp_err_t Ads1115::read_single_ended_mv(
         static_cast<std::uint16_t>(0x4000 + (channel << 12));
     const std::uint16_t config =
         kStart | mux | kPga4096 | kSingleShot |
-        kDataRate128 | kComparatorDisabled;
+        kDataRate860 | kComparatorDisabled;
 
     auto error = write_register(kConfigRegister, config);
     if (error == ESP_OK) {
-        vTaskDelay(pdMS_TO_TICKS(10));
+        // Do not use a fixed RTOS delay here. After changing the MUX, wait
+        // until ADS1115 reports that THIS single-shot conversion is complete;
+        // otherwise the conversion register can still contain the previous
+        // channel and the four physical inputs appear cyclically shifted.
+        const auto deadline_us = esp_timer_get_time() + 5000;
+        std::uint16_t ready_config = 0;
+        do {
+            error = read_register(kConfigRegister, &ready_config);
+            if (error != ESP_OK) break;
+            if ((ready_config & kStart) != 0U) break;
+            if (esp_timer_get_time() >= deadline_us) {
+                error = ESP_ERR_TIMEOUT;
+                break;
+            }
+            esp_rom_delay_us(100);
+        } while (true);
 
         std::uint16_t raw_unsigned = 0;
-        error = read_register(kConversionRegister, &raw_unsigned);
+        if (error == ESP_OK) {
+            error = read_register(kConversionRegister, &raw_unsigned);
+        }
         if (error == ESP_OK) {
             const auto raw = static_cast<std::int16_t>(raw_unsigned);
             *millivolts = static_cast<float>(raw) * 0.125F;

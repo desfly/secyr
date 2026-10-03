@@ -130,14 +130,12 @@ HARNESS = r"""
   await login('smoke-user', '1234');
   for (const command of ['security.arm_away', 'security.disarm', 'security.arm_home']) {
     (await waitEnabled(`[data-command="${command}"]`)).click();
-    await sleep(2100);
-    // Mock partition always reports disarmed: arm commands must not claim confirmation.
+    await sleep(300);
+    // Command acceptance must return control immediately. Authoritative state is
+    // reconciled by refresh/scheduler without holding the button for 1.8 s.
     const message = document.querySelector('#toast')?.textContent || '';
-    if (command !== 'security.disarm' && !message.includes('ще не підтверджено')) {
-      throw new Error(`unconfirmed ${command} reported success: ${message}`);
-    }
-    if (command === 'security.disarm' && !message.includes('Стан охорони підтверджено')) {
-      throw new Error(`disarm state not confirmed: ${message}`);
+    if (!message.includes('Команду прийнято')) {
+      throw new Error(`security command did not acknowledge promptly: ${message}`);
     }
   }
   if (!document.querySelector('[data-command="security.panic"]')?.disabled) throw new Error('panic unexpectedly enabled for user');

@@ -159,7 +159,7 @@ policy = {
     'request_id_encoded_as_string': 'LegacyApiContract.requestId(command.requestId)' in http_api,
     'local_tls_enabled_by_default': bool(re.search(r'config HOMEGUARD_LOCAL_TLS.*?default y', kconfig, re.S)),
     'default_api_port_443': bool(re.search(r'config HOMEGUARD_API_PORT.*?default 443', kconfig, re.S)),
-    'telemetry_interval_configured': bool(re.search(r'config HOMEGUARD_TELEMETRY_INTERVAL_MS.*?default 1000', kconfig, re.S)) and 'pdMS_TO_TICKS(1000)' in (root / 'firmware/esp-idf/main/hg_telemetry_runtime.cpp').read_text(encoding='utf-8'),
+    'telemetry_interval_configured': bool(re.search(r'config HOMEGUARD_TELEMETRY_INTERVAL_MS.*?default 1000', kconfig, re.S)) and 'kTelemetryPeriodMs = 1000ULL' in (root / 'firmware/esp-idf/main/hg_telemetry_runtime.cpp').read_text(encoding='utf-8'),
     'cloud_disabled_by_default': bool(re.search(r'config HOMEGUARD_CLOUD_ENABLED.*?default n', kconfig, re.S)),
     'bench_nvs_encryption_disabled': 'CONFIG_NVS_ENCRYPTION=y' not in sdkconfig,
     'rest_requires_bearer_token': all(item in rest for item in ['Authorization', '401 Unauthorized', 'WWW-Authenticate', 'Bearer realm=', '/api/v1/system/status', '/api/v1/system/security-command', 'request_auth::authenticated']),
