@@ -241,6 +241,12 @@ void BleTransport::on_notify_subscription(bool enabled) {
 esp_err_t BleTransport::advertise() {
     ble_hs_adv_fields fields{};
     fields.flags=BLE_HS_ADV_F_DISC_GEN|BLE_HS_ADV_F_BREDR_UNSUP;
+    const auto* name = ble_svc_gap_device_name();
+    if (name != nullptr && name[0] != '\0') {
+        fields.name = reinterpret_cast<const std::uint8_t*>(name);
+        fields.name_len = static_cast<std::uint8_t>(std::min<std::size_t>(std::strlen(name), 255U));
+        fields.name_is_complete = 1;
+    }
     fields.uuids128=const_cast<ble_uuid128_t*>(&kServiceUuid);
     fields.num_uuids128=1;
     fields.uuids128_is_complete=1;
