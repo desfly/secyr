@@ -16,7 +16,7 @@ import kotlin.coroutines.resumeWithException
 
 class HttpDeviceApi(
     baseUrl: String,
-    private val tokenProvider: () -> String,
+    private val tokenProvider: suspend () -> String,
     certificatePin: String = "",
     private val runtimeV1: Boolean = false,
 ) : DeviceApi {
