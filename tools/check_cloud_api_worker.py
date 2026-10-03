@@ -8,17 +8,14 @@ import homeguard_cloud.api_worker as worker
 
 old=dict(os.environ)
 try:
-    for key in ("HOMEGUARD_OIDC_ISSUER","HOMEGUARD_OIDC_AUDIENCE","HOMEGUARD_OIDC_JWKS_URI"):
-        os.environ.pop(key,None)
+    os.environ.pop("HOMEGUARD_FIREBASE_PROJECT_ID",None)
     try:
         worker.main()
         raise AssertionError("worker started without OIDC configuration")
     except RuntimeError as exc:
-        assert str(exc)=="HOMEGUARD_OIDC_ISSUER_required"
+        assert str(exc)=="HOMEGUARD_FIREBASE_PROJECT_ID_required"
 
-    os.environ["HOMEGUARD_OIDC_ISSUER"]="https://id.example"
-    os.environ["HOMEGUARD_OIDC_AUDIENCE"]="homeguard-api"
-    os.environ["HOMEGUARD_OIDC_JWKS_URI"]="https://id.example/jwks"
+    os.environ["HOMEGUARD_FIREBASE_PROJECT_ID"]="homeguard-s3"
     os.environ["HOMEGUARD_HTTP_HOST"]="127.0.0.1"
     os.environ["HOMEGUARD_HTTP_PORT"]="18080"
     os.environ["HOMEGUARD_MQTT_HOST"]="broker.example"
@@ -36,14 +33,14 @@ try:
     paho=types.ModuleType("paho"); mqttpkg=types.ModuleType("paho.mqtt"); paho.mqtt=mqttpkg; mqttpkg.client=mqtt
     sys.modules["paho"]=paho; sys.modules["paho.mqtt"]=mqttpkg; sys.modules["paho.mqtt.client"]=mqtt
     class Verifier:
-        def __init__(self,**kwargs): seen["oidc"]=kwargs
-    worker.OidcTokenVerifier=Verifier
+        def __init__(self,**kwargs): seen["firebase"]=kwargs
+    worker.FirebaseTokenVerifier=Verifier
     worker.build_cloud_api=lambda **kwargs: seen.setdefault("api",kwargs) or object()
     def fake_serve(**kwargs):
         seen["serve"]=kwargs
     worker.serve=fake_serve
     worker.main()
-    assert seen["oidc"]["audience"]=="homeguard-api"
+    assert seen["firebase"]["project_id"]=="homeguard-s3"
     assert seen["serve"]["host"]=="127.0.0.1"
     assert seen["serve"]["port"]==18080
     assert seen["mqtt_connect"]==("broker.example",8883,60)
