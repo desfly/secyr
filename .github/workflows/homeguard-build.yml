@@ -122,6 +122,8 @@ jobs:
         run: PYTHONPATH=cloud-backend python tools/check_cloud_event_push.py
       - name: Cloud push token endpoint contract
         run: PYTHONPATH=cloud-backend python tools/check_cloud_push_endpoint.py
+      - name: Cloud device claim endpoint contract
+        run: PYTHONPATH=cloud-backend python tools/check_cloud_claim_endpoint.py
       - name: FCM HTTP v1 sender contract
         run: PYTHONPATH=cloud-backend python tools/check_cloud_fcm_sender.py
       - name: MQTT event to push bridge contract
