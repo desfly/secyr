@@ -291,10 +291,12 @@ void SystemHttp::on_event(const hg::SystemEvent& event,void* context) {
 }
 
 void SystemHttp::record(const hg::SystemEvent& event) {
+    std::lock_guard<std::mutex> lock(event_log_mutex_);
     event_log_.append(event.timestamp_ms,severity_for(event.type),static_cast<std::uint16_t>(event.type),hg::system_event_type_name(event.type),event.source_id,event.value);
 }
 
 std::string SystemHttp::events_json() const {
+    std::lock_guard<std::mutex> lock(event_log_mutex_);
     std::ostringstream out;
     out << "{\"capacity\":" << hg::EventLog::capacity << ",\"events\":[";
     for (std::size_t i = 0; i < event_log_.size(); ++i) {

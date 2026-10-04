@@ -300,6 +300,8 @@ void TelemetryRuntime::run()
 {
     std::uint32_t cycles = 0;
     while (true) {
+        // Retry deferred/bounded dispatch even when no physical zone changes.
+        if (system_bus_ != nullptr) (void)system_bus_->dispatch_all();
         const auto now_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
         const auto& hardware_status = hardware_->status();
 
