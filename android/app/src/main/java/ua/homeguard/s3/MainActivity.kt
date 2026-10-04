@@ -436,22 +436,20 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             settings.selectDevice(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() })
             delay(250)
-            if (accessSession.value == null || !settings.settings.value.deviceId.equals(device.deviceId, true)) {
+            if (accessSession.value == null || !activeAccessDeviceId.equals(device.deviceId, true)) {
                 if (!tryPersistentLogin(showFailure = false)) {
                     commandStatus.value = "Потрібна авторизація · ${device.name}"
                     return@launch
                 }
             }
-            val saved = settings.savedLogin(device.deviceId)
-            if (saved == null) {
-                commandStatus.value = "BLE: немає збереженого входу · ${device.name}"
-                return@launch
+            if (!commands.hasLocalSession()) {
+                val saved = settings.savedLogin(device.deviceId)
+                if (saved == null || !commands.ensureBleSession(device.deviceId, saved.actor, saved.pin)) {
+                    commandStatus.value = "Немає авторизованого каналу · ${device.name}"
+                    return@launch
+                }
             }
-            commandStatus.value = "BLE: підключення · ${device.name}…"
-            if (!commands.ensureBleSession(device.deviceId, saved.actor, saved.pin)) {
-                commandStatus.value = "BLE: не вдалося підключитися · ${device.name}"
-                return@launch
-            }
+            commandStatus.value = "Виконання · ${device.name}…"
             val reply = commands.execute(type, accessSession.value?.actor.orEmpty())
             commandStatus.value = if (reply.accepted) "Виконано · ${device.name}" else "Не виконано · ${reply.code}"
         }
@@ -461,24 +459,20 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             settings.selectDevice(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() })
             delay(250)
-            if (accessSession.value == null || !settings.settings.value.deviceId.equals(device.deviceId, true)) {
+            if (accessSession.value == null || !activeAccessDeviceId.equals(device.deviceId, true)) {
                 if (!tryPersistentLogin(showFailure = false)) {
                     commandStatus.value = "Потрібна авторизація · ${device.name}"
                     return@launch
                 }
             }
-            // Door workflow: establish the saved per-device BLE session on demand
-            // even when Wi-Fi/LAN is unavailable, then let the universal router fall back.
-            val saved = settings.savedLogin(device.deviceId)
-            if (saved == null) {
-                commandStatus.value = "BLE: немає збереженого входу · ${device.name}"
-                return@launch
+            if (!commands.hasLocalSession()) {
+                val saved = settings.savedLogin(device.deviceId)
+                if (saved == null || !commands.ensureBleSession(device.deviceId, saved.actor, saved.pin)) {
+                    commandStatus.value = "Немає авторизованого каналу · ${device.name}"
+                    return@launch
+                }
             }
-            commandStatus.value = "BLE: підключення · ${device.name}…"
-            if (!commands.ensureBleSession(device.deviceId, saved.actor, saved.pin)) {
-                commandStatus.value = "BLE: не вдалося підключитися · ${device.name}"
-                return@launch
-            }
+            commandStatus.value = "Виконання · ${device.name}…"
             val reply = commands.pulseLock(accessSession.value?.actor.orEmpty())
             commandStatus.value = if (reply.accepted) "Замок · 5 с · ${device.name}" else "Замок не виконано · ${reply.code}"
         }
