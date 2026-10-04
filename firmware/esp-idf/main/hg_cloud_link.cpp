@@ -466,7 +466,10 @@ void CloudLink::publish_system_event(const hg::SystemEvent& event)
         static_cast<unsigned long long>(event.timestamp_ms),
         static_cast<unsigned long long>(event.sequence));
     if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(payload)) return;
-    (void)esp_mqtt_client_publish(client_, event_topic_.data(), payload, length, 1, 0);
+    // Event callbacks also run in the security zone task. Queue the payload;
+    // MQTT network writes must execute in the MQTT task, never in ADC sampling.
+    const int message_id = esp_mqtt_client_enqueue(client_, event_topic_.data(), payload, length, 1, 0, true);
+    if (message_id < 0) ESP_LOGE(kTag, "Cloud event enqueue failed: %d", message_id);
 }
 
 bool CloudLink::begin_trust_rotation()
