@@ -19,6 +19,7 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
 /** Minimal MQTT 3.1.1 runtime used by HomeGuard Android. */
@@ -112,11 +113,28 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         while (scope.isActive && config == cfg) {
             try {
                 state.value = State.CONNECTING
+                availability.value = "unknown"
                 open(cfg)
                 state.value = State.CONNECTED
-                availability.value = "unknown"
                 backoffMs = 1_000L
-                readLoop(cfg)
+                val sessionOutput = checkNotNull(output)
+                val sessionSocket = checkNotNull(socket)
+                val pingJob = scope.launch(Dispatchers.IO) {
+                    while (isActive && config == cfg && output === sessionOutput) {
+                        delay(30_000L)
+                        try {
+                            writePing(sessionOutput)
+                        } catch (_: java.io.IOException) {
+                            runCatching { sessionSocket.close() }
+                            break
+                        }
+                    }
+                }
+                try {
+                    readLoop(cfg)
+                } finally {
+                    pingJob.cancel()
+                }
             } catch (cancel: kotlinx.coroutines.CancellationException) {
                 throw cancel
             } catch (_: Throwable) {
@@ -126,6 +144,10 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
                 socket = null
                 input = null
                 output = null
+                pendingResponses.values.forEach {
+                    it.completeExceptionally(EOFException("MQTT connection lost; command outcome unknown"))
+                }
+                pendingResponses.clear()
             }
             if (config != cfg) break
             delay(backoffMs)
@@ -136,12 +158,17 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
     private fun open(cfg: Config) {
         val uri = normalizeUri(cfg.brokerUri)
         val secure = uri.scheme.equals("mqtts", true) || uri.scheme.equals("ssl", true)
-        val port = if (uri.port > 0) uri.port else if (secure) 8883 else 1883
+        require(secure) { "MQTT requires TLS" }
+        val port = if (uri.port > 0) uri.port else 8883
         val host = requireNotNull(uri.host) { "MQTT host missing" }
         val raw = if (secure) SSLSocketFactory.getDefault().createSocket(host, port) else Socket(host, port)
         raw.tcpNoDelay = true
         raw.soTimeout = 90_000
         socket = raw
+        if (raw is SSLSocket) {
+            raw.sslParameters = raw.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
+            raw.startHandshake()
+        }
         val sessionInput = BufferedInputStream(raw.getInputStream())
         input = sessionInput
         output = BufferedOutputStream(raw.getOutputStream())
@@ -149,20 +176,15 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         writeConnect(cfg)
         val packet = readPacket(sessionInput)
         check(packet.type == 2 && packet.payload.size >= 2 && packet.payload[1].toInt() == 0) { "MQTT CONNACK rejected" }
-        subscribe(sessionInput, topic(cfg, "availability"))
-        subscribe(sessionInput, topic(cfg, "heartbeat"))
-        subscribe(sessionInput, topic(cfg, "events"))
-        subscribe(sessionInput, topic(cfg, "responses"))
+        subscribe(sessionInput, cfg, topic(cfg, "availability"))
+        subscribe(sessionInput, cfg, topic(cfg, "heartbeat"))
+        subscribe(sessionInput, cfg, topic(cfg, "events"))
+        subscribe(sessionInput, cfg, topic(cfg, "responses"))
     }
 
     private fun readLoop(cfg: Config) {
         val sessionInput = checkNotNull(input) { "MQTT input stream missing" }
-        var lastPingAt = System.currentTimeMillis()
         while (worker?.isActive == true && config == cfg) {
-            if (System.currentTimeMillis() - lastPingAt >= 30_000L) {
-                writeRaw(byteArrayOf(0xC0.toByte(), 0x00))
-                lastPingAt = System.currentTimeMillis()
-            }
             val packet = readPacket(sessionInput)
             when (packet.type) {
                 3 -> handlePublish(cfg, packet.flags, packet.payload)
@@ -225,7 +247,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         writePacket(header, variable.toByteArray())
     }
 
-    private fun subscribe(input: BufferedInputStream, topic: String) {
+    private fun subscribe(input: BufferedInputStream, cfg: Config, topic: String) {
         val topicBytes = topic.toByteArray(StandardCharsets.UTF_8)
         val packetId = nextPacketId()
         val payload = ByteArray(2 + 2 + topicBytes.size + 1)
@@ -238,8 +260,21 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         i += topicBytes.size
         payload[i] = 1
         writePacket(0x82, payload)
-        val ack = readPacket(input)
-        check(ack.type == 9) { "MQTT SUBACK missing" }
+        // Retained messages from earlier subscriptions can arrive before this
+        // SUBACK. Process them without losing the acknowledgement correlation.
+        while (true) {
+            val ack = readPacket(input)
+            if (ack.type == 3) {
+                handlePublish(cfg, ack.flags, ack.payload)
+                continue
+            }
+            if (ack.type != 9) continue
+            check(ack.payload.size == 3) { "Malformed MQTT SUBACK" }
+            val ackId = ((ack.payload[0].toInt() and 0xff) shl 8) or (ack.payload[1].toInt() and 0xff)
+            check(ackId == packetId) { "MQTT SUBACK id mismatch" }
+            check((ack.payload[2].toInt() and 0xff) in 0..1) { "MQTT subscription rejected" }
+            return
+        }
     }
 
     private fun writeConnect(cfg: Config) {
@@ -256,6 +291,13 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         if (cfg.username.isNotEmpty()) appendUtf8(variable, cfg.username)
         if (cfg.password.isNotEmpty()) appendUtf8(variable, cfg.password)
         writePacket(0x10, variable.toByteArray())
+    }
+
+    @Synchronized
+    private fun writePing(sessionOutput: BufferedOutputStream) {
+        if (output !== sessionOutput) return
+        sessionOutput.write(byteArrayOf(0xC0.toByte(), 0x00))
+        sessionOutput.flush()
     }
 
     @Synchronized

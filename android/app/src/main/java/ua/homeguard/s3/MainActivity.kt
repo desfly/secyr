@@ -146,15 +146,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        settings = SettingsStore(this)
-        registeredDevices = RegisteredDeviceStore(this)
-        eventHistory = EventHistoryStore(this)
-        discovery = LocalDiscoveryCoordinator(this, lifecycleScope)
-        resolver = DeviceEndpointResolver(settings, discovery, lifecycleScope)
+        val runtime = ua.homeguard.s3.network.MonitoringRuntime.get(this)
+        settings = runtime.settings
+        registeredDevices = runtime.registeredDevices
+        eventHistory = runtime.eventHistory
+        discovery = runtime.discovery
+        resolver = runtime.resolver
         provisioning = ProvisioningCoordinator(this, settings, discovery, lifecycleScope)
-        telemetry = TelemetrySocket().apply { seedEvents(eventHistory.load()) }
-        session = DeviceSession(lifecycleScope, resolver.endpoint, settings, telemetry)
-        commands = CommandController(resolver.endpoint, settings)
+        telemetry = runtime.telemetry
+        session = runtime.session
+        commands = runtime.commands
+        ContextCompat.startForegroundService(this, Intent(this,
+            ua.homeguard.s3.notifications.MonitoringService::class.java))
         notifications = HomeGuardNotifications(this)
         notifications.createChannels()
         requestLocalNetworkPermission()
@@ -173,16 +176,6 @@ class MainActivity : ComponentActivity() {
                     alarmUiActive.value = true
                     alarmSourceId.value = 0
                     startForegroundAlarm()
-                    notifications.notify(
-                        SystemEventRecord(
-                            sequence = snapshot.sequence,
-                            timestampMs = System.currentTimeMillis(),
-                            event = "ALARM",
-                            sourceId = 0,
-                            value = 1,
-                        ),
-                        settings.settings.value,
-                    )
                 } else if (!zoneAlarmArmed) {
                     stopForegroundAlarm()
                 }
@@ -191,7 +184,6 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             telemetry.liveEvents().collect { event ->
-                eventHistory.append(event)
                 val type = event.event.uppercase()
                 val zoneAlarm = type == "ALARM" || (
                     zoneAlarmArmed &&
@@ -203,10 +195,7 @@ class MainActivity : ComponentActivity() {
                     if (!alarmUiActive.value) {
                         alarmUiActive.value = true
                         startForegroundAlarm()
-                        notifications.notify(event.copy(event = "ALARM"), settings.settings.value)
                     }
-                } else if (type != "ALARM") {
-                    notifications.notify(event, settings.settings.value)
                 }
             }
         }
@@ -234,8 +223,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        discovery.start()
-        session.start()
 
         // Keep the light button tied to the controller's actual output #4
         // state, including changes made from the web UI or automatic zone logic.
@@ -986,8 +973,6 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         stopForegroundAlarm()
         operatorPin.value = ""
-        session.stop()
-        discovery.stop()
         super.onDestroy()
     }
 }

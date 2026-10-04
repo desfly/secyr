@@ -32,6 +32,8 @@ class CommandController(
         LocalTelemetryTicketBroker.install { refreshTelemetryToken() }
     }
 
+    fun hasLocalSession(): Boolean = localHttpSessionToken.isNotBlank() && localActor.isNotBlank()
+
     fun bleState(): StateFlow<BleHomeGuardClient.State> = ble.state()
 
     suspend fun accessState(): AccessLifecycleState {
