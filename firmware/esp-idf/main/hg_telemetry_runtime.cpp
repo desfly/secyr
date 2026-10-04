@@ -144,9 +144,11 @@ void TelemetryRuntime::run_zones()
 
     TickType_t next_wake = xTaskGetTickCount();
     while (true) {
+        const auto scan_started_us = esp_timer_get_time();
         std::array<hg::ZoneState, 8> zones{};
         zones.fill(hg::ZoneState::Disabled);
         sample_zone_adc(hardware_->zone_adc(), 0, zones);
+        const auto scan_finished_us = esp_timer_get_time();
         portENTER_CRITICAL(&zone_snapshot_lock_);
         zone_snapshot_ = zones;
         portEXIT_CRITICAL(&zone_snapshot_lock_);
@@ -156,12 +158,19 @@ void TelemetryRuntime::run_zones()
             zone_triggers_light(zones[0]) || zone_triggers_light(zones[1]);
         const auto now_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
 
+        // Drive the local light before event delivery or logging can run.
+        if (changed || light_trigger || light_cycle_active_) {
+            update_zone_light(zones, now_ms);
+        }
         if (changed) {
             update_zone_model(zones, event_timestamp_ms(now_ms));
             previous = zones;
         }
-        if (changed || light_trigger || light_cycle_active_) {
-            update_zone_light(zones, now_ms);
+        const auto cycle_finished_us = esp_timer_get_time();
+        if (cycle_finished_us - scan_started_us > 100000) {
+            ESP_LOGW(kTag, "Slow zone cycle: ADC=%lld us model/light=%lld us",
+                static_cast<long long>(scan_finished_us - scan_started_us),
+                static_cast<long long>(cycle_finished_us - scan_finished_us));
         }
 
         vTaskDelayUntil(&next_wake, kZonePollPeriod);
@@ -239,11 +248,9 @@ void TelemetryRuntime::update_zone_model(
         (void)system_model_->set_partition_arm(1, hg::PartitionArmState::Alarm, now_ms);
     }
 
-    // Zone transitions originate in the telemetry task. Dispatch them here so
-    // the HTTP event log/WebSocket subscribers and Android-visible state are
-    // updated immediately instead of waiting for a later command request.
-    ESP_LOGI(kTag, "Security state dispatch at %llu ms; alarm_triggered=%d", static_cast<unsigned long long>(now_ms), alarm_triggered ? 1 : 0);
-    (void)system_bus_->dispatch_all();
+    // The telemetry task drains the event bus every loop. The zone task must
+    // never invoke HTTP/MQTT/subscriber callbacks before its next ADC sample.
+
 }
 
 void TelemetryRuntime::update_zone_light(

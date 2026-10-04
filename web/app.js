@@ -195,8 +195,12 @@ function stateClass(value) {
 function armLabel(value) { return ({ disarmed: "ЗНЯТО", stay: "НІЧНИЙ", away: "ПІД ОХОРОНОЮ", alarm: "ТРИВОГА" })[value] || "—"; }
 function wifiStateLabel(value) { return ({ connected: "Підключено", connecting: "Підключення…", idle: "Не налаштовано", error: "Помилка" })[value] || "Перевірка…"; }
 
+let liveZones = [];
+let liveStateVersion = 0;
+
 function renderZones(data) {
   const zones = Array.isArray(data?.zones) ? data.zones : [];
+  liveZones = zones.map(zone => ({ ...zone }));
   document.querySelector("#zoneCount").textContent = zones.length || "—";
   document.querySelector("#zones").innerHTML = zones.length ? zones.map(zone => `
     <div class="zone"><span>${escapeHtml(zone.name || `Зона ${zone.id}`)}${zone.alwaysOn ? " · 24/7" : ""}</span><strong class="${stateClass(zone.state)}">${escapeHtml(zone.state)}</strong></div>`).join("") : "<div class=\"zone\"><span>Дані ще не отримані</span><strong>—</strong></div>";
@@ -410,7 +414,11 @@ async function refresh() {
     ];
     for (const [path, render] of requests) {
       if (!authenticatedUi()) break;
-      try { render(await api(path)); } catch (_) {}
+      try {
+        const version = liveStateVersion;
+        const data = await api(path);
+        if ((render !== renderZones && render !== renderPartitions) || version === liveStateVersion) render(data);
+      } catch (_) {}
     }
   } finally {
     refreshBusy = false;
@@ -823,6 +831,60 @@ function tickClock() {
   if (date) date.textContent = now.toLocaleDateString("uk-UA");
 }
 
+const liveConnection = { socket: null, connecting: false, retryAt: 0 };
+
+function acceptLiveState(data) {
+  if (!authenticatedUi()) return;
+  if (typeof data.event === "string") {
+    const event = data.event.toLowerCase();
+    const value = Number(data.value);
+    const source = Number(data.sourceId);
+    ++liveStateVersion;
+    if (event === "partition.disarmed") renderPartitions({ partitions: [{ armState: "disarmed" }] });
+    else if (event === "partition.armed") renderPartitions({ partitions: [{ armState: value === 1 ? "stay" : value === 3 ? "alarm" : "away" }] });
+    else if (event === "alarm" && value === 3) renderPartitions({ partitions: [{ armState: "alarm" }] });
+    const zoneStates = { "zone.open": "open", "zone.closed": "normal", "alarm": "alarm", "tamper": "tamper" };
+    if (zoneStates[event] && !(event === "alarm" && value === 3)) {
+      renderZones({ zones: liveZones.map(zone => Number(zone.id) === source ? { ...zone, state: zoneStates[event] } : zone) });
+      if (zoneAlarmRuntime.armed && event !== "zone.closed") setZoneAlarmActive(true);
+    }
+  } else if (Number.isInteger(data.mode)) {
+    ++liveStateVersion;
+    const mode = ["disarmed", "stay", "away", "alarm"][data.mode];
+    if (mode) renderPartitions({ partitions: [{ armState: mode }] });
+  }
+}
+
+async function ensureLiveConnection() {
+  if (!authenticatedUi()) {
+    const socket = liveConnection.socket;
+    liveConnection.socket = null;
+    if (socket) socket.close();
+    return;
+  }
+  if (liveConnection.socket || liveConnection.connecting || Date.now() < liveConnection.retryAt || typeof WebSocket === "undefined") return;
+  liveConnection.connecting = true;
+  try {
+    const ticket = await api("/api/v1/telemetry/session", { method: "POST", body: JSON.stringify({ actor: window.HomeGuardAuth.actor() }) });
+    if (!authenticatedUi()) return;
+    if (!/^[0-9a-f]{64}$/.test(ticket.telemetryToken || "")) throw new Error("invalid telemetry ticket");
+    const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/telemetry?ticket=${encodeURIComponent(ticket.telemetryToken)}`);
+    liveConnection.socket = socket;
+    socket.onmessage = message => {
+      if (liveConnection.socket !== socket) return;
+      try { acceptLiveState(JSON.parse(message.data)); } catch (_) {}
+    };
+    socket.onclose = () => {
+      if (liveConnection.socket === socket) {
+        liveConnection.socket = null;
+        liveConnection.retryAt = Date.now() + 2000;
+      }
+    };
+    socket.onerror = () => socket.close();
+  } catch (_) { liveConnection.retryAt = Date.now() + 2000; }
+  finally { liveConnection.connecting = false; }
+}
+
 const scheduler = {
   timer: 0,
   busy: false,
@@ -837,6 +899,7 @@ const LAN_POLL_MS = 15000;
 
 async function schedulerStep() {
   tickClock();
+  void ensureLiveConnection();
   const now = Date.now();
   const authenticated = authenticatedUi();
 

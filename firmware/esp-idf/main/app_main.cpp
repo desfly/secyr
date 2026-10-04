@@ -458,6 +458,9 @@ extern "C" void app_main()
     else ESP_LOGI(kTag, "Cloud identity ready: %s", g_cloud_link.device_id());
 
     initialize_system_model();
+    ESP_ERROR_CHECK(g_system_bus.subscribe([](const hg::SystemEvent& event, void* context) {
+        static_cast<WebsocketTelemetry*>(context)->publish_event(event);
+    }, &g_websocket_telemetry) ? ESP_OK : ESP_ERR_NO_MEM);
     g_cloud_link.set_command_runtime(&g_system_model, &g_system_bus, &g_access_control, &g_cloud_time);
     initialize_physical_outputs();
     start_ble_transport();
