@@ -11,6 +11,7 @@
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "nvs.h"
 #include "homeguard/access_control.hpp"
@@ -28,6 +29,11 @@
 namespace homeguard::idf {
 namespace {
 constexpr const char* kTag = "hg_cloud";
+struct CloudEventWork {
+    CloudLink* owner;
+    hg::SystemEvent event;
+};
+QueueHandle_t cloud_event_queue{};
 constexpr const char* kPrefix = "homeguard/v1/devices";
 constexpr std::uint64_t kHeartbeatPeriodUs = 60ULL * 1000ULL * 1000ULL;
 constexpr char kCloudSecurityNamespace[] = "hg-cloud-sec";
@@ -280,6 +286,28 @@ void CloudLink::set_command_runtime(
     access_control_ = access_control;
     trusted_time_ = trusted_time;
     if (bus_ != nullptr && !event_bus_subscribed_) {
+        if (cloud_event_queue == nullptr) {
+            cloud_event_queue = xQueueCreate(32, sizeof(CloudEventWork));
+            if (cloud_event_queue == nullptr) {
+                ESP_LOGE(kTag, "Cloud event worker queue allocation failed");
+                return;
+            }
+            const auto created = xTaskCreate([](void* context) {
+                const auto queue = static_cast<QueueHandle_t>(context);
+                CloudEventWork work{};
+                for (;;) {
+                    if (xQueueReceive(queue, &work, portMAX_DELAY) == pdTRUE) {
+                        work.owner->publish_system_event(work.event);
+                    }
+                }
+            }, "hg_cloud_events", 4096, cloud_event_queue, 4, nullptr);
+            if (created != pdPASS) {
+                vQueueDelete(cloud_event_queue);
+                cloud_event_queue = nullptr;
+                ESP_LOGE(kTag, "Cloud event worker task allocation failed");
+                return;
+            }
+        }
         event_bus_subscribed_ = bus_->subscribe(&CloudLink::system_event_handler, this);
         if (!event_bus_subscribed_) ESP_LOGE(kTag, "Cloud event subscription failed");
     }
@@ -451,7 +479,13 @@ void CloudLink::heartbeat_timer_handler(void* context)
 void CloudLink::system_event_handler(const hg::SystemEvent& event, void* context)
 {
     auto* self = static_cast<CloudLink*>(context);
-    if (self != nullptr) self->publish_system_event(event);
+    if (self == nullptr || cloud_event_queue == nullptr) return;
+    const CloudEventWork work{self, event};
+    // Zero wait: neither MQTT's internal mutex nor a slow network may hold
+    // the security zone task. Network serialization runs in hg_cloud_events.
+    if (xQueueSend(cloud_event_queue, &work, 0) != pdTRUE) {
+        ESP_LOGE(kTag, "Cloud event worker queue full");
+    }
 }
 
 void CloudLink::publish_system_event(const hg::SystemEvent& event)
