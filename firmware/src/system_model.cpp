@@ -149,8 +149,9 @@ bool SystemModel::set_partition_arm(std::uint16_t id, PartitionArmState state, s
         if (item.id != id) continue;
         if (item.arm_state == state) return true;
         item.arm_state = state;
-        const bool disarmed = state == PartitionArmState::Disarmed;
-        return emit(disarmed ? SystemEventType::Disarmed : SystemEventType::Armed, id, now_ms, static_cast<std::int32_t>(state));
+        const auto event_type = state == PartitionArmState::Alarm ? SystemEventType::Alarm :
+            (state == PartitionArmState::Disarmed ? SystemEventType::Disarmed : SystemEventType::Armed);
+        return emit(event_type, id, now_ms, static_cast<std::int32_t>(state));
     }
     return false;
 }

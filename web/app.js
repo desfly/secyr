@@ -578,7 +578,6 @@ async function sendSecurityCommand(button) {
     // up to 1.8 s while polling for confirmation; refresh immediately and let
     // the normal scheduler reconcile the authoritative state in background.
     showToast("Команду прийнято");
-    await refresh();
   } catch (error) {
     showToast(`Помилка команди: ${error.message}`);
   } finally {
