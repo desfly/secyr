@@ -5,12 +5,14 @@
 namespace hg {
 
 bool SystemEventBus::subscribe(SystemEventCallback callback, void* context) {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
     if (callback == nullptr || subscriber_count_ >= subscribers_.size()) return false;
     subscribers_[subscriber_count_++] = Subscriber{callback, context};
     return true;
 }
 
 bool SystemEventBus::publish(SystemEvent event) {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
     event.sequence = next_sequence_++;
     ++published_;
 
@@ -26,21 +28,46 @@ bool SystemEventBus::publish(SystemEvent event) {
     return true;
 }
 
-bool SystemEventBus::dispatch_one() {
-    if (queue_size_ == 0U) return false;
-    const SystemEvent event = queue_[queue_head_];
-    queue_head_ = (queue_head_ + 1U) % queue_.size();
-    --queue_size_;
+namespace {
+struct DispatchRelease {
+    std::atomic_flag& flag;
+    ~DispatchRelease() { flag.clear(std::memory_order_release); }
+};
+}
 
-    for (std::size_t i = 0; i < subscriber_count_; ++i) {
-        subscribers_[i].callback(event, subscribers_[i].context);
+bool SystemEventBus::deliver_one() {
+    SystemEvent event;
+    std::array<Subscriber, subscriber_capacity> subscribers;
+    std::size_t subscriber_count;
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        if (queue_size_ == 0U) return false;
+        event = queue_[queue_head_];
+        queue_head_ = (queue_head_ + 1U) % queue_.size();
+        --queue_size_;
+        subscribers = subscribers_;
+        subscriber_count = subscriber_count_;
+    }
+    // Callbacks may publish more events. Never hold the queue lock here.
+    for (std::size_t i = 0; i < subscriber_count; ++i) {
+        subscribers[i].callback(event, subscribers[i].context);
     }
     return true;
 }
 
+bool SystemEventBus::dispatch_one() {
+    if (dispatching_.test_and_set(std::memory_order_acquire)) return false;
+    DispatchRelease release{dispatching_};
+    return deliver_one();
+}
+
 std::size_t SystemEventBus::dispatch_all() {
+    // Another task (or a callback) must not wait for the current dispatcher.
+    if (dispatching_.test_and_set(std::memory_order_acquire)) return 0;
+    DispatchRelease release{dispatching_};
     std::size_t count = 0;
-    while (dispatch_one()) ++count;
+    // Bound each pass even when callbacks or producers keep adding events.
+    while (count < queue_capacity && deliver_one()) ++count;
     return count;
 }
 

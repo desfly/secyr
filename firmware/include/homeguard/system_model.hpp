@@ -1,6 +1,8 @@
 #pragma once
 
 #include <array>
+#include <atomic>
+#include <mutex>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -34,10 +36,13 @@ public:
     bool publish(SystemEvent event);
     bool dispatch_one();
     std::size_t dispatch_all();
-    [[nodiscard]] std::size_t queued() const { return queue_size_; }
-    [[nodiscard]] std::uint64_t published() const { return published_; }
-    [[nodiscard]] std::uint64_t dropped() const { return dropped_; }
+    [[nodiscard]] std::size_t queued() const { std::lock_guard<std::mutex> lock(queue_mutex_); return queue_size_; }
+    [[nodiscard]] std::uint64_t published() const { std::lock_guard<std::mutex> lock(queue_mutex_); return published_; }
+    [[nodiscard]] std::uint64_t dropped() const { std::lock_guard<std::mutex> lock(queue_mutex_); return dropped_; }
 private:
+    bool deliver_one();
+    mutable std::mutex queue_mutex_;
+    std::atomic_flag dispatching_ = ATOMIC_FLAG_INIT;
     struct Subscriber { SystemEventCallback callback{}; void* context{}; };
     std::array<SystemEvent, queue_capacity> queue_{};
     std::array<Subscriber, subscriber_capacity> subscribers_{};
