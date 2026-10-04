@@ -3,6 +3,7 @@
 #include "homeguard/telemetry.hpp"
 #include "esp_http_server.h"
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -26,6 +27,7 @@ private:
     void remove_client(int fd);
     void run_broadcast(BroadcastWork& work);
     void* server_{};
+    std::atomic<unsigned> pending_broadcasts_{0};
     hg::BearerTokenVerifier token_{};
     std::array<hg::BearerTokenVerifier, 4> session_tokens_{};
     std::array<std::int64_t, 4> session_token_issued_us_{};

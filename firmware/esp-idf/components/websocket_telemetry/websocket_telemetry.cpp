@@ -165,7 +165,10 @@ int WebsocketTelemetry::websocket(httpd_req_t* request) {
 void WebsocketTelemetry::broadcast_work_entry(void* context) {
     auto* work = static_cast<BroadcastWork*>(context);
     if (!work) return;
-    if (work->owner) work->owner->run_broadcast(*work);
+    if (work->owner) {
+        work->owner->run_broadcast(*work);
+        work->owner->pending_broadcasts_.fetch_sub(1);
+    }
     delete work;
 }
 
@@ -177,28 +180,41 @@ void WebsocketTelemetry::run_broadcast(BroadcastWork& work) {
     packet.len = work.payload.size();
     for (const int fd : work.clients) {
         if (fd < 0) continue;
+        if (httpd_ws_get_fd_info(static_cast<httpd_handle_t>(server_), fd) != HTTPD_WS_CLIENT_WEBSOCKET) {
+            remove_client(fd);
+            continue;
+        }
         if (httpd_ws_send_frame_async(static_cast<httpd_handle_t>(server_), fd, &packet) != ESP_OK) {
             remove_client(fd);
+            (void)httpd_sess_trigger_close(static_cast<httpd_handle_t>(server_), fd);
         }
     }
 }
 
 void WebsocketTelemetry::publish(const hg::TelemetryFrame& frame) {
+    // A snapshot is replaceable. Never accumulate stale frames behind a slow
+    // client and starve HTTP requests or grow the heap without a bound.
+    if (pending_broadcasts_.fetch_add(1) != 0U) {
+        pending_broadcasts_.fetch_sub(1);
+        return;
+    }
     void* handle = nullptr;
     auto* work = new (std::nothrow) BroadcastWork{};
     if (!work) {
+        pending_broadcasts_.fetch_sub(1);
         ESP_LOGE(tag, "telemetry broadcast allocation failed");
         return;
     }
     {
         std::scoped_lock lock(mutex_);
         handle = server_;
-        if (!handle) { delete work; return; }
+        if (!handle) { pending_broadcasts_.fetch_sub(1); delete work; return; }
         work->owner = this;
         work->clients = clients_;
         work->payload = hg::telemetry_json(frame);
     }
     if (httpd_queue_work(static_cast<httpd_handle_t>(handle), &WebsocketTelemetry::broadcast_work_entry, work) != ESP_OK) {
+        pending_broadcasts_.fetch_sub(1);
         delete work;
         ESP_LOGW(tag, "telemetry broadcast queue is full");
     }
