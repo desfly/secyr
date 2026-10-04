@@ -1,8 +1,11 @@
 #include "homeguard/system_model.hpp"
 #include <atomic>
-#include <cassert>
+#include <cstdlib>
+#include <iostream>
 #include <thread>
 #include <vector>
+
+#define REQUIRE(condition) do { if (!(condition)) { std::cerr << "Failed: " #condition << "\n"; std::abort(); } } while (false)
 
 struct State {
     hg::SystemEventBus* bus;
@@ -16,7 +19,7 @@ void receive(const hg::SystemEvent& event, void* context) {
     state.last = event.sequence;
     ++state.delivered;
     // Reentrant dispatch must return immediately, without delivering twice.
-    assert(state.bus->dispatch_all() == 0);
+    REQUIRE(state.bus->dispatch_all() == 0);
 }
 void replenish(const hg::SystemEvent&, void* context) {
     auto& bus = *static_cast<hg::SystemEventBus*>(context);
@@ -25,7 +28,7 @@ void replenish(const hg::SystemEvent&, void* context) {
 int main() {
     hg::SystemEventBus bus;
     State state{&bus};
-    assert(bus.subscribe(receive, &state));
+    REQUIRE(bus.subscribe(receive, &state));
     std::atomic<int> producers{4};
     std::vector<std::thread> threads;
     for (int i = 0; i < 4; ++i) {
@@ -41,20 +44,20 @@ int main() {
         threads.emplace_back([&] {
             while (producers.load() != 0) {
                 bus.dispatch_one();
-                assert(bus.queued() <= hg::SystemEventBus::queue_capacity);
+                REQUIRE(bus.queued() <= hg::SystemEventBus::queue_capacity);
             }
         });
     }
     for (auto& thread : threads) thread.join();
     while (bus.dispatch_all() != 0) {}
-    assert(bus.published() == 80000);
-    assert(bus.queued() == 0);
-    assert(state.ordered);
-    assert(state.delivered + bus.dropped() == bus.published());
+    REQUIRE(bus.published() == 80000);
+    REQUIRE(bus.queued() == 0);
+    REQUIRE(state.ordered);
+    REQUIRE(state.delivered + bus.dropped() == bus.published());
 
     hg::SystemEventBus replenishing;
-    assert(replenishing.subscribe(replenish, &replenishing));
+    REQUIRE(replenishing.subscribe(replenish, &replenishing));
     replenishing.publish({});
-    assert(replenishing.dispatch_all() == hg::SystemEventBus::queue_capacity);
-    assert(replenishing.queued() == 1);
+    REQUIRE(replenishing.dispatch_all() == hg::SystemEventBus::queue_capacity);
+    REQUIRE(replenishing.queued() == 1);
 }
