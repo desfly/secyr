@@ -222,6 +222,17 @@ if errors:
         print(" -", error)
     sys.exit(1)
 
+# Every admitted command branch must release the gate, and the lock pulse
+# must consume replay state before its first output side effect.
+unsupported = link[link.find('else if (command == "security.panic")'):link.find('// Persist the monotonic counter before consuming')]
+require('xSemaphoreGive(replay_mutex);\n        publish_response(false, "unsupported_command")' in unsupported,
+        "unsupported MQTT command leaks replay admission mutex")
+lock_start = link.find('if (command == "output.lock")')
+lock_effect = link.find('hg::apply_output_command', lock_start)
+lock_commit = link.find('persist_command_replay_state(command_counter, request_id)', lock_start)
+require(lock_start < lock_commit < lock_effect,
+        "lock pulse must persist replay admission before output side effects")
+
 print("Cloud runtime contract PASS")
 print(" - persistent MQTT config + boot restore")
 print(" - Bearer-session cloud configuration endpoint")

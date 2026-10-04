@@ -700,6 +700,13 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // runtime synchronization loop is responsible for mirroring output #5 to
     // the direct lock relay.  Keep replay persistence above this side effect.
     if (command == "output.lock") {
+        // Commit replay admission before changing the lock output. A repeated
+        // signed envelope must never trigger another physical pulse.
+        if (!persist_command_replay_state(command_counter, request_id)) {
+            xSemaphoreGive(replay_mutex);
+            publish_response(false, "replay_state_persist_failed");
+            return;
+        }
         // Output #5 is the direct lock relay.  Keep the cloud action bounded:
         // ON is accepted only through the normal interlock, then an independent
         // task restores OFF after five seconds even if the MQTT client drops.
@@ -739,6 +746,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     else if (command == "security.disarm") target = hg::PartitionArmState::Disarmed;
     else if (command == "security.panic") target = hg::PartitionArmState::Alarm;
     else {
+        xSemaphoreGive(replay_mutex);
         publish_response(false, "unsupported_command");
         return;
     }
