@@ -90,6 +90,21 @@ class HttpDeviceApi(
 
     suspend fun cloudClientConfig(): JSONObject = execute(RuntimeApiContract.CLOUD_CLIENT_CONFIG_PATH)
 
+    suspend fun installCloudCommandTrust(actor: String, version: Int, publicKeyPem: String): JSONObject {
+        val normalizedActor = actor.trim()
+        require(normalizedActor.isNotEmpty()) { "User ID is required" }
+        require(version > 0) { "Trust version must be positive" }
+        require(publicKeyPem.isNotBlank()) { "Public key is required" }
+        return execute(
+            RuntimeApiContract.CLOUD_TRUST_PATH,
+            "POST",
+            JSONObject()
+                .put("actor", normalizedActor)
+                .put("version", version)
+                .put("publicKeyPem", publicKeyPem),
+        )
+    }
+
     suspend fun networkStatus(): JSONObject = execute(RuntimeApiContract.NETWORK_STATUS_PATH)
 
     suspend fun runtimeOutputActive(outputId: Int): Boolean? {
