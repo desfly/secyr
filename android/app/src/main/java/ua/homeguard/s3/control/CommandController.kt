@@ -136,6 +136,14 @@ class CommandController(
         return createApi(target).cloudClientConfig()
     }
 
+    suspend fun installCloudCommandTrust(version: Int, publicKeyPem: String): JSONObject {
+        val target = localTarget()
+        require(localHttpSessionToken.isNotBlank() && localActor.isNotBlank()) {
+            "authenticated local HTTP session unavailable"
+        }
+        return createApi(target).installCloudCommandTrust(localActor, version, publicKeyPem)
+    }
+
     fun logout() {
         clearLocalSession()
         ble.disconnect()
