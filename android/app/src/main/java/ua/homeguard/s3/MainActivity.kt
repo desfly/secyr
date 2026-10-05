@@ -45,6 +45,7 @@ import ua.homeguard.s3.network.DiscoveryInputValidator
 import ua.homeguard.s3.network.FactoryResetClient
 import ua.homeguard.s3.network.FactoryResetResult
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
+import ua.homeguard.s3.network.mqtt.MqttCommandSigner
 import ua.homeguard.s3.network.TelemetrySocket
 import ua.homeguard.s3.notifications.HomeGuardNotifications
 import ua.homeguard.s3.repository.ProvisioningCoordinator
@@ -748,7 +749,23 @@ class MainActivity : ComponentActivity() {
                         val username = json.optString("username", "").trim()
                         val password = json.optString("password", "")
                         if (brokerUri.isNotBlank() && password.isNotBlank()) {
+                            val deviceId = settings.settings.value.deviceId
+                            if (deviceId.isBlank()) {
+                                lastError = "deviceId відсутній"
+                                return@repeat
+                            }
                             settings.saveMqttClientConfig(brokerUri, username, password)
+                            if (settings.mqttCommandKeyEpoch(deviceId) == 0L) {
+                                val signer = MqttCommandSigner(deviceId)
+                                val epoch = 1L
+                                val trust = commands.installCloudCommandTrust(epoch.toInt(), signer.publicKeyPem())
+                                if (!trust.optBoolean("ok", false)) {
+                                    lastError = trust.optString("reason", "command trust відхилено")
+                                    return@repeat
+                                }
+                                settings.setMqttCommandKeyEpoch(deviceId, epoch)
+                                settings.resetMqttCommandCounter(deviceId)
+                            }
                             commandStatus.value += " · MQTT готовий"
                             return
                         }
