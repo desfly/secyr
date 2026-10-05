@@ -6,6 +6,13 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.media.AudioManager
+import android.media.ToneGenerator
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +38,8 @@ class MqttAlarmService : Service() {
     private lateinit var settings: SettingsStore
     private lateinit var client: MqttRuntimeClient
     private lateinit var notifications: HomeGuardNotifications
+    private var alarmTone: ToneGenerator? = null
+    private var alarmToneJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -43,6 +52,7 @@ class MqttAlarmService : Service() {
         scope.launch {
             client.events().collect { json ->
                 if (json.optString("event", "").equals("alarm", ignoreCase = true)) {
+                    startAlarmSignal()
                     notifications.notify(
                         SystemEventRecord(
                             sequence = json.optLong("seq", System.currentTimeMillis()),
@@ -65,6 +75,7 @@ class MqttAlarmService : Service() {
     }
 
     override fun onDestroy() {
+        stopAlarmSignal()
         client.stop()
         scope.cancel()
         super.onDestroy()
@@ -85,6 +96,33 @@ class MqttAlarmService : Service() {
                 clientId = "android-alarm-" + current.deviceId,
             ),
         )
+    }
+
+    private fun startAlarmSignal() {
+        if (alarmToneJob?.isActive == true) return
+        val vibrator = getSystemService(VIBRATOR_SERVICE) as? Vibrator
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 500, 250, 500, 250, 900), 0))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator?.vibrate(longArrayOf(0, 500, 250, 500, 250, 900), 0)
+        }
+        alarmTone = ToneGenerator(AudioManager.STREAM_ALARM, 100)
+        alarmToneJob = scope.launch {
+            while (true) {
+                alarmTone?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 650)
+                delay(900)
+            }
+        }
+    }
+
+    private fun stopAlarmSignal() {
+        alarmToneJob?.cancel()
+        alarmToneJob = null
+        alarmTone?.stopTone()
+        alarmTone?.release()
+        alarmTone = null
+        (getSystemService(VIBRATOR_SERVICE) as? Vibrator)?.cancel()
     }
 
     private fun createServiceChannel() {
