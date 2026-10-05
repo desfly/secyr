@@ -46,6 +46,7 @@ import ua.homeguard.s3.network.FactoryResetClient
 import ua.homeguard.s3.network.FactoryResetResult
 import ua.homeguard.s3.network.LocalDiscoveryCoordinator
 import ua.homeguard.s3.network.mqtt.MqttCommandSigner
+import ua.homeguard.s3.network.mqtt.MqttAlarmService
 import ua.homeguard.s3.network.TelemetrySocket
 import ua.homeguard.s3.notifications.HomeGuardNotifications
 import ua.homeguard.s3.repository.ProvisioningCoordinator
@@ -766,6 +767,10 @@ class MainActivity : ComponentActivity() {
                                 settings.setMqttCommandKeyEpoch(deviceId, epoch)
                                 settings.resetMqttCommandCounter(deviceId)
                             }
+                            ContextCompat.startForegroundService(
+                                this@MainActivity,
+                                Intent(this@MainActivity, MqttAlarmService::class.java),
+                            )
                             commandStatus.value += " · MQTT готовий"
                             return
                         }
