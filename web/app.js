@@ -4,7 +4,8 @@ const nativeFetch = window.fetch.bind(window);
 // Preserve the real browser fetch for bootstrap/login flows. These requests must
 // never sit behind the operational API queue or inherit its AbortController timeout.
 window.__homeguardNativeFetch = nativeFetch;
-let apiQueueTail = Promise.resolve();
+const apiPending = [];
+let apiRequestRunning = false;
 
 function requestUrl(input) {
   if (typeof input === "string") return input;
@@ -32,7 +33,9 @@ function apiTimeoutMs(input) {
 function serializedApiFetch(input, init = {}) {
   if (!isApiRequest(input)) return nativeFetch(input, init);
 
+  const enqueuedAt = Date.now();
   const execute = async () => {
+    const startedAt = Date.now();
     if (init.signal) return nativeFetch(input, init);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), apiTimeoutMs(input));
@@ -40,12 +43,34 @@ function serializedApiFetch(input, init = {}) {
       return await nativeFetch(input, { ...init, signal: controller.signal });
     } finally {
       clearTimeout(timer);
+      const queueMs = startedAt - enqueuedAt;
+      const requestMs = Date.now() - startedAt;
+      if (queueMs > 500 || requestMs > 500) {
+        console.warn("HomeGuard API timing", requestUrl(input).split("?")[0], { queueMs, requestMs });
+      }
     }
   };
 
-  const result = apiQueueTail.then(execute, execute);
-  apiQueueTail = result.then(() => undefined, () => undefined);
-  return result;
+  const method = String(init.method || input?.method || "GET").toUpperCase();
+  const priority = method === "GET" || method === "HEAD" ? 0 : 1;
+  return new Promise((resolve, reject) => {
+    apiPending.push({ execute, resolve, reject, priority });
+    drainApiQueue();
+  });
+}
+
+async function drainApiQueue() {
+  if (apiRequestRunning) return;
+  apiRequestRunning = true;
+  try {
+    while (apiPending.length) {
+      // Preserve FIFO among mutations, ahead of queued background reads.
+      const priorityIndex = apiPending.findIndex(request => request.priority > 0);
+      const request = apiPending.splice(priorityIndex < 0 ? 0 : priorityIndex, 1)[0];
+      try { request.resolve(await request.execute()); }
+      catch (error) { request.reject(error); }
+    }
+  } finally { apiRequestRunning = false; }
 }
 
 window.fetch = serializedApiFetch;
