@@ -110,6 +110,40 @@ class SettingsStore(context: Context) {
 
     fun mqttPassword(): String = secure.get("mqtt_password")
 
+    @Synchronized
+    fun mqttCommandKeyEpoch(deviceId: String = settings.value.deviceId): Long {
+        if (deviceId.isBlank()) return 0L
+        return preferences.getLong("mqtt_command_key_epoch_$deviceId", 0L)
+    }
+
+    @Synchronized
+    fun setMqttCommandKeyEpoch(deviceId: String = settings.value.deviceId, epoch: Long) {
+        require(deviceId.isNotBlank()) { "deviceId is required" }
+        require(epoch > 0L) { "key epoch must be positive" }
+        check(preferences.edit().putLong("mqtt_command_key_epoch_$deviceId", epoch).commit()) {
+            "MQTT command epoch persistence failed"
+        }
+    }
+
+    @Synchronized
+    fun nextMqttCommandCounter(deviceId: String = settings.value.deviceId): Long {
+        require(deviceId.isNotBlank()) { "deviceId is required" }
+        val key = "mqtt_command_counter_$deviceId"
+        val current = preferences.getLong(key, 0L)
+        check(current < Long.MAX_VALUE) { "MQTT command counter exhausted" }
+        val next = current + 1L
+        check(preferences.edit().putLong(key, next).commit()) { "MQTT command counter persistence failed" }
+        return next
+    }
+
+    @Synchronized
+    fun resetMqttCommandCounter(deviceId: String = settings.value.deviceId) {
+        require(deviceId.isNotBlank()) { "deviceId is required" }
+        check(preferences.edit().putLong("mqtt_command_counter_$deviceId", 0L).commit()) {
+            "MQTT command counter reset persistence failed"
+        }
+    }
+
     private fun load() = AppSettings(
         deviceId = preferences.getString("device_id", "").orEmpty(),
         apiToken = secure.get("api_token"),
