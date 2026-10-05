@@ -6,8 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.media.RingtoneManager
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -26,8 +24,6 @@ class HomeGuardNotifications(private val context: Context) {
     fun createChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
-        val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_CRITICAL,
@@ -37,13 +33,7 @@ class HomeGuardNotifications(private val context: Context) {
                 description = "Тривога HomeGuard: звук і вібрація"
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 500, 250, 500, 250, 900)
-                setSound(
-                    alarmSound,
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build(),
-                )
+                setSound(null, null)
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
         )
@@ -86,10 +76,8 @@ class HomeGuardNotifications(private val context: Context) {
             .setContentIntent(pendingIntent)
 
         if (critical && Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
             builder
-                .setSound(alarmSound)
+                .setSound(null)
                 .setVibrate(longArrayOf(0, 500, 250, 500, 250, 900))
         }
         val notification = builder.build()
