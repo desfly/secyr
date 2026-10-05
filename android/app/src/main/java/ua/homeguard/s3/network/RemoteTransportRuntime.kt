@@ -10,6 +10,9 @@ import ua.homeguard.s3.network.cloud.CloudRuntime
 import ua.homeguard.s3.network.mqtt.MqttConnectionConfig
 import ua.homeguard.s3.network.mqtt.MqttRuntime
 import ua.homeguard.s3.network.mqtt.MqttRuntimeClient
+import ua.homeguard.s3.network.mqtt.MqttCommandEnvelope
+import ua.homeguard.s3.network.mqtt.MqttCommandSigner
+import org.json.JSONObject
 import ua.homeguard.s3.model.SystemEventRecord
 
 /**
@@ -36,6 +39,12 @@ class RemoteTransportRuntime(
     fun mqttState(): StateFlow<MqttRuntime.State> = mqtt.state()
     fun mqttLastSeenAtMs(): StateFlow<Long> = mqtt.lastSeenAtMs()
     fun mqttConfiguration(): StateFlow<MqttConnectionConfig> = mqttConfig.asStateFlow()
+
+    suspend fun mqttCommand(
+        envelope: MqttCommandEnvelope,
+        signer: MqttCommandSigner,
+        timeoutMs: Long = 8_000L,
+    ): JSONObject = mqttClient.command(envelope, signer, timeoutMs)
 
     fun start() {
         cloud.start()
