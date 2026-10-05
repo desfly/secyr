@@ -16,6 +16,9 @@ import ua.homeguard.s3.network.ble.BleRuntimeRegistry
 import ua.homeguard.s3.network.cloud.CloudRuntime
 import ua.homeguard.s3.network.mqtt.MqttConnectionConfig
 import ua.homeguard.s3.network.mqtt.MqttRuntime
+import ua.homeguard.s3.network.mqtt.MqttCommandEnvelope
+import ua.homeguard.s3.network.mqtt.MqttCommandSigner
+import org.json.JSONObject
 import ua.homeguard.s3.storage.RegisteredDeviceStore
 import ua.homeguard.s3.storage.SettingsStore
 
@@ -45,6 +48,12 @@ class DeviceSession(
     fun remoteStatuses(): List<TransportStatus> = remoteTransports.transportStatuses()
     fun configureMqtt(config: MqttConnectionConfig, credential: String = "") =
         remoteTransports.configureMqtt(config, credential)
+
+    suspend fun mqttCommand(
+        envelope: MqttCommandEnvelope,
+        signer: MqttCommandSigner,
+        timeoutMs: Long = 8_000L,
+    ): JSONObject = remoteTransports.mqttCommand(envelope, signer, timeoutMs)
 
     fun start() {
         if (job != null) return
