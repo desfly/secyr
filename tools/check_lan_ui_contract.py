@@ -34,13 +34,15 @@ require("LAN_POLL_MS" in js and "schedulerStep" in js,
 # Exercise the production fetch queue; implementation variable names are not
 # evidence that requests remain single-flight or that mutations preserve FIFO.
 try:
-    queue_test = subprocess.run(
-        ["node", str(ROOT / "tests" / "web_api_queue_test.cjs")],
-        cwd=ROOT, capture_output=True, text=True, timeout=20,
-    )
-    require(queue_test.returncode == 0,
-            "LAN/API single-flight or command priority regression: " +
-            (queue_test.stdout + queue_test.stderr).strip())
+    for test_name in ("web_api_queue_test.cjs", "web_auth_queue_test.cjs", "web_dashboard_poll_test.cjs"):
+        queue_test = subprocess.run(
+            ["node", str(ROOT / "tests" / test_name)],
+            cwd=ROOT, capture_output=True, text=True, timeout=20,
+        )
+        require(queue_test.returncode == 0,
+                "LAN/API single-flight or command priority regression: " +
+                (queue_test.stdout + queue_test.stderr).strip())
+
 except (OSError, subprocess.TimeoutExpired) as error:
     require(False, f"LAN/API queue behavior test could not complete: {error}")
 require("setInterval(" not in js and "setInterval(" not in html,

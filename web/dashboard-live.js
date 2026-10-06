@@ -11,6 +11,9 @@
     analogTimer: 0,
     authTimer: 0,
     connectivityTimer: 0,
+    outputRefreshBusy: false,
+    analogRefreshBusy: false,
+    connectivityRefreshBusy: false,
     lockBusy: false,
     commandBusy: false,
   };
@@ -155,6 +158,8 @@
     }
     if (!ensureAdminConnectivityCard()) return;
 
+    if (live.connectivityRefreshBusy) return;
+    live.connectivityRefreshBusy = true;
     try {
       const [wifi, local, cloud] = await Promise.all([
         api("/api/v1/network/status"),
@@ -195,6 +200,8 @@
     } catch (error) {
       const updated = document.getElementById("adminConnectivityUpdated");
       if (updated) updated.textContent = `Помилка: ${error.message}`;
+    } finally {
+      live.connectivityRefreshBusy = false;
     }
   }
 
@@ -207,6 +214,7 @@
   }
 
   function zoneStateFromMv(raw) {
+    if (raw === null || raw === undefined) return 3;
     const millivolts = Number(raw);
     if (!Number.isFinite(millivolts)) return 3;
     if (millivolts <= 350) return 4;
@@ -218,7 +226,7 @@
   function renderLiveZones(states, millivolts = null) {
     if (!Array.isArray(states) || states.length < 8) return;
     live.zones = states.slice(0, 8).map(Number);
-    live.zonesMv = Array.isArray(millivolts) ? millivolts.slice(0, 8).map(Number) : live.zonesMv;
+    live.zonesMv = Array.isArray(millivolts) ? millivolts.slice(0, 8).map(value => value === null || value === undefined ? null : Number(value)) : live.zonesMv;
     live.zonesAt = Date.now();
     const target = document.querySelector("#zones");
     if (!target) return;
@@ -273,27 +281,33 @@
 
   async function refreshOutputs() {
     if (!window.HomeGuardAuth?.authenticated?.()) return;
+    if (live.outputRefreshBusy) return;
+    live.outputRefreshBusy = true;
     try {
       const data = await api("/api/v1/system/outputs");
       syncOutputSnapshot(data);
     } catch (_) {
+    } finally {
+      live.outputRefreshBusy = false;
     }
   }
 
   async function refreshAnalogZones() {
     if (!window.HomeGuardAuth?.authenticated?.()) return;
+    if (live.analogRefreshBusy) return;
+    live.analogRefreshBusy = true;
     try {
       const data = await api("/api/v1/hardware/analog");
       const devices = Array.isArray(data?.devices) ? data.devices : [];
       const first = devices.find(item => item?.role === "zones" || Number(item?.address) === 0x48);
-      const second = devices.find(item => item?.role === "telemetry" || Number(item?.address) === 0x49);
       const firstValues = Array.isArray(first?.channels_mv) ? first.channels_mv : [];
-      const secondValues = Array.isArray(second?.channels_mv) ? second.channels_mv : [];
-      const values = [...firstValues.slice(0, 4), ...secondValues.slice(0, 4)];
-      if (values.length !== 8 || values.some(value => !Number.isFinite(Number(value)))) return;
-      const mv = values.map(Number);
+      if (firstValues.length !== 4) return;
+      // Only ADS 0x48 is wired to zones. ADS 0x49 belongs to telemetry.
+      const mv = [...firstValues.map(value => value === null || value === undefined ? null : Number(value)), null, null, null, null];
       renderLiveZones(mv.map(zoneStateFromMv), mv);
     } catch (_) {
+    } finally {
+      live.analogRefreshBusy = false;
     }
   }
 

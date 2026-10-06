@@ -1,7 +1,8 @@
 "use strict";
 
 (() => {
-  const originalFetch = window.__homeguardNativeFetch || window.fetch.bind(window);
+  const operationalFetch = window.fetch.bind(window);
+  const originalFetch = window.__homeguardNativeFetch || operationalFetch;
   let session = null;
   let gateMode = "loading";
   let authRecoveryPromise = null;
@@ -139,7 +140,7 @@
   ]);
 
   window.fetch = function(input, init = {}) {
-    if (!session) return originalFetch(input, init);
+    if (!session) return operationalFetch(input, init);
     const url = typeof input === "string" ? input : String(input?.url || "");
     if (!url.startsWith("/api/v1/") || url === "/api/v1/access/login" || url === "/api/v1/access/state") return originalFetch(input, init);
     const headers = new Headers(init.headers || (typeof input !== "string" ? input.headers : undefined) || {});
@@ -158,7 +159,7 @@
       }
     }
 
-    return originalFetch(input, nextInit).then(response => {
+    return operationalFetch(input, nextInit).then(response => {
       if (response.status === 401 && session) {
         // Do not destroy a browser session because one protected request failed.
         // Coalesce concurrent 401s and let the authoritative access-state endpoint
