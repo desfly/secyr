@@ -41,15 +41,17 @@ class MonitoringService : Service() {
             .setContentIntent(open).setOngoing(true).build())
         runtime = MonitoringRuntime.get(this)
         val notifications = HomeGuardNotifications(this).apply { createChannels() }
+        var latestMode: SystemMode? = null
         scope.launch {
             runtime.telemetry.liveEvents().collect { event ->
                 runtime.eventHistory.append(event)
-                notifications.notify(event, runtime.settings.settings.value)
+                notifications.notify(event, runtime.settings.settings.value, latestMode)
             }
         }
         scope.launch {
             var alarm = false
             runtime.telemetry.snapshots().collect { snapshot ->
+                latestMode = snapshot.mode
                 if (snapshot.mode == SystemMode.ALARM && !alarm) notifications.notify(
                     SystemEventRecord(snapshot.sequence, System.currentTimeMillis(), "ALARM", 0, 1),
                     runtime.settings.settings.value)

@@ -31,6 +31,8 @@ public:
 private:
     static void task_entry(void* context);
     static void zone_task_entry(void* context);
+    static void output_mirror_task_entry(void* context);
+    void run_output_mirror();
     void run();
     void run_zones();
     void update_zone_model(const std::array<hg::ZoneState, 8>& zones, std::uint64_t now_ms);

@@ -1,6 +1,7 @@
 package ua.homeguard.s3.notifications
 
 import ua.homeguard.s3.model.SystemEventRecord
+import ua.homeguard.s3.model.SystemMode
 
 enum class AlertSeverity { INFO, WARNING, CRITICAL }
 
@@ -11,9 +12,11 @@ data class AlertMessage(
 )
 
 object AlertPolicy {
-    fun classify(event: SystemEventRecord): AlertMessage? = when (event.event.uppercase()) {
+    fun classify(event: SystemEventRecord, mode: SystemMode? = null): AlertMessage? = when (event.event.uppercase()) {
         "ALARM" -> AlertMessage(AlertSeverity.CRITICAL, "Тривога HomeGuard", "Тривога: джерело ${event.sourceId}")
-        "TAMPER" -> AlertMessage(AlertSeverity.CRITICAL, "Саботаж / Tamper", "Tamper: зона або модуль ${event.sourceId}")
+        "TAMPER" -> if (mode == SystemMode.DISARMED && event.sourceId in 1..8)
+            AlertMessage(AlertSeverity.INFO, "Стан зони", "Зона ${event.sourceId}: коротке замикання / Tamper")
+        else AlertMessage(AlertSeverity.CRITICAL, "Саботаж / Tamper", "Tamper: зона або модуль ${event.sourceId}")
         "BATTERY_LOW" -> AlertMessage(AlertSeverity.WARNING, "Низький заряд", "Джерело ${event.sourceId}: низький заряд")
         "SENSOR_OFFLINE" -> AlertMessage(AlertSeverity.WARNING, "Датчик недоступний", "Датчик ${event.sourceId} втратив зв'язок")
         "ARMED" -> AlertMessage(AlertSeverity.INFO, "Система під охороною", "Розділ ${event.sourceId} поставлено під охорону")

@@ -123,6 +123,8 @@ esp_err_t TelemetryRuntime::start(
     ble_transport_ = ble_transport;
     auto result = xTaskCreate(&TelemetryRuntime::zone_task_entry, "hg_zones", 4096, this, 7, nullptr);
     if (result != pdPASS) return ESP_ERR_NO_MEM;
+    result = xTaskCreate(&TelemetryRuntime::output_mirror_task_entry, "hg_io_mirror", 3072, this, 4, nullptr);
+    if (result != pdPASS) return ESP_ERR_NO_MEM;
     result = xTaskCreate(&TelemetryRuntime::task_entry, "hg_telemetry", 7168, this, 6, nullptr);
     return result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }
@@ -135,6 +137,45 @@ void TelemetryRuntime::task_entry(void* context)
 void TelemetryRuntime::zone_task_entry(void* context)
 {
     static_cast<TelemetryRuntime*>(context)->run_zones();
+}
+
+void TelemetryRuntime::output_mirror_task_entry(void* context)
+{
+    static_cast<TelemetryRuntime*>(context)->run_output_mirror();
+}
+
+void TelemetryRuntime::run_output_mirror()
+{
+    bool applied = false;
+    std::uint8_t previous = 0;
+    while (true) {
+        auto& expander = hardware_->io_expander();
+        if (!expander.ready()) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+        std::uint8_t desired = 0;
+        {
+            const auto state_lock = system_model_->lock();
+            const auto light = system_model_->output_snapshot(4);
+            const auto lock = system_model_->output_snapshot(5);
+            if (light && light->active) desired |= 0x01;
+            if (lock && lock->active) desired |= 0x02;
+        }
+        // I2C runs outside model locks and outside the fast security-zone task.
+        if (!applied || desired != previous) {
+            const auto error = expander.write_mirrored_outputs(desired);
+            if (error != ESP_OK) {
+                applied = false;
+                ESP_LOGW(kTag, "MCP output mirror failed: %s", esp_err_to_name(error));
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+            previous = desired;
+            applied = true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
 }
 
 void TelemetryRuntime::run_zones()
