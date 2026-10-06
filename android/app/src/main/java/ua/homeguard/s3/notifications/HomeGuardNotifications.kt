@@ -100,8 +100,9 @@ class HomeGuardNotifications(private val context: Context) {
 
     private fun isEnabled(event: SystemEventRecord, alert: AlertMessage, settings: AppSettings): Boolean {
         val type = event.event.uppercase()
-        if (type == "ZONE_OPEN" || type == "ZONE_CLOSED" ||
-            (type == "TAMPER" && alert.severity == AlertSeverity.INFO)) {
+        // Disarmed zone tamper remains in event history, without phone alerts.
+        if (type == "TAMPER" && alert.severity == AlertSeverity.INFO) return false
+        if (type == "ZONE_OPEN" || type == "ZONE_CLOSED") {
             return settings.statusNotificationsEnabled && settings.zoneNotificationsEnabled
         }
         return if (alert.severity == AlertSeverity.INFO) {
