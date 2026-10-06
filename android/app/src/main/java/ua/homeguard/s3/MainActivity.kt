@@ -451,7 +451,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
             commandStatus.value = "Виконання · ${device.name}…"
-            val reply = commands.execute(type, accessSession.value?.actor.orEmpty())
+            var reply = commands.execute(type, accessSession.value?.actor.orEmpty())
+            if (ua.homeguard.s3.control.QuickCommandSessionPolicy.canRecover(type, reply)) {
+                // An explicit 401 precedes execution. Retry only idempotent
+                // security commands, once, after a fresh authorized login.
+                commandStatus.value = "Відновлення входу · ${device.name}…"
+                commands.logout()
+                accessSession.value = null
+                activeAccessDeviceId = ""
+                if (tryPersistentLogin(showFailure = false)) {
+                    reply = commands.execute(type, accessSession.value?.actor.orEmpty())
+                }
+            }
             commandStatus.value = if (reply.accepted) "Виконано · ${device.name}" else "Не виконано · ${reply.code}"
         }
     }

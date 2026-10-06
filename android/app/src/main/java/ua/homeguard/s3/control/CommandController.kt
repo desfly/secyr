@@ -12,6 +12,7 @@ import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceCommand
 import ua.homeguard.s3.model.DeviceEndpoint
+import ua.homeguard.s3.network.HttpDeviceApiException
 import ua.homeguard.s3.network.HttpDeviceApi
 import ua.homeguard.s3.network.LocalTelemetryTicketBroker
 import ua.homeguard.s3.network.ble.BleHomeGuardClient
@@ -172,7 +173,10 @@ class CommandController(
         // currently resolved network/cloud path.
         val httpResult = runCatching { executeHttp(type, actor, credential) }
         val httpReply = httpResult.getOrNull()
-        return httpReply ?: CommandReply(accepted = false, code = "offline")
+        val error = httpResult.exceptionOrNull()
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        return httpReply ?: CommandReply(accepted = false,
+            code = (error as? HttpDeviceApiException)?.reason ?: "offline")
     }
 
     suspend fun panicOverBle(): CommandReply {
