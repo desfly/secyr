@@ -146,6 +146,10 @@ if ADS1115.exists() and ADS1115_HEADER.exists() and HARDWARE_BOOTSTRAP.exists() 
         if item not in hardware_text:
             errors.append(f"dual ADS1115 bootstrap contract missing: {item}")
 
+    snapshot_helper = hardware_text.split("void append_adc_snapshot(", 1)[1].split("void validate_adc_conversion(", 1)[0]
+    if "cached_single_ended_mv" not in snapshot_helper or "read_all_single_ended_mv" in snapshot_helper:
+        errors.append("HTTP analog diagnostics must consume cache without ADC transactions")
+
     if '/api/v1/hardware/analog' not in infrastructure_text:
         errors.append("dual ADS1115 diagnostic API route missing")
     if "kI2cSda = GPIO_NUM_4" not in board_text or "kI2cScl = GPIO_NUM_5" not in board_text:

@@ -350,11 +350,17 @@ void TelemetryRuntime::run()
         std::array<float, 2> pressure_values{};
         std::array<bool, 2> pressure_valid{};
         auto& analog_adc = hardware_->telemetry_adc();
+        // ADS 0x49 also supplies zone 5–8 diagnostics. Scan all channels here,
+        // never in HTTPD; these readings do not enter security/output decisions.
+        std::array<float, 4> analog_values{};
+        std::array<bool, 4> analog_valid{};
+        if (analog_adc.ready()) {
+            (void)analog_adc.read_all_single_ended_mv(&analog_values, &analog_valid);
+        }
         for (std::size_t index = 0; index < pressures.size(); ++index) {
             if (!analog_adc.ready()) { pressures[index] = hg::PressureState::Disabled; continue; }
-            float millivolts = 0.0F;
-            if (analog_adc.read_single_ended_mv(static_cast<std::uint8_t>(index), &millivolts) == ESP_OK) {
-                pressure_values[index] = millivolts;
+            if (analog_valid[index]) {
+                pressure_values[index] = analog_values[index];
                 pressure_valid[index] = true;
                 pressures[index] = hg::PressureState::Normal;
             } else pressures[index] = hg::PressureState::SensorFault;
