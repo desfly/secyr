@@ -2,6 +2,7 @@
 #include "hg_i2c_bus.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include "freertos/FreeRTOS.h"
