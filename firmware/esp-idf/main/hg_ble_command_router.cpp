@@ -493,8 +493,8 @@ void BleCommandRouter::handle_command(const std::string& json)
         }
         (void)parse_bool(json, "alarmActive", alarm_active);
 
-        const auto* output = model_->output(output_id);
-        if (output == nullptr) {
+        const auto output = model_->output_snapshot(output_id);
+        if (!output) {
             send(kCommandReplyType, "{\"ok\":false,\"reason\":\"unknown_output\"}");
             return;
         }

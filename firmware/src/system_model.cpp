@@ -71,6 +71,18 @@ std::size_t SystemEventBus::dispatch_all() {
     return count;
 }
 
+std::optional<OutputRecord> SystemModel::output_snapshot(std::uint16_t id) const {
+    const auto state_lock = lock();
+    const auto* item = output(id);
+    return item ? std::optional<OutputRecord>(*item) : std::nullopt;
+}
+
+std::optional<PartitionRecord> SystemModel::partition_snapshot(std::uint16_t id) const {
+    const auto state_lock = lock();
+    const auto* item = partition(id);
+    return item ? std::optional<PartitionRecord>(*item) : std::nullopt;
+}
+
 void SystemModel::copy_name(std::array<char, 24>& destination, std::string_view source) {
     destination.fill('\0');
     const auto count = std::min(source.size(), destination.size() - 1U);
@@ -82,6 +94,7 @@ bool SystemModel::emit(SystemEventType type, std::uint16_t source_id, std::uint6
 }
 
 bool SystemModel::add_zone(std::uint16_t id, std::string_view name, ModelZoneType type, bool always_on) {
+    const auto state_lock = lock();
     if (zone_count_ >= zones_.size() || zone(id) != nullptr) return false;
     auto& item = zones_[zone_count_++];
     item.id = id;
@@ -92,6 +105,7 @@ bool SystemModel::add_zone(std::uint16_t id, std::string_view name, ModelZoneTyp
 }
 
 bool SystemModel::add_sensor(std::uint16_t id, ModelSensorType type) {
+    const auto state_lock = lock();
     if (sensor_count_ >= sensors_.size() || sensor(id) != nullptr) return false;
     auto& item = sensors_[sensor_count_++];
     item.id = id;
@@ -100,6 +114,7 @@ bool SystemModel::add_sensor(std::uint16_t id, ModelSensorType type) {
 }
 
 bool SystemModel::add_output(std::uint16_t id, ModelOutputType type) {
+    const auto state_lock = lock();
     if (output_count_ >= outputs_.size() || output(id) != nullptr) return false;
     auto& item = outputs_[output_count_++];
     item.id = id;
@@ -108,12 +123,14 @@ bool SystemModel::add_output(std::uint16_t id, ModelOutputType type) {
 }
 
 bool SystemModel::add_partition(std::uint16_t id) {
+    const auto state_lock = lock();
     if (partition_count_ >= partitions_.size() || partition(id) != nullptr) return false;
     partitions_[partition_count_++].id = id;
     return true;
 }
 
 bool SystemModel::set_zone_state(std::uint16_t id, ModelZoneState state, std::uint64_t now_ms) {
+    const auto state_lock = lock();
     for (std::size_t i = 0; i < zone_count_; ++i) {
         auto& item = zones_[i];
         if (item.id != id) continue;
@@ -133,6 +150,7 @@ bool SystemModel::set_zone_state(std::uint16_t id, ModelZoneState state, std::ui
 }
 
 bool SystemModel::set_output_active(std::uint16_t id, bool active, std::uint64_t now_ms) {
+    const auto state_lock = lock();
     for (std::size_t i = 0; i < output_count_; ++i) {
         auto& item = outputs_[i];
         if (item.id != id) continue;
@@ -144,6 +162,7 @@ bool SystemModel::set_output_active(std::uint16_t id, bool active, std::uint64_t
 }
 
 bool SystemModel::set_partition_arm(std::uint16_t id, PartitionArmState state, std::uint64_t now_ms) {
+    const auto state_lock = lock();
     for (std::size_t i = 0; i < partition_count_; ++i) {
         auto& item = partitions_[i];
         if (item.id != id) continue;

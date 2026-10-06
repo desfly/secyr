@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <mutex>
+#include <optional>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -92,6 +93,12 @@ public:
     static constexpr std::size_t max_outputs = 16;
     static constexpr std::size_t max_partitions = 4;
     explicit SystemModel(SystemEventBus& bus) : bus_(bus) {}
+    // Hold across compound decisions; never across dispatch or network I/O.
+    [[nodiscard]] std::unique_lock<std::recursive_mutex> lock() const {
+        return std::unique_lock<std::recursive_mutex>(state_mutex_);
+    }
+    [[nodiscard]] std::optional<OutputRecord> output_snapshot(std::uint16_t id) const;
+    [[nodiscard]] std::optional<PartitionRecord> partition_snapshot(std::uint16_t id) const;
     bool add_zone(std::uint16_t id, std::string_view name, ModelZoneType type, bool always_on = false);
     bool add_sensor(std::uint16_t id, ModelSensorType type);
     bool add_output(std::uint16_t id, ModelOutputType type);
@@ -114,6 +121,7 @@ public:
 private:
     static void copy_name(std::array<char, 24>& destination, std::string_view source);
     bool emit(SystemEventType type, std::uint16_t source_id, std::uint64_t now_ms, std::int32_t value = 0);
+    mutable std::recursive_mutex state_mutex_;
     SystemEventBus& bus_;
     std::array<ZoneRecord, max_zones> zones_{};
     std::array<SensorRecord, max_sensors> sensors_{};

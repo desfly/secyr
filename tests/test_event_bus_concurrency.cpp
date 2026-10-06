@@ -4,6 +4,8 @@
 #include <iostream>
 #include <thread>
 #include <vector>
+#include <future>
+#include <chrono>
 
 #define REQUIRE(condition) do { if (!(condition)) { std::cerr << "Failed: " #condition << "\n"; std::abort(); } } while (false)
 
@@ -54,6 +56,29 @@ int main() {
     REQUIRE(bus.queued() == 0);
     REQUIRE(state.ordered);
     REQUIRE(state.delivered + bus.dropped() == bus.published());
+
+    // A disarm cannot be overwritten by a zone decision using an earlier
+    // armed state: its write must wait until the compound decision completes.
+    hg::SystemEventBus model_bus;
+    hg::SystemModel model(model_bus);
+    REQUIRE(model.add_partition(1));
+    REQUIRE(model.set_partition_arm(1, hg::PartitionArmState::Away, 0));
+    std::future<bool> disarm;
+    std::promise<void> attempted;
+    auto attempted_future = attempted.get_future();
+    {
+        const auto state_lock = model.lock();
+        REQUIRE(model.partition(1)->arm_state == hg::PartitionArmState::Away);
+        disarm = std::async(std::launch::async, [&] {
+            attempted.set_value();
+            return model.set_partition_arm(1, hg::PartitionArmState::Disarmed, 2);
+        });
+        attempted_future.wait();
+        REQUIRE(disarm.wait_for(std::chrono::milliseconds(25)) == std::future_status::timeout);
+        REQUIRE(model.set_partition_arm(1, hg::PartitionArmState::Alarm, 1));
+    }
+    REQUIRE(disarm.get());
+    REQUIRE(model.partition_snapshot(1)->arm_state == hg::PartitionArmState::Disarmed);
 
     hg::SystemEventBus replenishing;
     REQUIRE(replenishing.subscribe(replenish, &replenishing));

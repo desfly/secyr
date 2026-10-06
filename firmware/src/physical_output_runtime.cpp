@@ -4,8 +4,8 @@ namespace hg {
 namespace {
 
 bool output_state(const SystemModel& model, std::uint16_t id) {
-    const auto* output = model.output(id);
-    return output != nullptr && output->active;
+    const auto output = model.output_snapshot(id);
+    return output.has_value() && output->active;
 }
 
 }  // namespace

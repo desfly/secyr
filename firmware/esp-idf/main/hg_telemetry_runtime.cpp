@@ -46,8 +46,8 @@ hg::HealthState module_health(homeguard::HardwareModuleState state)
 
 hg::SystemMode system_mode(const hg::SystemModel& model)
 {
-    const auto* partition = model.partition_at(0);
-    if (partition == nullptr) return hg::SystemMode::Disarmed;
+    const auto partition = model.partition_snapshot(1);
+    if (!partition) return hg::SystemMode::Disarmed;
     switch (partition->arm_state) {
         case hg::PartitionArmState::Stay: return hg::SystemMode::ArmedHome;
         case hg::PartitionArmState::Away: return hg::SystemMode::ArmedAway;
@@ -180,8 +180,8 @@ void TelemetryRuntime::run_zones()
 bool TelemetryRuntime::set_light_output(bool active, std::uint64_t now_ms)
 {
     if (system_model_ == nullptr) return false;
-    const auto* output = system_model_->output(kLightOutputId);
-    if (output == nullptr) return false;
+    const auto output = system_model_->output_snapshot(kLightOutputId);
+    if (!output) return false;
 
     if (output->active != active && !system_model_->set_output_active(kLightOutputId, active, now_ms)) {
         ESP_LOGE(kTag, "Zone light: failed to update output model");
@@ -202,6 +202,7 @@ void TelemetryRuntime::update_zone_model(
 {
     if (system_model_ == nullptr || system_bus_ == nullptr) return;
 
+    const auto state_lock = system_model_->lock();
     const auto* partition = system_model_->partition(1);
     const bool armed = partition != nullptr &&
         (partition->arm_state == hg::PartitionArmState::Stay ||
@@ -262,8 +263,8 @@ void TelemetryRuntime::update_zone_light(
     if (!light_cycle_active_) {
         if (!triggered) return;
 
-        const auto* light = system_model_->output(kLightOutputId);
-        if (light == nullptr) {
+        const auto light = system_model_->output_snapshot(kLightOutputId);
+        if (!light) {
             ESP_LOGE(kTag, "Zone light: output 4 is missing");
             return;
         }
@@ -280,9 +281,9 @@ void TelemetryRuntime::update_zone_light(
     // Never shorten or restart the running minute because of transitions that
     // happen inside it. If something turns the relay off during the automatic
     // cycle, assert the required ON state again on the next telemetry tick.
-    const auto* light = system_model_->output(kLightOutputId);
+    const auto light = system_model_->output_snapshot(kLightOutputId);
     if (now_ms < light_cycle_deadline_ms_) {
-        if (light != nullptr && !light->active) (void)set_light_output(true, now_ms);
+        if (light.has_value() && !light->active) (void)set_light_output(true, now_ms);
         return;
     }
 
@@ -290,7 +291,7 @@ void TelemetryRuntime::update_zone_light(
         // Still active after one minute: continue with the next minute without
         // dropping the lamp between cycles.
         light_cycle_deadline_ms_ = now_ms + kLightCycleMs;
-        if (light != nullptr && !light->active) (void)set_light_output(true, now_ms);
+        if (light.has_value() && !light->active) (void)set_light_output(true, now_ms);
         ESP_LOGI(kTag, "Zone light: trigger still active, next 60 s cycle started");
         return;
     }

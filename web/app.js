@@ -36,13 +36,20 @@ function serializedApiFetch(input, init = {}) {
   const enqueuedAt = Date.now();
   const execute = async () => {
     const startedAt = Date.now();
-    if (init.signal) return nativeFetch(input, init);
     const controller = new AbortController();
+    const abortFromCaller = () => controller.abort(init.signal.reason);
+    if (init.signal?.aborted) abortFromCaller();
+    else init.signal?.addEventListener("abort", abortFromCaller, { once: true });
     const timer = setTimeout(() => controller.abort(), apiTimeoutMs(input));
     try {
-      return await nativeFetch(input, { ...init, signal: controller.signal });
+      const response = await nativeFetch(input, { ...init, signal: controller.signal });
+      // fetch resolves at headers. Keep the queue and timeout until the body
+      // arrives; preserve the original Response for callers and its metadata.
+      await response.clone().arrayBuffer();
+      return response;
     } finally {
       clearTimeout(timer);
+      init.signal?.removeEventListener("abort", abortFromCaller);
       const queueMs = startedAt - enqueuedAt;
       const requestMs = Date.now() - startedAt;
       if (queueMs > 500 || requestMs > 500) {

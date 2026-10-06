@@ -163,8 +163,8 @@ bool BleRemoteRuntime::execute(hg::BleRemoteAction action, std::uint64_t now_ms)
             changed = model_->set_partition_arm(kPartitionId, hg::PartitionArmState::Alarm, now_ms);
             break;
         case hg::BleRemoteAction::LightToggle: {
-            const auto* light = model_->output(kLightOutputId);
-            if (light == nullptr) return false;
+            const auto light = model_->output_snapshot(kLightOutputId);
+            if (!light) return false;
             changed = model_->set_output_active(kLightOutputId, !light->active, now_ms);
             break;
         }

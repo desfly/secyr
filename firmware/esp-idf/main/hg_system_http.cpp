@@ -263,31 +263,10 @@ esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
     return send_json(request,response.c_str(),response.size());
 }
 
-void SystemHttp::remember_client(int socket_fd) {
-    if (socket_fd < 0) return;
-    for (const int client : clients_) if (client == socket_fd) return;
-    for (auto& client : clients_) {
-        if (client < 0) {
-            client = socket_fd;
-            return;
-        }
-    }
-    clients_[0] = socket_fd;
-}
-
-esp_err_t SystemHttp::websocket(httpd_req_t* request) {
-    auto* self = self_from(request);
-    if (!self) return ESP_FAIL;
-    if (!self->authenticated_request(request)) return request_auth::send_login_required(request);
-    self->remember_client(httpd_req_to_sockfd(request));
-    return ESP_OK;
-}
-
 void SystemHttp::on_event(const hg::SystemEvent& event,void* context) {
     auto* self = static_cast<SystemHttp*>(context);
     if (!self) return;
     self->record(event);
-    self->broadcast(event);
 }
 
 void SystemHttp::record(const hg::SystemEvent& event) {
@@ -309,50 +288,6 @@ std::string SystemHttp::events_json() const {
     }
     out << "]}";
     return out.str();
-}
-
-void SystemHttp::broadcast(const hg::SystemEvent& event) {
-    if (!server_) return;
-    // Bound queued work if a slow WebSocket client stalls the HTTP task.
-    static std::atomic<unsigned> pending{0};
-    const auto previous = pending.fetch_add(1);
-    if (previous >= 16U) {
-        pending.fetch_sub(1);
-        ESP_LOGE("hg_system", "Event WebSocket queue full; event remains in local log");
-        return;
-    }
-    struct Work {
-        SystemHttp* self;
-        hg::SystemEvent event;
-        std::atomic<unsigned>* pending;
-    };
-    auto* work = new (std::nothrow) Work{this, event, &pending};
-    if (work == nullptr) {
-        pending.fetch_sub(1);
-        ESP_LOGE("hg_system", "Event WebSocket allocation failed");
-        return;
-    }
-    const auto error = httpd_queue_work(server_, [](void* context) {
-        auto* work = static_cast<Work*>(context);
-        auto* self = work->self;
-        const std::string payload = hg::system_event_json(work->event);
-        httpd_ws_frame_t frame{};
-        frame.type = HTTPD_WS_TYPE_TEXT;
-        frame.payload = reinterpret_cast<std::uint8_t*>(const_cast<char*>(payload.data()));
-        frame.len = payload.size();
-        for (auto& client : self->clients_) {
-            if (client < 0) continue;
-            if (httpd_ws_get_fd_info(self->server_, client) != HTTPD_WS_CLIENT_WEBSOCKET ||
-                httpd_ws_send_frame_async(self->server_, client, &frame) != ESP_OK) client = -1;
-        }
-        work->pending->fetch_sub(1);
-        delete work;
-    }, work);
-    if (error != ESP_OK) {
-        pending.fetch_sub(1);
-        delete work;
-        ESP_LOGE("hg_system", "Event WebSocket work enqueue failed: %s", esp_err_to_name(error));
-    }
 }
 
 }  // namespace homeguard::idf

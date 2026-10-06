@@ -103,8 +103,8 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
         return request_auth::send_login_required(request);
     }
 
-    const auto* output = model_->output(output_id);
-    const std::string command = output != nullptr && output->type == hg::ModelOutputType::Valve
+    const auto output = model_->output_snapshot(output_id);
+    const std::string command = output.has_value() && output->type == hg::ModelOutputType::Valve
         ? (active ? "valve.open" : "valve.close")
         : "output.control";
     const auto decision = access_control_->authorize_session(actor, command);
