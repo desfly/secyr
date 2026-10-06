@@ -328,6 +328,7 @@ class MainActivity : ComponentActivity() {
                         discovered = devices,
                         activeDeviceId = appSettings.deviceId,
                         snapshot = lastValidDeviceListSnapshot,
+                        commandStatus = commandMessage,
                         onAddDevice = { addDeviceOpen.value = true; lifecycleScope.launch { discovery.rescan() } },
                         onRenameDevice = { device, newName -> lifecycleScope.launch { registeredDevices.rename(device.deviceId, newName) } },
                         onDeleteDevice = { device ->

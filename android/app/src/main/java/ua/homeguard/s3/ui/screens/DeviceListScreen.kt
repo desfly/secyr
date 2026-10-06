@@ -57,6 +57,7 @@ fun DeviceListScreen(
     discovered: List<DiscoveredDevice>,
     activeDeviceId: String,
     snapshot: SystemSnapshot,
+    commandStatus: String = "Готово",
     onAddDevice: () -> Unit,
     onRenameDevice: (RegisteredDevice, String) -> Unit,
     onDeleteDevice: (RegisteredDevice) -> Unit,
@@ -223,6 +224,9 @@ fun DeviceListScreen(
                                 onClick = { onQuickLock(device) },
                                 modifier = Modifier.weight(1f),
                             ) { Text("🔒 Замок") }
+                        }
+                        if (active && commandStatus != "Готово") {
+                            Text(commandStatus, style = MaterialTheme.typography.bodySmall)
                         }
                         if (!device.authorized) Text("Потрібна перевірка авторизації", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         if (expanded) {
