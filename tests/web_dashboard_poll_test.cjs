@@ -18,13 +18,14 @@ vm.runInContext(extract('function zoneStateFromMv','function renderLiveZones') +
  await context.refreshAnalogZones();
  assert.strictEqual(calls, 1, 'polling must not overlap an unfinished read');
  release({devices: [{role:'zones', channels_mv:[null, 1600, 0, 3300]},
- {role:'telemetry',channels_mv:[1600,1600,1600,1600]}]});
+ {role:'telemetry',channels_mv:[1600,null,0,3300]}]});
  await first;
- assert.deepStrictEqual(Array.from(rendered.states), [3,0,4,1,3,3,3,3]);
+ assert.deepStrictEqual(Array.from(rendered.states), [3,0,4,1,0,3,4,1]);
  assert.strictEqual(rendered.mv[0], null);
- assert.strictEqual(rendered.mv[4], null, 'telemetry ADC must not become zones');
+ assert.strictEqual(rendered.mv[4], 1600, 'second ADS supplies zone 5');
+ assert.strictEqual(rendered.mv[5], null, 'invalid zone 6 stays unavailable');
  const next = context.refreshAnalogZones();
  assert.strictEqual(calls, 2, 'polling must resume after completion');
  release({devices:[]}); await next;
- console.log('Dashboard polling: single-flight, invalid ADC and telemetry separation PASS');
+ console.log('Dashboard polling: single-flight, invalid ADC and both zone modules PASS');
 })().catch(error => {console.error(error);process.exitCode=1;});

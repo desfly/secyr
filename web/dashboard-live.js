@@ -300,10 +300,13 @@
       const data = await api("/api/v1/hardware/analog");
       const devices = Array.isArray(data?.devices) ? data.devices : [];
       const first = devices.find(item => item?.role === "zones" || Number(item?.address) === 0x48);
+      const second = devices.find(item => Number(item?.address) === 0x49 || item?.role === "telemetry");
       const firstValues = Array.isArray(first?.channels_mv) ? first.channels_mv : [];
-      if (firstValues.length !== 4) return;
-      // Only ADS 0x48 is wired to zones. ADS 0x49 belongs to telemetry.
-      const mv = [...firstValues.map(value => value === null || value === undefined ? null : Number(value)), null, null, null, null];
+      const secondValues = Array.isArray(second?.channels_mv) ? second.channels_mv : [];
+      if (firstValues.length !== 4 || secondValues.length !== 4) return;
+      // Physical wiring: ADS 0x48 = zones 1–4; ADS 0x49 = zones 5–8.
+      // Displaying zones 5–8 does not enable alarm/output actions for them.
+      const mv = [...firstValues, ...secondValues].map(value => value === null || value === undefined ? null : Number(value));
       renderLiveZones(mv.map(zoneStateFromMv), mv);
     } catch (_) {
     } finally {
