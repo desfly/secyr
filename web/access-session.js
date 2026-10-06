@@ -162,16 +162,17 @@
     return operationalFetch(input, nextInit).then(response => {
       if (response.status === 401 && session) {
         // Do not destroy a browser session because one protected request failed.
-        // Coalesce concurrent 401s and let the authoritative access-state endpoint
-        // decide whether the server-side session really disappeared (for example,
-        // after a controller reboot).
+        // access/state reports setup state, not session validity. Verify the
+        // current bearer against a protected read and coalesce concurrent 401s.
         console.warn("HomeGuard API returned 401; verifying browser session", url);
         if (!authRecoveryPromise) {
           authRecoveryPromise = (async () => {
             try {
-              const stateResponse = await originalFetch("/api/v1/access/state", {cache:"no-store"});
-              const stateBody = await apiBody(stateResponse);
-              if (stateResponse.ok && stateBody.ok !== false && stateBody.state === "login_required" && session) {
+              const checkedSession = session;
+              const stateResponse = await operationalFetch("/api/v1/system/zones", {
+                cache: "no-store", headers: { Authorization: authHeader() }
+              });
+              if (stateResponse.status === 401 && session === checkedSession) {
                 await recoverAccessGate("Сесію контролера завершено. Увійдіть повторно.");
               }
             } catch (_) {
