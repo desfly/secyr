@@ -139,7 +139,6 @@ void BleRemoteRuntime::tick(std::uint64_t now_ms)
     lock_deadline_ms_ = 0;
     if (model_->set_output_active(kLockOutputId, false, now_ms)) {
         (void)physical_->synchronize(*model_, *readiness_);
-        if (bus_ != nullptr) (void)bus_->dispatch_all();
         ESP_LOGI(kTag, "BLE keyfob lock pulse completed");
     }
 }
@@ -184,7 +183,6 @@ bool BleRemoteRuntime::execute(hg::BleRemoteAction action, std::uint64_t now_ms)
         }
         return false;
     }
-    if (bus_ != nullptr) (void)bus_->dispatch_all();
     return true;
 }
 
@@ -201,7 +199,6 @@ void BleRemoteRuntime::publish_remote_event(
         0,
         1,
     });
-    (void)bus_->dispatch_all();
 }
 
 }  // namespace homeguard::idf
