@@ -257,7 +257,9 @@ esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
         httpd_resp_set_status(request,"409 Conflict");
         return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"partition_command_failed\"}",-1);
     }
-    (void)bus_->dispatch_all();
+    // Do not synchronously fan out SystemEventBus subscribers from the single
+    // HTTPD task. The telemetry dispatcher drains the bus continuously; the
+    // command response must not wait behind WebSocket/cloud/journal consumers.
     const std::string response = std::string{"{\"ok\":true,\"command\":\""} + command +
         "\",\"armState\":\"" + arm_state_name(target) + "\"}";
     return send_json(request,response.c_str(),response.size());
