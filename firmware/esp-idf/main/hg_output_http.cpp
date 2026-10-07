@@ -119,15 +119,6 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
     const auto result = hg::apply_output_command(
         *model_, *readiness_, {output_id, active, alarm_active, 0});
 
-    if (result.status == hg::OutputCommandStatus::Applied && !physical_->synchronize(*model_, *readiness_)) {
-        (void)model_->set_output_active(output_id, false, 0);
-        (void)physical_->force_safe();
-        httpd_resp_set_status(request, "503 Service Unavailable");
-        httpd_resp_set_type(request, "application/json");
-        return httpd_resp_send(request,
-            "{\"ok\":false,\"reason\":\"physical_output_failure\",\"active\":false}", -1);
-    }
-
     std::string response = std::string{"{\"ok\":"} +
         (result.status == hg::OutputCommandStatus::Applied ? "true" : "false") +
         ",\"status\":\"" + hg::to_string(result.status) +
