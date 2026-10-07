@@ -138,7 +138,6 @@ void BleRemoteRuntime::tick(std::uint64_t now_ms)
 
     lock_deadline_ms_ = 0;
     if (model_->set_output_active(kLockOutputId, false, now_ms)) {
-        (void)physical_->synchronize(*model_, *readiness_);
         ESP_LOGI(kTag, "BLE keyfob lock pulse completed");
     }
 }
@@ -174,15 +173,7 @@ bool BleRemoteRuntime::execute(hg::BleRemoteAction action, std::uint64_t now_ms)
     }
 
     if (!changed) return false;
-    if (!physical_->synchronize(*model_, *readiness_)) {
-        if (action == hg::BleRemoteAction::LightToggle || action == hg::BleRemoteAction::LockPulse) {
-            const auto output_id = action == hg::BleRemoteAction::LightToggle ? kLightOutputId : kLockOutputId;
-            (void)model_->set_output_active(output_id, false, now_ms);
-            (void)physical_->force_safe();
-            lock_deadline_ms_ = 0;
-        }
-        return false;
-    }
+    // LIGHT/LOCK are applied by the MCP23017 GPA0/GPA1 worker.
     return true;
 }
 
