@@ -230,9 +230,13 @@ void WebsocketTelemetry::publish(const hg::TelemetryFrame& frame) {
 }
 
 void WebsocketTelemetry::publish_event(const hg::SystemEvent& event) {
-    if (pending_events_.fetch_add(1) >= 16U) {
+    // WebSocket is a live view, not the authoritative event journal. Keep at
+    // most one event broadcast pending so a stalled WSS client cannot queue
+    // repeated TLS writes ahead of REST/static HTTP work. The local journal
+    // and cloud event path retain authoritative event delivery independently.
+    if (pending_events_.fetch_add(1) != 0U) {
         pending_events_.fetch_sub(1);
-        ESP_LOGW(tag, "event broadcast queue is full; local journal retains event");
+        ESP_LOGW(tag, "event broadcast already pending; local journal retains event");
         return;
     }
     auto* work = new (std::nothrow) BroadcastWork{};
