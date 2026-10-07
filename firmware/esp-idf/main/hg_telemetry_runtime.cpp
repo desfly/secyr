@@ -229,11 +229,8 @@ bool TelemetryRuntime::set_light_output(bool active, std::uint64_t now_ms)
         return false;
     }
 
-    const auto gpio = static_cast<gpio_num_t>(hg::direct_light_relay_gpio);
-    if (gpio_set_level(gpio, active ? 1 : 0) != ESP_OK) {
-        ESP_LOGE(kTag, "Zone light: GPIO%d write failed", hg::direct_light_relay_gpio);
-        return false;
-    }
+    // Physical LIGHT is MCP23017 GPA0. The output-mirror task applies the
+    // model change within its 20 ms cycle; GPIO1 remains completely free.
     return true;
 }
 
