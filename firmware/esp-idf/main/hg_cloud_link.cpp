@@ -801,7 +801,6 @@ void CloudLink::handle_command(const char* data, std::size_t size)
             publish_response(false, hg::to_string(result.status));
             return;
         }
-        (void)bus_->dispatch_all();
         xSemaphoreGive(replay_mutex);
         const auto task_ok = xTaskCreate(
             [](void* context) {
@@ -809,14 +808,12 @@ void CloudLink::handle_command(const char* data, std::size_t size)
                 vTaskDelay(pdMS_TO_TICKS(5000));
                 if (self != nullptr && self->model_ != nullptr) {
                     (void)self->model_->set_output_active(5, false, 0);
-                    if (self->bus_ != nullptr) (void)self->bus_->dispatch_all();
                 }
                 vTaskDelete(nullptr);
             },
             "hg_lock_pulse", 2048, this, 5, nullptr);
         if (task_ok != pdPASS) {
             (void)model_->set_output_active(5, false, 0);
-            (void)bus_->dispatch_all();
             publish_response(false, "lock_timer_failed");
             return;
         }
@@ -866,7 +863,6 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         publish_response(false, "partition_command_failed");
         return;
     }
-    (void)bus_->dispatch_all();
     xSemaphoreGive(replay_mutex);
     publish_response(true, "accepted", arm_state_name(target));
 }
