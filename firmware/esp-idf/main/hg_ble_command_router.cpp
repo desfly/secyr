@@ -476,7 +476,6 @@ void BleCommandRouter::handle_command(const std::string& json)
             send(kCommandReplyType, "{\"ok\":false,\"reason\":\"partition_command_failed\"}");
             return;
         }
-        (void)bus_->dispatch_all();
         const std::string body = std::string{"{\"ok\":true,\"command\":\""} + command +
             "\",\"armState\":\"" + arm_state_name(target) + "\"}";
         send(kCommandReplyType, body);
@@ -520,7 +519,6 @@ void BleCommandRouter::handle_command(const std::string& json)
 
         if (result.status == hg::OutputCommandStatus::Applied) {
             (void)bus_->publish({hg::SystemEventType::ConfigChanged, output_id, 0, 0, active ? 5401 : 5400});
-            (void)bus_->dispatch_all();
         }
         const std::string body = std::string{"{\"ok\":"} +
             (result.status == hg::OutputCommandStatus::Applied ? "true" : "false") +
