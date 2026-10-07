@@ -139,6 +139,7 @@ esp_err_t InfrastructureHttp::connectivity_get(httpd_req_t* request)
         : std::string{};
 
     const bool ble_runtime_ready = ble_runtime_status::ready();
+    const bool ble_advertising = ble_runtime_status::advertising();
     const bool ble_link_connected = BleTransport::active_connection();
     const bool ble_notifications = BleTransport::active_notifications();
     const auto ble_epoch = BleTransport::active_connection_epoch();
@@ -162,6 +163,7 @@ esp_err_t InfrastructureHttp::connectivity_get(httpd_req_t* request)
     output << "\"rssi\":" << (wifi_connected ? static_cast<int>(wifi_ap.rssi) : 0) << "},";
     output << "\"ble\":{";
     output << "\"runtimeReady\":" << (ble_runtime_ready ? "true" : "false") << ",";
+    output << "\"advertising\":" << (ble_advertising ? "true" : "false") << ",";
     output << "\"online\":" << (ble_runtime_ready ? "true" : "false") << ",";
     output << "\"connected\":" << (ble_runtime_ready ? "true" : "false") << ",";
     output << "\"linkConnected\":" << (ble_link_connected ? "true" : "false") << ",";

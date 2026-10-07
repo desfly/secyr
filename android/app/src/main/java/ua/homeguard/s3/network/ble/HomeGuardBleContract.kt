@@ -9,7 +9,10 @@ object HomeGuardBleContract {
 
     const val PROTOCOL_VERSION: Int = 1
     const val HEADER_SIZE: Int = 6
-    const val PREFERRED_MTU: Int = 247
+    // Real-device trace reaches onMtuChanged(status=133) when requesting 247,
+    // then the CCCD subscribe fails and Android terminates the GATT link.
+    // Keep the standard ATT MTU for runtime; BleFrameCodec already fragments.
+    const val PREFERRED_MTU: Int = 23
     const val MAX_MESSAGE_BYTES: Int = 4096
 
     object Type {

@@ -29,16 +29,18 @@ object BleFrameCodec {
     }
 
     class Decoder {
-        private var type = -1
-        private var messageId = -1
-        private var expectedCount = 0
-        private var nextIndex = 0
-        private var size = 0
-        private var output = ByteArrayOutputStream()
+        private data class Key(val type: Int, val messageId: Int)
+        private data class Assembly(
+            val expectedCount: Int,
+            var nextIndex: Int = 0,
+            var size: Int = 0,
+            val output: ByteArrayOutputStream = ByteArrayOutputStream(),
+        )
+
+        private val assemblies = linkedMapOf<Key, Assembly>()
 
         fun reset() {
-            type = -1; messageId = -1; expectedCount = 0; nextIndex = 0; size = 0
-            output = ByteArrayOutputStream()
+            assemblies.clear()
         }
 
         fun accept(frame: ByteArray): Message? {
@@ -50,23 +52,40 @@ object BleFrameCodec {
             val count = frame[5].toInt() and 0xff
             require(count > 0 && index < count) { "ble_fragment_index" }
 
+            val key = Key(incomingType, incomingId)
             if (index == 0) {
-                reset()
-                type = incomingType; messageId = incomingId; expectedCount = count
+                // Notifications for telemetry and command/session replies can be
+                // interleaved by the ESP. Keep a separate reassembly state per
+                // protocol message instead of resetting the one global stream.
+                assemblies[key] = Assembly(expectedCount = count)
+                while (assemblies.size > MAX_IN_FLIGHT_MESSAGES) {
+                    assemblies.remove(assemblies.keys.first())
+                }
             }
-            require(type == incomingType && messageId == incomingId && expectedCount == count && index == nextIndex) {
-                "ble_fragment_sequence"
-            }
-            val fragmentSize = frame.size - HomeGuardBleContract.HEADER_SIZE
-            require(size + fragmentSize <= HomeGuardBleContract.MAX_MESSAGE_BYTES) { "ble_message_too_large" }
-            output.write(frame, HomeGuardBleContract.HEADER_SIZE, fragmentSize)
-            size += fragmentSize
-            nextIndex++
-            if (nextIndex != expectedCount) return null
 
-            val completed = Message(type, messageId, output.toByteArray())
-            reset()
-            return completed
+            val assembly = assemblies[key]
+                ?: throw IllegalArgumentException("ble_fragment_sequence")
+            if (assembly.expectedCount != count || index != assembly.nextIndex) {
+                assemblies.remove(key)
+                throw IllegalArgumentException("ble_fragment_sequence")
+            }
+
+            val fragmentSize = frame.size - HomeGuardBleContract.HEADER_SIZE
+            require(assembly.size + fragmentSize <= HomeGuardBleContract.MAX_MESSAGE_BYTES) {
+                assemblies.remove(key)
+                "ble_message_too_large"
+            }
+            assembly.output.write(frame, HomeGuardBleContract.HEADER_SIZE, fragmentSize)
+            assembly.size += fragmentSize
+            assembly.nextIndex++
+            if (assembly.nextIndex != assembly.expectedCount) return null
+
+            assemblies.remove(key)
+            return Message(incomingType, incomingId, assembly.output.toByteArray())
+        }
+
+        companion object {
+            private const val MAX_IN_FLIGHT_MESSAGES = 8
         }
     }
 }
