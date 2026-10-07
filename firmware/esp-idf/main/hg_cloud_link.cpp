@@ -36,6 +36,7 @@ struct CloudEventWork {
 QueueHandle_t cloud_event_queue{};
 constexpr const char* kPrefix = "homeguard/v1/devices";
 constexpr std::uint64_t kHeartbeatPeriodUs = 60ULL * 1000ULL * 1000ULL;
+constexpr std::uint64_t kStatePeriodUs = 5ULL * 1000ULL * 1000ULL;
 constexpr char kCloudSecurityNamespace[] = "hg-cloud-sec";
 constexpr char kCommandCounterKey[] = "cmd_counter";
 constexpr char kRequestIdKey[] = "req_id";
@@ -406,6 +407,7 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
 
 void CloudLink::stop()
 {
+    stop_state_timer();
     stop_heartbeat_timer();
     if (client_ == nullptr) {
         connected_ = false;
@@ -468,6 +470,51 @@ void CloudLink::stop_heartbeat_timer()
     if (esp_timer_is_active(heartbeat_timer_)) (void)esp_timer_stop(heartbeat_timer_);
     (void)esp_timer_delete(heartbeat_timer_);
     heartbeat_timer_ = nullptr;
+}
+
+void CloudLink::publish_periodic_state()
+{
+    if (client_ == nullptr || !connected_ || model_ == nullptr) return;
+    const auto partition = model_->partition_snapshot(1);
+    if (!partition) return;
+    char payload[128]{};
+    const int length = std::snprintf(payload, sizeof(payload),
+        "{\"seq\":%llu,\"up\":%llu,\"arm\":%u}",
+        static_cast<unsigned long long>(++state_sequence_),
+        static_cast<unsigned long long>(esp_timer_get_time() / 1000000LL),
+        static_cast<unsigned>(partition->arm_state));
+    if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(payload)) return;
+    const int id = esp_mqtt_client_enqueue(client_, state_topic_.data(), payload, length, 1, 1, true);
+    if (id < 0) ESP_LOGW(kTag, "MQTT 5s state enqueue failed: %d", id);
+}
+
+void CloudLink::start_state_timer()
+{
+    if (state_timer_ == nullptr) {
+        const esp_timer_create_args_t args = {
+            .callback = &CloudLink::state_timer_handler,
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "hg_mqtt_state",
+            .skip_unhandled_events = true,
+        };
+        if (esp_timer_create(&args, &state_timer_) != ESP_OK) { state_timer_ = nullptr; return; }
+    }
+    if (!esp_timer_is_active(state_timer_)) (void)esp_timer_start_periodic(state_timer_, kStatePeriodUs);
+}
+
+void CloudLink::stop_state_timer()
+{
+    if (state_timer_ == nullptr) return;
+    if (esp_timer_is_active(state_timer_)) (void)esp_timer_stop(state_timer_);
+    (void)esp_timer_delete(state_timer_);
+    state_timer_ = nullptr;
+}
+
+void CloudLink::state_timer_handler(void* context)
+{
+    auto* self = static_cast<CloudLink*>(context);
+    if (self != nullptr) self->publish_periodic_state();
 }
 
 void CloudLink::heartbeat_timer_handler(void* context)
@@ -833,8 +880,9 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             publish_online(true);
             publish_heartbeat();
             start_heartbeat_timer();
+            start_state_timer();
             (void)esp_mqtt_client_subscribe(client_, command_topic_.data(), 1);
-            ESP_LOGI(kTag, "Cloud connected; low-traffic heartbeat=60s events=%s", event_topic_.data());
+            ESP_LOGI(kTag, "Cloud connected; state=5s heartbeat=60s events=%s", event_topic_.data());
             break;
         case MQTT_EVENT_DISCONNECTED:
             connected_ = false;
