@@ -151,6 +151,7 @@ void TelemetryRuntime::run_output_mirror()
     while (true) {
         auto& expander = hardware_->io_expander();
         if (!expander.ready()) {
+            mcp_outputs_healthy_ = false;
             vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
@@ -167,12 +168,15 @@ void TelemetryRuntime::run_output_mirror()
             const auto error = expander.write_mirrored_outputs(desired);
             if (error != ESP_OK) {
                 applied = false;
+                mcp_outputs_healthy_ = false;
                 ESP_LOGW(kTag, "MCP output mirror failed: %s", esp_err_to_name(error));
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 continue;
             }
             previous = desired;
             applied = true;
+            mcp_outputs_applied_ = desired;
+            mcp_outputs_healthy_ = true;
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
