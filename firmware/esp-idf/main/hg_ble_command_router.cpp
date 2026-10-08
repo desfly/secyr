@@ -510,6 +510,14 @@ void BleCommandRouter::handle_command(const std::string& json)
 
         const auto result = hg::apply_output_command(
             *model_, *readiness_, {output_id, active, alarm_active, 0});
+        if (result.status == hg::OutputCommandStatus::Applied && output_id != 4 && output_id != 5 &&
+            !physical_->synchronize(*model_, *readiness_)) {
+            (void)model_->set_output_active(output_id, false, 0);
+            (void)physical_->force_safe();
+            send(kCommandReplyType, "{\"ok\":false,\"reason\":\"physical_output_failure\",\"active\":false}");
+            return;
+        }
+
         if (result.status == hg::OutputCommandStatus::Applied) {
             (void)bus_->publish({hg::SystemEventType::ConfigChanged, output_id, 0, 0, active ? 5401 : 5400});
         }
