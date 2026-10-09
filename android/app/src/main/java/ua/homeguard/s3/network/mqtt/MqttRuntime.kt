@@ -38,9 +38,9 @@ class MqttRuntime(
             while (isActive) {
                 val heartbeat = client.lastHeartbeatAtMs().value
                 if (heartbeat > 0L) lastSeenAtMs.value = heartbeat
-                val heartbeatFresh = heartbeat == 0L || System.currentTimeMillis() - heartbeat <= HEARTBEAT_TIMEOUT_MS
+                val heartbeatFresh = heartbeat > 0L && System.currentTimeMillis() - heartbeat <= HEARTBEAT_TIMEOUT_MS
                 state.value = when (client.state().value) {
-                    MqttRuntimeClient.State.CONNECTED -> if (heartbeatFresh) State.CONNECTED else State.OFFLINE
+                    MqttRuntimeClient.State.CONNECTED -> if (heartbeatFresh && client.availability().value == "online") State.CONNECTED else State.OFFLINE
                     MqttRuntimeClient.State.CONNECTING -> State.CONNECTING
                     MqttRuntimeClient.State.OFFLINE,
                     MqttRuntimeClient.State.ERROR -> State.OFFLINE
