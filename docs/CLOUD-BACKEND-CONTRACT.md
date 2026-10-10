@@ -90,4 +90,4 @@ with the firmware's exact v1 fields and sends it unchanged at QoS 1 without rete
 It rejects mismatched device IDs and expired packets before publication. It does not
 verify the server signature locally; firmware remains the authority for signature,
 actor authorization and durable replay admission. There is no MQTT PIN command API.
-The repository still does not supply a deployed signer or an Android signer endpoint.
+The repository supplies a configurable signer implementation in `backend/`, but no deployed signer or Android signer endpoint configuration.
