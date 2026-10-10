@@ -90,4 +90,10 @@ with the firmware's exact v1 fields and sends it unchanged at QoS 1 without rete
 It rejects mismatched device IDs and expired packets before publication. It does not
 verify the server signature locally; firmware remains the authority for signature,
 actor authorization and durable replay admission. There is no MQTT PIN command API.
-The repository supplies a configurable signer implementation in `backend/`, but no deployed signer or Android signer endpoint configuration.
+The repository supplies a configurable signer implementation in `backend/` and
+an Android HTTPS `SignedCommandApi` client. The client sends only command/challenge
+with a separate account bearer token, validates the returned device/command and
+lifetime, disallows redirects/retries, bounds response size and cancels HTTP work
+when its coroutine is cancelled. It returns a packet for `publishSignedCommand`;
+it does not publish commands itself. No signer URL/account-token provisioning or
+UI command route is enabled yet, and no hosted deployment is included.
