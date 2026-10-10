@@ -10,7 +10,12 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
+import ua.homeguard.s3.model.SystemMode
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.EOFException
@@ -19,6 +24,7 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
 /** Minimal MQTT 3.1.1 runtime used by HomeGuard Android. */
@@ -36,6 +42,10 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
     private val state = MutableStateFlow(State.DISABLED)
     private val availability = MutableStateFlow("unknown")
     private val lastHeartbeatAtMs = MutableStateFlow(0L)
+    data class DeviceState(val sequence: Long, val uptimeSeconds: Long, val mode: SystemMode, val receivedAtMs: Long)
+    private val deviceState = MutableStateFlow<DeviceState?>(null)
+    fun deviceState(): StateFlow<DeviceState?> = deviceState
+
     private val events = MutableSharedFlow<JSONObject>(extraBufferCapacity = 64)
     private val responses = MutableSharedFlow<JSONObject>(extraBufferCapacity = 32)
     private val pendingResponses = ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<JSONObject>>()
@@ -46,6 +56,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
     @Volatile private var input: BufferedInputStream? = null
     @Volatile private var output: BufferedOutputStream? = null
     private var worker: Job? = null
+    private val connectionMutex = Mutex()
 
     fun state(): StateFlow<State> = state
     fun availability(): StateFlow<String> = availability
@@ -59,7 +70,10 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         if (config == next && worker?.isActive == true) return
         stop()
         config = next
-        worker = scope.launch(Dispatchers.IO) { connectionLoop(next) }
+        worker = scope.launch(Dispatchers.IO) {
+            // The old worker must finish closing its socket before a replacement opens.
+            connectionMutex.withLock { connectionLoop(next) }
+        }
     }
 
     fun stop() {
@@ -72,39 +86,32 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         pendingResponses.values.forEach { it.cancel() }
         pendingResponses.clear()
         config = null
-        availability.value = "unknown"
-        lastHeartbeatAtMs.value = 0L
+        resetDeviceHealth()
         state.value = State.DISABLED
     }
 
-    suspend fun command(
-        requestId: String,
-        actor: String,
-        credential: String,
-        command: String,
+    suspend fun publishSignedCommand(
+        envelope: SignedCommandEnvelope,
         timeoutMs: Long = 8_000L,
     ): JSONObject {
-        require(requestId.isNotBlank()) { "MQTT request id is empty" }
-        require(actor.isNotBlank()) { "MQTT actor is empty" }
-        require(credential.isNotBlank()) { "MQTT credential is empty" }
-        require(command.isNotBlank()) { "MQTT command is empty" }
         val cfg = config ?: error("MQTT disabled")
         check(state.value == State.CONNECTED) { "MQTT offline" }
-
+        val body = envelope.payloadFor(cfg.deviceId)
+        val requestId = envelope.requestId
         val waiter = kotlinx.coroutines.CompletableDeferred<JSONObject>()
-        pendingResponses[requestId] = waiter
+        check(pendingResponses.putIfAbsent(requestId, waiter) == null) { "MQTT request already pending" }
         try {
-            val body = JSONObject()
-                .put("request_id", requestId)
-                .put("actor", actor)
-                .put("credential", credential)
-                .put("command", command)
-                .toString()
             publish(topic(cfg, "commands"), body, qos = 1, retain = false)
             return kotlinx.coroutines.withTimeout(timeoutMs) { waiter.await() }
         } finally {
-            pendingResponses.remove(requestId)
+            pendingResponses.remove(requestId, waiter)
         }
+    }
+
+    private fun resetDeviceHealth() {
+        deviceState.value = null
+        lastHeartbeatAtMs.value = 0L
+        availability.value = "unknown"
     }
 
     private suspend fun connectionLoop(cfg: Config) {
@@ -112,20 +119,43 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         while (scope.isActive && config == cfg) {
             try {
                 state.value = State.CONNECTING
+                resetDeviceHealth()
                 open(cfg)
+                currentCoroutineContext().ensureActive()
                 state.value = State.CONNECTED
-                availability.value = "unknown"
                 backoffMs = 1_000L
-                readLoop(cfg)
+                val sessionOutput = checkNotNull(output)
+                val sessionSocket = checkNotNull(socket)
+                val pingJob = scope.launch(Dispatchers.IO) {
+                    while (isActive && config == cfg && output === sessionOutput) {
+                        delay(30_000L)
+                        try {
+                            writePing(sessionOutput)
+                        } catch (_: java.io.IOException) {
+                            runCatching { sessionSocket.close() }
+                            break
+                        }
+                    }
+                }
+                try {
+                    readLoop(cfg)
+                } finally {
+                    pingJob.cancel()
+                }
             } catch (cancel: kotlinx.coroutines.CancellationException) {
                 throw cancel
             } catch (_: Throwable) {
                 state.value = State.OFFLINE
             } finally {
+                resetDeviceHealth()
                 runCatching { socket?.close() }
                 socket = null
                 input = null
                 output = null
+                pendingResponses.values.forEach {
+                    it.completeExceptionally(EOFException("MQTT connection lost; command outcome unknown"))
+                }
+                pendingResponses.clear()
             }
             if (config != cfg) break
             delay(backoffMs)
@@ -136,12 +166,17 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
     private fun open(cfg: Config) {
         val uri = normalizeUri(cfg.brokerUri)
         val secure = uri.scheme.equals("mqtts", true) || uri.scheme.equals("ssl", true)
-        val port = if (uri.port > 0) uri.port else if (secure) 8883 else 1883
+        require(secure) { "MQTT requires TLS" }
+        val port = if (uri.port > 0) uri.port else 8883
         val host = requireNotNull(uri.host) { "MQTT host missing" }
         val raw = if (secure) SSLSocketFactory.getDefault().createSocket(host, port) else Socket(host, port)
         raw.tcpNoDelay = true
         raw.soTimeout = 90_000
         socket = raw
+        if (raw is SSLSocket) {
+            raw.sslParameters = raw.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
+            raw.startHandshake()
+        }
         val sessionInput = BufferedInputStream(raw.getInputStream())
         input = sessionInput
         output = BufferedOutputStream(raw.getOutputStream())
@@ -149,20 +184,16 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         writeConnect(cfg)
         val packet = readPacket(sessionInput)
         check(packet.type == 2 && packet.payload.size >= 2 && packet.payload[1].toInt() == 0) { "MQTT CONNACK rejected" }
-        subscribe(sessionInput, topic(cfg, "availability"))
-        subscribe(sessionInput, topic(cfg, "heartbeat"))
-        subscribe(sessionInput, topic(cfg, "events"))
-        subscribe(sessionInput, topic(cfg, "responses"))
+        subscribe(sessionInput, cfg, topic(cfg, "availability"))
+        subscribe(sessionInput, cfg, topic(cfg, "heartbeat"))
+        subscribe(sessionInput, cfg, topic(cfg, "state"))
+        subscribe(sessionInput, cfg, topic(cfg, "events"))
+        subscribe(sessionInput, cfg, topic(cfg, "responses"))
     }
 
     private fun readLoop(cfg: Config) {
         val sessionInput = checkNotNull(input) { "MQTT input stream missing" }
-        var lastPingAt = System.currentTimeMillis()
         while (worker?.isActive == true && config == cfg) {
-            if (System.currentTimeMillis() - lastPingAt >= 30_000L) {
-                writeRaw(byteArrayOf(0xC0.toByte(), 0x00))
-                lastPingAt = System.currentTimeMillis()
-            }
             val packet = readPacket(sessionInput)
             when (packet.type) {
                 3 -> handlePublish(cfg, packet.flags, packet.payload)
@@ -193,8 +224,31 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         when (incomingTopic) {
             topic(cfg, "availability") -> availability.value = body.trim()
             topic(cfg, "heartbeat") -> {
+                // A retained heartbeat belongs to an earlier broker session.
+                if ((flags and 0x01) != 0) return
                 lastHeartbeatAtMs.value = System.currentTimeMillis()
                 availability.value = "online"
+            }
+            topic(cfg, "state") -> {
+                // Retained state is historical; only live state proves current device health.
+                if ((flags and 0x01) != 0) return
+                val json = runCatching { JSONObject(body) }.getOrNull() ?: return
+                val sequence = json.opt("seq") as? Number ?: return
+                val uptime = json.opt("up") as? Number ?: return
+                val arm = json.opt("arm") as? Number ?: return
+                if (sequence.toDouble() != sequence.toLong().toDouble() || sequence.toLong() < 0 ||
+                    uptime.toDouble() != uptime.toLong().toDouble() || uptime.toLong() < 0 ||
+                    arm.toDouble() != arm.toInt().toDouble()) return
+                val mode = when (arm.toInt()) {
+                    0 -> SystemMode.DISARMED
+                    1 -> SystemMode.ARMED_HOME
+                    2 -> SystemMode.ARMED_AWAY
+                    3 -> SystemMode.ALARM
+                    else -> return
+                }
+                val previous = deviceState.value
+                if (previous != null && uptime.toLong() >= previous.uptimeSeconds && sequence.toLong() <= previous.sequence) return
+                deviceState.value = DeviceState(sequence.toLong(), uptime.toLong(), mode, System.currentTimeMillis())
             }
             topic(cfg, "events") -> runCatching { JSONObject(body) }.getOrNull()?.let(events::tryEmit)
             topic(cfg, "responses") -> {
@@ -225,7 +279,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         writePacket(header, variable.toByteArray())
     }
 
-    private fun subscribe(input: BufferedInputStream, topic: String) {
+    private fun subscribe(input: BufferedInputStream, cfg: Config, topic: String) {
         val topicBytes = topic.toByteArray(StandardCharsets.UTF_8)
         val packetId = nextPacketId()
         val payload = ByteArray(2 + 2 + topicBytes.size + 1)
@@ -238,8 +292,21 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         i += topicBytes.size
         payload[i] = 1
         writePacket(0x82, payload)
-        val ack = readPacket(input)
-        check(ack.type == 9) { "MQTT SUBACK missing" }
+        // Retained messages from earlier subscriptions can arrive before this
+        // SUBACK. Process them without losing the acknowledgement correlation.
+        while (true) {
+            val ack = readPacket(input)
+            if (ack.type == 3) {
+                handlePublish(cfg, ack.flags, ack.payload)
+                continue
+            }
+            if (ack.type != 9) continue
+            check(ack.payload.size == 3) { "Malformed MQTT SUBACK" }
+            val ackId = ((ack.payload[0].toInt() and 0xff) shl 8) or (ack.payload[1].toInt() and 0xff)
+            check(ackId == packetId) { "MQTT SUBACK id mismatch" }
+            check((ack.payload[2].toInt() and 0xff) in 0..1) { "MQTT subscription rejected" }
+            return
+        }
     }
 
     private fun writeConnect(cfg: Config) {
@@ -256,6 +323,13 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         if (cfg.username.isNotEmpty()) appendUtf8(variable, cfg.username)
         if (cfg.password.isNotEmpty()) appendUtf8(variable, cfg.password)
         writePacket(0x10, variable.toByteArray())
+    }
+
+    @Synchronized
+    private fun writePing(sessionOutput: BufferedOutputStream) {
+        if (output !== sessionOutput) return
+        sessionOutput.write(byteArrayOf(0xC0.toByte(), 0x00))
+        sessionOutput.flush()
     }
 
     @Synchronized

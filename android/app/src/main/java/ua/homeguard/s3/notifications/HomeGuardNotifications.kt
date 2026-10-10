@@ -15,6 +15,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import ua.homeguard.s3.MainActivity
 import ua.homeguard.s3.model.SystemEventRecord
+import ua.homeguard.s3.model.SystemMode
 import ua.homeguard.s3.storage.AppSettings
 
 class HomeGuardNotifications(private val context: Context) {
@@ -56,8 +57,8 @@ class HomeGuardNotifications(private val context: Context) {
         )
     }
 
-    fun notify(event: SystemEventRecord, settings: AppSettings) {
-        val alert = AlertPolicy.classify(event) ?: return
+    fun notify(event: SystemEventRecord, settings: AppSettings, mode: SystemMode? = null) {
+        val alert = AlertPolicy.classify(event, mode) ?: return
         if (!isEnabled(event, alert, settings)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -99,6 +100,8 @@ class HomeGuardNotifications(private val context: Context) {
 
     private fun isEnabled(event: SystemEventRecord, alert: AlertMessage, settings: AppSettings): Boolean {
         val type = event.event.uppercase()
+        // Disarmed zone tamper remains in event history, without phone alerts.
+        if (type == "TAMPER" && alert.severity == AlertSeverity.INFO) return false
         if (type == "ZONE_OPEN" || type == "ZONE_CLOSED") {
             return settings.statusNotificationsEnabled && settings.zoneNotificationsEnabled
         }

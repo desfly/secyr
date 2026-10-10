@@ -8,7 +8,7 @@ This build includes the ESP32 outbound TLS/MQTT client and Android cloud endpoin
 - Client ID: stable `device_id`.
 - Username: stable `device_id`.
 - Password: provisioned random device access token.
-- Device subscribes only to `homeguard/<device_id>/commands`.
+- Device subscribes only to `homeguard/v1/devices/<device_id>/commands`.
 - Broker ACL must prevent access to every other device namespace.
 - Broker authentication and ACL are transport controls; they do not replace command-envelope authentication by the device.
 
@@ -79,3 +79,21 @@ The backend maps that route to the authenticated device session and never reveal
 - audit log for dangerous commands;
 - push notification delivery;
 - revocation of lost phones and device tokens.
+
+## Android MQTT command readiness
+
+Android receives live compact state from `homeguard/v1/devices/<device_id>/state`.
+This is telemetry readiness, not command readiness. MQTT remains excluded from
+command selection until a server signing route and account authentication are configured.
+`MqttRuntimeClient.publishSignedCommand` accepts an immutable `SignedCommandEnvelope`
+with the firmware's exact v1 fields and sends it unchanged at QoS 1 without retention.
+It rejects mismatched device IDs and expired packets before publication. It does not
+verify the server signature locally; firmware remains the authority for signature,
+actor authorization and durable replay admission. There is no MQTT PIN command API.
+The repository supplies a configurable signer implementation in `backend/` and
+an Android HTTPS `SignedCommandApi` client. The client sends only command/challenge
+with a separate account bearer token, validates the returned device/command and
+lifetime, disallows redirects/retries, bounds response size and cancels HTTP work
+when its coroutine is cancelled. It returns a packet for `publishSignedCommand`;
+it does not publish commands itself. No signer URL/account-token provisioning or
+UI command route is enabled yet, and no hosted deployment is included.

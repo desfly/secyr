@@ -26,6 +26,9 @@ public:
         std::array<float, 4>* millivolts,
         std::array<bool, 4>* valid);
 
+    esp_err_t cached_single_ended_mv(std::array<float, 4>* millivolts,
+                                    std::array<bool, 4>* valid);
+
     bool ready() const noexcept;
     std::uint8_t address() const noexcept;
 
@@ -40,6 +43,10 @@ private:
     i2c_master_dev_handle_t device_{nullptr};
     SemaphoreHandle_t mutex_{nullptr};
     std::uint8_t address_{0};
+    portMUX_TYPE cache_lock_ = portMUX_INITIALIZER_UNLOCKED;
+    std::array<float, 4> cached_mv_{};
+    std::array<bool, 4> cached_valid_{};
+    std::array<std::int64_t, 4> cached_at_us_{};
 };
 
 }  // namespace homeguard::idf

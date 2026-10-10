@@ -6,6 +6,7 @@ OutputInterlockResult evaluate_output_interlock(
     const SystemModel& model,
     const OutputInterlockRequest& request)
 {
+    const auto state_lock = model.lock();
     if (model.output(request.output_id) == nullptr) {
         return {OutputInterlockDecision::InvalidOutput, false};
     }

@@ -72,8 +72,9 @@ void test_runtime() {
     TEST_CHECK(!backend.levels[10]);
     TEST_CHECK(!backend.levels[11]);
     TEST_CHECK(!backend.levels[12]);
-    TEST_CHECK(backend.levels[hg::direct_light_relay_gpio]);
-    TEST_CHECK(backend.levels[hg::direct_lock_relay_gpio]);
+    // LIGHT/LOCK are handled by MCP23017 GPA0/GPA1, not ESP GPIO1/GPIO2.
+    TEST_CHECK(backend.levels.count(1) == 0);
+    TEST_CHECK(backend.levels.count(2) == 0);
 
     hg::BootReadinessReport ready{};
     ready.status = hg::BootReadinessStatus::ReadyForPhysicalOutputs;

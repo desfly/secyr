@@ -476,7 +476,6 @@ void BleCommandRouter::handle_command(const std::string& json)
             send(kCommandReplyType, "{\"ok\":false,\"reason\":\"partition_command_failed\"}");
             return;
         }
-        (void)bus_->dispatch_all();
         const std::string body = std::string{"{\"ok\":true,\"command\":\""} + command +
             "\",\"armState\":\"" + arm_state_name(target) + "\"}";
         send(kCommandReplyType, body);
@@ -493,8 +492,8 @@ void BleCommandRouter::handle_command(const std::string& json)
         }
         (void)parse_bool(json, "alarmActive", alarm_active);
 
-        const auto* output = model_->output(output_id);
-        if (output == nullptr) {
+        const auto output = model_->output_snapshot(output_id);
+        if (!output) {
             send(kCommandReplyType, "{\"ok\":false,\"reason\":\"unknown_output\"}");
             return;
         }
@@ -511,7 +510,8 @@ void BleCommandRouter::handle_command(const std::string& json)
 
         const auto result = hg::apply_output_command(
             *model_, *readiness_, {output_id, active, alarm_active, 0});
-        if (result.status == hg::OutputCommandStatus::Applied && !physical_->synchronize(*model_, *readiness_)) {
+        if (result.status == hg::OutputCommandStatus::Applied && output_id != 4 && output_id != 5 &&
+            !physical_->synchronize(*model_, *readiness_)) {
             (void)model_->set_output_active(output_id, false, 0);
             (void)physical_->force_safe();
             send(kCommandReplyType, "{\"ok\":false,\"reason\":\"physical_output_failure\",\"active\":false}");
@@ -520,7 +520,6 @@ void BleCommandRouter::handle_command(const std::string& json)
 
         if (result.status == hg::OutputCommandStatus::Applied) {
             (void)bus_->publish({hg::SystemEventType::ConfigChanged, output_id, 0, 0, active ? 5401 : 5400});
-            (void)bus_->dispatch_all();
         }
         const std::string body = std::string{"{\"ok\":"} +
             (result.status == hg::OutputCommandStatus::Applied ? "true" : "false") +

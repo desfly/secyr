@@ -7,6 +7,7 @@ OutputCommandResult apply_output_command(
     const BootReadinessReport& readiness,
     const OutputCommand& command)
 {
+    const auto state_lock = model.lock();
     if (model.output(command.output_id) == nullptr) {
         return {OutputCommandStatus::InvalidOutput, OutputInterlockDecision::InvalidOutput, false};
     }

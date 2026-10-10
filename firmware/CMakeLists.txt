@@ -61,3 +61,11 @@ add_executable(homeguard_tests
 target_link_libraries(homeguard_tests PRIVATE homeguard_core)
 enable_testing()
 add_test(NAME homeguard_tests COMMAND homeguard_tests)
+find_package(Threads REQUIRED)
+add_executable(homeguard_event_bus_tests ../tests/test_event_bus_concurrency.cpp)
+target_link_libraries(homeguard_event_bus_tests PRIVATE homeguard_core Threads::Threads)
+add_test(NAME homeguard_event_bus_tests COMMAND homeguard_event_bus_tests)
+
+add_executable(homeguard_bounded_write_tests ../tests/test_bounded_write.cpp)
+target_link_libraries(homeguard_bounded_write_tests PRIVATE homeguard_core)
+add_test(NAME homeguard_bounded_write_tests COMMAND homeguard_bounded_write_tests)

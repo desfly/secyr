@@ -5,10 +5,13 @@
 #include "homeguard/system_api.hpp"
 
 #include "esp_system.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <atomic>
+#include <new>
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
@@ -254,44 +257,27 @@ esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
         httpd_resp_set_status(request,"409 Conflict");
         return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"partition_command_failed\"}",-1);
     }
-    (void)bus_->dispatch_all();
+    // Do not synchronously fan out SystemEventBus subscribers from the single
+    // HTTPD task. The telemetry dispatcher drains the bus continuously; the
+    // command response must not wait behind WebSocket/cloud/journal consumers.
     const std::string response = std::string{"{\"ok\":true,\"command\":\""} + command +
         "\",\"armState\":\"" + arm_state_name(target) + "\"}";
     return send_json(request,response.c_str(),response.size());
-}
-
-void SystemHttp::remember_client(int socket_fd) {
-    if (socket_fd < 0) return;
-    for (const int client : clients_) if (client == socket_fd) return;
-    for (auto& client : clients_) {
-        if (client < 0) {
-            client = socket_fd;
-            return;
-        }
-    }
-    clients_[0] = socket_fd;
-}
-
-esp_err_t SystemHttp::websocket(httpd_req_t* request) {
-    auto* self = self_from(request);
-    if (!self) return ESP_FAIL;
-    if (!self->authenticated_request(request)) return request_auth::send_login_required(request);
-    self->remember_client(httpd_req_to_sockfd(request));
-    return ESP_OK;
 }
 
 void SystemHttp::on_event(const hg::SystemEvent& event,void* context) {
     auto* self = static_cast<SystemHttp*>(context);
     if (!self) return;
     self->record(event);
-    self->broadcast(event);
 }
 
 void SystemHttp::record(const hg::SystemEvent& event) {
+    std::lock_guard<std::mutex> lock(event_log_mutex_);
     event_log_.append(event.timestamp_ms,severity_for(event.type),static_cast<std::uint16_t>(event.type),hg::system_event_type_name(event.type),event.source_id,event.value);
 }
 
 std::string SystemHttp::events_json() const {
+    std::lock_guard<std::mutex> lock(event_log_mutex_);
     std::ostringstream out;
     out << "{\"capacity\":" << hg::EventLog::capacity << ",\"events\":[";
     for (std::size_t i = 0; i < event_log_.size(); ++i) {
@@ -304,19 +290,6 @@ std::string SystemHttp::events_json() const {
     }
     out << "]}";
     return out.str();
-}
-
-void SystemHttp::broadcast(const hg::SystemEvent& event) {
-    if (!server_) return;
-    const std::string payload = hg::system_event_json(event);
-    httpd_ws_frame_t frame{};
-    frame.type = HTTPD_WS_TYPE_TEXT;
-    frame.payload = reinterpret_cast<std::uint8_t*>(const_cast<char*>(payload.data()));
-    frame.len = payload.size();
-    for (auto& client : clients_) {
-        if (client < 0) continue;
-        if (httpd_ws_send_frame_async(server_,client,&frame) != ESP_OK) client = -1;
-    }
 }
 
 }  // namespace homeguard::idf

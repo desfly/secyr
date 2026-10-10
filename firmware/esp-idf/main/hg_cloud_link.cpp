@@ -11,6 +11,7 @@
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "nvs.h"
 #include "homeguard/access_control.hpp"
@@ -28,8 +29,14 @@
 namespace homeguard::idf {
 namespace {
 constexpr const char* kTag = "hg_cloud";
+struct CloudEventWork {
+    CloudLink* owner;
+    hg::SystemEvent event;
+};
+QueueHandle_t cloud_event_queue{};
 constexpr const char* kPrefix = "homeguard/v1/devices";
 constexpr std::uint64_t kHeartbeatPeriodUs = 60ULL * 1000ULL * 1000ULL;
+constexpr std::uint64_t kStatePeriodUs = 5ULL * 1000ULL * 1000ULL;
 constexpr char kCloudSecurityNamespace[] = "hg-cloud-sec";
 constexpr char kCommandCounterKey[] = "cmd_counter";
 constexpr char kRequestIdKey[] = "req_id";
@@ -280,6 +287,28 @@ void CloudLink::set_command_runtime(
     access_control_ = access_control;
     trusted_time_ = trusted_time;
     if (bus_ != nullptr && !event_bus_subscribed_) {
+        if (cloud_event_queue == nullptr) {
+            cloud_event_queue = xQueueCreate(32, sizeof(CloudEventWork));
+            if (cloud_event_queue == nullptr) {
+                ESP_LOGE(kTag, "Cloud event worker queue allocation failed");
+                return;
+            }
+            const auto created = xTaskCreate([](void* context) {
+                const auto queue = static_cast<QueueHandle_t>(context);
+                CloudEventWork work{};
+                for (;;) {
+                    if (xQueueReceive(queue, &work, portMAX_DELAY) == pdTRUE) {
+                        work.owner->publish_system_event(work.event);
+                    }
+                }
+            }, "hg_cloud_events", 4096, cloud_event_queue, 4, nullptr);
+            if (created != pdPASS) {
+                vQueueDelete(cloud_event_queue);
+                cloud_event_queue = nullptr;
+                ESP_LOGE(kTag, "Cloud event worker task allocation failed");
+                return;
+            }
+        }
         event_bus_subscribed_ = bus_->subscribe(&CloudLink::system_event_handler, this);
         if (!event_bus_subscribed_) ESP_LOGE(kTag, "Cloud event subscription failed");
     }
@@ -378,6 +407,7 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
 
 void CloudLink::stop()
 {
+    stop_state_timer();
     stop_heartbeat_timer();
     if (client_ == nullptr) {
         connected_ = false;
@@ -442,6 +472,51 @@ void CloudLink::stop_heartbeat_timer()
     heartbeat_timer_ = nullptr;
 }
 
+void CloudLink::publish_periodic_state()
+{
+    if (client_ == nullptr || !connected_ || model_ == nullptr) return;
+    const auto partition = model_->partition_snapshot(1);
+    if (!partition) return;
+    char payload[128]{};
+    const int length = std::snprintf(payload, sizeof(payload),
+        "{\"seq\":%llu,\"up\":%llu,\"arm\":%u}",
+        static_cast<unsigned long long>(++state_sequence_),
+        static_cast<unsigned long long>(esp_timer_get_time() / 1000000LL),
+        static_cast<unsigned>(partition->arm_state));
+    if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(payload)) return;
+    const int id = esp_mqtt_client_enqueue(client_, state_topic_.data(), payload, length, 1, 1, true);
+    if (id < 0) ESP_LOGW(kTag, "MQTT 5s state enqueue failed: %d", id);
+}
+
+void CloudLink::start_state_timer()
+{
+    if (state_timer_ == nullptr) {
+        const esp_timer_create_args_t args = {
+            .callback = &CloudLink::state_timer_handler,
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "hg_mqtt_state",
+            .skip_unhandled_events = true,
+        };
+        if (esp_timer_create(&args, &state_timer_) != ESP_OK) { state_timer_ = nullptr; return; }
+    }
+    if (!esp_timer_is_active(state_timer_)) (void)esp_timer_start_periodic(state_timer_, kStatePeriodUs);
+}
+
+void CloudLink::stop_state_timer()
+{
+    if (state_timer_ == nullptr) return;
+    if (esp_timer_is_active(state_timer_)) (void)esp_timer_stop(state_timer_);
+    (void)esp_timer_delete(state_timer_);
+    state_timer_ = nullptr;
+}
+
+void CloudLink::state_timer_handler(void* context)
+{
+    auto* self = static_cast<CloudLink*>(context);
+    if (self != nullptr) self->publish_periodic_state();
+}
+
 void CloudLink::heartbeat_timer_handler(void* context)
 {
     auto* self = static_cast<CloudLink*>(context);
@@ -451,7 +526,13 @@ void CloudLink::heartbeat_timer_handler(void* context)
 void CloudLink::system_event_handler(const hg::SystemEvent& event, void* context)
 {
     auto* self = static_cast<CloudLink*>(context);
-    if (self != nullptr) self->publish_system_event(event);
+    if (self == nullptr || cloud_event_queue == nullptr) return;
+    const CloudEventWork work{self, event};
+    // Zero wait: neither MQTT's internal mutex nor a slow network may hold
+    // the security zone task. Network serialization runs in hg_cloud_events.
+    if (xQueueSend(cloud_event_queue, &work, 0) != pdTRUE) {
+        ESP_LOGE(kTag, "Cloud event worker queue full");
+    }
 }
 
 void CloudLink::publish_system_event(const hg::SystemEvent& event)
@@ -466,7 +547,10 @@ void CloudLink::publish_system_event(const hg::SystemEvent& event)
         static_cast<unsigned long long>(event.timestamp_ms),
         static_cast<unsigned long long>(event.sequence));
     if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(payload)) return;
-    (void)esp_mqtt_client_publish(client_, event_topic_.data(), payload, length, 1, 0);
+    // Event callbacks also run in the security zone task. Queue the payload;
+    // MQTT network writes must execute in the MQTT task, never in ADC sampling.
+    const int message_id = esp_mqtt_client_enqueue(client_, event_topic_.data(), payload, length, 1, 0, true);
+    if (message_id < 0) ESP_LOGE(kTag, "Cloud event enqueue failed: %d", message_id);
 }
 
 bool CloudLink::begin_trust_rotation()
@@ -700,6 +784,13 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // runtime synchronization loop is responsible for mirroring output #5 to
     // the direct lock relay.  Keep replay persistence above this side effect.
     if (command == "output.lock") {
+        // Commit replay admission before changing the lock output. A repeated
+        // signed envelope must never trigger another physical pulse.
+        if (!persist_command_replay_state(command_counter, request_id)) {
+            xSemaphoreGive(replay_mutex);
+            publish_response(false, "replay_state_persist_failed");
+            return;
+        }
         // Output #5 is the direct lock relay.  Keep the cloud action bounded:
         // ON is accepted only through the normal interlock, then an independent
         // task restores OFF after five seconds even if the MQTT client drops.
@@ -710,7 +801,6 @@ void CloudLink::handle_command(const char* data, std::size_t size)
             publish_response(false, hg::to_string(result.status));
             return;
         }
-        (void)bus_->dispatch_all();
         xSemaphoreGive(replay_mutex);
         const auto task_ok = xTaskCreate(
             [](void* context) {
@@ -718,14 +808,12 @@ void CloudLink::handle_command(const char* data, std::size_t size)
                 vTaskDelay(pdMS_TO_TICKS(5000));
                 if (self != nullptr && self->model_ != nullptr) {
                     (void)self->model_->set_output_active(5, false, 0);
-                    if (self->bus_ != nullptr) (void)self->bus_->dispatch_all();
                 }
                 vTaskDelete(nullptr);
             },
             "hg_lock_pulse", 2048, this, 5, nullptr);
         if (task_ok != pdPASS) {
             (void)model_->set_output_active(5, false, 0);
-            (void)bus_->dispatch_all();
             publish_response(false, "lock_timer_failed");
             return;
         }
@@ -739,6 +827,7 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     else if (command == "security.disarm") target = hg::PartitionArmState::Disarmed;
     else if (command == "security.panic") target = hg::PartitionArmState::Alarm;
     else {
+        xSemaphoreGive(replay_mutex);
         publish_response(false, "unsupported_command");
         return;
     }
@@ -774,7 +863,6 @@ void CloudLink::handle_command(const char* data, std::size_t size)
         publish_response(false, "partition_command_failed");
         return;
     }
-    (void)bus_->dispatch_all();
     xSemaphoreGive(replay_mutex);
     publish_response(true, "accepted", arm_state_name(target));
 }
@@ -788,8 +876,9 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             publish_online(true);
             publish_heartbeat();
             start_heartbeat_timer();
+            start_state_timer();
             (void)esp_mqtt_client_subscribe(client_, command_topic_.data(), 1);
-            ESP_LOGI(kTag, "Cloud connected; low-traffic heartbeat=60s events=%s", event_topic_.data());
+            ESP_LOGI(kTag, "Cloud connected; state=5s heartbeat=60s events=%s", event_topic_.data());
             break;
         case MQTT_EVENT_DISCONNECTED:
             connected_ = false;

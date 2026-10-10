@@ -196,7 +196,8 @@ require('authorize_session(actor, "security.disarm")' not in link[challenge_bran
         "disarm challenge branch must not perform a redundant second authorization")
 require('parse_json_string(body, "credential"' not in link and "authorize(actor, credential" not in link,
         "MQTT command path must not transport or re-check a user PIN credential")
-require("model_->set_partition_arm" in link and "bus_->dispatch_all" in link, "MQTT security command does not reach live model")
+require("model_->set_partition_arm" in link and "publish_response(true, \"accepted\", arm_state_name(target))" in link, "MQTT security command does not reach live model")
+require("bus_->dispatch_all" not in link, "MQTT handler must not synchronously dispatch subscribers")
 require("deferred to safe command router" not in link, "old deferred MQTT command placeholder remains")
 require("nvs_set_str" in nvs and "nvs_get_str" in nvs and "nvs_commit" in nvs, "cloud credentials are not persisted in NVS")
 require("enabled > 1 || (enabled == 1 && config.broker_uri.empty())" in nvs and
@@ -221,6 +222,17 @@ if errors:
     for error in errors:
         print(" -", error)
     sys.exit(1)
+
+# Every admitted command branch must release the gate, and the lock pulse
+# must consume replay state before its first output side effect.
+unsupported = link[link.find('else if (command == "security.panic")'):link.find('// Persist the monotonic counter before consuming')]
+require('xSemaphoreGive(replay_mutex);\n        publish_response(false, "unsupported_command")' in unsupported,
+        "unsupported MQTT command leaks replay admission mutex")
+lock_start = link.find('if (command == "output.lock")')
+lock_effect = link.find('hg::apply_output_command', lock_start)
+lock_commit = link.find('persist_command_replay_state(command_counter, request_id)', lock_start)
+require(lock_start < lock_commit < lock_effect,
+        "lock pulse must persist replay admission before output side effects")
 
 print("Cloud runtime contract PASS")
 print(" - persistent MQTT config + boot restore")

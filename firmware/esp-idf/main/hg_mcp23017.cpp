@@ -18,6 +18,7 @@ esp_err_t Mcp23017::initialize(
     I2cBus& bus,
     std::uint8_t address)
 {
+    initialized_ = false;
     auto error = bus.add_device(
         address,
         400000,
@@ -26,6 +27,7 @@ esp_err_t Mcp23017::initialize(
         return error;
     }
 
+    if ((error = force_safe_outputs()) != ESP_OK) return error;
     if ((error = write_register(kIodirA, 0x00)) != ESP_OK) {
         return error;
     }
@@ -36,7 +38,8 @@ esp_err_t Mcp23017::initialize(
         return error;
     }
 
-    return force_safe_outputs();
+    initialized_ = true;
+    return ESP_OK;
 }
 
 esp_err_t Mcp23017::write_register(
@@ -77,6 +80,16 @@ esp_err_t Mcp23017::write_outputs(std::uint8_t value)
     return write_register(kOlatA, value);
 }
 
+esp_err_t Mcp23017::write_mirrored_outputs(std::uint8_t value)
+{
+    if (!ready()) return ESP_ERR_INVALID_STATE;
+    std::uint8_t previous = 0;
+    const auto error = read_register(kOlatA, &previous);
+    if (error != ESP_OK) return error;
+    // Only GPA0/GPA1 belong to these duplicates; preserve GPA2–GPA7.
+    return write_register(kOlatA, (previous & 0xFCU) | (value & 0x03U));
+}
+
 esp_err_t Mcp23017::read_inputs(std::uint8_t* value)
 {
     return read_register(kGpioB, value);
@@ -84,7 +97,7 @@ esp_err_t Mcp23017::read_inputs(std::uint8_t* value)
 
 bool Mcp23017::ready() const noexcept
 {
-    return device_ != nullptr;
+    return device_ != nullptr && initialized_;
 }
 
 }  // namespace homeguard::idf

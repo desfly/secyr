@@ -19,7 +19,7 @@ cmake = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
 web_http = (MAIN / "hg_web_http.cpp").read_text(encoding="utf-8")
 
 # Firmware: an armed physical zone transition must be promoted to partition ALARM
-# and dispatched immediately to event/WebSocket consumers.
+# and delivered by the telemetry task without blocking the zone task.
 for needle in (
     "void TelemetryRuntime::update_zone_model(",
     "partition->arm_state == hg::PartitionArmState::Stay",
@@ -30,6 +30,15 @@ for needle in (
     "system_bus_->dispatch_all()",
 ):
     require(needle in telemetry, f"physical alarm propagation missing: {needle}")
+
+zone_task = telemetry.split("void TelemetryRuntime::run_zones()", 1)[1].split("bool TelemetryRuntime::set_light_output", 1)[0]
+zone_model = telemetry.split("void TelemetryRuntime::update_zone_model(", 1)[1].split("void TelemetryRuntime::update_zone_light(", 1)[0]
+require("dispatch_all" not in zone_task + zone_model,
+        "physical zone task must never execute network event callbacks")
+require(zone_task.index("update_zone_light(zones, now_ms)") < zone_task.index("update_zone_model(zones"),
+        "local light must run before zone event logging")
+require('new WebSocket(' in web and 'function acceptLiveState(data)' in web,
+        "Web alarm must receive authenticated live events")
 
 require("constexpr std::size_t kActiveSecurityZones = 4;" in telemetry,
         "zones 5-8 must remain excluded until commissioned")
@@ -81,6 +90,6 @@ if errors:
 
 print("Physical zone -> Web alarm regression gate PASS")
 print(" - armed physical Open/Short/Tamper can promote partition to ALARM")
-print(" - event bus dispatch remains immediate")
+print(" - local zone/light task cannot execute network callbacks")
 print(" - canonical Web UI is embedded in firmware")
 print(" - Web security card flashes red with audio on alarm and clears on disarm")

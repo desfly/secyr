@@ -5,12 +5,14 @@
 namespace hg {
 
 bool SystemEventBus::subscribe(SystemEventCallback callback, void* context) {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
     if (callback == nullptr || subscriber_count_ >= subscribers_.size()) return false;
     subscribers_[subscriber_count_++] = Subscriber{callback, context};
     return true;
 }
 
 bool SystemEventBus::publish(SystemEvent event) {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
     event.sequence = next_sequence_++;
     ++published_;
 
@@ -26,22 +28,59 @@ bool SystemEventBus::publish(SystemEvent event) {
     return true;
 }
 
-bool SystemEventBus::dispatch_one() {
-    if (queue_size_ == 0U) return false;
-    const SystemEvent event = queue_[queue_head_];
-    queue_head_ = (queue_head_ + 1U) % queue_.size();
-    --queue_size_;
+namespace {
+struct DispatchRelease {
+    std::atomic_flag& flag;
+    ~DispatchRelease() { flag.clear(std::memory_order_release); }
+};
+}
 
-    for (std::size_t i = 0; i < subscriber_count_; ++i) {
-        subscribers_[i].callback(event, subscribers_[i].context);
+bool SystemEventBus::deliver_one() {
+    SystemEvent event;
+    std::array<Subscriber, subscriber_capacity> subscribers;
+    std::size_t subscriber_count;
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        if (queue_size_ == 0U) return false;
+        event = queue_[queue_head_];
+        queue_head_ = (queue_head_ + 1U) % queue_.size();
+        --queue_size_;
+        subscribers = subscribers_;
+        subscriber_count = subscriber_count_;
+    }
+    // Callbacks may publish more events. Never hold the queue lock here.
+    for (std::size_t i = 0; i < subscriber_count; ++i) {
+        subscribers[i].callback(event, subscribers[i].context);
     }
     return true;
 }
 
+bool SystemEventBus::dispatch_one() {
+    if (dispatching_.test_and_set(std::memory_order_acquire)) return false;
+    DispatchRelease release{dispatching_};
+    return deliver_one();
+}
+
 std::size_t SystemEventBus::dispatch_all() {
+    // Another task (or a callback) must not wait for the current dispatcher.
+    if (dispatching_.test_and_set(std::memory_order_acquire)) return 0;
+    DispatchRelease release{dispatching_};
     std::size_t count = 0;
-    while (dispatch_one()) ++count;
+    // Bound each pass even when callbacks or producers keep adding events.
+    while (count < queue_capacity && deliver_one()) ++count;
     return count;
+}
+
+std::optional<OutputRecord> SystemModel::output_snapshot(std::uint16_t id) const {
+    const auto state_lock = lock();
+    const auto* item = output(id);
+    return item ? std::optional<OutputRecord>(*item) : std::nullopt;
+}
+
+std::optional<PartitionRecord> SystemModel::partition_snapshot(std::uint16_t id) const {
+    const auto state_lock = lock();
+    const auto* item = partition(id);
+    return item ? std::optional<PartitionRecord>(*item) : std::nullopt;
 }
 
 void SystemModel::copy_name(std::array<char, 24>& destination, std::string_view source) {
@@ -55,6 +94,7 @@ bool SystemModel::emit(SystemEventType type, std::uint16_t source_id, std::uint6
 }
 
 bool SystemModel::add_zone(std::uint16_t id, std::string_view name, ModelZoneType type, bool always_on) {
+    const auto state_lock = lock();
     if (zone_count_ >= zones_.size() || zone(id) != nullptr) return false;
     auto& item = zones_[zone_count_++];
     item.id = id;
@@ -65,6 +105,7 @@ bool SystemModel::add_zone(std::uint16_t id, std::string_view name, ModelZoneTyp
 }
 
 bool SystemModel::add_sensor(std::uint16_t id, ModelSensorType type) {
+    const auto state_lock = lock();
     if (sensor_count_ >= sensors_.size() || sensor(id) != nullptr) return false;
     auto& item = sensors_[sensor_count_++];
     item.id = id;
@@ -73,6 +114,7 @@ bool SystemModel::add_sensor(std::uint16_t id, ModelSensorType type) {
 }
 
 bool SystemModel::add_output(std::uint16_t id, ModelOutputType type) {
+    const auto state_lock = lock();
     if (output_count_ >= outputs_.size() || output(id) != nullptr) return false;
     auto& item = outputs_[output_count_++];
     item.id = id;
@@ -81,12 +123,14 @@ bool SystemModel::add_output(std::uint16_t id, ModelOutputType type) {
 }
 
 bool SystemModel::add_partition(std::uint16_t id) {
+    const auto state_lock = lock();
     if (partition_count_ >= partitions_.size() || partition(id) != nullptr) return false;
     partitions_[partition_count_++].id = id;
     return true;
 }
 
 bool SystemModel::set_zone_state(std::uint16_t id, ModelZoneState state, std::uint64_t now_ms) {
+    const auto state_lock = lock();
     for (std::size_t i = 0; i < zone_count_; ++i) {
         auto& item = zones_[i];
         if (item.id != id) continue;
@@ -106,6 +150,7 @@ bool SystemModel::set_zone_state(std::uint16_t id, ModelZoneState state, std::ui
 }
 
 bool SystemModel::set_output_active(std::uint16_t id, bool active, std::uint64_t now_ms) {
+    const auto state_lock = lock();
     for (std::size_t i = 0; i < output_count_; ++i) {
         auto& item = outputs_[i];
         if (item.id != id) continue;
@@ -117,13 +162,15 @@ bool SystemModel::set_output_active(std::uint16_t id, bool active, std::uint64_t
 }
 
 bool SystemModel::set_partition_arm(std::uint16_t id, PartitionArmState state, std::uint64_t now_ms) {
+    const auto state_lock = lock();
     for (std::size_t i = 0; i < partition_count_; ++i) {
         auto& item = partitions_[i];
         if (item.id != id) continue;
         if (item.arm_state == state) return true;
         item.arm_state = state;
-        const bool disarmed = state == PartitionArmState::Disarmed;
-        return emit(disarmed ? SystemEventType::Disarmed : SystemEventType::Armed, id, now_ms, static_cast<std::int32_t>(state));
+        const auto event_type = state == PartitionArmState::Alarm ? SystemEventType::Alarm :
+            (state == PartitionArmState::Disarmed ? SystemEventType::Disarmed : SystemEventType::Armed);
+        return emit(event_type, id, now_ms, static_cast<std::int32_t>(state));
     }
     return false;
 }

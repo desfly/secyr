@@ -24,7 +24,7 @@ void append_adc_snapshot(
     std::array<float, 4> values{};
     std::array<bool, 4> valid{};
     const auto read_error = adc.ready()
-        ? adc.read_all_single_ended_mv(&values, &valid)
+        ? adc.cached_single_ended_mv(&values, &valid)
         : ESP_ERR_INVALID_STATE;
 
     output << "{\"role\":\"" << role << "\","
