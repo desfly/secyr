@@ -12,6 +12,7 @@ import okhttp3.WebSocketListener
 import org.json.JSONObject
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
+import ua.homeguard.s3.model.SystemMode
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.ScheduledFuture
@@ -38,6 +39,16 @@ class TelemetrySocket(private val telemetryTimeoutMs: Long = 15_000L) {
 
     fun lastReceivedAtMs(): StateFlow<Long> = receivedAtMs.asStateFlow()
     private var fallbackSnapshot: SystemSnapshot? = null
+    private var mqttMode: SystemMode? = null
+
+    private fun fallbackState(): SystemSnapshot = fallbackSnapshot ?: SystemSnapshot(mode = mqttMode ?: SystemMode.DISARMED)
+
+    /** Compact MQTT state carries no zone or sensor measurements. */
+    @Synchronized
+    fun acceptMqttMode(mode: SystemMode?) {
+        mqttMode = mode
+        if (connectionState.value != TelemetryConnectionState.CONNECTED) state.value = fallbackState()
+    }
 
     fun snapshots(): Flow<SystemSnapshot> = state
     fun events(): Flow<List<SystemEventRecord>> = eventState
@@ -75,7 +86,7 @@ class TelemetrySocket(private val telemetryTimeoutMs: Long = 15_000L) {
     fun clearFallbackSnapshot() {
         fallbackSnapshot = null
         if (connectionState.value != TelemetryConnectionState.CONNECTED) {
-            state.value = SystemSnapshot()
+            state.value = fallbackState()
         }
     }
 
@@ -129,7 +140,7 @@ class TelemetrySocket(private val telemetryTimeoutMs: Long = 15_000L) {
                     } else {
                         TelemetryConnectionState.OFFLINE
                     }
-                    state.value = fallbackSnapshot ?: SystemSnapshot()
+                    state.value = fallbackState()
                 }
             }
 
@@ -143,7 +154,7 @@ class TelemetrySocket(private val telemetryTimeoutMs: Long = 15_000L) {
                     } else {
                         TelemetryConnectionState.OFFLINE
                     }
-                    state.value = fallbackSnapshot ?: SystemSnapshot()
+                    state.value = fallbackState()
                 }
             }
         })
@@ -155,7 +166,7 @@ class TelemetrySocket(private val telemetryTimeoutMs: Long = 15_000L) {
                     watchdogTask?.cancel(false)
                     watchdogTask = null
                     active.cancel()
-                    state.value = fallbackSnapshot ?: SystemSnapshot()
+                    state.value = fallbackState()
                     connectionState.value = TelemetryConnectionState.OFFLINE
                 }
             }
@@ -171,6 +182,6 @@ class TelemetrySocket(private val telemetryTimeoutMs: Long = 15_000L) {
         previous?.cancel()
         receivedAtMs.value = 0L
         connectionState.value = TelemetryConnectionState.IDLE
-        state.value = fallbackSnapshot ?: SystemSnapshot()
+        state.value = fallbackState()
     }
 }

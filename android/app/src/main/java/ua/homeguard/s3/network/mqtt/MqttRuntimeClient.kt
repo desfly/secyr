@@ -10,7 +10,12 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
+import ua.homeguard.s3.model.SystemMode
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.EOFException
@@ -37,6 +42,10 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
     private val state = MutableStateFlow(State.DISABLED)
     private val availability = MutableStateFlow("unknown")
     private val lastHeartbeatAtMs = MutableStateFlow(0L)
+    data class DeviceState(val sequence: Long, val uptimeSeconds: Long, val mode: SystemMode, val receivedAtMs: Long)
+    private val deviceState = MutableStateFlow<DeviceState?>(null)
+    fun deviceState(): StateFlow<DeviceState?> = deviceState
+
     private val events = MutableSharedFlow<JSONObject>(extraBufferCapacity = 64)
     private val responses = MutableSharedFlow<JSONObject>(extraBufferCapacity = 32)
     private val pendingResponses = ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<JSONObject>>()
@@ -47,6 +56,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
     @Volatile private var input: BufferedInputStream? = null
     @Volatile private var output: BufferedOutputStream? = null
     private var worker: Job? = null
+    private val connectionMutex = Mutex()
 
     fun state(): StateFlow<State> = state
     fun availability(): StateFlow<String> = availability
@@ -60,7 +70,10 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         if (config == next && worker?.isActive == true) return
         stop()
         config = next
-        worker = scope.launch(Dispatchers.IO) { connectionLoop(next) }
+        worker = scope.launch(Dispatchers.IO) {
+            // The old worker must finish closing its socket before a replacement opens.
+            connectionMutex.withLock { connectionLoop(next) }
+        }
     }
 
     fun stop() {
@@ -108,6 +121,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
     }
 
     private fun resetDeviceHealth() {
+        deviceState.value = null
         lastHeartbeatAtMs.value = 0L
         availability.value = "unknown"
     }
@@ -119,6 +133,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
                 state.value = State.CONNECTING
                 resetDeviceHealth()
                 open(cfg)
+                currentCoroutineContext().ensureActive()
                 state.value = State.CONNECTED
                 backoffMs = 1_000L
                 val sessionOutput = checkNotNull(output)
@@ -183,6 +198,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         check(packet.type == 2 && packet.payload.size >= 2 && packet.payload[1].toInt() == 0) { "MQTT CONNACK rejected" }
         subscribe(sessionInput, cfg, topic(cfg, "availability"))
         subscribe(sessionInput, cfg, topic(cfg, "heartbeat"))
+        subscribe(sessionInput, cfg, topic(cfg, "state"))
         subscribe(sessionInput, cfg, topic(cfg, "events"))
         subscribe(sessionInput, cfg, topic(cfg, "responses"))
     }
@@ -224,6 +240,27 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
                 if ((flags and 0x01) != 0) return
                 lastHeartbeatAtMs.value = System.currentTimeMillis()
                 availability.value = "online"
+            }
+            topic(cfg, "state") -> {
+                // Retained state is historical; only live state proves current device health.
+                if ((flags and 0x01) != 0) return
+                val json = runCatching { JSONObject(body) }.getOrNull() ?: return
+                val sequence = json.opt("seq") as? Number ?: return
+                val uptime = json.opt("up") as? Number ?: return
+                val arm = json.opt("arm") as? Number ?: return
+                if (sequence.toDouble() != sequence.toLong().toDouble() || sequence.toLong() < 0 ||
+                    uptime.toDouble() != uptime.toLong().toDouble() || uptime.toLong() < 0 ||
+                    arm.toDouble() != arm.toInt().toDouble()) return
+                val mode = when (arm.toInt()) {
+                    0 -> SystemMode.DISARMED
+                    1 -> SystemMode.ARMED_HOME
+                    2 -> SystemMode.ARMED_AWAY
+                    3 -> SystemMode.ALARM
+                    else -> return
+                }
+                val previous = deviceState.value
+                if (previous != null && uptime.toLong() >= previous.uptimeSeconds && sequence.toLong() <= previous.sequence) return
+                deviceState.value = DeviceState(sequence.toLong(), uptime.toLong(), mode, System.currentTimeMillis())
             }
             topic(cfg, "events") -> runCatching { JSONObject(body) }.getOrNull()?.let(events::tryEmit)
             topic(cfg, "responses") -> {

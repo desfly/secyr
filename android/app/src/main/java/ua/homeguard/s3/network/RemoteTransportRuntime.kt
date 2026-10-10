@@ -6,6 +6,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import ua.homeguard.s3.network.cloud.CloudRuntime
 import ua.homeguard.s3.network.mqtt.MqttConnectionConfig
 import ua.homeguard.s3.network.mqtt.MqttRuntime
@@ -28,6 +29,7 @@ class RemoteTransportRuntime(
     private val mqttClient = MqttRuntimeClient(scope)
     private val mqtt = MqttRuntime(scope, mqttClient)
     private var mqttEventsJob: Job? = null
+    private var mqttStateJob: Job? = null
 
     private val mqttConfig = MutableStateFlow(MqttConnectionConfig())
 
@@ -58,6 +60,13 @@ class RemoteTransportRuntime(
                 }
             }
         }
+        if (mqttStateJob == null) {
+            mqttStateJob = scope.launch {
+                combine(mqttClient.deviceState(), mqtt.state()) { device, health ->
+                    if (health == MqttRuntime.State.CONNECTED) device?.mode else null
+                }.collect { telemetry.acceptMqttMode(it) }
+            }
+        }
         applyMqttConfig(mqttConfig.value)
     }
 
@@ -66,6 +75,9 @@ class RemoteTransportRuntime(
         mqtt.stop()
         mqttEventsJob?.cancel()
         mqttEventsJob = null
+        mqttStateJob?.cancel()
+        mqttStateJob = null
+        telemetry.acceptMqttMode(null)
     }
 
     fun configureMqtt(config: MqttConnectionConfig, credential: String = "") {
@@ -108,6 +120,7 @@ class RemoteTransportRuntime(
 
     private fun applyMqttConfig(config: MqttConnectionConfig, credential: String = "") {
         mqtt.stop()
+        telemetry.acceptMqttMode(null)
         if (!config.ready) return
         mqtt.start(
             MqttRuntimeClient.Config(

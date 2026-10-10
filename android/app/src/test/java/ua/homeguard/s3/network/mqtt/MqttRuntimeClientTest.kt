@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.*
 import org.junit.Test
+import ua.homeguard.s3.model.SystemMode
 
 class MqttRuntimeClientTest {
     private val cfg = MqttRuntimeClient.Config("mqtts://broker.example", deviceId = "HG-TEST")
@@ -93,5 +94,47 @@ class MqttRuntimeClientTest {
         assertEquals(0L, client.lastHeartbeatAtMs().value)
         heartbeat(client, false)
         assertTrue(client.lastHeartbeatAtMs().value > 0)
+    }
+    private fun publishState(client: MqttRuntimeClient, body: String, retained: Boolean = false) {
+        val topic = "homeguard/v1/devices/HG-TEST/state".toByteArray()
+        val payload = byteArrayOf(0, topic.size.toByte()) + topic + body.toByteArray()
+        client.javaClass.getDeclaredMethod("handlePublish", MqttRuntimeClient.Config::class.java,
+            Int::class.javaPrimitiveType, ByteArray::class.java).apply { isAccessible = true }
+            .invoke(client, cfg, if (retained) 1 else 0, payload)
+    }
+
+    @Test fun liveStateMapsEveryFirmwareArmValue() {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        val modes = listOf(SystemMode.DISARMED, SystemMode.ARMED_HOME, SystemMode.ARMED_AWAY, SystemMode.ALARM)
+        modes.forEachIndexed { arm, mode ->
+            publishState(client, "{\"seq\":${arm + 1},\"up\":50,\"arm\":$arm}")
+            assertEquals(mode, client.deviceState().value?.mode)
+            assertEquals(50L, client.deviceState().value?.uptimeSeconds)
+            assertTrue(client.deviceState().value!!.receivedAtMs > 0)
+        }
+    }
+
+    @Test fun retainedMalformedAndDuplicateStateCannotRefreshHealth() {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        publishState(client, "{\"seq\":1,\"up\":50,\"arm\":2}", retained = true)
+        assertNull(client.deviceState().value)
+        publishState(client, "{\"seq\":2,\"up\":50,\"arm\":2}")
+        val previous = client.deviceState().value
+        listOf("{}", "invalid", "{\"seq\":3,\"up\":50,\"arm\":9}",
+            "{\"seq\":3,\"up\":50,\"arm\":1.5}", "{\"seq\":1,\"up\":50,\"arm\":0}",
+            "{\"seq\":2,\"up\":50,\"arm\":0}").forEach { body ->
+            publishState(client, body)
+            assertEquals(previous, client.deviceState().value)
+        }
+        client.stop()
+        assertNull(client.deviceState().value)
+    }
+
+    @Test fun deviceRebootMayRestartStateCounter() {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        publishState(client, "{\"seq\":100,\"up\":500,\"arm\":2}")
+        publishState(client, "{\"seq\":1,\"up\":1,\"arm\":0}")
+        assertEquals(SystemMode.DISARMED, client.deviceState().value?.mode)
+        assertEquals(1L, client.deviceState().value?.sequence)
     }
 }

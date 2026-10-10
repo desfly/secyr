@@ -5,6 +5,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
+import ua.homeguard.s3.model.SystemMode
+import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceEndpoint
 import ua.homeguard.s3.network.cloud.CloudRuntime
@@ -117,5 +121,18 @@ class TelemetrySocketTest {
             telemetry.disconnect()
             server.shutdown()
         }
+    }
+    @Test fun compactMqttModeDoesNotInventSensorsOrOverrideBle() = runBlocking {
+        val telemetry = TelemetrySocket()
+        telemetry.acceptMqttMode(SystemMode.ARMED_AWAY)
+        assertEquals(SystemMode.ARMED_AWAY, telemetry.snapshots().first().mode)
+        assertTrue(telemetry.snapshots().first().zones.isEmpty())
+        telemetry.acceptFallbackSnapshot(SystemSnapshot(mode = SystemMode.ARMED_HOME))
+        telemetry.acceptMqttMode(SystemMode.ALARM)
+        assertEquals(SystemMode.ARMED_HOME, telemetry.snapshots().first().mode)
+        telemetry.clearFallbackSnapshot()
+        assertEquals(SystemMode.ALARM, telemetry.snapshots().first().mode)
+        telemetry.acceptMqttMode(null)
+        assertEquals(SystemSnapshot(), telemetry.snapshots().first())
     }
 }
