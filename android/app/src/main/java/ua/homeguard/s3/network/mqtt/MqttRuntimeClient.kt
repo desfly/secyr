@@ -73,8 +73,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         pendingResponses.values.forEach { it.cancel() }
         pendingResponses.clear()
         config = null
-        availability.value = "unknown"
-        lastHeartbeatAtMs.value = 0L
+        resetDeviceHealth()
         state.value = State.DISABLED
     }
 
@@ -108,12 +107,17 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         }
     }
 
+    private fun resetDeviceHealth() {
+        lastHeartbeatAtMs.value = 0L
+        availability.value = "unknown"
+    }
+
     private suspend fun connectionLoop(cfg: Config) {
         var backoffMs = 1_000L
         while (scope.isActive && config == cfg) {
             try {
                 state.value = State.CONNECTING
-                availability.value = "unknown"
+                resetDeviceHealth()
                 open(cfg)
                 state.value = State.CONNECTED
                 backoffMs = 1_000L
@@ -140,6 +144,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
             } catch (_: Throwable) {
                 state.value = State.OFFLINE
             } finally {
+                resetDeviceHealth()
                 runCatching { socket?.close() }
                 socket = null
                 input = null
@@ -215,6 +220,8 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         when (incomingTopic) {
             topic(cfg, "availability") -> availability.value = body.trim()
             topic(cfg, "heartbeat") -> {
+                // A retained heartbeat belongs to an earlier broker session.
+                if ((flags and 0x01) != 0) return
                 lastHeartbeatAtMs.value = System.currentTimeMillis()
                 availability.value = "online"
             }

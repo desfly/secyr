@@ -67,4 +67,31 @@ class MqttRuntimeClientTest {
         ping.invoke(client, current)
         assertArrayEquals(byteArrayOf(0xC0.toByte(), 0), bytes.toByteArray())
     }
+    private fun heartbeat(client: MqttRuntimeClient, retained: Boolean) {
+        val topic = "homeguard/v1/devices/HG-TEST/heartbeat".toByteArray()
+        val payload = byteArrayOf(0, topic.size.toByte()) + topic + "{}".toByteArray()
+        client.javaClass.getDeclaredMethod("handlePublish", MqttRuntimeClient.Config::class.java,
+            Int::class.javaPrimitiveType, ByteArray::class.java).apply { isAccessible = true }
+            .invoke(client, cfg, if (retained) 1 else 0, payload)
+    }
+
+    @Test fun retainedHeartbeatCannotEstablishFreshDeviceHealth() {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        heartbeat(client, true)
+        assertEquals(0L, client.lastHeartbeatAtMs().value)
+        assertEquals("unknown", client.availability().value)
+    }
+
+    @Test fun newSessionRequiresAnotherLiveHeartbeat() {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        heartbeat(client, false)
+        assertTrue(client.lastHeartbeatAtMs().value > 0)
+        client.javaClass.getDeclaredMethod("resetDeviceHealth").apply { isAccessible = true }.invoke(client)
+        assertEquals(0L, client.lastHeartbeatAtMs().value)
+        assertEquals("unknown", client.availability().value)
+        heartbeat(client, true)
+        assertEquals(0L, client.lastHeartbeatAtMs().value)
+        heartbeat(client, false)
+        assertTrue(client.lastHeartbeatAtMs().value > 0)
+    }
 }

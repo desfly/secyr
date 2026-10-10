@@ -13,13 +13,18 @@ import org.json.JSONObject
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.ScheduledFuture
 
 enum class TelemetryConnectionState { IDLE, CONNECTING, CONNECTED, UNAUTHORIZED, OFFLINE }
 
-class TelemetrySocket {
+class TelemetrySocket(private val telemetryTimeoutMs: Long = 15_000L) {
     companion object {
         private const val MAX_EVENT_HISTORY = 256
         private const val HEARTBEAT_SECONDS = 5L
+        private val watchdog = ScheduledThreadPoolExecutor(1) { task ->
+            Thread(task, "homeguard-telemetry-watchdog").apply { isDaemon = true }
+        }.apply { removeOnCancelPolicy = true }
     }
 
     private val state = MutableStateFlow(SystemSnapshot())
@@ -27,6 +32,11 @@ class TelemetrySocket {
     private val liveEventState = MutableSharedFlow<SystemEventRecord>(extraBufferCapacity = 16)
     private val connectionState = MutableStateFlow(TelemetryConnectionState.IDLE)
     private var socket: WebSocket? = null
+    private val receivedAtMs = MutableStateFlow(0L)
+    private var lastFrameNanos = 0L
+    private var watchdogTask: ScheduledFuture<*>? = null
+
+    fun lastReceivedAtMs(): StateFlow<Long> = receivedAtMs.asStateFlow()
     private var fallbackSnapshot: SystemSnapshot? = null
 
     fun snapshots(): Flow<SystemSnapshot> = state
@@ -52,6 +62,7 @@ class TelemetrySocket {
      * The newest fallback is cached even while WSS is healthy so a BLE/MQTT
      * snapshot can be promoted immediately if WSS drops between telemetry frames.
      */
+    @Synchronized
     fun acceptFallbackSnapshot(snapshot: SystemSnapshot) {
         fallbackSnapshot = snapshot
         if (connectionState.value != TelemetryConnectionState.CONNECTED) {
@@ -60,6 +71,7 @@ class TelemetrySocket {
     }
 
     /** Drop fallback data when its authenticated transport/session is gone. */
+    @Synchronized
     fun clearFallbackSnapshot() {
         fallbackSnapshot = null
         if (connectionState.value != TelemetryConnectionState.CONNECTED) {
@@ -67,6 +79,7 @@ class TelemetrySocket {
         }
     }
 
+    @Synchronized
     fun connect(url: String, token: String, certificateSha256: String = "") {
         disconnect()
         if (url.isBlank()) return
@@ -78,13 +91,14 @@ class TelemetrySocket {
         val request = Request.Builder().url(url).apply {
             if (token.isNotBlank()) header("Authorization", "Bearer $token")
         }.build()
+        lastFrameNanos = System.nanoTime()
         socket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                if (socket === webSocket) connectionState.value = TelemetryConnectionState.CONNECTED
+                // An open socket is not evidence of device telemetry.
             }
 
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                if (socket === webSocket) connectionState.value = TelemetryConnectionState.CONNECTED
+            override fun onMessage(webSocket: WebSocket, text: String) = synchronized(this@TelemetrySocket) {
+                if (socket !== webSocket) return@synchronized
                 runCatching {
                     val json = JSONObject(text)
                     if (json.has("event")) {
@@ -94,15 +108,22 @@ class TelemetrySocket {
                         )
                         eventState.value = (listOf(item) + eventState.value).distinctBy { it.sequence }.take(MAX_EVENT_HISTORY)
                         liveEventState.tryEmit(item)
-                    } else {
-                        state.value = JsonParsers.snapshot(json)
+                    } else if (json.optJSONArray("zones") != null) {
+                        val snapshot = JsonParsers.snapshot(json)
+                        state.value = snapshot
+                        lastFrameNanos = System.nanoTime()
+                        receivedAtMs.value = System.currentTimeMillis()
+                        connectionState.value = TelemetryConnectionState.CONNECTED
                     }
                 }
+                Unit
             }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = synchronized(this@TelemetrySocket) {
                 if (socket === webSocket) {
                     socket = null
+                    watchdogTask?.cancel(false)
+                    watchdogTask = null
                     connectionState.value = if (response?.code == 401 || response?.code == 403) {
                         TelemetryConnectionState.UNAUTHORIZED
                     } else {
@@ -112,9 +133,11 @@ class TelemetrySocket {
                 }
             }
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = synchronized(this@TelemetrySocket) {
                 if (socket === webSocket) {
                     socket = null
+                    watchdogTask?.cancel(false)
+                    watchdogTask = null
                     connectionState.value = if (code == 1008 || reason.contains("unauthor", true) || reason.contains("forbidden", true)) {
                         TelemetryConnectionState.UNAUTHORIZED
                     } else {
@@ -124,11 +147,29 @@ class TelemetrySocket {
                 }
             }
         })
+        watchdogTask = watchdog.scheduleAtFixedRate({
+            synchronized(this) {
+                val active = socket
+                if (active != null && TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - lastFrameNanos) >= telemetryTimeoutMs) {
+                    socket = null
+                    watchdogTask?.cancel(false)
+                    watchdogTask = null
+                    active.cancel()
+                    state.value = fallbackSnapshot ?: SystemSnapshot()
+                    connectionState.value = TelemetryConnectionState.OFFLINE
+                }
+            }
+        }, 100L, 100L, TimeUnit.MILLISECONDS)
     }
 
+    @Synchronized
     fun disconnect() {
-        socket?.close(1000, "client disconnect")
+        val previous = socket
         socket = null
+        watchdogTask?.cancel(false)
+        watchdogTask = null
+        previous?.cancel()
+        receivedAtMs.value = 0L
         connectionState.value = TelemetryConnectionState.IDLE
         state.value = fallbackSnapshot ?: SystemSnapshot()
     }
