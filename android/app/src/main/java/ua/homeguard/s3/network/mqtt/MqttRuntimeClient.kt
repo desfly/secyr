@@ -90,33 +90,21 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         state.value = State.DISABLED
     }
 
-    suspend fun command(
-        requestId: String,
-        actor: String,
-        credential: String,
-        command: String,
+    suspend fun publishSignedCommand(
+        envelope: SignedCommandEnvelope,
         timeoutMs: Long = 8_000L,
     ): JSONObject {
-        require(requestId.isNotBlank()) { "MQTT request id is empty" }
-        require(actor.isNotBlank()) { "MQTT actor is empty" }
-        require(credential.isNotBlank()) { "MQTT credential is empty" }
-        require(command.isNotBlank()) { "MQTT command is empty" }
         val cfg = config ?: error("MQTT disabled")
         check(state.value == State.CONNECTED) { "MQTT offline" }
-
+        val body = envelope.payloadFor(cfg.deviceId)
+        val requestId = envelope.requestId
         val waiter = kotlinx.coroutines.CompletableDeferred<JSONObject>()
-        pendingResponses[requestId] = waiter
+        check(pendingResponses.putIfAbsent(requestId, waiter) == null) { "MQTT request already pending" }
         try {
-            val body = JSONObject()
-                .put("request_id", requestId)
-                .put("actor", actor)
-                .put("credential", credential)
-                .put("command", command)
-                .toString()
             publish(topic(cfg, "commands"), body, qos = 1, retain = false)
             return kotlinx.coroutines.withTimeout(timeoutMs) { waiter.await() }
         } finally {
-            pendingResponses.remove(requestId)
+            pendingResponses.remove(requestId, waiter)
         }
     }
 

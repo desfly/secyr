@@ -7,6 +7,12 @@ import java.io.ByteArrayOutputStream
 import java.lang.reflect.InvocationTargetException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.MutableStateFlow
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import ua.homeguard.s3.model.SystemMode
@@ -136,5 +142,38 @@ class MqttRuntimeClientTest {
         publishState(client, "{\"seq\":1,\"up\":1,\"arm\":0}")
         assertEquals(SystemMode.DISARMED, client.deviceState().value?.mode)
         assertEquals(1L, client.deviceState().value?.sequence)
+    }
+    @Test fun publishesSignedPacketUnchangedWithoutRetentionAndProtectsPendingRequest() = runBlocking {
+        val bytes = ByteArrayOutputStream()
+        val client = client(BufferedOutputStream(bytes))
+        client.javaClass.getDeclaredField("config").apply { isAccessible = true }.set(client, cfg)
+        @Suppress("UNCHECKED_CAST")
+        val connection = client.javaClass.getDeclaredField("state").apply { isAccessible = true }
+            .get(client) as MutableStateFlow<MqttRuntimeClient.State>
+        connection.value = MqttRuntimeClient.State.CONNECTED
+        val now = System.currentTimeMillis()
+        val json = JSONObject().put("version", 1).put("deviceId", "HG-TEST").put("requestId", "signed-1")
+            .put("actor", "user").put("command", "security.arm_away").put("keyEpoch", 1)
+            .put("counter", 2).put("issuedAtMs", now).put("expiresAtMs", now + 60_000)
+            .put("challenge", "").put("signature", "abcd")
+        val envelope = SignedCommandEnvelope.parse(json)
+        val sending = launch(start = CoroutineStart.UNDISPATCHED) { client.publishSignedCommand(envelope) }
+        try {
+            val sent = bytes.toByteArray()
+            assertEquals(0x32, sent[0].toInt() and 0xff) // QoS 1, retain=false
+            var offset = 1
+            while ((sent[offset++].toInt() and 0x80) != 0) { }
+            val topicLength = ((sent[offset].toInt() and 0xff) shl 8) or (sent[offset + 1].toInt() and 0xff)
+            offset += 2
+            assertEquals("homeguard/v1/devices/HG-TEST/commands", String(sent, offset, topicLength, Charsets.UTF_8))
+            offset += topicLength + 2 // QoS packet id
+            assertEquals(json.toString(), String(sent, offset, sent.size - offset, Charsets.UTF_8))
+            try { client.publishSignedCommand(envelope); fail("Duplicate pending id accepted") }
+            catch (_: IllegalStateException) { }
+            assertEquals(sent.size, bytes.size())
+        } finally {
+            sending.cancelAndJoin()
+            client.stop()
+        }
     }
 }

@@ -108,6 +108,7 @@ class RemoteTransportRuntime(
                 available = mqttState == MqttRuntime.State.CONNECTED,
                 authenticated = mqttState == MqttRuntime.State.CONNECTED,
                 lastSeenAtMs = mqttSeen,
+                commandSupported = false, // Enable only after server signing and command routing are configured.
             ),
         )
     }
