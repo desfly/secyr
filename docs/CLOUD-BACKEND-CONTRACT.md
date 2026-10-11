@@ -101,3 +101,15 @@ lifetime, disallows redirects/retries, bounds response size and cancels HTTP wor
 when its coroutine is cancelled. It returns a packet for `publishSignedCommand`;
 it does not publish commands itself. No signer URL/account-token provisioning or
 UI command route is enabled yet, and no hosted deployment is included.
+
+## MQTT disarm coordinator
+
+`MqttSignedCommandController` serializes requests for one configured device.
+Disarm first obtains and executes a signed `security.disarm_challenge`, checks
+the successful correlated response and its 32-character token/TTL, then signs
+and publishes `security.disarm` with that token. Rejection, missing/malformed
+challenge, or unknown outcome stops the sequence without retry. Firmware now
+returns the token and `ok` in the same `requestId`-correlated response rather
+than an uncorrelated token plus a separate success acknowledgement.
+The coordinator still needs signer credentials, a deployed endpoint and UI
+routing. It does not enable MQTT commands merely because telemetry is online.

@@ -572,12 +572,13 @@ esp_err_t CloudLink::publish_state(const char* json, int qos, bool retain)
     return id >= 0 ? ESP_OK : ESP_FAIL;
 }
 
-esp_err_t CloudLink::issue_disarm_challenge()
+esp_err_t CloudLink::issue_disarm_challenge(const char* request_id)
 {
-    if (client_ == nullptr || !connected_) return ESP_ERR_INVALID_STATE;
+    if (client_ == nullptr || !connected_ || request_id == nullptr || request_id[0] == '\0') return ESP_ERR_INVALID_STATE;
     const std::string challenge = ::homeguard::idf::issue_disarm_challenge();
-    const std::string payload = std::string{"{\"type\":\"security.disarm_challenge\",\"challenge\":\""} +
-                                json_escape(challenge) + "\",\"ttlMs\":60000}";
+    const std::string payload = std::string{"{\"ok\":true,\"requestId\":\""} + json_escape(request_id) +
+        "\",\"reason\":\"challenge_issued\",\"type\":\"security.disarm_challenge\",\"challenge\":\"" +
+        json_escape(challenge) + "\",\"ttlMs\":60000}";
     const int id = esp_mqtt_client_publish(client_, response_topic_.data(), payload.c_str(), 0, 1, 0);
     return id >= 0 ? ESP_OK : ESP_FAIL;
 }
@@ -769,13 +770,13 @@ void CloudLink::handle_command(const char* data, std::size_t size)
             publish_response(false, "key_epoch_changed");
             return;
         }
-        if (issue_disarm_challenge() != ESP_OK) {
+        if (issue_disarm_challenge(request_id.c_str()) != ESP_OK) {
             xSemaphoreGive(replay_mutex);
             publish_response(false, "challenge_issue_failed");
             return;
         }
         xSemaphoreGive(replay_mutex);
-        publish_response(true, "challenge_issued");
+        // The correlated challenge packet is the successful response.
         return;
     }
 

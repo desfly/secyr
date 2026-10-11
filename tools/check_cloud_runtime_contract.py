@@ -93,7 +93,7 @@ require("cloud_->begin_trust_rotation()" in http and
         "trust writer must hold the shared gate while persisting a new key")
 challenge_start = link.find('if (command == "security.disarm_challenge")')
 challenge_commit = link.find("persist_command_replay_state(command_counter, request_id)", challenge_start)
-challenge_issue_locked = link.find("if (issue_disarm_challenge() != ESP_OK)", challenge_commit)
+challenge_issue_locked = link.find("if (issue_disarm_challenge(request_id.c_str()) != ESP_OK)", challenge_commit)
 # Error branches must unlock before returning; inspect only the success path
 # between the end of the replay-persist error branch and the side effect.
 challenge_persist_failure = link.find('publish_response(false, "replay_state_persist_failed")', challenge_commit)
@@ -156,7 +156,7 @@ challenge_branch = link.find('if (command == "security.disarm_challenge")')
 replay_check = link.find("if (command_counter <= stored_counter)")
 request_replay_check = link.find("if (request_id == last_request_id)")
 challenge_persist = link.find("persist_command_replay_state(command_counter, request_id)", challenge_branch)
-challenge_issue = link.find("issue_disarm_challenge()", challenge_branch)
+challenge_issue = link.find("issue_disarm_challenge(request_id.c_str())", challenge_branch)
 require(challenge_branch >= 0, "signed disarm challenge issuance path missing")
 require(replay_check >= 0 and request_replay_check >= 0 and replay_check < challenge_branch and request_replay_check < challenge_branch,
         "disarm challenge issuance bypasses persistent replay checks")

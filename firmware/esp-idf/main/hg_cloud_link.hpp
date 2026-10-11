@@ -29,7 +29,7 @@ public:
     [[nodiscard]] std::uint32_t disconnect_count() const { return disconnect_count_; }
 
     esp_err_t publish_state(const char* json, int qos = 1, bool retain = true);
-    esp_err_t issue_disarm_challenge();
+    esp_err_t issue_disarm_challenge(const char* request_id);
     bool begin_trust_rotation();
     void end_trust_rotation();
 
