@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicLong
 class CommandController(
     private val endpoint: StateFlow<DeviceEndpoint>,
     private val settings: SettingsStore,
+    private val mqtt: MqttCommandRoute? = null,
 ) {
     private val requestIds = AtomicLong(System.currentTimeMillis())
     private val ble = BleRuntimeRegistry.get(settings.appContext)
@@ -168,6 +169,11 @@ class CommandController(
             if (bleReply != null) return mapBleReply(bleReply)
         }
 
+        if (endpoint.value.path == ControlPath.CLOUD || endpoint.value.path == ControlPath.OFFLINE) {
+            val mqttReply = mqtt?.execute(type)
+            if (mqttReply != null) return mqttReply
+        }
+
         // HTTP is transport-agnostic here: DeviceEndpoint may resolve to local
         // Wi-Fi/Ethernet or CLOUD.  BLE failure therefore falls through to the
         // currently resolved network/cloud path.
@@ -241,15 +247,18 @@ class CommandController(
     suspend fun pulseLock(actor: String): CommandReply {
         // The object-card lock is a universal action, not a BLE-only control.
         // Prefer an already-authorized nearby BLE session for door latency,
-        // then fall back to the resolved local network path.  Cloud lock output
-        // control is not part of the current controller API contract, so do not
-        // pretend it is supported until the protocol exposes it.
+        // then use a configured signed MQTT route for remote access or the
+        // resolved local network path. An unknown remote result is never repeated.
         if (ble.isReady()) {
             val bleReply = runCatching { mapBleReply(ble.pulseLock()) }.getOrNull()
             if (bleReply != null && (bleReply.accepted || bleReply.duplicate)) return bleReply
         }
 
         val target = endpoint.value
+        if (target.path == ControlPath.CLOUD || target.path == ControlPath.OFFLINE) {
+            val mqttReply = mqtt?.pulseLock()
+            if (mqttReply != null) return mqttReply
+        }
         if (target.path != ControlPath.OFFLINE && target.path != ControlPath.CLOUD &&
             target.apiBaseUrl.isNotBlank() && localHttpSessionToken.isNotBlank()) {
             val api = createApi(target)

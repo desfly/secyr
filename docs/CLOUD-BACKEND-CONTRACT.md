@@ -84,7 +84,7 @@ The backend maps that route to the authenticated device session and never reveal
 
 Android receives live compact state from `homeguard/v1/devices/<device_id>/state`.
 This is telemetry readiness, not command readiness. MQTT remains excluded from
-command selection until a server signing route and account authentication are configured.
+command selection until a server signing route and account authentication are configured for the selected device.
 `MqttRuntimeClient.publishSignedCommand` accepts an immutable `SignedCommandEnvelope`
 with the firmware's exact v1 fields and sends it unchanged at QoS 1 without retention.
 It rejects mismatched device IDs and expired packets before publication. It does not
@@ -99,8 +99,8 @@ an Android HTTPS `SignedCommandApi` client. The client sends only command/challe
 with a separate account bearer token, validates the returned device/command and
 lifetime, disallows redirects/retries, bounds response size and cancels HTTP work
 when its coroutine is cancelled. It returns a packet for `publishSignedCommand`;
-it does not publish commands itself. No signer URL/account-token provisioning or
-UI command route is enabled yet, and no hosted deployment is included.
+it does not publish commands itself. The daily-action controller is wired to the optional MQTT route, but signer
+URL/account-token provisioning and a hosted deployment are not included.
 
 ## MQTT disarm coordinator
 
@@ -111,5 +111,21 @@ and publishes `security.disarm` with that token. Rejection, missing/malformed
 challenge, or unknown outcome stops the sequence without retry. Firmware now
 returns the token and `ok` in the same `requestId`-correlated response rather
 than an uncorrelated token plus a separate success acknowledgement.
-The coordinator still needs signer credentials, a deployed endpoint and UI
-routing. It does not enable MQTT commands merely because telemetry is online.
+The coordinator still needs signer credentials and a deployed endpoint. It does not enable MQTT commands merely because telemetry is online.
+
+## Daily-action routing
+
+`MonitoringRuntime.commands` installs `MqttCommandRoute` into the actual
+`CommandController` used by daily buttons. After the existing ready BLE path,
+Arm Home/Away, Disarm and Lock can use a configured, fresh MQTT route when the
+selected endpoint is CLOUD or OFFLINE. Local HTTP behavior is retained. A
+non-null MQTT result, including rejection or unknown outcome, stops routing;
+there is no automatic second-transport attempt after a potentially sent action.
+
+Configure through `DeviceSession.configureMqttSigner(deviceId, httpsBaseUrl,
+accountTokenProvider)` after MQTT setup. This keeps the account token outside
+ordinary settings/backup data. Signer credentials are currently memory-only;
+there is no UI/account enrollment flow yet. Configuration is scoped to a device,
+cleared when changing MQTT device or stopping monitoring, and checked against
+the currently selected device before signing. `clearMqttSigner` revokes the local
+route. Deployment, grant provisioning and real end-to-end validation remain open.

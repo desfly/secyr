@@ -12,6 +12,9 @@ import ua.homeguard.s3.network.mqtt.MqttConnectionConfig
 import ua.homeguard.s3.network.mqtt.MqttRuntime
 import ua.homeguard.s3.network.mqtt.MqttRuntimeClient
 import ua.homeguard.s3.model.SystemEventRecord
+import ua.homeguard.s3.network.mqtt.SignedCommandApi
+import ua.homeguard.s3.network.mqtt.MqttSignedCommandController
+import org.json.JSONObject
 
 /**
  * Coordinates remote transports without coupling them.
@@ -30,6 +33,23 @@ class RemoteTransportRuntime(
     private val mqtt = MqttRuntime(scope, mqttClient)
     private var mqttEventsJob: Job? = null
     private var mqttStateJob: Job? = null
+
+    private data class SignerRoute(val deviceId: String, val controller: MqttSignedCommandController)
+    @Volatile private var signerRoute: SignerRoute? = null
+
+    fun configureMqttSigner(deviceId: String, baseUrl: String, tokenProvider: () -> String) {
+        require(deviceId.isNotBlank()) { "Signer device id required" }
+        val api = SignedCommandApi(baseUrl, tokenProvider)
+        signerRoute = SignerRoute(deviceId, MqttSignedCommandController(deviceId, api, mqttClient))
+    }
+
+    fun clearMqttSigner() { signerRoute = null }
+
+    suspend fun executeMqttCommand(selectedDeviceId: String, command: String): JSONObject? {
+        val route = signerRoute ?: return null
+        if (route.deviceId != selectedDeviceId || route.deviceId != mqttConfig.value.deviceId || mqtt.state().value != MqttRuntime.State.CONNECTED) return null
+        return route.controller.execute(command)
+    }
 
     private val mqttConfig = MutableStateFlow(MqttConnectionConfig())
 
@@ -72,6 +92,7 @@ class RemoteTransportRuntime(
 
     fun stop() {
         cloud.stop()
+        clearMqttSigner()
         mqtt.stop()
         mqttEventsJob?.cancel()
         mqttEventsJob = null
@@ -81,6 +102,7 @@ class RemoteTransportRuntime(
     }
 
     fun configureMqtt(config: MqttConnectionConfig, credential: String = "") {
+        if (signerRoute?.deviceId != config.deviceId) clearMqttSigner()
         mqttConfig.value = config
         applyMqttConfig(config, credential)
     }
@@ -108,7 +130,7 @@ class RemoteTransportRuntime(
                 available = mqttState == MqttRuntime.State.CONNECTED,
                 authenticated = mqttState == MqttRuntime.State.CONNECTED,
                 lastSeenAtMs = mqttSeen,
-                commandSupported = false, // Enable only after server signing and command routing are configured.
+                commandSupported = signerRoute?.deviceId == mqttConfig.value.deviceId,
             ),
         )
     }

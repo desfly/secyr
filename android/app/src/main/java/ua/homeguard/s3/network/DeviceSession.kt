@@ -46,6 +46,12 @@ class DeviceSession(
     fun configureMqtt(config: MqttConnectionConfig, credential: String = "") =
         remoteTransports.configureMqtt(config, credential)
 
+    fun configureMqttSigner(deviceId: String, baseUrl: String, tokenProvider: () -> String) =
+        remoteTransports.configureMqttSigner(deviceId, baseUrl, tokenProvider)
+    fun clearMqttSigner() = remoteTransports.clearMqttSigner()
+    suspend fun executeMqttCommand(command: String): org.json.JSONObject? =
+        remoteTransports.executeMqttCommand(settings.settings.value.deviceId, command)
+
     fun start() {
         if (job != null) return
         remoteTransports.start()

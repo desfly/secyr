@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import ua.homeguard.s3.control.CommandController
+import ua.homeguard.s3.control.MqttCommandRoute
 import ua.homeguard.s3.storage.EventHistoryStore
 import ua.homeguard.s3.storage.RegisteredDeviceStore
 import ua.homeguard.s3.storage.SettingsStore
@@ -19,7 +20,7 @@ class MonitoringRuntime private constructor(context: Context) {
     val resolver = DeviceEndpointResolver(settings, discovery, scope)
     val telemetry = TelemetrySocket().apply { seedEvents(eventHistory.load()) }
     val session = DeviceSession(scope, resolver.endpoint, settings, telemetry)
-    val commands = CommandController(resolver.endpoint, settings)
+    val commands = CommandController(resolver.endpoint, settings, MqttCommandRoute { session.executeMqttCommand(it) })
 
     fun start() { discovery.start(); session.start() }
     fun stop() { session.stop(); discovery.stop() }
