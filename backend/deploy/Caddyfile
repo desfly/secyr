@@ -1,0 +1,12 @@
+{$SIGNER_DOMAIN} {
+    @commands {
+        method POST
+        path /v1/devices/*/signed-command
+    }
+    handle @commands {
+        reverse_proxy signer:9080
+    }
+    handle {
+        respond "Not found" 404
+    }
+}

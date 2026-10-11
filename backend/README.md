@@ -24,6 +24,10 @@ The default listener is `127.0.0.1:9080`. Place it behind an authenticated TLS
 reverse proxy for remote access. Keep PEM keys/configuration private and preserve
 the SQLite database and its audit records across restarts and deployments.
 
+For a container deployment with Caddy HTTPS and persistent state, use
+[`deploy/README.md`](deploy/README.md). Deployment still requires the host/domain
+and already-enrolled device configuration; the package does not supply them.
+
 Configuration structure (placeholders, not working enrollment credentials):
 
 ```json

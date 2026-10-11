@@ -17,7 +17,7 @@ jobs:
   cloud-signer-tests:
     name: Cloud signer tests
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -25,6 +25,26 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install -r backend/requirements.txt
       - run: PYTHONPATH=backend python -m unittest discover -s backend/tests -v
+      - name: Validate HTTPS deployment and persistent container state
+        shell: bash
+        run: |
+          set -euo pipefail
+          SIGNER_DOMAIN=signer.example.com SIGNER_SECRETS_DIR=/tmp/ci-unused \
+            docker compose -f backend/deploy/compose.yaml config --quiet
+          docker run --rm -e SIGNER_DOMAIN=signer.example.com \
+            -v "$PWD/backend/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker build -f backend/Dockerfile -t homeguard-signer-ci backend
+          state_volume="homeguard-signer-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker volume create "$state_volume"
+          trap 'docker volume rm "$state_volume"' EXIT
+          for expected in 101 102; do
+            docker run --rm --read-only --tmpfs /tmp:mode=1777 --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              -v "$state_volume:/state" \
+              -v "$PWD/backend/deploy/check_container.py:/checks/check.py:ro" \
+              --entrypoint python homeguard-signer-ci /checks/check.py "$expected"
+          done
 
   host-gates:
     name: Host validation
