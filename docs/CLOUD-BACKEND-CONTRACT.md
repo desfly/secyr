@@ -31,15 +31,29 @@ The server implementation, deployment assets, server configuration UI, persisted
 server settings API, HTTP signer client and associated CI job have been removed.
 No migration erases any device, phone, broker, zone or replay configuration.
 
-## Remaining integration
+## Phone enrollment and current limits
 
-The local signing primitive is tested, but phone key storage/enrollment and durable
-counter synchronization are not yet wired into ordinary login. Consequently the
-MQTT command route is not automatically enabled and remote buttons are not yet
-claimed fixed. An existing trust key must not be overwritten and replay counters
-must not be guessed or reset. The next integration must bind the locally enrolled
-phone key to authorized users and preserve existing NVS/configuration. This requires
-code work on the phone/controller, not a separate server.
+`PhoneMqttSignerStore` stores non-exportable P-256 private keys in AndroidKeyStore
+per device/actor. Activation requires the controller-confirmed matching public key,
+key epoch and replay floor; it never lowers the phone's persisted per-device counter.
+Every allocation uses synchronous commit before signing. Missing/mismatched keys
+and stale signer profiles fail closed. `DeviceSession` restores activated phone
+signers after startup/device selection; activation refreshes only the route, not MQTT.
+
+After an authenticated local HTTP login, the existing MQTT enrollment path reads
+`GET /api/v1/cloud/trust`. The response supplies the device id, current public key,
+key epoch and actual durable counter floor. It performs no NVS writes and reports
+read faults instead of substituting a zero counter. If trust is absent, an Admin
+may initialize version 1 using the existing admin-only POST endpoint. Android then
+reads it back and activates only a matching phone key. A pre-existing different
+key is never overwritten automatically; no counter or configuration is erased.
+
+This initial integration supports the phone whose key is enrolled as the current
+controller trust. Another phone/actor key does not silently replace it. Controllers
+with a different existing trust key remain unavailable for phone MQTT commands
+until a deliberate enrollment/rotation is implemented. Older firmware without the
+GET endpoint keeps telemetry working and reports control as not connected. Physical
+phone/controller verification remains pending; no hardware has been flashed.
 
 Factory identity, MQTT credentials and Cloud Command Trust identity remain
 separate: broker access is not permission to impersonate a controller user.

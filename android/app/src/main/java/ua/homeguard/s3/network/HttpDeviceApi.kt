@@ -92,6 +92,12 @@ class HttpDeviceApi(
 
     suspend fun cloudClientConfig(): JSONObject = execute(RuntimeApiContract.CLOUD_CLIENT_CONFIG_PATH)
 
+    suspend fun commandTrust(): JSONObject = execute("/api/v1/cloud/trust")
+
+    suspend fun initializeCommandTrust(publicKeyPem: String): JSONObject = execute(
+        "/api/v1/cloud/trust", "POST", JSONObject().put("version", 1).put("publicKeyPem", publicKeyPem),
+    )
+
     suspend fun networkStatus(): JSONObject = execute(RuntimeApiContract.NETWORK_STATUS_PATH)
 
     suspend fun runtimeOutputActive(outputId: Int): Boolean? {

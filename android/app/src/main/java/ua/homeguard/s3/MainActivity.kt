@@ -754,7 +754,11 @@ class MainActivity : ComponentActivity() {
                         val password = json.optString("password", "")
                         if (brokerUri.isNotBlank() && password.isNotBlank()) {
                             settings.saveMqttClientConfig(brokerUri, username, password)
-                            commandStatus.value += " · MQTT готовий"
+                            val phoneEnrollment = runCatching {
+                                commands.enrollPhoneSigner(session.phoneSigners, requireNotNull(accessSession.value))
+                            }
+                            commandStatus.value += if (phoneEnrollment.isSuccess) " · Віддалене керування готове"
+                                else " · MQTT сповіщення готові; керування ще не підключено"
                             return
                         }
                         lastError = "неповні MQTT credentials"

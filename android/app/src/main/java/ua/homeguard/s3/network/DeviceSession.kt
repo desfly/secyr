@@ -38,6 +38,8 @@ class DeviceSession(
     private var bleTelemetryJob: Job? = null
     private var bleStateJob: Job? = null
     private var mqttSettingsJob: Job? = null
+    private var phoneSignerJob: Job? = null
+    val phoneSigners = ua.homeguard.s3.storage.PhoneMqttSignerStore(settings.appContext)
     @Volatile private var activeTarget: SessionTarget? = null
 
     fun cloudState(): StateFlow<CloudRuntime.State> = remoteTransports.cloudState()
@@ -61,6 +63,9 @@ class DeviceSession(
                 .map { Triple(it.mqttBrokerUri, it.mqttUsername, it.deviceId) }
                 .distinctUntilChanged()
                 .collect { applyPersistedMqtt() }
+        }
+        phoneSignerJob = scope.launch {
+            phoneSigners.revision.collect { applyLocalSigner() }
         }
         job = scope.launch {
             combine(endpointProvider, settings.settings) { endpoint, appSettings ->
@@ -140,6 +145,7 @@ class DeviceSession(
         bleTelemetryJob?.cancel()
         bleStateJob?.cancel()
         mqttSettingsJob?.cancel()
+        phoneSignerJob?.cancel()
         job?.cancel()
         authorizationJob?.cancel()
         reconnectJob = null
@@ -147,6 +153,7 @@ class DeviceSession(
         bleTelemetryJob = null
         bleStateJob = null
         mqttSettingsJob = null
+        phoneSignerJob = null
         job = null
         authorizationJob = null
         remoteTransports.stop()
@@ -166,6 +173,19 @@ class DeviceSession(
             ),
             settings.mqttPassword(),
         )
+        applyLocalSigner()
+    }
+
+    private fun applyLocalSigner() {
+        val deviceId = settings.settings.value.deviceId
+        val signer = runCatching { phoneSigners.signer(deviceId) }.getOrNull()
+        if (signer == null) {
+            remoteTransports.clearMqttSigner()
+        } else {
+            remoteTransports.configureMqttSigner(deviceId) { device, command, challenge ->
+                signer.sign(device, command, challenge)
+            }
+        }
     }
 
     private fun connectTarget(target: SessionTarget) {

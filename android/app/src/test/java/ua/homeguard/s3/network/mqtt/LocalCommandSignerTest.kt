@@ -8,6 +8,29 @@ import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 
 class LocalCommandSignerTest {
+    @Test fun persistenceFailureStopsBeforePrivateKeyAccess() {
+        var keyReads = 0
+        val signer = LocalCommandSigner("HG-TEST", "admin", 1,
+            { keyReads++; error("Key must not be used") }, { error("Counter write failed") })
+        try { signer.sign("HG-TEST", "output.lock"); fail("Unsigned counter admitted") }
+        catch (error: IllegalStateException) { assertEquals("Counter write failed", error.message) }
+        assertEquals(0, keyReads)
+    }
+
+    @Test fun aSigningFailureConsumesItsCounterSoTheNextAttemptCannotReuseIt() {
+        val key = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+        var counter = 40L
+        var keyAvailable = false
+        val signer = LocalCommandSigner("HG-TEST", "admin", 1,
+            { check(keyAvailable) { "Key unavailable" }; key.private }, { ++counter }, { 1_800_000_000_000 })
+        try { signer.sign("HG-TEST", "output.lock"); fail("Unavailable key admitted") }
+        catch (_: IllegalStateException) { }
+        assertEquals(41L, counter)
+        keyAvailable = true
+        val packet = JSONObject(signer.sign("HG-TEST", "output.lock").payloadFor("HG-TEST", 1_800_000_000_000))
+        assertEquals(42L, packet.getLong("counter"))
+    }
+
     @Test fun phoneSignatureMatchesFirmwareTranscriptAndBindsDeviceActorAndCounter() {
         val key = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
         var counter = 40L

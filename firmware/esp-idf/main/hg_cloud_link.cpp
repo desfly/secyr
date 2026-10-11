@@ -553,6 +553,14 @@ void CloudLink::publish_system_event(const hg::SystemEvent& event)
     if (message_id < 0) ESP_LOGE(kTag, "Cloud event enqueue failed: %d", message_id);
 }
 
+bool CloudLink::read_command_counter(std::uint64_t& value)
+{
+    if (!begin_trust_rotation()) return false;
+    const bool loaded = load_command_counter(value);
+    end_trust_rotation();
+    return loaded;
+}
+
 bool CloudLink::begin_trust_rotation()
 {
     const auto mutex = replay_admission_mutex();

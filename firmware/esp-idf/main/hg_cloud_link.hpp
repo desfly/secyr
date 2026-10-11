@@ -32,6 +32,7 @@ public:
     esp_err_t issue_disarm_challenge(const char* request_id);
     bool begin_trust_rotation();
     void end_trust_rotation();
+    bool read_command_counter(std::uint64_t& value);
 
 private:
     static void mqtt_event_handler(void* handler_args,

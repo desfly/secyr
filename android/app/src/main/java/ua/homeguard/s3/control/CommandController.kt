@@ -140,6 +140,36 @@ class CommandController(
         return createApi(target).cloudClientConfig()
     }
 
+    /** Initializes an empty trust only; a pre-existing key is never rotated automatically. */
+    suspend fun enrollPhoneSigner(store: ua.homeguard.s3.storage.PhoneMqttSignerStore, session: AccessSession) {
+        val target = localTarget()
+        require(hasLocalSession() && session.actor == localActor) { "Authenticated local actor required" }
+        val deviceId = settings.settings.value.deviceId
+        val api = createApi(target)
+        var trust = api.commandTrust()
+        require(trust.opt("ok") == true && trust.optString("deviceId") == deviceId) { "Controller trust identity mismatch" }
+        require(settings.settings.value.deviceId == deviceId && localActor == session.actor && hasLocalSession()) {
+            "Selected controller changed during enrollment"
+        }
+        val publicKey = store.preparePublicKey(deviceId, session.actor)
+        if (trust.opt("configured") == false) {
+            require(session.role == AccessRole.ADMIN) { "Admin must initialize command trust" }
+            require(api.initializeCommandTrust(publicKey).opt("ok") == true) { "Command trust initialization rejected" }
+            trust = api.commandTrust()
+        }
+        require(trust.opt("ok") == true && trust.opt("configured") == true &&
+            trust.optString("deviceId") == deviceId) { "Controller enrollment not confirmed" }
+        fun integer(name: String): Long {
+            val value = trust.opt(name)
+            require(value is Number) { "Invalid controller $name" }
+            return requireNotNull(value.toString().toLongOrNull()) { "Invalid controller $name" }
+        }
+        require(settings.settings.value.deviceId == deviceId && localActor == session.actor && hasLocalSession()) {
+            "Selected controller changed during enrollment"
+        }
+        store.activate(deviceId, session.actor, integer("keyEpoch"), integer("counterFloor"), trust.getString("publicKeyPem"))
+    }
+
     fun logout() {
         clearLocalSession()
         ble.disconnect()
