@@ -25,7 +25,111 @@ class DeviceSession(
     private val settings: SettingsStore,
     private val telemetry: TelemetrySocket
 ) {
-    …1243 tokens truncated…          if (snapshot.zones.isNotEmpty()) telemetry.acceptFallbackSnapshot(snapshot)
+    companion object {
+        private const val RECONNECT_DELAY_MS = 2_000L
+    }
+
+    private val remoteTransports = RemoteTransportRuntime(scope, endpointProvider, telemetry)
+    private val ble = BleRuntimeRegistry.get(settings.appContext)
+    private var job: Job? = null
+    private var authorizationJob: Job? = null
+    private var reconnectJob: Job? = null
+    private var ticketRefreshJob: Job? = null
+    private var bleTelemetryJob: Job? = null
+    private var bleStateJob: Job? = null
+    private var mqttSettingsJob: Job? = null
+    private var signerSettingsJob: Job? = null
+    @Volatile private var activeTarget: SessionTarget? = null
+
+    fun cloudState(): StateFlow<CloudRuntime.State> = remoteTransports.cloudState()
+    fun mqttState(): StateFlow<MqttRuntime.State> = remoteTransports.mqttState()
+    fun remoteStatuses(): List<TransportStatus> = remoteTransports.transportStatuses()
+    fun configureMqtt(config: MqttConnectionConfig, credential: String = "") =
+        remoteTransports.configureMqtt(config, credential)
+
+    fun configureMqttSigner(deviceId: String, baseUrl: String, tokenProvider: () -> String) =
+        remoteTransports.configureMqttSigner(deviceId, baseUrl, tokenProvider)
+    fun clearMqttSigner() = remoteTransports.clearMqttSigner()
+    suspend fun executeMqttCommand(command: String): org.json.JSONObject? =
+        remoteTransports.executeMqttCommand(settings.settings.value.deviceId, command)
+
+    fun start() {
+        if (job != null) return
+        remoteTransports.start()
+        applyPersistedMqtt()
+        mqttSettingsJob = scope.launch {
+            settings.settings
+                .map { Triple(it.mqttBrokerUri, it.mqttUsername, it.deviceId) }
+                .distinctUntilChanged()
+                .collect { applyPersistedMqtt(); applyPersistedSigner() }
+        }
+        signerSettingsJob = scope.launch {
+            settings.signerRevision.collect { applyPersistedSigner() }
+        }
+        job = scope.launch {
+            combine(endpointProvider, settings.settings) { endpoint, appSettings ->
+                when (endpoint.path) {
+                    ControlPath.CLOUD -> SessionTarget(endpoint, appSettings.apiToken, false)
+                    ControlPath.OFFLINE -> SessionTarget(endpoint, "", false)
+                    else -> SessionTarget(
+                        endpoint = endpoint,
+                        token = appSettings.telemetryToken.ifBlank { appSettings.apiToken },
+                        oneShotTicket = appSettings.telemetryToken.isNotBlank(),
+                    )
+                }
+            }.distinctUntilChanged().collect { target: SessionTarget ->
+                val previous = activeTarget
+                activeTarget = target
+                reconnectJob?.cancel()
+                reconnectJob = null
+
+                // A telemetry ticket is consumed by the WebSocket upgrade. If
+                // local routing fails over between Wi-Fi and W5500, never reuse
+                // the ticket that authenticated the old socket. Mint a fresh
+                // ticket on the newly selected route before reconnecting.
+                val localRouteChanged =
+                    previous != null &&
+                        isLocal(previous.endpoint) &&
+                        isLocal(target.endpoint) &&
+                        previous.endpoint.apiBaseUrl != target.endpoint.apiBaseUrl
+
+                if (localRouteChanged && target.oneShotTicket) {
+                    refreshLocalTicket(settings.settings.value.deviceId, allowDurableFallback = false)
+                } else {
+                    connectTarget(target)
+                }
+            }
+        }
+
+        authorizationJob = scope.launch {
+            telemetry.connection().collect { state ->
+                val deviceId = settings.settings.value.deviceId
+                when (state) {
+                    TelemetryConnectionState.UNAUTHORIZED -> handleUnauthorized(deviceId)
+                    TelemetryConnectionState.CONNECTED -> {
+                        reconnectJob?.cancel()
+                        reconnectJob = null
+                        ticketRefreshJob?.cancel()
+                        ticketRefreshJob = null
+                        RegisteredDeviceStore.markActiveAuthorization(deviceId, true)
+                    }
+                    TelemetryConnectionState.OFFLINE -> scheduleReconnect()
+                    else -> Unit
+                }
+            }
+        }
+
+        bleTelemetryJob = scope.launch {
+            ble.snapshots().collect { snapshot ->
+                if (ble.isReady()) telemetry.acceptFallbackSnapshot(snapshot)
+            }
+        }
+
+        bleStateJob = scope.launch {
+            ble.state().collect { state ->
+                if (state == BleHomeGuardClient.State.READY) {
+                    val snapshot = ble.snapshots().value
+                    if (snapshot.zones.isNotEmpty()) telemetry.acceptFallbackSnapshot(snapshot)
                 } else {
                     telemetry.clearFallbackSnapshot()
                 }
