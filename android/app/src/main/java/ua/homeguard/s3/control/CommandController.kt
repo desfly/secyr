@@ -160,6 +160,22 @@ class CommandController(
         }.getOrDefault(false)
     }
 
+    /** Account-authorized remote actions do not require a new local PIN login. */
+    suspend fun quickRemoteCommand(deviceId: String, type: CommandType): CommandReply? {
+        if (!canUseQuickRemote(deviceId)) return null
+        return mqtt?.execute(type)
+    }
+
+    suspend fun quickRemoteLock(deviceId: String): CommandReply? {
+        if (!canUseQuickRemote(deviceId)) return null
+        return mqtt?.pulseLock()
+    }
+
+    private fun canUseQuickRemote(deviceId: String): Boolean =
+        deviceId.isNotBlank() && deviceId == settings.settings.value.deviceId &&
+            !ble.isReady() &&
+            (endpoint.value.path == ControlPath.CLOUD || endpoint.value.path == ControlPath.OFFLINE)
+
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
         // For local security controls prefer the already-authenticated BLE link.
         // This keeps Arm Home/Away and Disarm responsive even when LAN/MQTT is

@@ -133,3 +133,9 @@ Stopping monitoring clears the in-memory route; saved credentials are restored
 on the next start. Invalid or incomplete saved configuration disables the route.
 The low-level `configureMqttSigner` API remains available for account integration.
 Deployment, account/grant provisioning and real end-to-end validation remain open.
+
+Quick actions on object cards attempt the account-authorized MQTT route before
+local PIN re-login when no BLE session is ready and the endpoint is CLOUD/OFFLINE.
+A rejection or uncertain result ends the action. Only an unavailable/unconfigured
+route proceeds to the existing saved-login flow. Signed-actor session permission
+on the firmware remains mandatory; this does not enroll or authenticate an actor.

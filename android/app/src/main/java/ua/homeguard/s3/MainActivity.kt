@@ -445,6 +445,12 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             settings.selectDevice(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() })
             delay(250)
+            commandStatus.value = "Виконання · ${device.name}…"
+            val remoteReply = commands.quickRemoteCommand(device.deviceId, type)
+            if (remoteReply != null) {
+                commandStatus.value = if (remoteReply.accepted) "Виконано · ${device.name}" else "Не виконано · ${remoteReply.code}"
+                return@launch
+            }
             if (accessSession.value == null || !activeAccessDeviceId.equals(device.deviceId, true)) {
                 if (!tryPersistentLogin(showFailure = false)) {
                     commandStatus.value = "Потрібна авторизація · ${device.name}"
@@ -479,6 +485,12 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             settings.selectDevice(device.deviceId, device.baseUrl.takeIf { it.isNotBlank() })
             delay(250)
+            commandStatus.value = "Виконання · ${device.name}…"
+            val remoteReply = commands.quickRemoteLock(device.deviceId)
+            if (remoteReply != null) {
+                commandStatus.value = if (remoteReply.accepted) "Замок · 5 с · ${device.name}" else "Замок не виконано · ${remoteReply.code}"
+                return@launch
+            }
             if (accessSession.value == null || !activeAccessDeviceId.equals(device.deviceId, true)) {
                 if (!tryPersistentLogin(showFailure = false)) {
                     commandStatus.value = "Потрібна авторизація · ${device.name}"
