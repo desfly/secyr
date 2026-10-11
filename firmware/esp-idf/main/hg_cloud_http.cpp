@@ -116,6 +116,7 @@ esp_err_t CloudHttp::register_handlers(
         {.uri = "/api/v1/cloud/client-config", .method = HTTP_GET, .handler = &CloudHttp::client_config_get, .user_ctx = this},
         {.uri = "/api/v1/cloud/config", .method = HTTP_POST, .handler = &CloudHttp::config_post, .user_ctx = this},
         {.uri = "/api/v1/cloud/trust", .method = HTTP_POST, .handler = &CloudHttp::trust_post, .user_ctx = this},
+        {.uri = "/api/v1/cloud/trust", .method = HTTP_GET, .handler = &CloudHttp::trust_get, .user_ctx = this},
     };
     for (const auto& route : routes) {
         const auto error = httpd_register_uri_handler(server, &route);
@@ -182,6 +183,31 @@ esp_err_t CloudHttp::config_post(httpd_req_t* request)
 {
     if (request == nullptr || request->user_ctx == nullptr) return ESP_ERR_INVALID_ARG;
     return static_cast<CloudHttp*>(request->user_ctx)->handle_config(request);
+}
+
+esp_err_t CloudHttp::trust_get(httpd_req_t* request)
+{
+    if (request == nullptr || request->user_ctx == nullptr) return ESP_ERR_INVALID_ARG;
+    auto* self = static_cast<CloudHttp*>(request->user_ctx);
+    if (!request_auth::authenticated(request, *self->access_control_)) {
+        return request_auth::send_login_required(request);
+    }
+    CloudCommandTrust trust{};
+    const auto error = self->trust_store_->load(trust);
+    if (error != ESP_OK && error != ESP_ERR_NVS_NOT_FOUND) {
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return send_json(request, "{\"ok\":false,\"reason\":\"command_trust_unreadable\"}");
+    }
+    std::uint64_t counter{};
+    if (!self->cloud_->read_command_counter(counter)) {
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        return send_json(request, "{\"ok\":false,\"reason\":\"replay_state_unavailable\"}");
+    }
+    return send_json(request, std::string{"{\"ok\":true,\"configured\":"} +
+        (error == ESP_OK ? "true" : "false") + ",\"deviceId\":\"" + self->cloud_->device_id() +
+        "\",\"keyEpoch\":" + std::to_string(trust.version) +
+        ",\"counterFloor\":" + std::to_string(counter) +
+        ",\"publicKeyPem\":\"" + json_escape_string(trust.public_key_pem) + "\"}");
 }
 
 esp_err_t CloudHttp::trust_post(httpd_req_t* request)

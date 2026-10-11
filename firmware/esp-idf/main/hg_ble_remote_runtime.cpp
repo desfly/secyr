@@ -138,8 +138,6 @@ void BleRemoteRuntime::tick(std::uint64_t now_ms)
 
     lock_deadline_ms_ = 0;
     if (model_->set_output_active(kLockOutputId, false, now_ms)) {
-        (void)physical_->synchronize(*model_, *readiness_);
-        if (bus_ != nullptr) (void)bus_->dispatch_all();
         ESP_LOGI(kTag, "BLE keyfob lock pulse completed");
     }
 }
@@ -163,8 +161,8 @@ bool BleRemoteRuntime::execute(hg::BleRemoteAction action, std::uint64_t now_ms)
             changed = model_->set_partition_arm(kPartitionId, hg::PartitionArmState::Alarm, now_ms);
             break;
         case hg::BleRemoteAction::LightToggle: {
-            const auto* light = model_->output(kLightOutputId);
-            if (light == nullptr) return false;
+            const auto light = model_->output_snapshot(kLightOutputId);
+            if (!light) return false;
             changed = model_->set_output_active(kLightOutputId, !light->active, now_ms);
             break;
         }
@@ -175,16 +173,7 @@ bool BleRemoteRuntime::execute(hg::BleRemoteAction action, std::uint64_t now_ms)
     }
 
     if (!changed) return false;
-    if (!physical_->synchronize(*model_, *readiness_)) {
-        if (action == hg::BleRemoteAction::LightToggle || action == hg::BleRemoteAction::LockPulse) {
-            const auto output_id = action == hg::BleRemoteAction::LightToggle ? kLightOutputId : kLockOutputId;
-            (void)model_->set_output_active(output_id, false, now_ms);
-            (void)physical_->force_safe();
-            lock_deadline_ms_ = 0;
-        }
-        return false;
-    }
-    if (bus_ != nullptr) (void)bus_->dispatch_all();
+    // LIGHT/LOCK are applied by the MCP23017 GPA0/GPA1 worker.
     return true;
 }
 
@@ -201,7 +190,6 @@ void BleRemoteRuntime::publish_remote_event(
         0,
         1,
     });
-    (void)bus_->dispatch_all();
 }
 
 }  // namespace homeguard::idf

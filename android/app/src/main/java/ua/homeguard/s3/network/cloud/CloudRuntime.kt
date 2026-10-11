@@ -44,7 +44,7 @@ class CloudRuntime(
                     when (telemetry.connection().value) {
                         TelemetryConnectionState.CONNECTED -> {
                             state.value = State.CONNECTED
-                            lastSeenAtMs.value = System.currentTimeMillis()
+                            lastSeenAtMs.value = telemetry.lastReceivedAtMs().value
                         }
                         TelemetryConnectionState.CONNECTING -> state.value = State.CONNECTING
                         else -> state.value = State.OFFLINE

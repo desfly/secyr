@@ -7,6 +7,9 @@
 
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
+#include "homeguard/bounded_write.hpp"
+#include <cstdio>
 #include <cstring>
 
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
@@ -41,6 +44,36 @@ void set_no_cache_headers(httpd_req_t* request, const char* content_type)
     httpd_resp_set_type(request, content_type);
 }
 
+esp_err_t send_fixed_response(httpd_req_t* request, const char* content_type,
+                              const char* payload, std::size_t size)
+{
+    char headers[256];
+    const int length = std::snprintf(headers, sizeof(headers),
+        "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %u\r\n"
+        "Cache-Control: no-store, no-cache, must-revalidate, max-age=0\r\n"
+        "Pragma: no-cache\r\nExpires: 0\r\n\r\n",
+        content_type, static_cast<unsigned>(size));
+    if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(headers)) return ESP_FAIL;
+    const auto started = esp_timer_get_time();
+    const auto deadline = started + 3'000'000;
+    const auto send = [request](const char* data, std::size_t count) {
+        // Public request API preserves the configured HTTP or TLS transport.
+        return httpd_send(request, data, count);
+    };
+    const auto clock = [] { return esp_timer_get_time(); };
+    const bool ok = hg::bounded_write(headers, static_cast<std::size_t>(length), deadline, send, clock) &&
+        hg::bounded_write(payload, size, deadline, send, clock);
+    if (!ok) {
+        ESP_LOGE("hg_web_http", "asset send failed: bytes=%u elapsed=%lld us internal=%u largest=%u",
+            static_cast<unsigned>(size), static_cast<long long>(esp_timer_get_time() - started),
+            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+            static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+        // Returning failure tells HTTPD to close this incomplete response.
+        return ESP_ERR_HTTPD_RESP_SEND;
+    }
+    return ESP_OK;
+}
+
 esp_err_t send_text_with_suffix(httpd_req_t* request,
                                 const char* content_type,
                                 const uint8_t* start,
@@ -54,7 +87,7 @@ esp_err_t send_text_with_suffix(httpd_req_t* request,
     const auto base_size = text_asset_size(start, end);
     const auto total_size = base_size + suffix_size;
     if (suffix == nullptr || suffix_size == 0) {
-        return httpd_resp_send(request, reinterpret_cast<const char*>(start), static_cast<ssize_t>(base_size));
+        return send_fixed_response(request, content_type, reinterpret_cast<const char*>(start), base_size);
     }
 
     auto* payload = static_cast<char*>(heap_caps_malloc(total_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -64,7 +97,7 @@ esp_err_t send_text_with_suffix(httpd_req_t* request,
     }
     std::memcpy(payload, start, base_size);
     std::memcpy(payload + base_size, suffix, suffix_size);
-    const auto error = httpd_resp_send(request, payload, static_cast<ssize_t>(total_size));
+    const auto error = send_fixed_response(request, content_type, payload, total_size);
     heap_caps_free(payload);
     if (error != ESP_OK) {
         ESP_LOGE("hg_web_http", "fixed-length asset send failed: %s", esp_err_to_name(error));
@@ -100,10 +133,8 @@ esp_err_t WebHttp::send_asset(httpd_req_t* request,
 {
     if (request == nullptr || start == nullptr || end == nullptr || end < start) return ESP_ERR_INVALID_ARG;
     set_no_cache_headers(request, content_type);
-    return httpd_resp_send(
-        request,
-        reinterpret_cast<const char*>(start),
-        static_cast<ssize_t>(end - start));
+    return send_fixed_response(request, content_type, reinterpret_cast<const char*>(start),
+                               static_cast<std::size_t>(end - start));
 }
 
 esp_err_t WebHttp::index_get(httpd_req_t* request)

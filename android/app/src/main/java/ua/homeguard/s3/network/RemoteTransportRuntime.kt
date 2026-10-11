@@ -6,11 +6,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import ua.homeguard.s3.network.cloud.CloudRuntime
 import ua.homeguard.s3.network.mqtt.MqttConnectionConfig
 import ua.homeguard.s3.network.mqtt.MqttRuntime
 import ua.homeguard.s3.network.mqtt.MqttRuntimeClient
 import ua.homeguard.s3.model.SystemEventRecord
+import ua.homeguard.s3.network.mqtt.SignedCommandEnvelope
+import ua.homeguard.s3.network.mqtt.MqttSignedCommandController
+import org.json.JSONObject
 
 /**
  * Coordinates remote transports without coupling them.
@@ -28,6 +32,24 @@ class RemoteTransportRuntime(
     private val mqttClient = MqttRuntimeClient(scope)
     private val mqtt = MqttRuntime(scope, mqttClient)
     private var mqttEventsJob: Job? = null
+    private var mqttStateJob: Job? = null
+
+    private data class SignerRoute(val deviceId: String, val controller: MqttSignedCommandController)
+    @Volatile private var signerRoute: SignerRoute? = null
+
+    fun configureMqttSigner(deviceId: String, sign: suspend (String, String, String) -> SignedCommandEnvelope) {
+        require(deviceId.isNotBlank()) { "Signer device id required" }
+        signerRoute = SignerRoute(deviceId, MqttSignedCommandController(deviceId, sign,
+            { envelope -> mqttClient.publishSignedCommand(envelope) }))
+    }
+
+    fun clearMqttSigner() { signerRoute = null }
+
+    suspend fun executeMqttCommand(selectedDeviceId: String, command: String): JSONObject? {
+        val route = signerRoute ?: return null
+        if (route.deviceId != selectedDeviceId || route.deviceId != mqttConfig.value.deviceId || mqtt.state().value != MqttRuntime.State.CONNECTED) return null
+        return route.controller.execute(command)
+    }
 
     private val mqttConfig = MutableStateFlow(MqttConnectionConfig())
 
@@ -58,17 +80,29 @@ class RemoteTransportRuntime(
                 }
             }
         }
+        if (mqttStateJob == null) {
+            mqttStateJob = scope.launch {
+                combine(mqttClient.deviceState(), mqtt.state()) { device, health ->
+                    if (health == MqttRuntime.State.CONNECTED) device?.mode else null
+                }.collect { telemetry.acceptMqttMode(it) }
+            }
+        }
         applyMqttConfig(mqttConfig.value)
     }
 
     fun stop() {
         cloud.stop()
+        clearMqttSigner()
         mqtt.stop()
         mqttEventsJob?.cancel()
         mqttEventsJob = null
+        mqttStateJob?.cancel()
+        mqttStateJob = null
+        telemetry.acceptMqttMode(null)
     }
 
     fun configureMqtt(config: MqttConnectionConfig, credential: String = "") {
+        if (signerRoute?.deviceId != config.deviceId) clearMqttSigner()
         mqttConfig.value = config
         applyMqttConfig(config, credential)
     }
@@ -96,6 +130,7 @@ class RemoteTransportRuntime(
                 available = mqttState == MqttRuntime.State.CONNECTED,
                 authenticated = mqttState == MqttRuntime.State.CONNECTED,
                 lastSeenAtMs = mqttSeen,
+                commandSupported = signerRoute?.deviceId == mqttConfig.value.deviceId,
             ),
         )
     }
@@ -108,6 +143,7 @@ class RemoteTransportRuntime(
 
     private fun applyMqttConfig(config: MqttConnectionConfig, credential: String = "") {
         mqtt.stop()
+        telemetry.acceptMqttMode(null)
         if (!config.ready) return
         mqtt.start(
             MqttRuntimeClient.Config(

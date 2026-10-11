@@ -1,8 +1,10 @@
 #pragma once
 #include "homeguard/bearer_token.hpp"
 #include "homeguard/telemetry.hpp"
+#include "homeguard/system_model.hpp"
 #include "esp_http_server.h"
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -14,6 +16,7 @@ public:
     bool begin(void* server_handle, std::string_view local_api_token);
     void stop();
     void publish(const hg::TelemetryFrame& frame);
+    void publish_event(const hg::SystemEvent& event);
     [[nodiscard]] std::string issue_session_token();
     [[nodiscard]] bool running() const { return server_ != nullptr; }
 private:
@@ -26,6 +29,8 @@ private:
     void remove_client(int fd);
     void run_broadcast(BroadcastWork& work);
     void* server_{};
+    std::atomic<unsigned> pending_broadcasts_{0};
+    std::atomic<unsigned> pending_events_{0};
     hg::BearerTokenVerifier token_{};
     std::array<hg::BearerTokenVerifier, 4> session_tokens_{};
     std::array<std::int64_t, 4> session_token_issued_us_{};

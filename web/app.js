@@ -4,7 +4,8 @@ const nativeFetch = window.fetch.bind(window);
 // Preserve the real browser fetch for bootstrap/login flows. These requests must
 // never sit behind the operational API queue or inherit its AbortController timeout.
 window.__homeguardNativeFetch = nativeFetch;
-let apiQueueTail = Promise.resolve();
+const apiPending = [];
+let apiRequestRunning = false;
 
 function requestUrl(input) {
   if (typeof input === "string") return input;
@@ -32,20 +33,51 @@ function apiTimeoutMs(input) {
 function serializedApiFetch(input, init = {}) {
   if (!isApiRequest(input)) return nativeFetch(input, init);
 
+  const enqueuedAt = Date.now();
   const execute = async () => {
-    if (init.signal) return nativeFetch(input, init);
+    const startedAt = Date.now();
     const controller = new AbortController();
+    const abortFromCaller = () => controller.abort(init.signal.reason);
+    if (init.signal?.aborted) abortFromCaller();
+    else init.signal?.addEventListener("abort", abortFromCaller, { once: true });
     const timer = setTimeout(() => controller.abort(), apiTimeoutMs(input));
     try {
-      return await nativeFetch(input, { ...init, signal: controller.signal });
+      const response = await nativeFetch(input, { ...init, signal: controller.signal });
+      // fetch resolves at headers. Keep the queue and timeout until the body
+      // arrives; preserve the original Response for callers and its metadata.
+      await response.clone().arrayBuffer();
+      return response;
     } finally {
       clearTimeout(timer);
+      init.signal?.removeEventListener("abort", abortFromCaller);
+      const queueMs = startedAt - enqueuedAt;
+      const requestMs = Date.now() - startedAt;
+      if (queueMs > 500 || requestMs > 500) {
+        console.warn("HomeGuard API timing", requestUrl(input).split("?")[0], { queueMs, requestMs });
+      }
     }
   };
 
-  const result = apiQueueTail.then(execute, execute);
-  apiQueueTail = result.then(() => undefined, () => undefined);
-  return result;
+  const method = String(init.method || input?.method || "GET").toUpperCase();
+  const priority = method === "GET" || method === "HEAD" ? 0 : 1;
+  return new Promise((resolve, reject) => {
+    apiPending.push({ execute, resolve, reject, priority });
+    drainApiQueue();
+  });
+}
+
+async function drainApiQueue() {
+  if (apiRequestRunning) return;
+  apiRequestRunning = true;
+  try {
+    while (apiPending.length) {
+      // Preserve FIFO among mutations, ahead of queued background reads.
+      const priorityIndex = apiPending.findIndex(request => request.priority > 0);
+      const request = apiPending.splice(priorityIndex < 0 ? 0 : priorityIndex, 1)[0];
+      try { request.resolve(await request.execute()); }
+      catch (error) { request.reject(error); }
+    }
+  } finally { apiRequestRunning = false; }
 }
 
 window.fetch = serializedApiFetch;
@@ -195,8 +227,12 @@ function stateClass(value) {
 function armLabel(value) { return ({ disarmed: "ЗНЯТО", stay: "НІЧНИЙ", away: "ПІД ОХОРОНОЮ", alarm: "ТРИВОГА" })[value] || "—"; }
 function wifiStateLabel(value) { return ({ connected: "Підключено", connecting: "Підключення…", idle: "Не налаштовано", error: "Помилка" })[value] || "Перевірка…"; }
 
+let liveZones = [];
+let liveStateVersion = 0;
+
 function renderZones(data) {
   const zones = Array.isArray(data?.zones) ? data.zones : [];
+  liveZones = zones.map(zone => ({ ...zone }));
   document.querySelector("#zoneCount").textContent = zones.length || "—";
   document.querySelector("#zones").innerHTML = zones.length ? zones.map(zone => `
     <div class="zone"><span>${escapeHtml(zone.name || `Зона ${zone.id}`)}${zone.alwaysOn ? " · 24/7" : ""}</span><strong class="${stateClass(zone.state)}">${escapeHtml(zone.state)}</strong></div>`).join("") : "<div class=\"zone\"><span>Дані ще не отримані</span><strong>—</strong></div>";
@@ -410,7 +446,11 @@ async function refresh() {
     ];
     for (const [path, render] of requests) {
       if (!authenticatedUi()) break;
-      try { render(await api(path)); } catch (_) {}
+      try {
+        const version = liveStateVersion;
+        const data = await api(path);
+        if ((render !== renderZones && render !== renderPartitions) || version === liveStateVersion) render(data);
+      } catch (_) {}
     }
   } finally {
     refreshBusy = false;
@@ -578,7 +618,6 @@ async function sendSecurityCommand(button) {
     // up to 1.8 s while polling for confirmation; refresh immediately and let
     // the normal scheduler reconcile the authoritative state in background.
     showToast("Команду прийнято");
-    await refresh();
   } catch (error) {
     showToast(`Помилка команди: ${error.message}`);
   } finally {
@@ -824,6 +863,60 @@ function tickClock() {
   if (date) date.textContent = now.toLocaleDateString("uk-UA");
 }
 
+const liveConnection = { socket: null, connecting: false, retryAt: 0 };
+
+function acceptLiveState(data) {
+  if (!authenticatedUi()) return;
+  if (typeof data.event === "string") {
+    const event = data.event.toLowerCase();
+    const value = Number(data.value);
+    const source = Number(data.sourceId);
+    ++liveStateVersion;
+    if (event === "partition.disarmed") renderPartitions({ partitions: [{ armState: "disarmed" }] });
+    else if (event === "partition.armed") renderPartitions({ partitions: [{ armState: value === 1 ? "stay" : value === 3 ? "alarm" : "away" }] });
+    else if (event === "alarm" && value === 3) renderPartitions({ partitions: [{ armState: "alarm" }] });
+    const zoneStates = { "zone.open": "open", "zone.closed": "normal", "alarm": "alarm", "tamper": "tamper" };
+    if (zoneStates[event] && !(event === "alarm" && value === 3)) {
+      renderZones({ zones: liveZones.map(zone => Number(zone.id) === source ? { ...zone, state: zoneStates[event] } : zone) });
+      if (zoneAlarmRuntime.armed && event !== "zone.closed") setZoneAlarmActive(true);
+    }
+  } else if (Number.isInteger(data.mode)) {
+    ++liveStateVersion;
+    const mode = ["disarmed", "stay", "away", "alarm"][data.mode];
+    if (mode) renderPartitions({ partitions: [{ armState: mode }] });
+  }
+}
+
+async function ensureLiveConnection() {
+  if (!authenticatedUi()) {
+    const socket = liveConnection.socket;
+    liveConnection.socket = null;
+    if (socket) socket.close();
+    return;
+  }
+  if (liveConnection.socket || liveConnection.connecting || Date.now() < liveConnection.retryAt || typeof WebSocket === "undefined") return;
+  liveConnection.connecting = true;
+  try {
+    const ticket = await api("/api/v1/telemetry/session", { method: "POST", body: JSON.stringify({ actor: window.HomeGuardAuth.actor() }) });
+    if (!authenticatedUi()) return;
+    if (!/^[0-9a-f]{64}$/.test(ticket.telemetryToken || "")) throw new Error("invalid telemetry ticket");
+    const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/telemetry?ticket=${encodeURIComponent(ticket.telemetryToken)}`);
+    liveConnection.socket = socket;
+    socket.onmessage = message => {
+      if (liveConnection.socket !== socket) return;
+      try { acceptLiveState(JSON.parse(message.data)); } catch (_) {}
+    };
+    socket.onclose = () => {
+      if (liveConnection.socket === socket) {
+        liveConnection.socket = null;
+        liveConnection.retryAt = Date.now() + 2000;
+      }
+    };
+    socket.onerror = () => socket.close();
+  } catch (_) { liveConnection.retryAt = Date.now() + 2000; }
+  finally { liveConnection.connecting = false; }
+}
+
 const scheduler = {
   timer: 0,
   busy: false,
@@ -838,6 +931,7 @@ const LAN_POLL_MS = 15000;
 
 async function schedulerStep() {
   tickClock();
+  void ensureLiveConnection();
   const now = Date.now();
   const authenticated = authenticatedUi();
 

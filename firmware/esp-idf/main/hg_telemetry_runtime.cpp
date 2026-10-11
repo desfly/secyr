@@ -46,8 +46,8 @@ hg::HealthState module_health(homeguard::HardwareModuleState state)
 
 hg::SystemMode system_mode(const hg::SystemModel& model)
 {
-    const auto* partition = model.partition_at(0);
-    if (partition == nullptr) return hg::SystemMode::Disarmed;
+    const auto partition = model.partition_snapshot(1);
+    if (!partition) return hg::SystemMode::Disarmed;
     switch (partition->arm_state) {
         case hg::PartitionArmState::Stay: return hg::SystemMode::ArmedHome;
         case hg::PartitionArmState::Away: return hg::SystemMode::ArmedAway;
@@ -123,6 +123,8 @@ esp_err_t TelemetryRuntime::start(
     ble_transport_ = ble_transport;
     auto result = xTaskCreate(&TelemetryRuntime::zone_task_entry, "hg_zones", 4096, this, 7, nullptr);
     if (result != pdPASS) return ESP_ERR_NO_MEM;
+    result = xTaskCreate(&TelemetryRuntime::output_mirror_task_entry, "hg_io_mirror", 3072, this, 4, nullptr);
+    if (result != pdPASS) return ESP_ERR_NO_MEM;
     result = xTaskCreate(&TelemetryRuntime::task_entry, "hg_telemetry", 7168, this, 6, nullptr);
     return result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }
@@ -137,6 +139,49 @@ void TelemetryRuntime::zone_task_entry(void* context)
     static_cast<TelemetryRuntime*>(context)->run_zones();
 }
 
+void TelemetryRuntime::output_mirror_task_entry(void* context)
+{
+    static_cast<TelemetryRuntime*>(context)->run_output_mirror();
+}
+
+void TelemetryRuntime::run_output_mirror()
+{
+    bool applied = false;
+    std::uint8_t previous = 0;
+    while (true) {
+        auto& expander = hardware_->io_expander();
+        if (!expander.ready()) {
+            mcp_outputs_healthy_ = false;
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+        std::uint8_t desired = 0;
+        {
+            const auto state_lock = system_model_->lock();
+            const auto light = system_model_->output_snapshot(4);
+            const auto lock = system_model_->output_snapshot(5);
+            if (light && light->active) desired |= 0x01;
+            if (lock && lock->active) desired |= 0x02;
+        }
+        // I2C runs outside model locks and outside the fast security-zone task.
+        if (!applied || desired != previous) {
+            const auto error = expander.write_mirrored_outputs(desired);
+            if (error != ESP_OK) {
+                applied = false;
+                mcp_outputs_healthy_ = false;
+                ESP_LOGW(kTag, "MCP output mirror failed: %s", esp_err_to_name(error));
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+            previous = desired;
+            applied = true;
+            mcp_outputs_applied_ = desired;
+            mcp_outputs_healthy_ = true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
 void TelemetryRuntime::run_zones()
 {
     std::array<hg::ZoneState, 8> previous{};
@@ -144,9 +189,11 @@ void TelemetryRuntime::run_zones()
 
     TickType_t next_wake = xTaskGetTickCount();
     while (true) {
+        const auto scan_started_us = esp_timer_get_time();
         std::array<hg::ZoneState, 8> zones{};
         zones.fill(hg::ZoneState::Disabled);
         sample_zone_adc(hardware_->zone_adc(), 0, zones);
+        const auto scan_finished_us = esp_timer_get_time();
         portENTER_CRITICAL(&zone_snapshot_lock_);
         zone_snapshot_ = zones;
         portEXIT_CRITICAL(&zone_snapshot_lock_);
@@ -156,12 +203,19 @@ void TelemetryRuntime::run_zones()
             zone_triggers_light(zones[0]) || zone_triggers_light(zones[1]);
         const auto now_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
 
+        // Drive the local light before event delivery or logging can run.
+        if (changed || light_trigger || light_cycle_active_) {
+            update_zone_light(zones, now_ms);
+        }
         if (changed) {
             update_zone_model(zones, event_timestamp_ms(now_ms));
             previous = zones;
         }
-        if (changed || light_trigger || light_cycle_active_) {
-            update_zone_light(zones, now_ms);
+        const auto cycle_finished_us = esp_timer_get_time();
+        if (cycle_finished_us - scan_started_us > 100000) {
+            ESP_LOGW(kTag, "Slow zone cycle: ADC=%lld us model/light=%lld us",
+                static_cast<long long>(scan_finished_us - scan_started_us),
+                static_cast<long long>(cycle_finished_us - scan_finished_us));
         }
 
         vTaskDelayUntil(&next_wake, kZonePollPeriod);
@@ -171,19 +225,16 @@ void TelemetryRuntime::run_zones()
 bool TelemetryRuntime::set_light_output(bool active, std::uint64_t now_ms)
 {
     if (system_model_ == nullptr) return false;
-    const auto* output = system_model_->output(kLightOutputId);
-    if (output == nullptr) return false;
+    const auto output = system_model_->output_snapshot(kLightOutputId);
+    if (!output) return false;
 
     if (output->active != active && !system_model_->set_output_active(kLightOutputId, active, now_ms)) {
         ESP_LOGE(kTag, "Zone light: failed to update output model");
         return false;
     }
 
-    const auto gpio = static_cast<gpio_num_t>(hg::direct_light_relay_gpio);
-    if (gpio_set_level(gpio, active ? 1 : 0) != ESP_OK) {
-        ESP_LOGE(kTag, "Zone light: GPIO%d write failed", hg::direct_light_relay_gpio);
-        return false;
-    }
+    // Physical LIGHT is MCP23017 GPA0. The output-mirror task applies the
+    // model change within its 20 ms cycle; GPIO1 remains completely free.
     return true;
 }
 
@@ -193,6 +244,7 @@ void TelemetryRuntime::update_zone_model(
 {
     if (system_model_ == nullptr || system_bus_ == nullptr) return;
 
+    const auto state_lock = system_model_->lock();
     const auto* partition = system_model_->partition(1);
     const bool armed = partition != nullptr &&
         (partition->arm_state == hg::PartitionArmState::Stay ||
@@ -239,11 +291,9 @@ void TelemetryRuntime::update_zone_model(
         (void)system_model_->set_partition_arm(1, hg::PartitionArmState::Alarm, now_ms);
     }
 
-    // Zone transitions originate in the telemetry task. Dispatch them here so
-    // the HTTP event log/WebSocket subscribers and Android-visible state are
-    // updated immediately instead of waiting for a later command request.
-    ESP_LOGI(kTag, "Security state dispatch at %llu ms; alarm_triggered=%d", static_cast<unsigned long long>(now_ms), alarm_triggered ? 1 : 0);
-    (void)system_bus_->dispatch_all();
+    // The telemetry task drains the event bus every loop. The zone task must
+    // never invoke HTTP/MQTT/subscriber callbacks before its next ADC sample.
+
 }
 
 void TelemetryRuntime::update_zone_light(
@@ -255,8 +305,8 @@ void TelemetryRuntime::update_zone_light(
     if (!light_cycle_active_) {
         if (!triggered) return;
 
-        const auto* light = system_model_->output(kLightOutputId);
-        if (light == nullptr) {
+        const auto light = system_model_->output_snapshot(kLightOutputId);
+        if (!light) {
             ESP_LOGE(kTag, "Zone light: output 4 is missing");
             return;
         }
@@ -273,9 +323,9 @@ void TelemetryRuntime::update_zone_light(
     // Never shorten or restart the running minute because of transitions that
     // happen inside it. If something turns the relay off during the automatic
     // cycle, assert the required ON state again on the next telemetry tick.
-    const auto* light = system_model_->output(kLightOutputId);
+    const auto light = system_model_->output_snapshot(kLightOutputId);
     if (now_ms < light_cycle_deadline_ms_) {
-        if (light != nullptr && !light->active) (void)set_light_output(true, now_ms);
+        if (light.has_value() && !light->active) (void)set_light_output(true, now_ms);
         return;
     }
 
@@ -283,7 +333,7 @@ void TelemetryRuntime::update_zone_light(
         // Still active after one minute: continue with the next minute without
         // dropping the lamp between cycles.
         light_cycle_deadline_ms_ = now_ms + kLightCycleMs;
-        if (light != nullptr && !light->active) (void)set_light_output(true, now_ms);
+        if (light.has_value() && !light->active) (void)set_light_output(true, now_ms);
         ESP_LOGI(kTag, "Zone light: trigger still active, next 60 s cycle started");
         return;
     }
@@ -300,6 +350,8 @@ void TelemetryRuntime::run()
 {
     std::uint32_t cycles = 0;
     while (true) {
+        // Retry deferred/bounded dispatch even when no physical zone changes.
+        if (system_bus_ != nullptr) (void)system_bus_->dispatch_all();
         const auto now_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
         const auto& hardware_status = hardware_->status();
 
@@ -340,11 +392,17 @@ void TelemetryRuntime::run()
         std::array<float, 2> pressure_values{};
         std::array<bool, 2> pressure_valid{};
         auto& analog_adc = hardware_->telemetry_adc();
+        // ADS 0x49 also supplies zone 5–8 diagnostics. Scan all channels here,
+        // never in HTTPD; these readings do not enter security/output decisions.
+        std::array<float, 4> analog_values{};
+        std::array<bool, 4> analog_valid{};
+        if (analog_adc.ready()) {
+            (void)analog_adc.read_all_single_ended_mv(&analog_values, &analog_valid);
+        }
         for (std::size_t index = 0; index < pressures.size(); ++index) {
             if (!analog_adc.ready()) { pressures[index] = hg::PressureState::Disabled; continue; }
-            float millivolts = 0.0F;
-            if (analog_adc.read_single_ended_mv(static_cast<std::uint8_t>(index), &millivolts) == ESP_OK) {
-                pressure_values[index] = millivolts;
+            if (analog_valid[index]) {
+                pressure_values[index] = analog_values[index];
                 pressure_valid[index] = true;
                 pressures[index] = hg::PressureState::Normal;
             } else pressures[index] = hg::PressureState::SensorFault;

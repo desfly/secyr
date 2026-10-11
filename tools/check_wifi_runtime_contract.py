@@ -82,11 +82,11 @@ if "kCandidateNvsKey" not in network or "clear_candidate_credentials()" not in n
 # Embedded text assets must use one fixed-length HTTP response. On real ESP32-S3
 # hardware the former repeated chunked sends stalled after the TCP send window
 # filled, truncating index.html/app.js after a cold boot.
-for snippet in ("apiQueueTail", "AbortController", "apiTimeoutMs"):
+for snippet in ("apiPending", "AbortController", "apiTimeoutMs"):
     if snippet not in web_app:
         errors.append(f"Web API socket bound missing: {snippet}")
-if "httpd_resp_send(request" not in web_http:
-    errors.append("firmware text assets must use fixed-length httpd_resp_send")
+if "Content-Length:" not in web_http or "httpd_send(request, data, count)" not in web_http:
+    errors.append("firmware assets must retain fixed-length framing through the configured transport")
 if "httpd_resp_send_chunk" in web_http:
     errors.append("firmware text assets must not use chunked streaming")
 if "std::string body(reinterpret_cast<const char*>(start)" in web_http:

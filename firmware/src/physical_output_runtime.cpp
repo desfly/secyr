@@ -4,8 +4,8 @@ namespace hg {
 namespace {
 
 bool output_state(const SystemModel& model, std::uint16_t id) {
-    const auto* output = model.output(id);
-    return output != nullptr && output->active;
+    const auto output = model.output_snapshot(id);
+    return output.has_value() && output->active;
 }
 
 }  // namespace
@@ -18,18 +18,6 @@ bool PhysicalOutputRuntime::initialize(
     backend_ = &backend;
     hardware_ = &hardware;
     state_ = {};
-
-    // LIGHT and LOCK are the current physical bench relays and are wired
-    // directly to ESP32-S3 GPIO1/GPIO2. Configure them first and keep them
-    // independent from the future MCP23017 commissioning gate.
-    const int direct_gpios[] = {direct_light_relay_gpio, direct_lock_relay_gpio};
-    for (const int gpio : direct_gpios) {
-        if (!backend_->configure_output(gpio, false)) {
-            ++state_.failures;
-            state_.status = PhysicalOutputStatus::BackendError;
-            return false;
-        }
-    }
 
     // Siren/valves remain protected by the verified commissioning record.
     if (!hardware_verification_allows_outputs(hardware)) {
@@ -89,8 +77,6 @@ bool PhysicalOutputRuntime::force_safe() {
     ok = write_safe(hardware_->pins.siren) && ok;
     ok = write_safe(hardware_->pins.valve1) && ok;
     ok = write_safe(hardware_->pins.valve2) && ok;
-    ok = write_safe(direct_light_relay_gpio) && ok;
-    ok = write_safe(direct_lock_relay_gpio) && ok;
     state_.outputs_enabled = false;
     if (!ok) state_.status = PhysicalOutputStatus::BackendError;
     return ok;
@@ -99,18 +85,10 @@ bool PhysicalOutputRuntime::force_safe() {
 bool PhysicalOutputRuntime::synchronize(const SystemModel& model, const BootReadinessReport& readiness) {
     if (backend_ == nullptr || hardware_ == nullptr) return false;
 
-    // Direct relays must follow the model regardless of commissioning state.
-    // This is the current tested wiring: output 4 -> GPIO1, output 5 -> GPIO2.
+    // Outputs 4 (light) and 5 (lock) are driven exclusively by MCP23017
+    // GPA0/GPA1 in TelemetryRuntime. GPIO1/GPIO2 remain unconfigured and free.
     bool ok = true;
-    ok = write_logical(direct_light_relay_gpio, output_state(model, 4)) && ok;
-    ok = write_logical(direct_lock_relay_gpio, output_state(model, 5)) && ok;
-    if (!ok) {
-        force_safe();
-        return false;
-    }
 
-    // The remaining physical outputs stay fail-closed until commissioning is
-    // valid. Do not turn the already-installed GPIO1/GPIO2 relays off here.
     if (!readiness.outputs_allowed() || !hardware_verification_allows_outputs(*hardware_)) {
         ok = write_safe(hardware_->pins.siren) && ok;
         ok = write_safe(hardware_->pins.valve1) && ok;

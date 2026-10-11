@@ -1,81 +1,61 @@
-# Cloud backend contract
+# Direct MQTT command contract
 
-This build includes the ESP32 outbound TLS/MQTT client and Android cloud endpoint routing. It does not include a hosted cloud deployment.
+No external signer service, account server, VPS, Docker deployment or HTTPS
+command endpoint is part of this project. Android communicates with the existing
+MQTT broker; local Wi-Fi and BLE command paths remain available.
 
-## Device session
+## Current firmware contract
 
-- Transport: MQTT over TLS, normally TCP 8883.
-- Client ID: stable `device_id`.
-- Username: stable `device_id`.
-- Password: provisioned random device access token.
-- Device subscribes only to `homeguard/<device_id>/commands`.
-- Broker ACL must prevent access to every other device namespace.
-- Broker authentication and ACL are transport controls; they do not replace command-envelope authentication by the device.
+The controller currently accepts a version 1 ECDSA signed envelope on its
+`homeguard/<deviceId>/commands` topic and responds on `responses`. Required fields:
+`"version"`, `"deviceId"`, `"requestId"`, `"actor"`, `"command"`, `"keyEpoch"`, `"counter"`,
+`"issuedAtMs"`, `"expiresAtMs"`, `"challenge"`, `"signature"`.
+The signature transcript contains these fields except `"signature"` in that exact
+order as `key=value` lines, without a trailing newline. The signature is DER
+ECDSA/SHA-256 encoded as hex. Key epoch must match the enrolled trust generation.
+Firmware verifies the enabled user's role, expiry, device binding and durable
+replay admission before performing an action. The user PIN is never a command field.
 
-## Canonical command envelope
+## Android
 
-There is one command schema for firmware, backend and CI. The backend must accept commands only from an authenticated account bound to the target device and must sign the canonical command envelope with the enrolled Cloud Command Trust key.
+`LocalCommandSigner` signs the same transcript on the phone, using an injected
+local private key and durable counter allocator. It rejects another device or
+invalid challenge before accessing the key or allocating a counter. No network
+request is involved in signing. `MqttSignedCommandController` serializes actions,
+obtains/executes the disarm challenge and stops on rejection or unknown outcome.
+`RemoteTransportRuntime.configureMqttSigner` now accepts a local signing callback;
+it has no URL, account token or HTTP client. Device scope and MQTT health are checked
+before calling it. Object-card commands can use this route before local re-login.
 
-```json
-{
-  "version": 1,
-  "deviceId": "HG-S3-7A31BC",
-  "requestId": "01K5EXAMPLE",
-  "actor": "account-or-user-id",
-  "command": "security.arm_away",
-  "keyEpoch": 1,
-  "counter": 42,
-  "issuedAtMs": 1785740000000,
-  "expiresAtMs": 1785740120000,
-  "challenge": "",
-  "signature": "<signature over canonical fields>"
-}
-```
+The server implementation, deployment assets, server configuration UI, persisted
+server settings API, HTTP signer client and associated CI job have been removed.
+No migration erases any device, phone, broker, zone or replay configuration.
 
-The signature covers, in fixed canonical order, `version`, `deviceId`, `requestId`, `actor`, `command`, `keyEpoch`, `counter`, `issuedAtMs`, `expiresAtMs` and `challenge`. The signature field itself is never part of the signed bytes. `challenge` is always a JSON string: use `""` for commands that do not require a challenge; `security.disarm` uses the currently issued 32-character hexadecimal one-time challenge. `null` is not valid.
+## Phone enrollment and current limits
 
-Before any command side effect, firmware must fail closed unless all applicable checks succeed:
+`PhoneMqttSignerStore` stores non-exportable P-256 private keys in AndroidKeyStore
+per device/actor. Activation requires the controller-confirmed matching public key,
+key epoch and replay floor; it never lowers the phone's persisted per-device counter.
+Every allocation uses synchronous commit before signing. Missing/mismatched keys
+and stale signer profiles fail closed. `DeviceSession` restores activated phone
+signers after startup/device selection; activation refreshes only the route, not MQTT.
 
-1. schema/version and field bounds are valid;
-2. `deviceId` exactly matches the local stable device identity;
-3. `keyEpoch` exactly matches the active monotonic Cloud Command Trust version, so rotation invalidates envelopes signed for an older key generation;
-4. the signature verifies against the enrolled Cloud Command Trust public key;
-5. the command is fresh: `issuedAtMs` is acceptable and `expiresAtMs` has not passed;
-6. `requestId` has not already been accepted;
-7. `counter` is greater than the persisted monotonic counter, which is persisted before the side effect;
-8. the actor is authorized for the requested command;
-9. dangerous actions satisfy their required challenge/presence policy.
+After an authenticated local HTTP login, the existing MQTT enrollment path reads
+`GET /api/v1/cloud/trust`. The response supplies the device id, current public key,
+key epoch and actual durable counter floor. It performs no NVS writes and reports
+read faults instead of substituting a zero counter. If trust is absent, an Admin
+may initialize version 1 using the existing admin-only POST endpoint. Android then
+reads it back and activates only a matching phone key. A pre-existing different
+key is never overwritten automatically; no counter or configuration is erased.
 
-The firmware enforces signed-command verification, trusted-time freshness, local actor authorization, persistent monotonic counter/request-ID replay barriers, and one-time challenge enforcement for remote disarm; these contracts are guarded by CI.
+This initial integration supports the phone whose key is enrolled as the current
+controller trust. Another phone/actor key does not silently replace it. Controllers
+with a different existing trust key remain unavailable for phone MQTT commands
+until a deliberate enrollment/rotation is implemented. Older firmware without the
+GET endpoint keeps telemetry working and reports control as not connected. Physical
+phone/controller verification remains pending; no hardware has been flashed.
 
-## Trust separation
-
-Three identities are intentionally separate:
-
-- **Factory identity** proves which physical controller this is. Its private key is manufacturing material and is not a Cloud command signing key.
-- **MQTT credentials** authorize a device session at the broker and are scoped by broker ACL to that device namespace.
-- **Cloud Command Trust identity** authorizes command envelopes. Firmware stores only the enrolled public key/certificate; the Cloud signing private key never resides on the controller.
-
-The Cloud Command Trust key may be installed or rotated only through an authenticated enrollment/administrative flow with explicit authorization. Ordinary MQTT payloads and ordinary broker configuration changes must not be able to replace it.
-
-## Android HTTPS route
-
-After account sign-in, Android addresses the selected device through:
-
-```text
-https://<cloud-api>/v1/devices/<device_id>/api/...
-wss://<cloud-api>/v1/devices/<device_id>/ws
-```
-
-The backend maps that route to the authenticated device session and never reveals the controller's private LAN address.
-
-## Required backend controls
-
-- per-account device binding;
-- short-lived user access tokens;
-- broker ACL isolation;
-- Cloud Command Trust key lifecycle and rotation audit;
-- command expiry and rate limiting;
-- audit log for dangerous commands;
-- push notification delivery;
-- revocation of lost phones and device tokens.
+Factory identity, MQTT credentials and Cloud Command Trust identity remain
+separate: broker access is not permission to impersonate a controller user.
+Firmware enforces signed-command verification and replay admission; these
+requirements are guarded by CI. Removing an HTTP signer never bypasses them.

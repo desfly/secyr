@@ -12,6 +12,7 @@ import ua.homeguard.s3.model.CommandType
 import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceCommand
 import ua.homeguard.s3.model.DeviceEndpoint
+import ua.homeguard.s3.network.HttpDeviceApiException
 import ua.homeguard.s3.network.HttpDeviceApi
 import ua.homeguard.s3.network.LocalTelemetryTicketBroker
 import ua.homeguard.s3.network.ble.BleHomeGuardClient
@@ -22,6 +23,7 @@ import java.util.concurrent.atomic.AtomicLong
 class CommandController(
     private val endpoint: StateFlow<DeviceEndpoint>,
     private val settings: SettingsStore,
+    private val mqtt: MqttCommandRoute? = null,
 ) {
     private val requestIds = AtomicLong(System.currentTimeMillis())
     private val ble = BleRuntimeRegistry.get(settings.appContext)
@@ -31,6 +33,8 @@ class CommandController(
     init {
         LocalTelemetryTicketBroker.install { refreshTelemetryToken() }
     }
+
+    fun hasLocalSession(): Boolean = localHttpSessionToken.isNotBlank() && localActor.isNotBlank()
 
     fun bleState(): StateFlow<BleHomeGuardClient.State> = ble.state()
 
@@ -136,6 +140,36 @@ class CommandController(
         return createApi(target).cloudClientConfig()
     }
 
+    /** Initializes an empty trust only; a pre-existing key is never rotated automatically. */
+    suspend fun enrollPhoneSigner(store: ua.homeguard.s3.storage.PhoneMqttSignerStore, session: AccessSession) {
+        val target = localTarget()
+        require(hasLocalSession() && session.actor == localActor) { "Authenticated local actor required" }
+        val deviceId = settings.settings.value.deviceId
+        val api = createApi(target)
+        var trust = api.commandTrust()
+        require(trust.opt("ok") == true && trust.optString("deviceId") == deviceId) { "Controller trust identity mismatch" }
+        require(settings.settings.value.deviceId == deviceId && localActor == session.actor && hasLocalSession()) {
+            "Selected controller changed during enrollment"
+        }
+        val publicKey = store.preparePublicKey(deviceId, session.actor)
+        if (trust.opt("configured") == false) {
+            require(session.role == AccessRole.ADMIN) { "Admin must initialize command trust" }
+            require(api.initializeCommandTrust(publicKey).opt("ok") == true) { "Command trust initialization rejected" }
+            trust = api.commandTrust()
+        }
+        require(trust.opt("ok") == true && trust.opt("configured") == true &&
+            trust.optString("deviceId") == deviceId) { "Controller enrollment not confirmed" }
+        fun integer(name: String): Long {
+            val value = trust.opt(name)
+            require(value is Number) { "Invalid controller $name" }
+            return requireNotNull(value.toString().toLongOrNull()) { "Invalid controller $name" }
+        }
+        require(settings.settings.value.deviceId == deviceId && localActor == session.actor && hasLocalSession()) {
+            "Selected controller changed during enrollment"
+        }
+        store.activate(deviceId, session.actor, integer("keyEpoch"), integer("counterFloor"), trust.getString("publicKeyPem"))
+    }
+
     fun logout() {
         clearLocalSession()
         ble.disconnect()
@@ -156,6 +190,22 @@ class CommandController(
         }.getOrDefault(false)
     }
 
+    /** Account-authorized remote actions do not require a new local PIN login. */
+    suspend fun quickRemoteCommand(deviceId: String, type: CommandType): CommandReply? {
+        if (!canUseQuickRemote(deviceId)) return null
+        return mqtt?.execute(type)
+    }
+
+    suspend fun quickRemoteLock(deviceId: String): CommandReply? {
+        if (!canUseQuickRemote(deviceId)) return null
+        return mqtt?.pulseLock()
+    }
+
+    private fun canUseQuickRemote(deviceId: String): Boolean =
+        deviceId.isNotBlank() && deviceId == settings.settings.value.deviceId &&
+            !ble.isReady() &&
+            (endpoint.value.path == ControlPath.CLOUD || endpoint.value.path == ControlPath.OFFLINE)
+
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
         // For local security controls prefer the already-authenticated BLE link.
         // This keeps Arm Home/Away and Disarm responsive even when LAN/MQTT is
@@ -165,12 +215,20 @@ class CommandController(
             if (bleReply != null) return mapBleReply(bleReply)
         }
 
+        if (endpoint.value.path == ControlPath.CLOUD || endpoint.value.path == ControlPath.OFFLINE) {
+            val mqttReply = mqtt?.execute(type)
+            if (mqttReply != null) return mqttReply
+        }
+
         // HTTP is transport-agnostic here: DeviceEndpoint may resolve to local
         // Wi-Fi/Ethernet or CLOUD.  BLE failure therefore falls through to the
         // currently resolved network/cloud path.
         val httpResult = runCatching { executeHttp(type, actor, credential) }
         val httpReply = httpResult.getOrNull()
-        return httpReply ?: CommandReply(accepted = false, code = "offline")
+        val error = httpResult.exceptionOrNull()
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        return httpReply ?: CommandReply(accepted = false,
+            code = (error as? HttpDeviceApiException)?.reason ?: "offline")
     }
 
     suspend fun panicOverBle(): CommandReply {
@@ -235,15 +293,18 @@ class CommandController(
     suspend fun pulseLock(actor: String): CommandReply {
         // The object-card lock is a universal action, not a BLE-only control.
         // Prefer an already-authorized nearby BLE session for door latency,
-        // then fall back to the resolved local network path.  Cloud lock output
-        // control is not part of the current controller API contract, so do not
-        // pretend it is supported until the protocol exposes it.
+        // then use a configured signed MQTT route for remote access or the
+        // resolved local network path. An unknown remote result is never repeated.
         if (ble.isReady()) {
             val bleReply = runCatching { mapBleReply(ble.pulseLock()) }.getOrNull()
             if (bleReply != null && (bleReply.accepted || bleReply.duplicate)) return bleReply
         }
 
         val target = endpoint.value
+        if (target.path == ControlPath.CLOUD || target.path == ControlPath.OFFLINE) {
+            val mqttReply = mqtt?.pulseLock()
+            if (mqttReply != null) return mqttReply
+        }
         if (target.path != ControlPath.OFFLINE && target.path != ControlPath.CLOUD &&
             target.apiBaseUrl.isNotBlank() && localHttpSessionToken.isNotBlank()) {
             val api = createApi(target)

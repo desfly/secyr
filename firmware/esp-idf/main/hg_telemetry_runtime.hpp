@@ -28,9 +28,14 @@ public:
         hg::SystemEventBus* system_bus,
         BleTransport* ble_transport = nullptr);
 
+    [[nodiscard]] bool mcp_outputs_healthy() const noexcept { return mcp_outputs_healthy_; }
+    [[nodiscard]] std::uint8_t mcp_outputs_applied() const noexcept { return mcp_outputs_applied_; }
+
 private:
     static void task_entry(void* context);
     static void zone_task_entry(void* context);
+    static void output_mirror_task_entry(void* context);
+    void run_output_mirror();
     void run();
     void run_zones();
     void update_zone_model(const std::array<hg::ZoneState, 8>& zones, std::uint64_t now_ms);
@@ -52,6 +57,8 @@ private:
     bool light_restore_active_{false};
     std::uint64_t light_cycle_deadline_ms_{0};
     std::uint64_t next_telemetry_ms_{0};
+    volatile bool mcp_outputs_healthy_{false};
+    volatile std::uint8_t mcp_outputs_applied_{0};
 };
 
 }  // namespace homeguard::idf

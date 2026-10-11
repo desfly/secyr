@@ -3,6 +3,18 @@
 #include "homeguard/system_model.hpp"
 #include <string>
 
+namespace {
+struct PartitionEvents {
+    hg::SystemEvent last{};
+    unsigned count{};
+};
+void capture_partition_event(const hg::SystemEvent& event, void* context) {
+    auto& captured = *static_cast<PartitionEvents*>(context);
+    captured.last = event;
+    ++captured.count;
+}
+}
+
 void test_build0032() {
     hg::SystemEventBus bus;
     hg::SystemModel model(bus);
@@ -38,4 +50,25 @@ void test_build0032() {
     const std::string event_json = hg::system_event_json(event);
     CHECK(event_json.find("\"event\":\"alarm\"") != std::string::npos);
     CHECK(event_json.find("\"sequence\":55") != std::string::npos);
+    // A partition alarm must reach MQTT/Android as critical ALARM, not ARMED.
+    hg::SystemEventBus alarm_bus;
+    hg::SystemModel alarm_model(alarm_bus);
+    PartitionEvents captured;
+    CHECK(alarm_bus.subscribe(capture_partition_event, &captured));
+    CHECK(alarm_model.add_partition(1));
+    CHECK(alarm_model.set_partition_arm(1, hg::PartitionArmState::Away, 100));
+    CHECK(alarm_bus.dispatch_all() == 1);
+    CHECK(captured.last.type == hg::SystemEventType::Armed);
+    CHECK(alarm_model.set_partition_arm(1, hg::PartitionArmState::Alarm, 200));
+    CHECK(alarm_bus.dispatch_all() == 1);
+    CHECK(captured.last.type == hg::SystemEventType::Alarm);
+    CHECK(captured.last.source_id == 1);
+    CHECK(captured.last.value == static_cast<int>(hg::PartitionArmState::Alarm));
+    CHECK(alarm_model.set_partition_arm(1, hg::PartitionArmState::Alarm, 201));
+    CHECK(alarm_bus.dispatch_all() == 0);
+    CHECK(alarm_model.set_partition_arm(1, hg::PartitionArmState::Disarmed, 300));
+    CHECK(alarm_bus.dispatch_all() == 1);
+    CHECK(captured.last.type == hg::SystemEventType::Disarmed);
+    CHECK(captured.count == 3);
+
 }

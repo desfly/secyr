@@ -16,6 +16,7 @@ data class TransportStatus(
     val available: Boolean,
     val authenticated: Boolean = false,
     val lastSeenAtMs: Long = 0L,
+    val commandSupported: Boolean = true,
 )
 
 data class TransportSelection(
@@ -61,7 +62,7 @@ object TransportMatrix {
     }
 
     fun chooseCommand(statuses: Collection<TransportStatus>): TransportKind? =
-        choose(commandPriority, statuses)
+        choose(commandPriority, statuses.filter { it.commandSupported })
 
     fun chooseTelemetry(statuses: Collection<TransportStatus>): TransportKind? =
         choose(telemetryPriority, statuses)

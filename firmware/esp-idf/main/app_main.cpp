@@ -260,7 +260,7 @@ esp_err_t start_https_server()
     config.httpd.max_uri_handlers = 48;
     config.httpd.stack_size = 8192;
     config.httpd.lru_purge_enable = true;
-    config.httpd.send_wait_timeout = 30;
+    config.httpd.send_wait_timeout = 1;
     config.servercert = reinterpret_cast<const unsigned char*>(identity.certificate_pem.c_str());
     config.servercert_len = identity.certificate_pem.size() + 1U;
     config.prvtkey_pem = reinterpret_cast<const unsigned char*>(identity.private_key_pem.c_str());
@@ -296,7 +296,7 @@ esp_err_t start_http_server()
     config.max_uri_handlers = g_https_server == nullptr ? 48 : 16;
     config.stack_size = 8192;
     config.lru_purge_enable = true;
-    config.send_wait_timeout = 30;
+    config.send_wait_timeout = 1;
 
     ESP_RETURN_ON_ERROR(httpd_start(&g_http_server, &config), kTag, "httpd_start");
 
@@ -458,6 +458,9 @@ extern "C" void app_main()
     else ESP_LOGI(kTag, "Cloud identity ready: %s", g_cloud_link.device_id());
 
     initialize_system_model();
+    ESP_ERROR_CHECK(g_system_bus.subscribe([](const hg::SystemEvent& event, void* context) {
+        static_cast<WebsocketTelemetry*>(context)->publish_event(event);
+    }, &g_websocket_telemetry) ? ESP_OK : ESP_ERR_NO_MEM);
     g_cloud_link.set_command_runtime(&g_system_model, &g_system_bus, &g_access_control, &g_cloud_time);
     initialize_physical_outputs();
     start_ble_transport();

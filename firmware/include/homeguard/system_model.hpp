@@ -1,6 +1,9 @@
 #pragma once
 
 #include <array>
+#include <atomic>
+#include <mutex>
+#include <optional>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -34,10 +37,13 @@ public:
     bool publish(SystemEvent event);
     bool dispatch_one();
     std::size_t dispatch_all();
-    [[nodiscard]] std::size_t queued() const { return queue_size_; }
-    [[nodiscard]] std::uint64_t published() const { return published_; }
-    [[nodiscard]] std::uint64_t dropped() const { return dropped_; }
+    [[nodiscard]] std::size_t queued() const { std::lock_guard<std::mutex> lock(queue_mutex_); return queue_size_; }
+    [[nodiscard]] std::uint64_t published() const { std::lock_guard<std::mutex> lock(queue_mutex_); return published_; }
+    [[nodiscard]] std::uint64_t dropped() const { std::lock_guard<std::mutex> lock(queue_mutex_); return dropped_; }
 private:
+    bool deliver_one();
+    mutable std::mutex queue_mutex_;
+    std::atomic_flag dispatching_ = ATOMIC_FLAG_INIT;
     struct Subscriber { SystemEventCallback callback{}; void* context{}; };
     std::array<SystemEvent, queue_capacity> queue_{};
     std::array<Subscriber, subscriber_capacity> subscribers_{};
@@ -87,6 +93,12 @@ public:
     static constexpr std::size_t max_outputs = 16;
     static constexpr std::size_t max_partitions = 4;
     explicit SystemModel(SystemEventBus& bus) : bus_(bus) {}
+    // Hold across compound decisions; never across dispatch or network I/O.
+    [[nodiscard]] std::unique_lock<std::recursive_mutex> lock() const {
+        return std::unique_lock<std::recursive_mutex>(state_mutex_);
+    }
+    [[nodiscard]] std::optional<OutputRecord> output_snapshot(std::uint16_t id) const;
+    [[nodiscard]] std::optional<PartitionRecord> partition_snapshot(std::uint16_t id) const;
     bool add_zone(std::uint16_t id, std::string_view name, ModelZoneType type, bool always_on = false);
     bool add_sensor(std::uint16_t id, ModelSensorType type);
     bool add_output(std::uint16_t id, ModelOutputType type);
@@ -109,6 +121,7 @@ public:
 private:
     static void copy_name(std::array<char, 24>& destination, std::string_view source);
     bool emit(SystemEventType type, std::uint16_t source_id, std::uint64_t now_ms, std::int32_t value = 0);
+    mutable std::recursive_mutex state_mutex_;
     SystemEventBus& bus_;
     std::array<ZoneRecord, max_zones> zones_{};
     std::array<SensorRecord, max_sensors> sensors_{};

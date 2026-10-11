@@ -14,6 +14,8 @@ import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+class HttpDeviceApiException(val statusCode: Int, val reason: String) : IOException("HTTP $statusCode: $reason")
+
 class HttpDeviceApi(
     baseUrl: String,
     private val tokenProvider: () -> String,
@@ -89,6 +91,12 @@ class HttpDeviceApi(
     }
 
     suspend fun cloudClientConfig(): JSONObject = execute(RuntimeApiContract.CLOUD_CLIENT_CONFIG_PATH)
+
+    suspend fun commandTrust(): JSONObject = execute("/api/v1/cloud/trust")
+
+    suspend fun initializeCommandTrust(publicKeyPem: String): JSONObject = execute(
+        "/api/v1/cloud/trust", "POST", JSONObject().put("version", 1).put("publicKeyPem", publicKeyPem),
+    )
 
     suspend fun networkStatus(): JSONObject = execute(RuntimeApiContract.NETWORK_STATUS_PATH)
 
@@ -201,7 +209,11 @@ class HttpDeviceApi(
         }.build()
         return client.newCall(request).await().use { response ->
             val text = response.body?.string().orEmpty()
-            if (!response.isSuccessful) throw IOException("HTTP ${response.code}: $text")
+            if (!response.isSuccessful) {
+                val reason = if (response.code == 401) "login_required" else
+                    runCatching { JSONObject(text).optString("reason", "http_error") }.getOrDefault("http_error")
+                throw HttpDeviceApiException(response.code, reason)
+            }
             if (text.isBlank()) JSONObject() else JSONObject(text)
         }
     }

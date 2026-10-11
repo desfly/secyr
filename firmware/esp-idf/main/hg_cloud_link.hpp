@@ -29,9 +29,10 @@ public:
     [[nodiscard]] std::uint32_t disconnect_count() const { return disconnect_count_; }
 
     esp_err_t publish_state(const char* json, int qos = 1, bool retain = true);
-    esp_err_t issue_disarm_challenge();
+    esp_err_t issue_disarm_challenge(const char* request_id);
     bool begin_trust_rotation();
     void end_trust_rotation();
+    bool read_command_counter(std::uint64_t& value);
 
 private:
     static void mqtt_event_handler(void* handler_args,
@@ -39,19 +40,24 @@ private:
                                    std::int32_t event_id,
                                    void* event_data);
     static void heartbeat_timer_handler(void* context);
+    static void state_timer_handler(void* context);
     static void system_event_handler(const hg::SystemEvent& event, void* context);
     void on_mqtt_event(esp_mqtt_event_handle_t event);
     void make_device_id();
     void make_topics();
     void publish_online(bool online);
     void publish_heartbeat();
+    void publish_periodic_state();
     void publish_system_event(const hg::SystemEvent& event);
     void start_heartbeat_timer();
     void stop_heartbeat_timer();
+    void start_state_timer();
+    void stop_state_timer();
     void handle_command(const char* data, std::size_t size);
 
     esp_mqtt_client_handle_t client_{};
     esp_timer_handle_t heartbeat_timer_{};
+    esp_timer_handle_t state_timer_{};
     std::array<char, 32> device_id_{};
     std::array<char, 96> state_topic_{};
     std::array<char, 96> availability_topic_{};
@@ -69,6 +75,7 @@ private:
     std::uint32_t connect_count_{};
     std::uint32_t disconnect_count_{};
     std::uint64_t heartbeat_sequence_{};
+    std::uint64_t state_sequence_{};
 };
 
 }  // namespace homeguard::idf

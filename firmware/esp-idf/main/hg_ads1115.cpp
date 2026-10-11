@@ -2,6 +2,7 @@
 #include "hg_i2c_bus.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include "freertos/FreeRTOS.h"
@@ -35,6 +36,11 @@ esp_err_t Ads1115::initialize(
     device_ = nullptr;
     mutex_ = nullptr;
     address_ = 0;
+    portENTER_CRITICAL(&cache_lock_);
+    cached_mv_.fill(0.0F);
+    cached_valid_.fill(false);
+    cached_at_us_.fill(0);
+    portEXIT_CRITICAL(&cache_lock_);
 
     i2c_master_dev_handle_t candidate = nullptr;
     auto error = bus.add_device(
@@ -167,6 +173,11 @@ esp_err_t Ads1115::read_single_ended_mv(
         }
     }
 
+    portENTER_CRITICAL(&cache_lock_);
+    cached_valid_[channel] = error == ESP_OK;
+    cached_at_us_[channel] = esp_timer_get_time();
+    if (error == ESP_OK) cached_mv_[channel] = *millivolts;
+    portEXIT_CRITICAL(&cache_lock_);
     (void)xSemaphoreGive(mutex_);
     return error;
 }
@@ -195,6 +206,23 @@ esp_err_t Ads1115::read_all_single_ended_mv(
     }
 
     return first_error;
+}
+
+esp_err_t Ads1115::cached_single_ended_mv(
+    std::array<float, 4>* millivolts, std::array<bool, 4>* valid)
+{
+    if (millivolts == nullptr || valid == nullptr) return ESP_ERR_INVALID_ARG;
+    const auto now_us = esp_timer_get_time();
+    portENTER_CRITICAL(&cache_lock_);
+    *millivolts = cached_mv_;
+    *valid = cached_valid_;
+    for (std::size_t channel = 0; channel < 4; ++channel) {
+        (*valid)[channel] = (*valid)[channel] &&
+            now_us - cached_at_us_[channel] <= 3000000;
+    }
+    portEXIT_CRITICAL(&cache_lock_);
+    for (bool channel_valid : *valid) if (!channel_valid) return ESP_ERR_INVALID_STATE;
+    return ESP_OK;
 }
 
 bool Ads1115::ready() const noexcept

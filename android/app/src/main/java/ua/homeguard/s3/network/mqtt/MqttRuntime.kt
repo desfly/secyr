@@ -20,6 +20,7 @@ class MqttRuntime(
 ) {
     companion object {
         private const val HEARTBEAT_TIMEOUT_MS = 185_000L
+        private const val STATE_TIMEOUT_MS = 15_000L
     }
 
     enum class State { DISABLED, CONNECTING, CONNECTED, OFFLINE }
@@ -37,10 +38,12 @@ class MqttRuntime(
         job = scope.launch {
             while (isActive) {
                 val heartbeat = client.lastHeartbeatAtMs().value
-                if (heartbeat > 0L) lastSeenAtMs.value = heartbeat
-                val heartbeatFresh = heartbeat == 0L || System.currentTimeMillis() - heartbeat <= HEARTBEAT_TIMEOUT_MS
+                val received = client.deviceState().value?.receivedAtMs ?: 0L
+                if (received > 0L) lastSeenAtMs.value = received
+                val stateFresh = received > 0L && System.currentTimeMillis() - received <= STATE_TIMEOUT_MS
+                val heartbeatFresh = heartbeat > 0L && System.currentTimeMillis() - heartbeat <= HEARTBEAT_TIMEOUT_MS
                 state.value = when (client.state().value) {
-                    MqttRuntimeClient.State.CONNECTED -> if (heartbeatFresh) State.CONNECTED else State.OFFLINE
+                    MqttRuntimeClient.State.CONNECTED -> if (stateFresh && heartbeatFresh && client.availability().value == "online") State.CONNECTED else State.OFFLINE
                     MqttRuntimeClient.State.CONNECTING -> State.CONNECTING
                     MqttRuntimeClient.State.OFFLINE,
                     MqttRuntimeClient.State.ERROR -> State.OFFLINE

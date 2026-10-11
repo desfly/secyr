@@ -49,6 +49,7 @@ std::string_view system_event_type_name(SystemEventType type) {
 }
 
 std::string system_status_json(const SystemModel& model, const SystemEventBus& bus) {
+    const auto state_lock = model.lock();
     std::ostringstream out;
     out << "{\"apiVersion\":1,\"zones\":" << model.zone_count()
         << ",\"sensors\":" << model.sensor_count()
@@ -61,6 +62,7 @@ std::string system_status_json(const SystemModel& model, const SystemEventBus& b
 }
 
 std::string system_zones_json(const SystemModel& model) {
+    const auto state_lock = model.lock();
     std::ostringstream out;
     out << "{\"zones\":[";
     for (std::size_t i = 0; i < model.zone_count(); ++i) {
@@ -77,6 +79,7 @@ std::string system_zones_json(const SystemModel& model) {
 }
 
 std::string system_outputs_json(const SystemModel& model) {
+    const auto state_lock = model.lock();
     std::ostringstream out;
     out << "{\"outputs\":[";
     for (std::size_t i = 0; i < model.output_count(); ++i) {
@@ -91,6 +94,7 @@ std::string system_outputs_json(const SystemModel& model) {
 }
 
 std::string system_partitions_json(const SystemModel& model) {
+    const auto state_lock = model.lock();
     std::ostringstream out;
     out << "{\"partitions\":[";
     for (std::size_t i = 0; i < model.partition_count(); ++i) {

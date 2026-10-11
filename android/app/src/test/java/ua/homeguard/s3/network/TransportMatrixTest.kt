@@ -102,6 +102,15 @@ class TransportMatrixTest {
         assertEquals(TransportKind.BLE, selection.telemetry)
     }
 
+    @Test
+    fun `telemetry only mqtt does not become a command route`() {
+        val mqtt = TransportStatus(TransportKind.MQTT, available = true, authenticated = true, commandSupported = false)
+        val selection = TransportMatrix.chooseActive(listOf(mqtt))
+        assertEquals(null, selection.command)
+        assertEquals(TransportKind.MQTT, selection.telemetry)
+        assertEquals(TransportKind.BLE, TransportMatrix.chooseCommand(listOf(mqtt, ready(TransportKind.BLE))))
+    }
+
     private fun ready(kind: TransportKind) =
         TransportStatus(kind = kind, available = true, authenticated = true)
 
