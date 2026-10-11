@@ -6,8 +6,10 @@ The JSON request contains `command` and optionally `challenge`; actor, device
 binding, epoch, counter and timestamps come from server configuration/storage.
 The response is the envelope accepted by Android `SignedCommandEnvelope.parse`.
 
-It does not publish to MQTT, deploy itself, enroll trust on ESP, create firmware
-actor sessions, or configure Android. These integration steps remain pending.
+Android requests the packet over HTTPS and publishes it over MQTT using its
+configured broker connection. Its dashboard can save a device-scoped signer URL
+and encrypted account token. The server does not deploy itself, enroll trust on
+ESP, or create firmware actor sessions; these setup steps remain pending.
 Firmware verifies every signature and maintains its own durable replay barrier.
 
 ## Run
@@ -67,7 +69,9 @@ not automatically issue another lock/disarm command.
 For disarm, request and execute `security.disarm_challenge` first, then submit the
 controller's returned challenge in the signed `security.disarm` request. Signing
 an arbitrary challenge does not make it valid; the firmware checks its one-time
-challenge. The response transport/coordinator is still to be integrated.
+challenge. Android's `MqttSignedCommandController` performs this two-step exchange
+and stops on rejection or an unknown result, without repeating the action.
+Cross-client delivery ordering still requires a server-side coordinator.
 
 ## Verification
 
@@ -79,3 +83,9 @@ Tests cover the exact firmware signature transcript, tamper rejection,
 account/device/permission isolation, durable counters, parallel allocation,
 rate limiting, disarm challenge shape and a real local HTTP request. They use
 new temporary keys/databases and do not contact an ESP or broker.
+
+Both suites also read `android/app/src/test/resources/signed-command-vector.json`.
+It contains a Python-generated packet and public key only; the temporary private
+key was discarded. Android parses and re-encodes the packet, then Java verifies
+the unchanged signature against the firmware transcript. Both suites reject
+tampering. This fixture is test data and must never be enrolled on a controller.

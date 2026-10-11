@@ -11,7 +11,7 @@ from pathlib import Path
 from http.server import ThreadingHTTPServer
 
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from signer import COMMANDS, Denied, DeviceKey, Grant, Signer, canonical
@@ -44,6 +44,18 @@ class SignerTests(unittest.TestCase):
         envelope['command'] = 'security.disarm'
         with self.assertRaises(InvalidSignature):
             self.key.public_key().verify(signature, canonical(envelope), ec.ECDSA(hashes.SHA256()))
+
+    def test_shared_android_vector_uses_exact_server_transcript(self):
+        path = Path(__file__).resolve().parents[2] / 'android/app/src/test/resources/signed-command-vector.json'
+        vector = json.loads(path.read_text())
+        packet = vector['envelope']
+        public_key = serialization.load_der_public_key(bytes.fromhex(vector['publicKeyDerHex']))
+        public_key.verify(bytes.fromhex(packet['signature']), canonical(packet), ec.ECDSA(hashes.SHA256()))
+        self.assertEqual(42, packet['counter'])
+        self.assertEqual('security.disarm', packet['command'])
+        altered = dict(packet, counter=43)
+        with self.assertRaises(InvalidSignature):
+            public_key.verify(bytes.fromhex(packet['signature']), canonical(altered), ec.ECDSA(hashes.SHA256()))
 
     def test_counter_survives_restart_and_never_rolls_back_with_lower_floor(self):
         self.assertEqual(101, self.sign()['counter'])
