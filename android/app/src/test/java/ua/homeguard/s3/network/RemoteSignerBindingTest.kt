@@ -16,13 +16,13 @@ class RemoteSignerBindingTest {
         val runtime = RemoteTransportRuntime(CoroutineScope(Dispatchers.Unconfined),
             MutableStateFlow(DeviceEndpoint("HG-ONE", "", "", ControlPath.OFFLINE)), TelemetrySocket())
         runtime.configureMqtt(MqttConnectionConfig(deviceId = "HG-ONE"))
-        runtime.configureMqttSigner("HG-ONE", "https://localhost:1", { "old-account-token" })
+        runtime.configureMqttSigner("HG-ONE") { _, _, _ -> error("Wrong device reached signer") }
         val mqtt = runtime.javaClass.getDeclaredField("mqtt").apply { isAccessible = true }.get(runtime) as MqttRuntime
         @Suppress("UNCHECKED_CAST")
         val state = mqtt.javaClass.getDeclaredField("state").apply { isAccessible = true }
             .get(mqtt) as MutableStateFlow<MqttRuntime.State>
         state.value = MqttRuntime.State.CONNECTED
-        // A wrong device must return before attempting HTTPS, even while the old MQTT link is healthy.
+        // A wrong device must return before invoking the signer, even while the old MQTT link is healthy.
         assertNull(runtime.executeMqttCommand("HG-TWO", "output.lock"))
         runtime.configureMqtt(MqttConnectionConfig(deviceId = "HG-TWO"))
         assertFalse(runtime.transportStatuses().first { it.kind == TransportKind.MQTT }.commandSupported)

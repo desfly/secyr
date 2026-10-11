@@ -246,7 +246,6 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val appSettings by settings.settings.collectAsState()
-            val signerRevision by settings.signerRevision.collectAsState()
             val devices by discovery.devices.collectAsState()
             val registered by registeredDevices.devices.collectAsState()
             val isScanning by discovery.isScanning.collectAsState()
@@ -335,7 +334,6 @@ class MainActivity : ComponentActivity() {
                         onDeleteDevice = { device ->
                             lifecycleScope.launch {
                                 registeredDevices.remove(device.deviceId)
-                                settings.clearSigner(device.deviceId)
                                 if (settings.settings.value.deviceId == device.deviceId) {
                                     settings.clearSavedLogin(device.deviceId)
                                     commands.logout()
@@ -424,12 +422,6 @@ class MainActivity : ComponentActivity() {
                         },
                         onExportSettings = { pendingSettingsBackupText = SettingsBackupCodec.encode(appSettings); settingsBackupLauncher.launch(SettingsBackupCodec.suggestedFileName()) },
                         onImportSettings = { settingsRestoreLauncher.launch("application/json") },
-                        signerUrl = remember(appSettings.deviceId, signerRevision) { settings.signerUrl(appSettings.deviceId) },
-                        signerConfigured = remember(appSettings.deviceId, signerRevision) { settings.signerToken(appSettings.deviceId).isNotBlank() },
-                        onSaveSigner = { url, token ->
-                            runCatching { settings.saveSigner(appSettings.deviceId, url, token) }.isSuccess
-                        },
-                        onClearSigner = { settings.clearSigner(appSettings.deviceId) },
                         onFactoryReset = ::factoryResetController,
                         onLightChange = ::executeLight,
                         onLockPulse = ::executeLockPulse,
@@ -595,7 +587,6 @@ class MainActivity : ComponentActivity() {
                         // longer owns access to the controller. Remove the object itself;
                         // transport failures/timeouts never enter this branch.
                         registeredDevices.remove(deviceId)
-                        settings.clearSigner(deviceId)
                         settings.clearSavedLogin(deviceId)
                         commands.logout()
                         if (settings.settings.value.deviceId.equals(deviceId, ignoreCase = true)) {

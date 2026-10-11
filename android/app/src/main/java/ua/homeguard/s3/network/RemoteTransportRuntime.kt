@@ -12,7 +12,7 @@ import ua.homeguard.s3.network.mqtt.MqttConnectionConfig
 import ua.homeguard.s3.network.mqtt.MqttRuntime
 import ua.homeguard.s3.network.mqtt.MqttRuntimeClient
 import ua.homeguard.s3.model.SystemEventRecord
-import ua.homeguard.s3.network.mqtt.SignedCommandApi
+import ua.homeguard.s3.network.mqtt.SignedCommandEnvelope
 import ua.homeguard.s3.network.mqtt.MqttSignedCommandController
 import org.json.JSONObject
 
@@ -37,10 +37,10 @@ class RemoteTransportRuntime(
     private data class SignerRoute(val deviceId: String, val controller: MqttSignedCommandController)
     @Volatile private var signerRoute: SignerRoute? = null
 
-    fun configureMqttSigner(deviceId: String, baseUrl: String, tokenProvider: () -> String) {
+    fun configureMqttSigner(deviceId: String, sign: suspend (String, String, String) -> SignedCommandEnvelope) {
         require(deviceId.isNotBlank()) { "Signer device id required" }
-        val api = SignedCommandApi(baseUrl, tokenProvider)
-        signerRoute = SignerRoute(deviceId, MqttSignedCommandController(deviceId, api, mqttClient))
+        signerRoute = SignerRoute(deviceId, MqttSignedCommandController(deviceId, sign,
+            { envelope -> mqttClient.publishSignedCommand(envelope) }))
     }
 
     fun clearMqttSigner() { signerRoute = null }

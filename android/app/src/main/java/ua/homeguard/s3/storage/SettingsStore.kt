@@ -10,7 +10,6 @@ class SettingsStore(context: Context) {
     private val preferences = appContext.getSharedPreferences("homeguard_settings", Context.MODE_PRIVATE)
     private val secure = SecureTokenStore(appContext)
     val settings = MutableStateFlow(load())
-    val signerRevision = MutableStateFlow(0L)
 
     suspend fun update(value: AppSettings) {
         val current = settings.value
@@ -110,32 +109,6 @@ class SettingsStore(context: Context) {
     }
 
     fun mqttPassword(): String = secure.get("mqtt_password")
-
-    fun signerUrl(deviceId: String = settings.value.deviceId): String =
-        if (deviceId.isBlank()) "" else preferences.getString("signer_url_$deviceId", "").orEmpty()
-
-    fun signerToken(deviceId: String = settings.value.deviceId): String =
-        if (deviceId.isBlank()) "" else secure.get("signer_token_$deviceId")
-
-    fun saveSigner(deviceId: String, baseUrl: String, token: String) {
-        require(deviceId.matches(Regex("[A-Za-z0-9_-]+")))
-        val url = baseUrl.trim()
-        val accountToken = token.trim()
-        // Use the same URL and credential constraints as the request client.
-        ua.homeguard.s3.network.mqtt.SignedCommandApi(url, tokenProvider = { accountToken })
-        require(accountToken.isNotBlank() && accountToken.length <= 4096 &&
-            accountToken.none { it.code < 32 || it.code == 127 })
-        secure.put("signer_token_$deviceId", accountToken)
-        preferences.edit().putString("signer_url_$deviceId", url).apply()
-        signerRevision.value += 1
-    }
-
-    fun clearSigner(deviceId: String) {
-        if (deviceId.isBlank()) return
-        secure.put("signer_token_$deviceId", "")
-        preferences.edit().remove("signer_url_$deviceId").apply()
-        signerRevision.value += 1
-    }
 
     private fun load() = AppSettings(
         deviceId = preferences.getString("device_id", "").orEmpty(),

@@ -5,16 +5,12 @@ import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.io.IOException
 
-/** One configured instance per device. UI routing and signer credentials are provisioned separately. */
+/** One configured instance per device. The signer runs on the phone; no HTTP service is involved. */
 class MqttSignedCommandController(
     private val deviceId: String,
     private val sign: suspend (String, String, String) -> SignedCommandEnvelope,
     private val publish: suspend (SignedCommandEnvelope) -> JSONObject,
 ) {
-    constructor(deviceId: String, signer: SignedCommandApi, mqtt: MqttRuntimeClient) :
-        this(deviceId, { device, command, challenge -> signer.request(device, command, challenge) },
-            { envelope -> mqtt.publishSignedCommand(envelope) })
-
     private val gate = Mutex()
 
     suspend fun execute(command: String): JSONObject = gate.withLock {

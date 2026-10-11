@@ -38,7 +38,6 @@ class DeviceSession(
     private var bleTelemetryJob: Job? = null
     private var bleStateJob: Job? = null
     private var mqttSettingsJob: Job? = null
-    private var signerSettingsJob: Job? = null
     @Volatile private var activeTarget: SessionTarget? = null
 
     fun cloudState(): StateFlow<CloudRuntime.State> = remoteTransports.cloudState()
@@ -47,8 +46,8 @@ class DeviceSession(
     fun configureMqtt(config: MqttConnectionConfig, credential: String = "") =
         remoteTransports.configureMqtt(config, credential)
 
-    fun configureMqttSigner(deviceId: String, baseUrl: String, tokenProvider: () -> String) =
-        remoteTransports.configureMqttSigner(deviceId, baseUrl, tokenProvider)
+    fun configureMqttSigner(deviceId: String, sign: suspend (String, String, String) -> ua.homeguard.s3.network.mqtt.SignedCommandEnvelope) =
+        remoteTransports.configureMqttSigner(deviceId, sign)
     fun clearMqttSigner() = remoteTransports.clearMqttSigner()
     suspend fun executeMqttCommand(command: String): org.json.JSONObject? =
         remoteTransports.executeMqttCommand(settings.settings.value.deviceId, command)
@@ -61,10 +60,7 @@ class DeviceSession(
             settings.settings
                 .map { Triple(it.mqttBrokerUri, it.mqttUsername, it.deviceId) }
                 .distinctUntilChanged()
-                .collect { applyPersistedMqtt(); applyPersistedSigner() }
-        }
-        signerSettingsJob = scope.launch {
-            settings.signerRevision.collect { applyPersistedSigner() }
+                .collect { applyPersistedMqtt() }
         }
         job = scope.launch {
             combine(endpointProvider, settings.settings) { endpoint, appSettings ->
@@ -144,7 +140,6 @@ class DeviceSession(
         bleTelemetryJob?.cancel()
         bleStateJob?.cancel()
         mqttSettingsJob?.cancel()
-        signerSettingsJob?.cancel()
         job?.cancel()
         authorizationJob?.cancel()
         reconnectJob = null
@@ -152,7 +147,6 @@ class DeviceSession(
         bleTelemetryJob = null
         bleStateJob = null
         mqttSettingsJob = null
-        signerSettingsJob = null
         job = null
         authorizationJob = null
         remoteTransports.stop()
@@ -172,18 +166,6 @@ class DeviceSession(
             ),
             settings.mqttPassword(),
         )
-    }
-
-    private fun applyPersistedSigner() {
-        val deviceId = settings.settings.value.deviceId
-        val url = settings.signerUrl(deviceId)
-        if (url.isBlank() || settings.signerToken(deviceId).isBlank()) {
-            remoteTransports.clearMqttSigner()
-            return
-        }
-        runCatching {
-            remoteTransports.configureMqttSigner(deviceId, url) { settings.signerToken(deviceId) }
-        }.onFailure { remoteTransports.clearMqttSigner() }
     }
 
     private fun connectTarget(target: SessionTarget) {
