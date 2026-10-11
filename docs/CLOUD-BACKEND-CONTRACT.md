@@ -122,10 +122,14 @@ selected endpoint is CLOUD or OFFLINE. Local HTTP behavior is retained. A
 non-null MQTT result, including rejection or unknown outcome, stops routing;
 there is no automatic second-transport attempt after a potentially sent action.
 
-Configure through `DeviceSession.configureMqttSigner(deviceId, httpsBaseUrl,
-accountTokenProvider)` after MQTT setup. This keeps the account token outside
-ordinary settings/backup data. Signer credentials are currently memory-only;
-there is no UI/account enrollment flow yet. Configuration is scoped to a device,
-cleared when changing MQTT device or stopping monitoring, and checked against
-the currently selected device before signing. `clearMqttSigner` revokes the local
-route. Deployment, grant provisioning and real end-to-end validation remain open.
+The dashboard's remote control panel accepts an HTTPS signer URL and a separately
+issued account token for the selected device. `SettingsStore` stores the URL per
+device and the token with the existing AndroidKeyStore-backed `SecureTokenStore`;
+neither is included in settings backup. The token input starts empty and is
+cleared after saving. Removing access deletes both values from the phone.
+`DeviceSession` restores the route after MQTT setup, updates it without restarting
+MQTT when credentials change, and checks the selected device before signing.
+Stopping monitoring clears the in-memory route; saved credentials are restored
+on the next start. Invalid or incomplete saved configuration disables the route.
+The low-level `configureMqttSigner` API remains available for account integration.
+Deployment, account/grant provisioning and real end-to-end validation remain open.

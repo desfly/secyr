@@ -73,6 +73,10 @@ fun DashboardScreen(
     onShareEvents: () -> Unit,
     onExportSettings: () -> Unit,
     onImportSettings: () -> Unit,
+    signerUrl: String,
+    signerConfigured: Boolean,
+    onSaveSigner: (String, String) -> Boolean,
+    onClearSigner: () -> Unit,
     onFactoryReset: () -> Unit,
     onLightChange: (Boolean) -> Unit,
     onLockPulse: () -> Unit,
@@ -260,6 +264,10 @@ fun DashboardScreen(
                     }
                 }
             }
+        }
+
+        item {
+            SignerSettingsPanel(deviceId, signerUrl, signerConfigured, onSaveSigner, onClearSigner)
         }
 
         item {
