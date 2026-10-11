@@ -74,9 +74,9 @@ class MqttRuntimeClientTest {
         ping.invoke(client, current)
         assertArrayEquals(byteArrayOf(0xC0.toByte(), 0), bytes.toByteArray())
     }
-    private fun heartbeat(client: MqttRuntimeClient, retained: Boolean) {
+    private fun heartbeat(client: MqttRuntimeClient, retained: Boolean, body: String = "{\"seq\":1,\"up\":50,\"online\":true}") {
         val topic = "homeguard/v1/devices/HG-TEST/heartbeat".toByteArray()
-        val payload = byteArrayOf(0, topic.size.toByte()) + topic + "{}".toByteArray()
+        val payload = byteArrayOf(0, topic.size.toByte()) + topic + body.toByteArray()
         client.javaClass.getDeclaredMethod("handlePublish", MqttRuntimeClient.Config::class.java,
             Int::class.javaPrimitiveType, ByteArray::class.java).apply { isAccessible = true }
             .invoke(client, cfg, if (retained) 1 else 0, payload)
@@ -175,5 +175,56 @@ class MqttRuntimeClientTest {
             sending.cancelAndJoin()
             client.stop()
         }
+    }
+    @Test fun invalidAndRepeatedHeartbeatsCannotRefreshHealth() {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        for (body in listOf("invalid", "{}", "{\"online\":true}",
+            "{\"seq\":1,\"up\":50,\"online\":false}",
+            "{\"seq\":1,\"up\":50,\"online\":\"true\"}",
+            "{\"seq\":0,\"up\":50,\"online\":true}",
+            "{\"seq\":1.5,\"up\":50,\"online\":true}",
+            "{\"seq\":1,\"up\":-1,\"online\":true}")) {
+            heartbeat(client, false, body)
+            assertEquals(0L, client.lastHeartbeatAtMs().value)
+            assertEquals("unknown", client.availability().value)
+        }
+        heartbeat(client, false)
+        val seen = client.lastHeartbeatAtMs().value
+        Thread.sleep(5)
+        heartbeat(client, false)
+        assertEquals(seen, client.lastHeartbeatAtMs().value)
+        heartbeat(client, false, "{\"seq\":2,\"up\":51,\"online\":true}")
+        assertTrue(client.lastHeartbeatAtMs().value > seen)
+    }
+
+    @Test fun retainedResponseCannotCompletePendingCommand() {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        val waiter = kotlinx.coroutines.CompletableDeferred<JSONObject>()
+        @Suppress("UNCHECKED_CAST")
+        val pending = client.javaClass.getDeclaredField("pendingResponses").apply { isAccessible = true }
+            .get(client) as java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<JSONObject>>
+        pending["request-1"] = waiter
+        val topic = "homeguard/v1/devices/HG-TEST/responses".toByteArray()
+        val body = "{\"requestId\":\"request-1\",\"ok\":true}".toByteArray()
+        val payload = byteArrayOf(0, topic.size.toByte()) + topic + body
+        val handle = client.javaClass.getDeclaredMethod("handlePublish", MqttRuntimeClient.Config::class.java,
+            Int::class.javaPrimitiveType, ByteArray::class.java).apply { isAccessible = true }
+        handle.invoke(client, cfg, 1, payload)
+        assertFalse(waiter.isCompleted)
+        handle.invoke(client, cfg, 0, payload)
+        assertTrue(waiter.isCompleted)
+    }
+    @Test fun rebootHeartbeatClearsPreviousStateAndOutOfOrderHeartbeatIsIgnored() {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        heartbeat(client, false, "{\"seq\":10,\"up\":500,\"online\":true}")
+        publishState(client, "{\"seq\":100,\"up\":500,\"arm\":2}")
+        val seen = client.lastHeartbeatAtMs().value
+        Thread.sleep(5)
+        heartbeat(client, false, "{\"seq\":11,\"up\":400,\"online\":true}")
+        assertEquals(seen, client.lastHeartbeatAtMs().value)
+        assertNotNull(client.deviceState().value)
+        heartbeat(client, false, "{\"seq\":1,\"up\":1,\"online\":true}")
+        assertNull(client.deviceState().value)
+        assertTrue(client.lastHeartbeatAtMs().value > seen)
     }
 }

@@ -42,6 +42,8 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
     private val state = MutableStateFlow(State.DISABLED)
     private val availability = MutableStateFlow("unknown")
     private val lastHeartbeatAtMs = MutableStateFlow(0L)
+    private var heartbeatSequence: Long? = null
+    private var heartbeatUptime: Long? = null
     data class DeviceState(val sequence: Long, val uptimeSeconds: Long, val mode: SystemMode, val receivedAtMs: Long)
     private val deviceState = MutableStateFlow<DeviceState?>(null)
     fun deviceState(): StateFlow<DeviceState?> = deviceState
@@ -109,6 +111,8 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
     }
 
     private fun resetDeviceHealth() {
+        heartbeatSequence = null
+        heartbeatUptime = null
         deviceState.value = null
         lastHeartbeatAtMs.value = 0L
         availability.value = "unknown"
@@ -226,6 +230,26 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
             topic(cfg, "heartbeat") -> {
                 // A retained heartbeat belongs to an earlier broker session.
                 if ((flags and 0x01) != 0) return
+                val json = runCatching { JSONObject(body) }.getOrNull() ?: return
+                if (json.opt("online") != true) return
+                fun unsignedInteger(name: String): Long? {
+                    val value = json.opt(name) as? Number ?: return null
+                    return value.toString().toLongOrNull()?.takeIf { it >= 0L }
+                }
+                val sequence = unsignedInteger("seq")?.takeIf { it > 0L } ?: return
+                val uptime = unsignedInteger("up") ?: return
+                val previousSequence = heartbeatSequence
+                val previousUptime = heartbeatUptime
+                if (previousSequence != null && previousUptime != null) {
+                    if (uptime >= previousUptime && sequence <= previousSequence) return
+                    if (uptime < previousUptime) {
+                        if (sequence >= previousSequence) return
+                        // A reboot starts a new telemetry generation.
+                        deviceState.value = null
+                    }
+                }
+                heartbeatSequence = sequence
+                heartbeatUptime = uptime
                 lastHeartbeatAtMs.value = System.currentTimeMillis()
                 availability.value = "online"
             }
@@ -252,6 +276,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
             }
             topic(cfg, "events") -> runCatching { JSONObject(body) }.getOrNull()?.let(events::tryEmit)
             topic(cfg, "responses") -> {
+                if ((flags and 0x01) != 0) return
                 val json = runCatching { JSONObject(body) }.getOrNull() ?: return
                 responses.tryEmit(json)
                 val id = json.optString("requestId").ifBlank { json.optString("request_id") }
