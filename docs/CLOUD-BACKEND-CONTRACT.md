@@ -89,7 +89,11 @@ command selection until a server signing route and account authentication are co
 with the firmware's exact v1 fields and sends it unchanged at QoS 1 without retention.
 It rejects mismatched device IDs and expired packets before publication. It does not
 verify the server signature locally; firmware remains the authority for signature,
-actor authorization and durable replay admission. There is no MQTT PIN command API.
+actor authorization and durable replay admission. There is no MQTT PIN command API. Pending command completion requires a live,
+non-retained response with the exact `requestId` and a boolean `ok`. Timeout,
+connection loss and session stop after publication report `MqttCommandOutcomeUnknown`;
+callers must not interpret this as rejection or automatically retry the action.
+Explicit caller coroutine cancellation still propagates as cancellation.
 The repository supplies a configurable signer implementation in `backend/` and
 an Android HTTPS `SignedCommandApi` client. The client sends only command/challenge
 with a separate account bearer token, validates the returned device/command and

@@ -211,6 +211,12 @@ class MqttRuntimeClientTest {
             Int::class.javaPrimitiveType, ByteArray::class.java).apply { isAccessible = true }
         handle.invoke(client, cfg, 1, payload)
         assertFalse(waiter.isCompleted)
+        for (invalid in listOf("{\"requestId\":\"request-1\"}",
+            "{\"requestId\":\"request-1\",\"ok\":\"true\"}",
+            "{\"requestId\":\"another-request\",\"ok\":true}")) {
+            handle.invoke(client, cfg, 0, byteArrayOf(0, topic.size.toByte()) + topic + invalid.toByteArray())
+            assertFalse(waiter.isCompleted)
+        }
         handle.invoke(client, cfg, 0, payload)
         assertTrue(waiter.isCompleted)
     }
@@ -226,5 +232,44 @@ class MqttRuntimeClientTest {
         heartbeat(client, false, "{\"seq\":1,\"up\":1,\"online\":true}")
         assertNull(client.deviceState().value)
         assertTrue(client.lastHeartbeatAtMs().value > seen)
+    }
+    private fun readySignedClient(): Pair<MqttRuntimeClient, SignedCommandEnvelope> {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        client.javaClass.getDeclaredField("config").apply { isAccessible = true }.set(client, cfg)
+        @Suppress("UNCHECKED_CAST")
+        val connection = client.javaClass.getDeclaredField("state").apply { isAccessible = true }
+            .get(client) as MutableStateFlow<MqttRuntimeClient.State>
+        connection.value = MqttRuntimeClient.State.CONNECTED
+        val now = System.currentTimeMillis()
+        val json = JSONObject().put("version", 1).put("deviceId", "HG-TEST").put("requestId", "unknown-1")
+            .put("actor", "user").put("command", "output.lock").put("keyEpoch", 1)
+            .put("counter", 2).put("issuedAtMs", now).put("expiresAtMs", now + 60_000)
+            .put("challenge", "").put("signature", "abcd")
+        return client to SignedCommandEnvelope.parse(json)
+    }
+
+    @Test fun timeoutReportsUnknownOutcomeAndRemovesPendingRequest() = runBlocking {
+        val (client, envelope) = readySignedClient()
+        try {
+            client.publishSignedCommand(envelope, timeoutMs = 50)
+            fail("Missing response accepted")
+        } catch (error: MqttCommandOutcomeUnknown) {
+            assertEquals("unknown-1", error.requestId)
+        }
+        val pending = client.javaClass.getDeclaredField("pendingResponses").apply { isAccessible = true }
+            .get(client) as Map<*, *>
+        assertTrue(pending.isEmpty())
+        client.stop()
+    }
+
+    @Test fun sessionStopReportsUnknownOutcomeInsteadOfSuccessfulCommand() = runBlocking {
+        val (client, envelope) = readySignedClient()
+        var outcome: Throwable? = null
+        val request = launch(start = CoroutineStart.UNDISPATCHED) {
+            try { client.publishSignedCommand(envelope) } catch (error: Throwable) { outcome = error }
+        }
+        client.stop()
+        request.join()
+        assertTrue(outcome is MqttCommandOutcomeUnknown)
     }
 }

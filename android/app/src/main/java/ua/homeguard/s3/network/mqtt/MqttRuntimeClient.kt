@@ -19,6 +19,7 @@ import ua.homeguard.s3.model.SystemMode
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.EOFException
+import java.io.IOException
 import java.net.Socket
 import java.net.URI
 import java.nio.charset.StandardCharsets
@@ -26,6 +27,9 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
+
+class MqttCommandOutcomeUnknown(val requestId: String, cause: Throwable? = null) :
+    IOException("MQTT command outcome unknown; do not automatically repeat", cause)
 
 /** Minimal MQTT 3.1.1 runtime used by HomeGuard Android. */
 class MqttRuntimeClient(private val scope: CoroutineScope) {
@@ -85,7 +89,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         socket = null
         input = null
         output = null
-        pendingResponses.values.forEach { it.cancel() }
+        pendingResponses.forEach { (id, waiter) -> waiter.completeExceptionally(MqttCommandOutcomeUnknown(id)) }
         pendingResponses.clear()
         config = null
         resetDeviceHealth()
@@ -96,6 +100,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         envelope: SignedCommandEnvelope,
         timeoutMs: Long = 8_000L,
     ): JSONObject {
+        require(timeoutMs > 0L) { "MQTT response timeout must be positive" }
         val cfg = config ?: error("MQTT disabled")
         check(state.value == State.CONNECTED) { "MQTT offline" }
         val body = envelope.payloadFor(cfg.deviceId)
@@ -105,6 +110,11 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
         try {
             publish(topic(cfg, "commands"), body, qos = 1, retain = false)
             return kotlinx.coroutines.withTimeout(timeoutMs) { waiter.await() }
+        } catch (error: kotlinx.coroutines.TimeoutCancellationException) {
+            throw MqttCommandOutcomeUnknown(requestId, error)
+        } catch (error: IOException) {
+            if (error is MqttCommandOutcomeUnknown) throw error
+            throw MqttCommandOutcomeUnknown(requestId, error)
         } finally {
             pendingResponses.remove(requestId, waiter)
         }
@@ -156,8 +166,8 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
                 socket = null
                 input = null
                 output = null
-                pendingResponses.values.forEach {
-                    it.completeExceptionally(EOFException("MQTT connection lost; command outcome unknown"))
+                pendingResponses.forEach { (id, waiter) ->
+                    waiter.completeExceptionally(MqttCommandOutcomeUnknown(id))
                 }
                 pendingResponses.clear()
             }
@@ -279,8 +289,9 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
                 if ((flags and 0x01) != 0) return
                 val json = runCatching { JSONObject(body) }.getOrNull() ?: return
                 responses.tryEmit(json)
-                val id = json.optString("requestId").ifBlank { json.optString("request_id") }
-                if (id.isNotBlank()) pendingResponses[id]?.complete(json)
+                val id = json.opt("requestId") as? String ?: return
+                if (id.isBlank() || json.opt("ok") !is Boolean) return
+                pendingResponses[id]?.complete(json)
             }
         }
     }
