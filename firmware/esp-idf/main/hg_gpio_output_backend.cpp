@@ -24,8 +24,12 @@ bool GpioOutputBackend::write_expander(int gpio, bool level) {
     if (expander_ == nullptr || !expander_->ready()) return false;
     const std::uint8_t mask = gpio == hg::direct_light_relay_gpio ? 0x01U : 0x02U;
     std::lock_guard<std::mutex> lock(expander_mutex_);
+    // After an uncertain I2C write, never energize either relay again
+    // until the device is restarted and the expander is reinitialized.
+    if (expander_fault_ && level) return false;
     const auto next = static_cast<std::uint8_t>(level ? (expander_shadow_ | mask) : (expander_shadow_ & ~mask));
     if (expander_->write_outputs(next) != ESP_OK) {
+        expander_fault_ = true;
         // Best-effort safe reset: a failed I2C transaction cannot guarantee
         // that the physical relay actually switched off.
         if (expander_->force_safe_outputs() == ESP_OK) expander_shadow_ = 0;
