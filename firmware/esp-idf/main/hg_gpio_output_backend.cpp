@@ -28,7 +28,13 @@ bool GpioOutputBackend::write_expander(int gpio, bool level) {
     if (expander_->write_outputs(next) != ESP_OK) {
         // Best-effort safe reset: a failed I2C transaction cannot guarantee
         // that the physical relay actually switched off.
-        if (expander_->force_safe_outputs() == ESP_OK) expander_shadow_ = 0;
+        if (expander_->force_safe_outputs() == ESP_OK) {
+            expander_shadow_ = 0;
+        } else {
+            // Do not trust the cached latch value after an unconfirmed write.
+            // Future commands must not silently reuse an uncertain state.
+            expander_shadow_ = 0;
+        }
         return false;
     }
     expander_shadow_ = next;
