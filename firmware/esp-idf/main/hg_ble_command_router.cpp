@@ -476,7 +476,14 @@ void BleCommandRouter::handle_command(const std::string& json)
             send(kCommandReplyType, "{\"ok\":false,\"reason\":\"partition_command_failed\"}");
             return;
         }
-        (void)bus_->dispatch_all();
+        const auto dispatch_started_us = esp_timer_get_time();
+        const auto dispatched = bus_->dispatch_all();
+        const auto dispatch_elapsed_us = esp_timer_get_time() - dispatch_started_us;
+        if (dispatch_elapsed_us > 100000) {
+            ESP_LOGW(kTag, "slow BLE security event dispatch: %lld us, %u events",
+                     static_cast<long long>(dispatch_elapsed_us),
+                     static_cast<unsigned>(dispatched));
+        }
         const std::string body = std::string{"{\"ok\":true,\"command\":\""} + command +
             "\",\"armState\":\"" + arm_state_name(target) + "\"}";
         send(kCommandReplyType, body);
@@ -525,7 +532,14 @@ void BleCommandRouter::handle_command(const std::string& json)
 
         if (result.status == hg::OutputCommandStatus::Applied) {
             (void)bus_->publish({hg::SystemEventType::ConfigChanged, output_id, 0, 0, active ? 5401 : 5400});
-            (void)bus_->dispatch_all();
+            const auto dispatch_started_us = esp_timer_get_time();
+            const auto dispatched = bus_->dispatch_all();
+            const auto dispatch_elapsed_us = esp_timer_get_time() - dispatch_started_us;
+            if (dispatch_elapsed_us > 100000) {
+                ESP_LOGW(kTag, "slow BLE output event dispatch: %lld us, %u events",
+                         static_cast<long long>(dispatch_elapsed_us),
+                         static_cast<unsigned>(dispatched));
+            }
         }
         const std::string body = std::string{"{\"ok\":"} +
             (result.status == hg::OutputCommandStatus::Applied ? "true" : "false") +
