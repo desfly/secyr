@@ -1,4 +1,5 @@
 #include "hg_gpio_output_backend.hpp"
+#include <cstdint>
 #include "homeguard/hardware_profile.hpp"
 #include "driver/gpio.h"
 #include "hg_board_hw678.hpp"
