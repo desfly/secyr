@@ -19,9 +19,8 @@ bool PhysicalOutputRuntime::initialize(
     hardware_ = &hardware;
     state_ = {};
 
-    // LIGHT and LOCK are the current physical bench relays and are wired
-    // directly to ESP32-S3 GPIO1/GPIO2. Configure them first and keep them
-    // independent from the future MCP23017 commissioning gate.
+    // LIGHT/LOCK use virtual output IDs routed to MCP23017 GPA0/GPA1.
+    // ESP32 GPIO1 and GPIO2 remain unassigned.
     const int direct_gpios[] = {direct_light_relay_gpio, direct_lock_relay_gpio};
     for (const int gpio : direct_gpios) {
         if (!backend_->configure_output(gpio, false)) {
