@@ -18,6 +18,9 @@ esp_err_t Mcp23017::initialize(
     I2cBus& bus,
     std::uint8_t address)
 {
+    // Do not register the same I2C address twice or discard an existing
+    // device handle. A failed setup must be handled by the caller.
+    if (device_ != nullptr) return ESP_ERR_INVALID_STATE;
     initialized_ = false;
     auto error = bus.add_device(
         address,
