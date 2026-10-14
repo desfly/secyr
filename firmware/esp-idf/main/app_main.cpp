@@ -394,12 +394,15 @@ extern "C" void app_main()
     initialize_system_model();
     g_cloud_link.set_command_runtime(&g_system_model, &g_system_bus, &g_access_control, &g_cloud_time);
     if (cloud_identity_error == ESP_OK) restore_cloud_config();
-    initialize_physical_outputs();
-    start_ble_transport();
-
+    // Initialize the I2C expander before making physical output control available.
+    // Keep BLE offline until the output backend has completed initialization.
     const auto hardware_error = g_hardware.initialize();
     if (hardware_error != ESP_OK) ESP_LOGE(kTag, "Hardware bootstrap failed: %s", esp_err_to_name(hardware_error));
     else ESP_LOGI(kTag, "Hardware bootstrap completed");
+
+    g_gpio_outputs.bind_expander(g_hardware.io_expander());
+    initialize_physical_outputs();
+    start_ble_transport();
 
     const auto https_error = start_https_server();
     if (https_error != ESP_OK) ESP_LOGW(kTag, "HTTPS transport unavailable: %s", esp_err_to_name(https_error));

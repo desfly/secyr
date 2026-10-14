@@ -92,7 +92,7 @@ esp_err_t HardwareBootstrap::initialize()
 {
     status_.safe_outputs_forced = true;
     ESP_LOGI(kTag, "========== 5-MODULE BENCH TEST START ==========");
-    ESP_LOGI(kTag, "Expected: ADS1115@0x48, ADS1115@0x49, INA226@0x40, microSD, W5500");
+    ESP_LOGI(kTag, "Expected: ADS1115@0x48, ADS1115@0x49, INA226@0x40, W5500; SD pins pending remap");
 
     auto error = i2c_.initialize();
     status_.i2c = module_status(
@@ -259,12 +259,13 @@ esp_err_t HardwareBootstrap::initialize()
         }
     }
 
-    const auto rs485_error =
-        rs485_.initialize(9600);
-    status_.rs485 = module_status(
-        rs485_error,
-        "RS-485 UART1 9600 8N1 half-duplex",
-        "RS-485 initialization failed");
+    // RS485 transceiver is not fitted on this HomeGuard-S3 installation.
+    // Do not claim UART pins or initialize the absent peripheral.
+    status_.rs485 = {
+        HardwareModuleState::Missing,
+        "RS485 not installed (disabled by hardware configuration)",
+        0,
+    };
 
     return ESP_OK;
 }

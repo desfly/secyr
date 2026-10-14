@@ -476,7 +476,14 @@ void BleCommandRouter::handle_command(const std::string& json)
             send(kCommandReplyType, "{\"ok\":false,\"reason\":\"partition_command_failed\"}");
             return;
         }
-        (void)bus_->dispatch_all();
+        const auto dispatch_started_us = esp_timer_get_time();
+        const auto dispatched = bus_->dispatch_all();
+        const auto dispatch_elapsed_us = esp_timer_get_time() - dispatch_started_us;
+        if (dispatch_elapsed_us > 100000) {
+            ESP_LOGW(kTag, "slow BLE security event dispatch: %lld us, %u events",
+                     static_cast<long long>(dispatch_elapsed_us),
+                     static_cast<unsigned>(dispatched));
+        }
         const std::string body = std::string{"{\"ok\":true,\"command\":\""} + command +
             "\",\"armState\":\"" + arm_state_name(target) + "\"}";
         send(kCommandReplyType, body);
@@ -512,15 +519,27 @@ void BleCommandRouter::handle_command(const std::string& json)
         const auto result = hg::apply_output_command(
             *model_, *readiness_, {output_id, active, alarm_active, 0});
         if (result.status == hg::OutputCommandStatus::Applied && !physical_->synchronize(*model_, *readiness_)) {
-            (void)model_->set_output_active(output_id, false, 0);
+            // Global safe-off affects every output, so invalidate all
+            // optimistic model states rather than only the requested one.
+            // Physical relay contacts still require independent feedback.
             (void)physical_->force_safe();
+            for (std::uint16_t id = 1; id <= 5; ++id) {
+                (void)model_->set_output_active(id, false, 0);
+            }
             send(kCommandReplyType, "{\"ok\":false,\"reason\":\"physical_output_failure\",\"active\":false}");
             return;
         }
 
         if (result.status == hg::OutputCommandStatus::Applied) {
             (void)bus_->publish({hg::SystemEventType::ConfigChanged, output_id, 0, 0, active ? 5401 : 5400});
-            (void)bus_->dispatch_all();
+            const auto dispatch_started_us = esp_timer_get_time();
+            const auto dispatched = bus_->dispatch_all();
+            const auto dispatch_elapsed_us = esp_timer_get_time() - dispatch_started_us;
+            if (dispatch_elapsed_us > 100000) {
+                ESP_LOGW(kTag, "slow BLE output event dispatch: %lld us, %u events",
+                         static_cast<long long>(dispatch_elapsed_us),
+                         static_cast<unsigned>(dispatched));
+            }
         }
         const std::string body = std::string{"{\"ok\":"} +
             (result.status == hg::OutputCommandStatus::Applied ? "true" : "false") +

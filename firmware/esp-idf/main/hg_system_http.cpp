@@ -5,6 +5,8 @@
 #include "homeguard/system_api.hpp"
 
 #include "esp_system.h"
+#include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -242,7 +244,14 @@ esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
         httpd_resp_set_status(request,"409 Conflict");
         return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"partition_command_failed\"}",-1);
     }
-    (void)bus_->dispatch_all();
+    const auto dispatch_started_us = esp_timer_get_time();
+    const auto dispatched = bus_->dispatch_all();
+    const auto dispatch_elapsed_us = esp_timer_get_time() - dispatch_started_us;
+    if (dispatch_elapsed_us > 100000) {
+        ESP_LOGW("hg_system_http", "slow security event dispatch: %lld us, %u events",
+                 static_cast<long long>(dispatch_elapsed_us),
+                 static_cast<unsigned>(dispatched));
+    }
     const std::string response = std::string{"{\"ok\":true,\"command\":\""} + command +
         "\",\"armState\":\"" + arm_state_name(target) + "\"}";
     return send_json(request,response.c_str(),response.size());
@@ -302,7 +311,18 @@ void SystemHttp::broadcast(const hg::SystemEvent& event) {
     frame.len = payload.size();
     for (auto& client : clients_) {
         if (client < 0) continue;
-        if (httpd_ws_send_frame_async(server_,client,&frame) != ESP_OK) client = -1;
+        const auto send_started_us = esp_timer_get_time();
+        const auto result = httpd_ws_send_frame_async(server_, client, &frame);
+        const auto send_elapsed_us = esp_timer_get_time() - send_started_us;
+        if (send_elapsed_us > 100000) {
+            ESP_LOGW("hg_system_http", "slow WebSocket enqueue: %lld us, socket=%d",
+                     static_cast<long long>(send_elapsed_us), client);
+        }
+        if (result != ESP_OK) {
+            ESP_LOGW("hg_system_http", "WebSocket enqueue failed: socket=%d, error=%s",
+                     client, esp_err_to_name(result));
+            client = -1;
+        }
     }
 }
 

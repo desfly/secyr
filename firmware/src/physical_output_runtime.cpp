@@ -19,9 +19,8 @@ bool PhysicalOutputRuntime::initialize(
     hardware_ = &hardware;
     state_ = {};
 
-    // LIGHT and LOCK are the current physical bench relays and are wired
-    // directly to ESP32-S3 GPIO1/GPIO2. Configure them first and keep them
-    // independent from the future MCP23017 commissioning gate.
+    // LIGHT/LOCK use virtual output IDs routed to MCP23017 GPA0/GPA1.
+    // ESP32 GPIO1 and GPIO2 remain unassigned.
     const int direct_gpios[] = {direct_light_relay_gpio, direct_lock_relay_gpio};
     for (const int gpio : direct_gpios) {
         if (!backend_->configure_output(gpio, false)) {
@@ -49,11 +48,12 @@ bool PhysicalOutputRuntime::initialize(
     }
 
     if (!readiness.outputs_allowed()) {
-        write_safe(hardware.pins.siren);
-        write_safe(hardware.pins.valve1);
-        write_safe(hardware.pins.valve2);
-        state_.status = PhysicalOutputStatus::FailClosed;
-        return true;
+        bool safe = true;
+        safe = write_safe(hardware.pins.siren) && safe;
+        safe = write_safe(hardware.pins.valve1) && safe;
+        safe = write_safe(hardware.pins.valve2) && safe;
+        state_.status = safe ? PhysicalOutputStatus::FailClosed : PhysicalOutputStatus::BackendError;
+        return safe;
     }
 
     state_.outputs_enabled = true;
@@ -84,7 +84,11 @@ bool PhysicalOutputRuntime::write_logical(int gpio, bool active) {
 }
 
 bool PhysicalOutputRuntime::force_safe() {
-    if (hardware_ == nullptr) return false;
+    if (hardware_ == nullptr || backend_ == nullptr) {
+        state_.status = PhysicalOutputStatus::BackendError;
+        state_.outputs_enabled = false;
+        return false;
+    }
     bool ok = true;
     ok = write_safe(hardware_->pins.siren) && ok;
     ok = write_safe(hardware_->pins.valve1) && ok;
@@ -99,8 +103,8 @@ bool PhysicalOutputRuntime::force_safe() {
 bool PhysicalOutputRuntime::synchronize(const SystemModel& model, const BootReadinessReport& readiness) {
     if (backend_ == nullptr || hardware_ == nullptr) return false;
 
-    // Direct relays must follow the model regardless of commissioning state.
-    // This is the current tested wiring: output 4 -> GPIO1, output 5 -> GPIO2.
+    // Light/lock outputs follow the model through MCP23017 GPA0/GPA1.
+    // GPIO1 and GPIO2 must remain free.
     bool ok = true;
     ok = write_logical(direct_light_relay_gpio, output_state(model, 4)) && ok;
     ok = write_logical(direct_lock_relay_gpio, output_state(model, 5)) && ok;
@@ -110,15 +114,17 @@ bool PhysicalOutputRuntime::synchronize(const SystemModel& model, const BootRead
     }
 
     // The remaining physical outputs stay fail-closed until commissioning is
-    // valid. Do not turn the already-installed GPIO1/GPIO2 relays off here.
+    // valid. Keep the MCP23017 light/lock outputs independently controlled.
     if (!readiness.outputs_allowed() || !hardware_verification_allows_outputs(*hardware_)) {
         ok = write_safe(hardware_->pins.siren) && ok;
         ok = write_safe(hardware_->pins.valve1) && ok;
         ok = write_safe(hardware_->pins.valve2) && ok;
         state_.outputs_enabled = false;
-        state_.status = hardware_verification_allows_outputs(*hardware_)
-            ? PhysicalOutputStatus::FailClosed
-            : PhysicalOutputStatus::InvalidHardware;
+        state_.status = !ok
+            ? PhysicalOutputStatus::BackendError
+            : (hardware_verification_allows_outputs(*hardware_)
+                ? PhysicalOutputStatus::FailClosed
+                : PhysicalOutputStatus::InvalidHardware);
         return ok;
     }
 
