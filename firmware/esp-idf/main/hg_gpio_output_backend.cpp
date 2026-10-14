@@ -21,9 +21,9 @@ bool GpioOutputBackend::write_output(int gpio, bool level) {
 }
 
 bool GpioOutputBackend::write_expander(int gpio, bool level) {
-    if (expander_ == nullptr || !expander_->ready()) return false;
     const std::uint8_t mask = gpio == hg::direct_light_relay_gpio ? 0x01U : 0x02U;
     std::lock_guard<std::mutex> lock(expander_mutex_);
+    if (expander_ == nullptr || !expander_->ready()) return false;
     // After an uncertain I2C write, never energize either relay again
     // until the device is restarted and the expander is reinitialized.
     if (expander_fault_ && level) return false;
