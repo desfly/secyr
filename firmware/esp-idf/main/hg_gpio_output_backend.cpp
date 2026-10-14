@@ -27,6 +27,13 @@ bool GpioOutputBackend::write_expander(int gpio, bool level) {
     // After an uncertain I2C write, never energize either relay again
     // until the device is restarted and the expander is reinitialized.
     if (expander_fault_ && level) return false;
+    // A latched fault permits only the full-port OFF value, not writes
+    // that might retain another relay in the energized state.
+    if (expander_fault_) {
+        if (expander_->force_safe_outputs() != ESP_OK) return false;
+        expander_shadow_ = 0;
+        return true;
+    }
     const auto next = static_cast<std::uint8_t>(level ? (expander_shadow_ | mask) : (expander_shadow_ & ~mask));
     if (expander_->write_outputs(next) != ESP_OK) {
         expander_fault_ = true;
