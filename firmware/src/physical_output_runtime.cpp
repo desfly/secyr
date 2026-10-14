@@ -48,11 +48,12 @@ bool PhysicalOutputRuntime::initialize(
     }
 
     if (!readiness.outputs_allowed()) {
-        write_safe(hardware.pins.siren);
-        write_safe(hardware.pins.valve1);
-        write_safe(hardware.pins.valve2);
-        state_.status = PhysicalOutputStatus::FailClosed;
-        return true;
+        bool safe = true;
+        safe = write_safe(hardware.pins.siren) && safe;
+        safe = write_safe(hardware.pins.valve1) && safe;
+        safe = write_safe(hardware.pins.valve2) && safe;
+        state_.status = safe ? PhysicalOutputStatus::FailClosed : PhysicalOutputStatus::BackendError;
+        return safe;
     }
 
     state_.outputs_enabled = true;
