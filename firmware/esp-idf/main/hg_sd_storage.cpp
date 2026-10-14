@@ -30,6 +30,13 @@ esp_err_t SdStorage::mount()
         return ESP_OK;
     }
 
+    // GPIO41/GPIO42 are physically wired to the output module.
+    // Never claim them as SD SPI pins; require a verified SD remap first.
+    if (board::kSdMosi == GPIO_NUM_41 || board::kSdMiso == GPIO_NUM_42) {
+        ESP_LOGW(kTag, "microSD disabled: GPIO41/GPIO42 belong to output module");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     const spi_bus_config_t bus_config{
         .mosi_io_num = board::kSdMosi,
         .miso_io_num = board::kSdMiso,
