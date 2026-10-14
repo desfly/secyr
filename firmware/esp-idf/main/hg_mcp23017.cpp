@@ -23,6 +23,7 @@ esp_err_t Mcp23017::initialize(
         400000,
         &device_);
     if (error != ESP_OK) {
+        device_ = nullptr;
         return error;
     }
 
