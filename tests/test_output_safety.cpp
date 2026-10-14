@@ -100,6 +100,15 @@ void test_runtime() {
     hg::PhysicalOutputRuntime broken;
     TEST_CHECK(!broken.initialize(failing, hardware, ready));
     TEST_CHECK(broken.state().status == hg::PhysicalOutputStatus::BackendError);
+
+    // A runtime write failure must never be reported as a successful sync.
+    FakeBackend write_failure;
+    hg::PhysicalOutputRuntime guarded;
+    TEST_CHECK(guarded.initialize(write_failure, hardware, ready));
+    write_failure.fail = true;
+    TEST_CHECK(!guarded.synchronize(model, ready));
+    TEST_CHECK(guarded.state().status == hg::PhysicalOutputStatus::BackendError);
+    TEST_CHECK(!guarded.state().outputs_enabled);
 }
 } // namespace
 
