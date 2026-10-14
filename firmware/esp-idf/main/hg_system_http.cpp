@@ -5,6 +5,8 @@
 #include "homeguard/system_api.hpp"
 
 #include "esp_system.h"
+#include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -242,7 +244,14 @@ esp_err_t SystemHttp::handle_security_command(httpd_req_t* request) {
         httpd_resp_set_status(request,"409 Conflict");
         return httpd_resp_send(request,"{\"ok\":false,\"reason\":\"partition_command_failed\"}",-1);
     }
-    (void)bus_->dispatch_all();
+    const auto dispatch_started_us = esp_timer_get_time();
+    const auto dispatched = bus_->dispatch_all();
+    const auto dispatch_elapsed_us = esp_timer_get_time() - dispatch_started_us;
+    if (dispatch_elapsed_us > 100000) {
+        ESP_LOGW("hg_system_http", "slow security event dispatch: %lld us, %u events",
+                 static_cast<long long>(dispatch_elapsed_us),
+                 static_cast<unsigned>(dispatched));
+    }
     const std::string response = std::string{"{\"ok\":true,\"command\":\""} + command +
         "\",\"armState\":\"" + arm_state_name(target) + "\"}";
     return send_json(request,response.c_str(),response.size());
