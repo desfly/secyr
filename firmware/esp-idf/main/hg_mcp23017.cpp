@@ -82,6 +82,7 @@ esp_err_t Mcp23017::force_safe_outputs()
 
 esp_err_t Mcp23017::write_outputs(std::uint8_t value)
 {
+    if (!initialized_) return ESP_ERR_INVALID_STATE;
     return write_register(kOlatA, value);
 }
 
