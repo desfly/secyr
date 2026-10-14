@@ -16,6 +16,7 @@ private:
     Mcp23017* expander_{nullptr};
     std::mutex expander_mutex_;
     std::uint8_t expander_shadow_{0};
+    bool expander_fault_{false};
 };
 
 }  // namespace homeguard::idf
