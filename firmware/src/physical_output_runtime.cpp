@@ -116,9 +116,11 @@ bool PhysicalOutputRuntime::synchronize(const SystemModel& model, const BootRead
         ok = write_safe(hardware_->pins.valve1) && ok;
         ok = write_safe(hardware_->pins.valve2) && ok;
         state_.outputs_enabled = false;
-        state_.status = hardware_verification_allows_outputs(*hardware_)
-            ? PhysicalOutputStatus::FailClosed
-            : PhysicalOutputStatus::InvalidHardware;
+        state_.status = !ok
+            ? PhysicalOutputStatus::BackendError
+            : (hardware_verification_allows_outputs(*hardware_)
+                ? PhysicalOutputStatus::FailClosed
+                : PhysicalOutputStatus::InvalidHardware);
         return ok;
     }
 
