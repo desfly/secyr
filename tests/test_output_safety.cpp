@@ -49,6 +49,11 @@ void test_interlocks() {
 }
 
 void test_runtime() {
+    hg::PhysicalOutputRuntime uninitialized;
+    TEST_CHECK(!uninitialized.force_safe());
+    TEST_CHECK(uninitialized.state().status == hg::PhysicalOutputStatus::BackendError);
+    TEST_CHECK(!uninitialized.state().outputs_enabled);
+
     hg::SystemEventBus bus;
     hg::SystemModel model(bus);
     TEST_CHECK(model.add_output(1, hg::ModelOutputType::Siren));
