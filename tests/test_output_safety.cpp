@@ -74,6 +74,9 @@ void test_runtime() {
     TEST_CHECK(!backend.levels[12]);
     TEST_CHECK(backend.levels[hg::direct_light_relay_gpio]);
     TEST_CHECK(backend.levels[hg::direct_lock_relay_gpio]);
+    // Virtual MCP23017 IDs must not silently touch ESP32 GPIO1/GPIO2.
+    TEST_CHECK(backend.levels.find(1) == backend.levels.end());
+    TEST_CHECK(backend.levels.find(2) == backend.levels.end());
 
     hg::BootReadinessReport ready{};
     ready.status = hg::BootReadinessStatus::ReadyForPhysicalOutputs;
@@ -86,6 +89,7 @@ void test_runtime() {
     failing.fail = true;
     hg::PhysicalOutputRuntime broken;
     TEST_CHECK(!broken.initialize(failing, hardware, ready));
+    TEST_CHECK(broken.state().status == hg::PhysicalOutputStatus::BackendError);
 }
 } // namespace
 
