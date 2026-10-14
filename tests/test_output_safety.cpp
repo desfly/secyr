@@ -85,6 +85,16 @@ void test_runtime() {
     TEST_CHECK(backend.levels[11]);
     TEST_CHECK(backend.levels[12]);
 
+    // Emergency shutdown must clear both MCP virtual outputs and all
+    // commissioned physical outputs even after they were energized.
+    TEST_CHECK(runtime.force_safe());
+    TEST_CHECK(!backend.levels[hg::direct_light_relay_gpio]);
+    TEST_CHECK(!backend.levels[hg::direct_lock_relay_gpio]);
+    TEST_CHECK(!backend.levels[10]);
+    TEST_CHECK(!backend.levels[11]);
+    TEST_CHECK(!backend.levels[12]);
+    TEST_CHECK(!runtime.state().outputs_enabled);
+
     FakeBackend failing;
     failing.fail = true;
     hg::PhysicalOutputRuntime broken;
