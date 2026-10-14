@@ -2,6 +2,7 @@
 
 #include "homeguard/physical_output_runtime.hpp"
 #include "hg_mcp23017.hpp"
+#include <cstdint>
 #include <mutex>
 
 namespace homeguard::idf {
