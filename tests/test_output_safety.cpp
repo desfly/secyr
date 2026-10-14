@@ -7,9 +7,10 @@
 namespace {
 class FakeBackend final : public hg::PhysicalOutputBackend {
 public:
-    bool configure_output(int gpio, bool initial) override { levels[gpio] = initial; return !fail; }
-    bool write_output(int gpio, bool level) override { if (fail) return false; levels[gpio] = level; return true; }
+    bool configure_output(int gpio, bool initial) override { if (fail) return false; levels[gpio] = initial; return true; }
+    bool write_output(int gpio, bool level) override { if (fail || fail_writes) return false; levels[gpio] = level; return true; }
     bool fail{};
+    bool fail_writes{};
     std::map<int, bool> levels;
 };
 
@@ -95,13 +96,11 @@ void test_runtime() {
     TEST_CHECK(!backend.levels[12]);
     TEST_CHECK(!runtime.state().outputs_enabled);
 
-    // During blocked boot, failure to drive safe levels must fail closed.
+    // Configuration can succeed while safe-level writes fail during boot.
     FakeBackend boot_failure;
-    boot_failure.fail = false;
+    boot_failure.fail_writes = true;
     hg::PhysicalOutputRuntime blocked_runtime;
-    TEST_CHECK(blocked_runtime.initialize(boot_failure, hardware, blocked));
-    boot_failure.fail = true;
-    TEST_CHECK(!blocked_runtime.force_safe());
+    TEST_CHECK(!blocked_runtime.initialize(boot_failure, hardware, blocked));
     TEST_CHECK(blocked_runtime.state().status == hg::PhysicalOutputStatus::BackendError);
 
     FakeBackend failing;
