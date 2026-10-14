@@ -95,6 +95,15 @@ void test_runtime() {
     TEST_CHECK(!backend.levels[12]);
     TEST_CHECK(!runtime.state().outputs_enabled);
 
+    // During blocked boot, failure to drive safe levels must fail closed.
+    FakeBackend boot_failure;
+    boot_failure.fail = false;
+    hg::PhysicalOutputRuntime blocked_runtime;
+    TEST_CHECK(blocked_runtime.initialize(boot_failure, hardware, blocked));
+    boot_failure.fail = true;
+    TEST_CHECK(!blocked_runtime.force_safe());
+    TEST_CHECK(blocked_runtime.state().status == hg::PhysicalOutputStatus::BackendError);
+
     FakeBackend failing;
     failing.fail = true;
     hg::PhysicalOutputRuntime broken;
