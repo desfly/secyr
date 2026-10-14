@@ -400,6 +400,7 @@ extern "C" void app_main()
     if (hardware_error != ESP_OK) ESP_LOGE(kTag, "Hardware bootstrap failed: %s", esp_err_to_name(hardware_error));
     else ESP_LOGI(kTag, "Hardware bootstrap completed");
 
+    g_gpio_outputs.bind_expander(g_hardware.io_expander());
     initialize_physical_outputs();
     start_ble_transport();
 
