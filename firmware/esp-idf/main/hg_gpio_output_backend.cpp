@@ -17,7 +17,7 @@ bool GpioOutputBackend::configure_output(int gpio, bool initial_level) {
 bool GpioOutputBackend::write_output(int gpio, bool level) {
     if (gpio == hg::direct_light_relay_gpio || gpio == hg::direct_lock_relay_gpio)
         return write_expander(gpio, level);
-    if (gpio < 0 || board::is_reserved_gpio(gpio)) return false;
+    if (gpio < 0 || !GPIO_IS_VALID_OUTPUT_GPIO(gpio) || board::is_reserved_gpio(gpio)) return false;
     return gpio_set_level(static_cast<gpio_num_t>(gpio), level ? 1 : 0) == ESP_OK;
 }
 
