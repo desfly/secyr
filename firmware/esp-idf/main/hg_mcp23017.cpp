@@ -26,6 +26,10 @@ esp_err_t Mcp23017::initialize(
         return error;
     }
 
+    // Preload safe OFF levels before switching port A pins to outputs.
+    if ((error = force_safe_outputs()) != ESP_OK) {
+        return error;
+    }
     if ((error = write_register(kIodirA, 0x00)) != ESP_OK) {
         return error;
     }
