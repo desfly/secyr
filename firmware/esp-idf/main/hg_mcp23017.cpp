@@ -18,6 +18,7 @@ esp_err_t Mcp23017::initialize(
     I2cBus& bus,
     std::uint8_t address)
 {
+    initialized_ = false;
     auto error = bus.add_device(
         address,
         400000,
@@ -41,7 +42,9 @@ esp_err_t Mcp23017::initialize(
         return error;
     }
 
-    return force_safe_outputs();
+    error = force_safe_outputs();
+    initialized_ = error == ESP_OK;
+    return error;
 }
 
 esp_err_t Mcp23017::write_register(
@@ -89,7 +92,7 @@ esp_err_t Mcp23017::read_inputs(std::uint8_t* value)
 
 bool Mcp23017::ready() const noexcept
 {
-    return device_ != nullptr;
+    return initialized_;
 }
 
 }  // namespace homeguard::idf
