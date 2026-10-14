@@ -117,6 +117,15 @@ void test_runtime() {
     TEST_CHECK(!guarded.synchronize(model, ready));
     TEST_CHECK(guarded.state().status == hg::PhysicalOutputStatus::BackendError);
     TEST_CHECK(!guarded.state().outputs_enabled);
+
+    // Failed fail-closed writes must not mask the backend error as FailClosed.
+    FakeBackend blocked_write_failure;
+    hg::PhysicalOutputRuntime blocked_guarded;
+    TEST_CHECK(blocked_guarded.initialize(blocked_write_failure, hardware, blocked));
+    blocked_write_failure.fail_writes = true;
+    TEST_CHECK(!blocked_guarded.synchronize(model, blocked));
+    TEST_CHECK(blocked_guarded.state().status == hg::PhysicalOutputStatus::BackendError);
+    TEST_CHECK(!blocked_guarded.state().outputs_enabled);
 }
 } // namespace
 
