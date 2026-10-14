@@ -311,7 +311,18 @@ void SystemHttp::broadcast(const hg::SystemEvent& event) {
     frame.len = payload.size();
     for (auto& client : clients_) {
         if (client < 0) continue;
-        if (httpd_ws_send_frame_async(server_,client,&frame) != ESP_OK) client = -1;
+        const auto send_started_us = esp_timer_get_time();
+        const auto result = httpd_ws_send_frame_async(server_, client, &frame);
+        const auto send_elapsed_us = esp_timer_get_time() - send_started_us;
+        if (send_elapsed_us > 100000) {
+            ESP_LOGW("hg_system_http", "slow WebSocket enqueue: %lld us, socket=%d",
+                     static_cast<long long>(send_elapsed_us), client);
+        }
+        if (result != ESP_OK) {
+            ESP_LOGW("hg_system_http", "WebSocket enqueue failed: socket=%d, error=%s",
+                     client, esp_err_to_name(result));
+            client = -1;
+        }
     }
 }
 
