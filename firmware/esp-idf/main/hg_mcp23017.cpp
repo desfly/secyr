@@ -51,6 +51,7 @@ esp_err_t Mcp23017::write_register(
     std::uint8_t reg,
     std::uint8_t value)
 {
+    if (device_ == nullptr) return ESP_ERR_INVALID_STATE;
     const std::uint8_t data[]{reg, value};
     return i2c_master_transmit(
         device_,
@@ -66,6 +67,7 @@ esp_err_t Mcp23017::read_register(
     if (value == nullptr) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (device_ == nullptr) return ESP_ERR_INVALID_STATE;
     return i2c_master_transmit_receive(
         device_,
         &reg,
