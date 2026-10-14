@@ -512,8 +512,13 @@ void BleCommandRouter::handle_command(const std::string& json)
         const auto result = hg::apply_output_command(
             *model_, *readiness_, {output_id, active, alarm_active, 0});
         if (result.status == hg::OutputCommandStatus::Applied && !physical_->synchronize(*model_, *readiness_)) {
-            (void)model_->set_output_active(output_id, false, 0);
+            // Global safe-off affects every output, so invalidate all
+            // optimistic model states rather than only the requested one.
+            // Physical relay contacts still require independent feedback.
             (void)physical_->force_safe();
+            for (std::uint16_t id = 1; id <= 5; ++id) {
+                (void)model_->set_output_active(id, false, 0);
+            }
             send(kCommandReplyType, "{\"ok\":false,\"reason\":\"physical_output_failure\",\"active\":false}");
             return;
         }
