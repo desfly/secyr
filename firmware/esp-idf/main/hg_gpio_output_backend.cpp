@@ -31,9 +31,11 @@ bool GpioOutputBackend::write_expander(int gpio, bool level) {
     // A latched fault permits only the full-port OFF value, not writes
     // that might retain another relay in the energized state.
     if (expander_fault_) {
-        if (expander_->force_safe_outputs() != ESP_OK) return false;
-        expander_shadow_ = 0;
-        return true;
+        // Retry a best-effort safe-off, but never report a successful output
+        // operation while the expander is fault-latched. A successful I2C
+        // transaction is not proof that the relay contacts are de-energized.
+        if (expander_->force_safe_outputs() == ESP_OK) expander_shadow_ = 0;
+        return false;
     }
     const auto next = static_cast<std::uint8_t>(level ? (expander_shadow_ | mask) : (expander_shadow_ & ~mask));
     if (expander_->write_outputs(next) != ESP_OK) {
