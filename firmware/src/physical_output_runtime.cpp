@@ -84,7 +84,11 @@ bool PhysicalOutputRuntime::write_logical(int gpio, bool active) {
 }
 
 bool PhysicalOutputRuntime::force_safe() {
-    if (hardware_ == nullptr) return false;
+    if (hardware_ == nullptr || backend_ == nullptr) {
+        state_.status = PhysicalOutputStatus::BackendError;
+        state_.outputs_enabled = false;
+        return false;
+    }
     bool ok = true;
     ok = write_safe(hardware_->pins.siren) && ok;
     ok = write_safe(hardware_->pins.valve1) && ok;
