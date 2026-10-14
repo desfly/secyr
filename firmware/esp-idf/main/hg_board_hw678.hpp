@@ -28,6 +28,8 @@ inline constexpr gpio_num_t kRs485Rx = GPIO_NUM_18;
 
 inline constexpr gpio_num_t kServiceButton = GPIO_NUM_21;
 
+// GPIO41 and GPIO42 are assigned to the external output module, not SD.
+// SD wiring must be verified and remapped before enabling the SD driver.
 inline constexpr gpio_num_t kSdCs = GPIO_NUM_39;
 inline constexpr gpio_num_t kSdSck = GPIO_NUM_40;
 inline constexpr gpio_num_t kSdMosi = GPIO_NUM_41;
@@ -44,6 +46,8 @@ inline constexpr bool is_reserved_gpio(int gpio) noexcept
     case 3:
     case 19:
     case 20:
+    case 41:
+    case 42:
     case 35:
     case 36:
     case 37:
