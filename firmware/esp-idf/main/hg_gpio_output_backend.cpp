@@ -3,6 +3,7 @@
 #include "homeguard/hardware_profile.hpp"
 #include "driver/gpio.h"
 #include "hg_board_hw678.hpp"
+#include "esp_timer.h"
 
 namespace homeguard::idf {
 
@@ -50,6 +51,21 @@ std::uint8_t GpioOutputBackend::relay_levels() {
     return expander_shadow_;
 }
 
+std::uint64_t GpioOutputBackend::now_ms() const {
+    return clock_ != nullptr ? clock_() : static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+}
+
+bool GpioOutputBackend::enforce_lock_timeout(hg::SystemModel& model) {
+    std::lock_guard<std::mutex> lock(expander_mutex_);
+    const auto now = now_ms();
+    if (lock_deadline_ms_ == 0 || now < lock_deadline_ms_) return true;
+    // Local monotonic deadline, independent of Android, HTTP, BLE and MQTT.
+    // The output worker invokes this every 20 ms during normal operation.
+    const bool updated = model.set_output_active(5, false, now);
+    const bool applied = apply_expander(static_cast<std::uint8_t>(expander_shadow_ & ~0x02U));
+    return updated && applied;
+}
+
 bool GpioOutputBackend::force_safe_relays() {
     std::lock_guard<std::mutex> lock(expander_mutex_);
     // Prevent the background model mirror from undoing an emergency safe-off.
@@ -58,6 +74,7 @@ bool GpioOutputBackend::force_safe_relays() {
     if (expander_ == nullptr || !expander_->ready()) return false;
     if (expander_->force_safe_outputs() != ESP_OK) return false;
     expander_shadow_ = 0;
+    lock_deadline_ms_ = 0;
     return true;
 }
 
@@ -81,6 +98,9 @@ bool GpioOutputBackend::apply_expander(std::uint8_t next) {
         if (expander_->force_safe_outputs() == ESP_OK) expander_shadow_ = 0;
         return false;
     }
+    // Repeated ON requests never extend continuous relay energization.
+    if ((next & 0x02U) != 0 && (expander_shadow_ & 0x02U) == 0) lock_deadline_ms_ = now_ms() + 5000;
+    if ((next & 0x02U) == 0) lock_deadline_ms_ = 0;
     expander_shadow_ = next;
     return true;
 }

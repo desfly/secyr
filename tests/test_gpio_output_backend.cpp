@@ -11,6 +11,8 @@ std::atomic<int> overlaps{0};
 std::atomic<int> writes{0};
 std::atomic<bool> fail_write{false};
 std::uint8_t port = 0xA0;
+std::uint64_t monotonic_ms = 1000;
+std::uint64_t clock_ms() { return monotonic_ms; }
 }
 
 // Fake I2C device, real shared output backend. No ESP or physical pins are used.
@@ -79,5 +81,28 @@ int main() {
     assert(!backend.write_output(hg::direct_lock_relay_gpio, true));
     assert(!backend.synchronize_relays(model));
     assert(port == 0);
+
+    GpioOutputBackend timed(clock_ms);
+    timed.bind_expander(expander);
+    assert(timed.synchronize_relays(model));
+    assert(port == 3);
+    monotonic_ms = 5999;
+    assert(timed.synchronize_relays(model)); // another ON must not extend the pulse
+    assert(timed.enforce_lock_timeout(model));
+    assert(port == 3);
+    monotonic_ms = 6000;
+    assert(timed.enforce_lock_timeout(model));
+    assert(port == 1); // leave the light ON, turn only the lock OFF
+    assert(!model.output_snapshot(5)->active);
+    assert(timed.synchronize_relays(model));
+    assert(port == 1);
+    assert(model.set_output_active(5, true, monotonic_ms));
+    assert(timed.synchronize_relays(model));
+    monotonic_ms = 10999;
+    assert(timed.enforce_lock_timeout(model));
+    assert(port == 3);
+    monotonic_ms = 11000;
+    assert(timed.enforce_lock_timeout(model));
+    assert(port == 1);
     return 0;
 }

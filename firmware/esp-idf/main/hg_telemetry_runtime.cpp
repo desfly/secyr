@@ -151,7 +151,8 @@ void TelemetryRuntime::run_output_mirror()
 {
     while (true) {
         // Same writer/lock as HTTP and BLE. No I2C access from the zone task.
-        const bool healthy = output_backend_->synchronize_relays(*system_model_);
+        const bool expired_ok = output_backend_->enforce_lock_timeout(*system_model_);
+        const bool healthy = output_backend_->synchronize_relays(*system_model_) && expired_ok;
         mcp_outputs_healthy_ = healthy;
         if (healthy) mcp_outputs_applied_ = output_backend_->relay_levels();
         vTaskDelay(pdMS_TO_TICKS(healthy ? 20 : 1000));
