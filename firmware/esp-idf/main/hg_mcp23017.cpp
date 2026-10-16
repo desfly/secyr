@@ -18,16 +18,24 @@ esp_err_t Mcp23017::initialize(
     I2cBus& bus,
     std::uint8_t address)
 {
-    initialized_ = false;
-    auto error = bus.add_device(
-        address,
-        400000,
-        &device_);
-    if (error != ESP_OK) {
-        return error;
+    // A failed register setup may leave a valid I2C device handle behind.
+    // Reuse that handle on retry; registering the same address again would
+    // leak a handle and can make recovery impossible.
+    if (initialized_) return ESP_ERR_INVALID_STATE;
+    if (!bus.ready()) return ESP_ERR_INVALID_STATE;
+    esp_err_t error = ESP_OK;
+    if (device_ == nullptr) {
+        error = bus.add_device(address, 400000, &device_);
+        if (error != ESP_OK) {
+            device_ = nullptr;
+            return error;
+        }
     }
 
-    if ((error = force_safe_outputs()) != ESP_OK) return error;
+    // Preload safe OFF levels before switching port A pins to outputs.
+    if ((error = force_safe_outputs()) != ESP_OK) {
+        return error;
+    }
     if ((error = write_register(kIodirA, 0x00)) != ESP_OK) {
         return error;
     }
@@ -38,14 +46,16 @@ esp_err_t Mcp23017::initialize(
         return error;
     }
 
-    initialized_ = true;
-    return ESP_OK;
+    error = force_safe_outputs();
+    initialized_ = error == ESP_OK;
+    return error;
 }
 
 esp_err_t Mcp23017::write_register(
     std::uint8_t reg,
     std::uint8_t value)
 {
+    if (device_ == nullptr) return ESP_ERR_INVALID_STATE;
     const std::uint8_t data[]{reg, value};
     return i2c_master_transmit(
         device_,
@@ -61,6 +71,7 @@ esp_err_t Mcp23017::read_register(
     if (value == nullptr) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (device_ == nullptr) return ESP_ERR_INVALID_STATE;
     return i2c_master_transmit_receive(
         device_,
         &reg,
@@ -77,6 +88,7 @@ esp_err_t Mcp23017::force_safe_outputs()
 
 esp_err_t Mcp23017::write_outputs(std::uint8_t value)
 {
+    if (!initialized_) return ESP_ERR_INVALID_STATE;
     return write_register(kOlatA, value);
 }
 
@@ -97,7 +109,7 @@ esp_err_t Mcp23017::read_inputs(std::uint8_t* value)
 
 bool Mcp23017::ready() const noexcept
 {
-    return device_ != nullptr && initialized_;
+    return initialized_;
 }
 
 }  // namespace homeguard::idf

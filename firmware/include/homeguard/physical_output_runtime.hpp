@@ -13,6 +13,18 @@ public:
     virtual ~PhysicalOutputBackend() = default;
     virtual bool configure_output(int gpio, bool initial_level) = 0;
     virtual bool write_output(int gpio, bool level) = 0;
+    virtual bool synchronize_relays(const SystemModel& model) {
+        const auto light = model.output_snapshot(4);
+        const auto lock = model.output_snapshot(5);
+        const bool light_ok = write_output(direct_light_relay_gpio, light && light->active);
+        const bool lock_ok = write_output(direct_lock_relay_gpio, lock && lock->active);
+        return light_ok && lock_ok;
+    }
+    virtual bool force_safe_relays() {
+        const bool light_ok = write_output(direct_light_relay_gpio, false);
+        const bool lock_ok = write_output(direct_lock_relay_gpio, false);
+        return light_ok && lock_ok;
+    }
 };
 
 enum class PhysicalOutputStatus : std::uint8_t {

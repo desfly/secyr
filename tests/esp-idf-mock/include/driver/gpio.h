@@ -1,6 +1,7 @@
 #pragma once
 #include "esp_err.h"
 #include <cstdint>
+#define GPIO_IS_VALID_OUTPUT_GPIO(gpio) ((gpio) >= 0 && (gpio) <= 48 && (gpio) != 46)
 enum gpio_num_t {
 GPIO_NUM_0=0, GPIO_NUM_3=3, GPIO_NUM_4=4, GPIO_NUM_5=5, GPIO_NUM_6=6,
 GPIO_NUM_7=7, GPIO_NUM_8=8, GPIO_NUM_9=9, GPIO_NUM_10=10, GPIO_NUM_11=11,

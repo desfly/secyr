@@ -462,12 +462,15 @@ extern "C" void app_main()
         static_cast<WebsocketTelemetry*>(context)->publish_event(event);
     }, &g_websocket_telemetry) ? ESP_OK : ESP_ERR_NO_MEM);
     g_cloud_link.set_command_runtime(&g_system_model, &g_system_bus, &g_access_control, &g_cloud_time);
-    initialize_physical_outputs();
-    start_ble_transport();
-
+    // Initialize the I2C expander before making physical output control available.
+    // Keep BLE offline until the output backend has completed initialization.
     const auto hardware_error = g_hardware.initialize();
     if (hardware_error != ESP_OK) ESP_LOGE(kTag, "Hardware bootstrap failed: %s", esp_err_to_name(hardware_error));
     else ESP_LOGI(kTag, "Hardware bootstrap completed");
+
+    g_gpio_outputs.bind_expander(g_hardware.io_expander());
+    initialize_physical_outputs();
+    start_ble_transport();
 
     const auto https_error = start_https_server();
     if (https_error != ESP_OK) ESP_LOGW(kTag, "HTTPS transport unavailable: %s", esp_err_to_name(https_error));
@@ -487,7 +490,7 @@ extern "C" void app_main()
         schedule_cloud_start();
     }
 
-    const auto telemetry_error = g_telemetry.start(&g_hardware, &g_websocket_telemetry, &g_system_model, &g_system_bus, &g_ble_transport);
+    const auto telemetry_error = g_telemetry.start(&g_hardware, &g_websocket_telemetry, &g_system_model, &g_system_bus, &g_ble_transport, &g_gpio_outputs);
     if (telemetry_error != ESP_OK) ESP_LOGE(kTag, "Telemetry task failed: %s", esp_err_to_name(telemetry_error));
 
     const auto build = homeguard::idf::current_build_info();
