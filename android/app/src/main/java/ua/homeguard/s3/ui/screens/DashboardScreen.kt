@@ -328,7 +328,7 @@ fun DashboardScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Система", style = MaterialTheme.typography.titleMedium)
-                    StatusRow("Режим", snapshot.mode.name)
+                    StatusRow("Режим", if (snapshot.mode == ua.homeguard.s3.model.SystemMode.UNKNOWN) "Невідомо" else snapshot.mode.name)
                     StatusRow("Стан", snapshot.health.name)
                     StatusRow("Транспорт", snapshot.transport.name)
                     Text("Телеметрія #${snapshot.sequence}", style = MaterialTheme.typography.bodySmall)

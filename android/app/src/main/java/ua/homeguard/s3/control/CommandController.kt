@@ -38,6 +38,8 @@ class CommandController(
 
     fun bleState(): StateFlow<BleHomeGuardClient.State> = ble.state()
 
+    private fun bleReady(actor: String = ""): Boolean = ble.isReadyFor(settings.settings.value.deviceId, actor)
+
     suspend fun accessState(): AccessLifecycleState {
         val target = localTarget()
         clearLocalSession()
@@ -176,7 +178,7 @@ class CommandController(
     }
 
     suspend fun ensureBleSession(deviceId: String, actor: String, pin: String): Boolean {
-        if (ble.isReady()) return true
+        if (ble.isReadyFor(deviceId, actor)) return true
         if (deviceId.isBlank() || actor.isBlank() || pin.isBlank()) return false
         return runCatching {
             ble.connectAndAuthenticate(
@@ -186,7 +188,7 @@ class CommandController(
                 connectTimeoutMs = 12_000L,
                 authTimeoutMs = 8_000L,
             )
-            ble.isReady()
+            ble.isReadyFor(deviceId, actor)
         }.getOrDefault(false)
     }
 
@@ -203,16 +205,18 @@ class CommandController(
 
     private fun canUseQuickRemote(deviceId: String): Boolean =
         deviceId.isNotBlank() && deviceId == settings.settings.value.deviceId &&
-            !ble.isReady() &&
+            !bleReady() &&
             (endpoint.value.path == ControlPath.CLOUD || endpoint.value.path == ControlPath.OFFLINE)
 
     suspend fun execute(type: CommandType, actor: String = "", credential: String = ""): CommandReply {
+        val expectedBleDevice = settings.settings.value.deviceId
         // For local security controls prefer the already-authenticated BLE link.
         // This keeps Arm Home/Away and Disarm responsive even when LAN/MQTT is
         // unavailable; the controller remains authoritative for authorization.
-        if (supportsBle(type) && ble.isReady()) {
-            val bleReply = runCatching { ble.execute(type) }.getOrNull()
-            if (bleReply != null) return mapBleReply(bleReply)
+        if (supportsBle(type) && bleReady(actor)) {
+            return try { mapBleReply(ble.execute(type, expectedDeviceId = expectedBleDevice, expectedActor = actor.ifBlank { ble.access().value.actor })) }
+            catch (error: kotlinx.coroutines.CancellationException) { throw error }
+            catch (_: Exception) { CommandReply(false, code = "ble_command_outcome_unknown") }
         }
 
         if (endpoint.value.path == ControlPath.CLOUD || endpoint.value.path == ControlPath.OFFLINE) {
@@ -232,8 +236,8 @@ class CommandController(
     }
 
     suspend fun panicOverBle(): CommandReply {
-        if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
-        return runCatching { mapBleReply(ble.panic()) }
+        if (!bleReady()) return CommandReply(accepted = false, code = "ble_not_ready")
+        return runCatching { mapBleReply(ble.panic(expectedDeviceId = settings.settings.value.deviceId)) }
             .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
     }
 
@@ -242,32 +246,32 @@ class CommandController(
         active: Boolean,
         alarmActive: Boolean = false,
     ): CommandReply {
-        if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
-        return runCatching { mapBleReply(ble.controlOutput(outputId, active, alarmActive)) }
+        if (!bleReady()) return CommandReply(accepted = false, code = "ble_not_ready")
+        return runCatching { mapBleReply(ble.controlOutput(outputId, active, alarmActive, expectedDeviceId = settings.settings.value.deviceId)) }
             .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
     }
 
     suspend fun setLightOverBle(active: Boolean): CommandReply {
-        if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
-        return runCatching { mapBleReply(ble.setLight(active)) }
+        if (!bleReady()) return CommandReply(accepted = false, code = "ble_not_ready")
+        return runCatching { mapBleReply(ble.setLight(active, expectedDeviceId = settings.settings.value.deviceId)) }
             .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
     }
 
     suspend fun setValve1OverBle(active: Boolean): CommandReply {
-        if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
-        return runCatching { mapBleReply(ble.setValve1(active)) }
+        if (!bleReady()) return CommandReply(accepted = false, code = "ble_not_ready")
+        return runCatching { mapBleReply(ble.setValve1(active, expectedDeviceId = settings.settings.value.deviceId)) }
             .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
     }
 
     suspend fun setValve2OverBle(active: Boolean): CommandReply {
-        if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
-        return runCatching { mapBleReply(ble.setValve2(active)) }
+        if (!bleReady()) return CommandReply(accepted = false, code = "ble_not_ready")
+        return runCatching { mapBleReply(ble.setValve2(active, expectedDeviceId = settings.settings.value.deviceId)) }
             .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
     }
 
     suspend fun pulseLockOverBle(): CommandReply {
-        if (!ble.isReady()) return CommandReply(accepted = false, code = "ble_not_ready")
-        return runCatching { mapBleReply(ble.pulseLock()) }
+        if (!bleReady()) return CommandReply(accepted = false, code = "ble_not_ready")
+        return runCatching { mapBleReply(ble.pulseLock(expectedDeviceId = settings.settings.value.deviceId)) }
             .getOrElse { CommandReply(accepted = false, code = it.message ?: "ble_error") }
     }
 
@@ -291,13 +295,15 @@ class CommandController(
     }
 
     suspend fun pulseLock(actor: String): CommandReply {
+        val expectedBleDevice = settings.settings.value.deviceId
         // The object-card lock is a universal action, not a BLE-only control.
         // Prefer an already-authorized nearby BLE session for door latency,
         // then use a configured signed MQTT route for remote access or the
         // resolved local network path. An unknown remote result is never repeated.
-        if (ble.isReady()) {
-            val bleReply = runCatching { mapBleReply(ble.pulseLock()) }.getOrNull()
-            if (bleReply != null && (bleReply.accepted || bleReply.duplicate)) return bleReply
+        if (bleReady(actor)) {
+            return try { mapBleReply(ble.pulseLock(expectedDeviceId = expectedBleDevice, expectedActor = actor.ifBlank { ble.access().value.actor })) }
+            catch (error: kotlinx.coroutines.CancellationException) { throw error }
+            catch (_: Exception) { CommandReply(false, code = "ble_command_outcome_unknown") }
         }
 
         val target = endpoint.value

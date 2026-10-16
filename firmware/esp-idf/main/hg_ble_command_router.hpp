@@ -63,6 +63,7 @@ private:
     bool provisioning_session_prepared_{};
     std::uint32_t provisioning_epoch_{};
     std::string actor_{};
+    std::string command_request_id_{};
     std::uint32_t authenticated_epoch_{};
 };
 

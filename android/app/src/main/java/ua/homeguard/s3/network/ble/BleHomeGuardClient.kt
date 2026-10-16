@@ -44,6 +44,7 @@ class BleHomeGuardClient(private val context: Context) {
     private var nextMessageId = 1
     private var sessionActor: String? = null
     private var pendingActor: String? = null
+    private val commands = BleCommandCorrelation()
 
     fun state(): StateFlow<State> = stateFlow.asStateFlow()
     fun snapshots(): StateFlow<SystemSnapshot> = snapshotFlow.asStateFlow()
@@ -68,6 +69,7 @@ class BleHomeGuardClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun disconnect() {
+        commands.clear()
         gatt?.disconnect(); gatt?.close(); gatt = null
         rx = null; tx = null; mtu = 23; decoder.reset(); sessionActor = null; pendingActor = null
         synchronized(writeQueue) { writeQueue.clear(); writeInFlight = false }
@@ -138,8 +140,12 @@ class BleHomeGuardClient(private val context: Context) {
         val payload = JSONObject(arguments.toString())
             .put("actor", actor)
             .put("command", command)
+        val requestId = commands.begin()
+        payload.put("requestId", requestId)
         commandReplyFlow.value = null
-        return sendJson(HomeGuardBleContract.Type.COMMAND, payload)
+        val queued = sendJson(HomeGuardBleContract.Type.COMMAND, payload)
+        if (!queued) commands.clear()
+        return queued
     }
 
     fun controlOutput(outputId: Int, active: Boolean, alarmActive: Boolean = false): Boolean =
@@ -182,7 +188,8 @@ class BleHomeGuardClient(private val context: Context) {
 
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
-            if (gatt !== g || status != BluetoothGatt.GATT_SUCCESS) { stateFlow.value = State.ERROR; return }
+            if (gatt !== g) return
+            if (status != BluetoothGatt.GATT_SUCCESS) { stateFlow.value = State.ERROR; return }
             val service = g.getService(HomeGuardBleContract.SERVICE_UUID)
             rx = service?.getCharacteristic(HomeGuardBleContract.RX_UUID)
             tx = service?.getCharacteristic(HomeGuardBleContract.TX_UUID)
@@ -261,7 +268,7 @@ class BleHomeGuardClient(private val context: Context) {
 
             HomeGuardBleContract.Type.HELLO_SESSION -> {
                 sessionReplyFlow.value = json
-                if (json.optBoolean("ok", false)) {
+                if (json.optBoolean("ok", false) && json.optString("actor") == pendingActor) {
                     sessionActor = pendingActor
                     pendingActor = null
                     stateFlow.value = if (sessionActor != null) State.READY else State.CONNECTED
@@ -285,9 +292,14 @@ class BleHomeGuardClient(private val context: Context) {
                 }
             }
 
-            HomeGuardBleContract.Type.COMMAND_REPLY -> commandReplyFlow.value = json
+            HomeGuardBleContract.Type.COMMAND_REPLY -> {
+                if (commands.accept(json)) commandReplyFlow.value = json
+            }
             HomeGuardBleContract.Type.ERROR -> {
                 errorFlow.value = json
+                if (commands.accept(json, error = true)) {
+                    commandReplyFlow.value = JSONObject(json.toString()).put("ok", false)
+                }
                 if (json.optString("reason") == "ble_session_required") {
                     sessionActor = null
                     pendingActor = null
