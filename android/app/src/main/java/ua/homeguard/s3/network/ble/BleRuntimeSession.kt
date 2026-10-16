@@ -1,6 +1,8 @@
 package ua.homeguard.s3.network.ble
 
 import android.content.Context
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -77,6 +79,8 @@ class BleRuntimeSession(context: Context) {
     private val scanner = BleProvisioningScanner(appContext)
     private val client = BleHomeGuardClient(appContext)
     private val accessFlow = MutableStateFlow(BleSessionAccess())
+    private val gate = Mutex()
+    @Volatile private var boundDeviceId = ""
 
     companion object {
         const val VALVE_1_OUTPUT_ID = 2
@@ -92,13 +96,24 @@ class BleRuntimeSession(context: Context) {
     fun access(): StateFlow<BleSessionAccess> = accessFlow.asStateFlow()
     fun isReady(): Boolean = client.state().value == BleHomeGuardClient.State.READY
 
-    suspend fun connect(deviceId: String, timeoutMs: Long = 15_000L) {
+    fun isReadyFor(deviceId: String, actor: String = ""): Boolean = isReady() &&
+        deviceId.isNotBlank() && boundDeviceId.equals(deviceId, ignoreCase = true) &&
+        accessFlow.value.authenticated && (actor.isBlank() || accessFlow.value.actor == actor)
+
+    suspend fun connect(deviceId: String, timeoutMs: Long = 15_000L) = gate.withLock {
+        connectLocked(deviceId, timeoutMs)
+    }
+
+    private suspend fun connectLocked(deviceId: String, timeoutMs: Long) {
         require(deviceId.isNotBlank()) { "BLE device id is empty" }
-        if (client.state().value == BleHomeGuardClient.State.READY ||
-            client.state().value == BleHomeGuardClient.State.CONNECTED) return
+        if (boundDeviceId.equals(deviceId, ignoreCase = true) &&
+            (client.state().value == BleHomeGuardClient.State.READY ||
+                client.state().value == BleHomeGuardClient.State.CONNECTED)) return
+        disconnect()
 
         accessFlow.value = BleSessionAccess()
         val device = scanner.find(deviceId, timeoutMs.coerceAtMost(12_000L))
+        boundDeviceId = deviceId
         client.connect(device)
         withTimeout(timeoutMs) {
             client.state().filter { state ->
@@ -113,7 +128,11 @@ class BleRuntimeSession(context: Context) {
         }
     }
 
-    suspend fun authenticate(actor: String, pin: String, timeoutMs: Long = 8_000L): JSONObject {
+    suspend fun authenticate(actor: String, pin: String, timeoutMs: Long = 8_000L): JSONObject = gate.withLock {
+        authenticateLocked(actor, pin, timeoutMs)
+    }
+
+    private suspend fun authenticateLocked(actor: String, pin: String, timeoutMs: Long): JSONObject {
         require(actor.isNotBlank()) { "BLE actor is empty" }
         require(pin.length in 4..12 && pin.all(Char::isDigit)) { "Invalid BLE PIN" }
         require(client.authenticate(actor, pin)) { "BLE authentication could not start" }
@@ -126,7 +145,7 @@ class BleRuntimeSession(context: Context) {
             "BLE authentication rejected: ${reply.optString("reason", "unauthorized")}"
         }
         accessFlow.value = BleSessionAccess.fromHello(reply)
-        require(accessFlow.value.authenticated) { "BLE authentication reply has no actor" }
+        require(accessFlow.value.actor == actor) { "BLE authentication actor mismatch" }
         withTimeout(timeoutMs) {
             client.state().filter { it == BleHomeGuardClient.State.READY }.first()
         }
@@ -139,10 +158,10 @@ class BleRuntimeSession(context: Context) {
         pin: String,
         connectTimeoutMs: Long = 15_000L,
         authTimeoutMs: Long = 8_000L,
-    ): JSONObject {
-        connect(deviceId, connectTimeoutMs)
-        if (isReady() && accessFlow.value.authenticated) {
-            return JSONObject()
+    ): JSONObject = gate.withLock {
+        connectLocked(deviceId, connectTimeoutMs)
+        if (isReadyFor(deviceId, actor)) {
+            return@withLock JSONObject()
                 .put("ok", true)
                 .put("state", "authenticated")
                 .put("actor", accessFlow.value.actor)
@@ -150,12 +169,12 @@ class BleRuntimeSession(context: Context) {
                 .put("role", accessFlow.value.role)
                 .put("transport", "ble")
         }
-        return authenticate(actor, pin, authTimeoutMs)
+        authenticateLocked(actor, pin, authTimeoutMs)
     }
 
-    suspend fun execute(type: CommandType, timeoutMs: Long = 8_000L): JSONObject {
-        require(isReady()) { "BLE runtime is not authenticated" }
-        return when (type) {
+    suspend fun execute(type: CommandType, timeoutMs: Long = 8_000L, expectedDeviceId: String = boundDeviceId, expectedActor: String = accessFlow.value.actor): JSONObject = gate.withLock {
+        require(isReadyFor(expectedDeviceId, expectedActor)) { "BLE runtime is not authenticated" }
+        when (type) {
             CommandType.ARM_HOME -> executeNamedCommand("security.arm_home", type, timeoutMs)
             CommandType.ARM_AWAY -> executeNamedCommand("security.arm_away", type, timeoutMs)
             CommandType.DISARM -> executeNamedCommand("security.disarm", type, timeoutMs)
@@ -185,56 +204,57 @@ class BleRuntimeSession(context: Context) {
         return lastReply
     }
 
-    suspend fun setLight(active: Boolean, timeoutMs: Long = 8_000L): JSONObject =
-        controlOutput(LIGHT_OUTPUT_ID, active, false, timeoutMs)
+    suspend fun setLight(active: Boolean, timeoutMs: Long = 8_000L, expectedDeviceId: String = boundDeviceId, expectedActor: String = accessFlow.value.actor): JSONObject =
+        controlOutput(LIGHT_OUTPUT_ID, active, false, timeoutMs, expectedDeviceId, expectedActor)
 
-    suspend fun setValve1(active: Boolean, timeoutMs: Long = 8_000L): JSONObject {
+    suspend fun setValve1(active: Boolean, timeoutMs: Long = 8_000L, expectedDeviceId: String = boundDeviceId, expectedActor: String = accessFlow.value.actor): JSONObject {
         requireAllowed(if (active) "valve.open" else "valve.close")
-        return controlOutput(VALVE_1_OUTPUT_ID, active, false, timeoutMs)
+        return controlOutput(VALVE_1_OUTPUT_ID, active, false, timeoutMs, expectedDeviceId, expectedActor)
     }
 
-    suspend fun setValve2(active: Boolean, timeoutMs: Long = 8_000L): JSONObject {
+    suspend fun setValve2(active: Boolean, timeoutMs: Long = 8_000L, expectedDeviceId: String = boundDeviceId, expectedActor: String = accessFlow.value.actor): JSONObject {
         requireAllowed(if (active) "valve.open" else "valve.close")
-        return controlOutput(VALVE_2_OUTPUT_ID, active, false, timeoutMs)
+        return controlOutput(VALVE_2_OUTPUT_ID, active, false, timeoutMs, expectedDeviceId, expectedActor)
     }
 
-    /**
-     * Energizes the lock relay for exactly five seconds from the Android side.
-     * The OFF command is attempted in NonCancellable context even if the caller
-     * leaves the screen or cancels the command coroutine.
-     */
-    suspend fun pulseLock(timeoutMs: Long = 8_000L): JSONObject {
-        val onReply = controlOutput(LOCK_OUTPUT_ID, true, false, timeoutMs)
-        if (!onReply.optBoolean("ok", false)) return onReply
+    /** Serializes ON/delay/OFF and never reports OFF without its acknowledgement. */
+    suspend fun pulseLock(timeoutMs: Long = 8_000L, expectedDeviceId: String = boundDeviceId, expectedActor: String = accessFlow.value.actor): JSONObject = gate.withLock {
+        require(isReadyFor(expectedDeviceId, expectedActor)) { "BLE target changed before command" }
+        val onReply = controlOutputLocked(LOCK_OUTPUT_ID, true, false, timeoutMs)
+        if (onReply.opt("ok") != true) return@withLock onReply
+        var offReply: JSONObject? = null
         try {
             delay(LOCK_PULSE_MS)
         } finally {
             withContext(NonCancellable) {
-                runCatching { controlOutput(LOCK_OUTPUT_ID, false, false, timeoutMs) }
+                offReply = controlOutputLocked(LOCK_OUTPUT_ID, false, false, timeoutMs)
             }
         }
-        return JSONObject(onReply.toString())
-            .put("pulseMs", LOCK_PULSE_MS)
-            .put("active", false)
+        val confirmed = requireNotNull(offReply)
+        if (confirmed.opt("ok") != true || confirmed.opt("active") != false) return@withLock JSONObject().put("ok", false).put("reason", "lock_off_not_confirmed")
+        JSONObject(onReply.toString()).put("pulseMs", LOCK_PULSE_MS).put("active", false)
     }
 
-    suspend fun panic(timeoutMs: Long = 8_000L): JSONObject {
-        require(isReady()) { "BLE runtime is not authenticated" }
+    suspend fun panic(timeoutMs: Long = 8_000L, expectedDeviceId: String = boundDeviceId, expectedActor: String = accessFlow.value.actor): JSONObject = gate.withLock {
+        require(isReadyFor(expectedDeviceId, expectedActor)) { "BLE runtime is not authenticated" }
         requireAllowed("security.panic")
         require(client.panic()) { "BLE panic command could not start" }
-        return awaitCommandReply(timeoutMs)
+        awaitCommandReply(timeoutMs)
     }
 
     suspend fun sendCommand(
         command: String,
         arguments: JSONObject = JSONObject(),
         timeoutMs: Long = 8_000L,
-    ): JSONObject {
+        expectedDeviceId: String = boundDeviceId,
+        expectedActor: String = accessFlow.value.actor,
+    ): JSONObject = gate.withLock {
         require(isReady()) { "BLE runtime is not authenticated" }
+        require(isReadyFor(expectedDeviceId, expectedActor)) { "BLE target changed before command" }
         require(command.isNotBlank()) { "BLE command is empty" }
         requireAllowed(command)
         require(client.sendCommand(command, arguments)) { "BLE command could not start" }
-        return awaitCommandReply(timeoutMs)
+        awaitCommandReply(timeoutMs)
     }
 
     suspend fun controlOutput(
@@ -242,7 +262,14 @@ class BleRuntimeSession(context: Context) {
         active: Boolean,
         alarmActive: Boolean = false,
         timeoutMs: Long = 8_000L,
-    ): JSONObject {
+        expectedDeviceId: String = boundDeviceId,
+        expectedActor: String = accessFlow.value.actor,
+    ): JSONObject = gate.withLock {
+        require(isReadyFor(expectedDeviceId, expectedActor)) { "BLE target changed before command" }
+        controlOutputLocked(outputId, active, alarmActive, timeoutMs)
+    }
+
+    private suspend fun controlOutputLocked(outputId: Int, active: Boolean, alarmActive: Boolean, timeoutMs: Long): JSONObject {
         require(isReady()) { "BLE runtime is not authenticated" }
         require(outputId in 1..65535) { "Invalid output id" }
         // Generic output.control does not have a matching HELLO capability yet;
@@ -252,6 +279,7 @@ class BleRuntimeSession(context: Context) {
     }
 
     fun disconnect() {
+        boundDeviceId = ""
         accessFlow.value = BleSessionAccess()
         client.disconnect()
     }
@@ -264,7 +292,12 @@ class BleRuntimeSession(context: Context) {
         }
     }
 
-    private suspend fun awaitCommandReply(timeoutMs: Long): JSONObject = withTimeout(timeoutMs) {
-        client.commandReplies().filterNotNull().first()
+    private suspend fun awaitCommandReply(timeoutMs: Long): JSONObject = try {
+        withTimeout(timeoutMs) { client.commandReplies().filterNotNull().first() }
+    } catch (error: Throwable) {
+        // A queued action may already have executed. Close this session before
+        // another action can observe a delayed response from the old command.
+        disconnect()
+        throw error
     }
 }

@@ -122,13 +122,14 @@ class DeviceSession(
 
         bleTelemetryJob = scope.launch {
             ble.snapshots().collect { snapshot ->
-                if (ble.isReady()) telemetry.acceptFallbackSnapshot(snapshot)
+                if (ble.isReadyFor(settings.settings.value.deviceId)) telemetry.acceptFallbackSnapshot(snapshot)
+                else telemetry.clearFallbackSnapshot()
             }
         }
 
         bleStateJob = scope.launch {
             ble.state().collect { state ->
-                if (state == BleHomeGuardClient.State.READY) {
+                if (state == BleHomeGuardClient.State.READY && ble.isReadyFor(settings.settings.value.deviceId)) {
                     val snapshot = ble.snapshots().value
                     if (snapshot.zones.isNotEmpty()) telemetry.acceptFallbackSnapshot(snapshot)
                 } else {
@@ -164,6 +165,7 @@ class DeviceSession(
     private fun applyPersistedMqtt() {
         val appSettings = settings.settings.value
         val deviceId = appSettings.deviceId
+        if (!ble.isReadyFor(deviceId)) telemetry.clearFallbackSnapshot()
         remoteTransports.configureMqtt(
             MqttConnectionConfig(
                 brokerUri = appSettings.mqttBrokerUri,

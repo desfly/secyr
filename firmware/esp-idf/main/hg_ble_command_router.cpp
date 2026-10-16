@@ -214,7 +214,13 @@ bool BleCommandRouter::prepare_provisioning_session(std::uint64_t current_ms)
 void BleCommandRouter::send(std::uint8_t type, const std::string& json) const
 {
     if (transport_ == nullptr || !transport_->connected()) return;
-    const auto error = transport_->send_message(type, json);
+    std::string response = json;
+    if ((type == kCommandReplyType || type == kErrorType) && !command_request_id_.empty() &&
+        !response.empty() && response.back() == '}') {
+        response.pop_back();
+        response += ",\"requestId\":\"" + json_escape(command_request_id_) + "\"}";
+    }
+    const auto error = transport_->send_message(type, response);
     if (error != ESP_OK) ESP_LOGW(kTag, "BLE reply failed: %s", esp_err_to_name(error));
 }
 
@@ -405,6 +411,13 @@ void BleCommandRouter::handle_hello(const std::string& json)
 
 void BleCommandRouter::handle_command(const std::string& json)
 {
+    command_request_id_.clear();
+    (void)http_util::parse_json_string(json, "requestId", command_request_id_);
+    if (command_request_id_.size() > 128U) {
+        command_request_id_.clear();
+        send_error("invalid_request_id");
+        return;
+    }
     if (!session_valid()) {
         actor_.clear();
         authenticated_epoch_ = 0;
