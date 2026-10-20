@@ -176,7 +176,7 @@ esp_err_t W5500::initialize()
 
     error = esp_event_handler_register(
         IP_EVENT,
-        IP_EVENT_ETH_GOT_IP,
+        ESP_EVENT_ANY_ID,
         &W5500::on_ip_event,
         this);
     if (error != ESP_OK) {
@@ -257,16 +257,23 @@ void W5500::on_eth_event(
 void W5500::on_ip_event(
     void* context,
     esp_event_base_t,
-    std::int32_t,
+    std::int32_t id,
     void* data)
 {
     auto* self = static_cast<W5500*>(context);
-    auto* event =
-        static_cast<ip_event_got_ip_t*>(data);
-
-    if (self == nullptr || event == nullptr || event->esp_netif != self->netif_) {
+    if (self == nullptr) return;
+    if (id == IP_EVENT_ETH_LOST_IP) {
+        // DHCP may lose its lease while PHY link remains up.
+        portENTER_CRITICAL(&self->status_lock_);
+        self->has_ip_ = false;
+        self->ipv4_addr_ = 0;
+        portEXIT_CRITICAL(&self->status_lock_);
+        ESP_LOGW(kTag, "Ethernet lost IPv4 lease");
         return;
     }
+    if (id != IP_EVENT_ETH_GOT_IP) return;
+    auto* event = static_cast<ip_event_got_ip_t*>(data);
+    if (event == nullptr || event->esp_netif != self->netif_) return;
 
     char buffer[16]{};
     esp_ip4addr_ntoa(

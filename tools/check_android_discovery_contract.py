@@ -21,6 +21,7 @@ checks = {
     "W5500 snapshot is by value": "W5500Status status() const;" in w5500_h and "const W5500Status& status()" not in w5500_h,
     "W5500 status fields guarded": "portENTER_CRITICAL(&self->status_lock_);" in w5500_cpp and "portENTER_CRITICAL(&status_lock_);" in w5500_cpp,
     "W5500 stale IP rejected": "if (!link_up)" in w5500_cpp and "event->esp_netif != self->netif_" in w5500_cpp,
+    "W5500 lost DHCP lease clears IPv4": "IP_EVENT_ETH_LOST_IP" in w5500_cpp and "self->ipv4_addr_ = 0;" in w5500_cpp,
     "UDP request token": 'const val REQUEST = "HG_DISCOVER_V1"' in udp,
     "UDP reply protocol": 'json.optString("protocol") != "homeguard-discovery-v1"' in udp,
     "Wi-Fi socket binding": "wifiNetwork.bindSocket(socket)" in udp,

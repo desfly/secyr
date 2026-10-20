@@ -10,6 +10,7 @@ def read(name: str) -> str:
 
 app = read("app_main.cpp")
 link = read("hg_cloud_link.cpp")
+link_header = read("hg_cloud_link.hpp")
 http = read("hg_cloud_http.cpp")
 nvs = read("hg_cloud_nvs.cpp")
 trust_nvs = read("hg_cloud_trust_nvs.cpp")
@@ -53,6 +54,12 @@ require("trust.version <= current.version" in trust_nvs and "ESP_ERR_INVALID_STA
         "Cloud Command Trust store does not reject version rollback")
 require("cloud_->stop()" in http and "cloud_->start(" in http, "cloud config change does not restart MQTT")
 require("responses" in link and "response_topic_" in link, "MQTT response topic missing")
+require("std::atomic<bool> connected_" in link_header and "std::atomic<bool> configured_" in link_header,
+        "MQTT status flags must be atomic across callback/timer/HTTP tasks")
+require("std::atomic<std::uint32_t> connect_count_" in link_header and "std::atomic<std::uint32_t> disconnect_count_" in link_header,
+        "MQTT reconnect counters must be atomic")
+require('"HG-UNKNOWN"' not in link and "device_id_[0] = '\\0';" in link,
+        "unique device identity must fail closed on MAC read error")
 require("handle_command(event->data" in link, "MQTT command payload is not routed")
 require("trusted_time_->ready()" in link and "expires_at_ms" in link and "issued_at_ms" in link,
         "MQTT command freshness is not gated by trusted time")

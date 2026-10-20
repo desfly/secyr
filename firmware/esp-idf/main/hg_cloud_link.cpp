@@ -318,7 +318,10 @@ void CloudLink::make_device_id()
 {
     std::uint8_t mac[6]{};
     if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
-        std::strncpy(device_id_.data(), "HG-UNKNOWN", device_id_.size() - 1);
+        // A shared fallback ID could bind different controllers to one identity.
+        // Fail closed instead of advertising or authenticating HG-UNKNOWN.
+        device_id_[0] = '\0';
+        ESP_LOGE(kTag, "Cannot derive unique device ID from Wi-Fi MAC");
         return;
     }
     std::snprintf(device_id_.data(), device_id_.size(),

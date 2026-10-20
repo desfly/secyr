@@ -5,6 +5,7 @@
 #include "mqtt_client.h"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -23,10 +24,10 @@ public:
     void set_command_runtime(hg::SystemModel* model, hg::SystemEventBus* bus, homeguard::AccessControl* access_control, CloudTrustedTime* trusted_time = nullptr);
 
     [[nodiscard]] const char* device_id() const { return device_id_.data(); }
-    [[nodiscard]] bool configured() const { return configured_; }
-    [[nodiscard]] bool connected() const { return connected_; }
-    [[nodiscard]] std::uint32_t connect_count() const { return connect_count_; }
-    [[nodiscard]] std::uint32_t disconnect_count() const { return disconnect_count_; }
+    [[nodiscard]] bool configured() const { return configured_.load(); }
+    [[nodiscard]] bool connected() const { return connected_.load(); }
+    [[nodiscard]] std::uint32_t connect_count() const { return connect_count_.load(); }
+    [[nodiscard]] std::uint32_t disconnect_count() const { return disconnect_count_.load(); }
 
     esp_err_t publish_state(const char* json, int qos = 1, bool retain = true);
     esp_err_t issue_disarm_challenge(const char* request_id);
@@ -70,10 +71,11 @@ private:
     homeguard::AccessControl* access_control_{};
     CloudTrustedTime* trusted_time_{};
     bool event_bus_subscribed_{};
-    bool configured_{};
-    bool connected_{};
-    std::uint32_t connect_count_{};
-    std::uint32_t disconnect_count_{};
+    // MQTT event callbacks, ESP timers and HTTP status run on different tasks.
+    std::atomic<bool> configured_{false};
+    std::atomic<bool> connected_{false};
+    std::atomic<std::uint32_t> connect_count_{0};
+    std::atomic<std::uint32_t> disconnect_count_{0};
     std::uint64_t heartbeat_sequence_{};
     std::uint64_t state_sequence_{};
 };
