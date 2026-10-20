@@ -2,6 +2,7 @@
 #include "hg_hardware_bootstrap.hpp"
 #include "hg_ble_transport.hpp"
 #include "hg_gpio_output_backend.hpp"
+#include "device_discovery.hpp"
 #include "websocket_telemetry.hpp"
 #include "homeguard/system_model.hpp"
 #include "homeguard/hardware_calibration.hpp"
@@ -11,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -115,7 +117,8 @@ esp_err_t TelemetryRuntime::start(
     hg::SystemModel* system_model,
     hg::SystemEventBus* system_bus,
     BleTransport* ble_transport,
-    GpioOutputBackend* output_backend)
+    GpioOutputBackend* output_backend,
+    DeviceDiscoveryService* discovery)
 {
     if (hardware == nullptr || websocket == nullptr || system_model == nullptr || system_bus == nullptr || output_backend == nullptr) return ESP_ERR_INVALID_ARG;
     hardware_ = hardware;
@@ -124,6 +127,7 @@ esp_err_t TelemetryRuntime::start(
     system_bus_ = system_bus;
     ble_transport_ = ble_transport;
     output_backend_ = output_backend;
+    discovery_ = discovery;
     auto result = xTaskCreate(&TelemetryRuntime::zone_task_entry, "hg_zones", 4096, this, 7, nullptr);
     if (result != pdPASS) return ESP_ERR_NO_MEM;
     result = xTaskCreate(&TelemetryRuntime::output_mirror_task_entry, "hg_io_mirror", 3072, this, 4, nullptr);
@@ -345,9 +349,19 @@ void TelemetryRuntime::run()
         health_.set(hg::Component::Rtc, rtc_valid ? hg::HealthState::Ok : module_health(hardware_status.ds3231.state), now_ms);
 
         wifi_ap_record_t wifi_ap{};
-        const bool wifi_connected = esp_wifi_sta_get_ap_info(&wifi_ap) == ESP_OK;
+        esp_netif_ip_info_t sta_ip{};
+        esp_netif_t* sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        const bool wifi_connected = esp_wifi_sta_get_ap_info(&wifi_ap) == ESP_OK &&
+            sta_netif != nullptr && esp_netif_get_ip_info(sta_netif, &sta_ip) == ESP_OK &&
+            sta_ip.ip.addr != 0;
+        wifi_mode_t wifi_mode = WIFI_MODE_NULL;
+        const bool ap_enabled = esp_wifi_get_mode(&wifi_mode) == ESP_OK &&
+            (wifi_mode == WIFI_MODE_AP || wifi_mode == WIFI_MODE_APSTA);
         const auto ethernet_status = hardware_->ethernet().status();
-        const auto transport = ethernet_status.link_up && ethernet_status.has_ip ? hg::Transport::Ethernet : (wifi_connected ? hg::Transport::WifiSta : hg::Transport::EmergencyAp);
+        const auto transport = ethernet_status.link_up && ethernet_status.has_ip ? hg::Transport::Ethernet :
+            (wifi_connected ? hg::Transport::WifiSta : (ap_enabled ? hg::Transport::EmergencyAp : hg::Transport::None));
+        // Preferred usable network is not proof of command/ACK delivery.
+        if (discovery_ != nullptr) discovery_->set_transport(transport);
         health_.set(hg::Component::Wifi, wifi_connected ? hg::HealthState::Ok : hg::HealthState::Degraded, now_ms);
 
         // The high-priority zone task is the only owner of the security ADS1115.

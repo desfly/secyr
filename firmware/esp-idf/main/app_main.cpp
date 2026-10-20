@@ -490,7 +490,7 @@ extern "C" void app_main()
         schedule_cloud_start();
     }
 
-    const auto telemetry_error = g_telemetry.start(&g_hardware, &g_websocket_telemetry, &g_system_model, &g_system_bus, &g_ble_transport, &g_gpio_outputs);
+    const auto telemetry_error = g_telemetry.start(&g_hardware, &g_websocket_telemetry, &g_system_model, &g_system_bus, &g_ble_transport, &g_gpio_outputs, &g_device_discovery);
     if (telemetry_error != ESP_OK) ESP_LOGE(kTag, "Telemetry task failed: %s", esp_err_to_name(telemetry_error));
 
     const auto build = homeguard::idf::current_build_info();

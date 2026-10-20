@@ -21,7 +21,7 @@ constexpr std::uint32_t kLinkPollPeriodMs = 100;
 
 esp_err_t W5500::initialize()
 {
-    if (status_.initialized) {
+    if (status().initialized) {
         return ESP_OK;
     }
 
@@ -184,14 +184,16 @@ esp_err_t W5500::initialize()
         return error;
     }
 
-    status_.initialized = true;
+    portENTER_CRITICAL(&status_lock_);
+    initialized_ = true;
+    portEXIT_CRITICAL(&status_lock_);
     ESP_LOGI(kTag, "W5500 ready");
     return ESP_OK;
 }
 
 esp_err_t W5500::start()
 {
-    if (!status_.initialized || eth_ == nullptr) {
+    if (!status().initialized || eth_ == nullptr) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -207,7 +209,15 @@ esp_err_t W5500::stop()
     if (eth_ == nullptr) {
         return ESP_OK;
     }
-    return esp_eth_stop(eth_);
+    const auto error = esp_eth_stop(eth_);
+    if (error == ESP_OK) {
+        portENTER_CRITICAL(&status_lock_);
+        link_up_ = false;
+        has_ip_ = false;
+        ipv4_addr_ = 0;
+        portEXIT_CRITICAL(&status_lock_);
+    }
+    return error;
 }
 
 void W5500::on_eth_event(
@@ -222,7 +232,11 @@ void W5500::on_eth_event(
     }
 
     if (id == ETHERNET_EVENT_CONNECTED) {
-        self->status_.link_up = true;
+        portENTER_CRITICAL(&self->status_lock_);
+        self->link_up_ = true;
+        self->has_ip_ = false;
+        self->ipv4_addr_ = 0;
+        portEXIT_CRITICAL(&self->status_lock_);
         if (self->netif_ != nullptr) {
             const auto dhcp_error = esp_netif_dhcpc_start(self->netif_);
             if (dhcp_error != ESP_OK && dhcp_error != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
@@ -231,9 +245,11 @@ void W5500::on_eth_event(
         }
         ESP_LOGI(kTag, "LINK UP; waiting for IPv4");
     } else if (id == ETHERNET_EVENT_DISCONNECTED) {
-        self->status_.link_up = false;
-        self->status_.has_ip = false;
-        self->status_.ipv4.clear();
+        portENTER_CRITICAL(&self->status_lock_);
+        self->link_up_ = false;
+        self->has_ip_ = false;
+        self->ipv4_addr_ = 0;
+        portEXIT_CRITICAL(&self->status_lock_);
         ESP_LOGW(kTag, "LINK DOWN");
     }
 }
@@ -248,7 +264,7 @@ void W5500::on_ip_event(
     auto* event =
         static_cast<ip_event_got_ip_t*>(data);
 
-    if (self == nullptr || event == nullptr) {
+    if (self == nullptr || event == nullptr || event->esp_netif != self->netif_) {
         return;
     }
 
@@ -258,14 +274,41 @@ void W5500::on_ip_event(
         buffer,
         sizeof(buffer));
 
-    self->status_.has_ip = true;
-    self->status_.ipv4 = buffer;
+    portENTER_CRITICAL(&self->status_lock_);
+    const bool link_up = self->link_up_;
+    if (link_up) {
+        self->ipv4_addr_ = event->ip_info.ip.addr;
+        self->has_ip_ = true;
+    }
+    portEXIT_CRITICAL(&self->status_lock_);
+    if (!link_up) {
+        ESP_LOGW(kTag, "Ignoring IPv4 event while LINK DOWN");
+        return;
+    }
     ESP_LOGI(kTag, "IPv4 %s", buffer);
 }
 
-const W5500Status& W5500::status() const noexcept
+W5500Status W5500::status() const
 {
-    return status_;
+    W5500Status snapshot{};
+    std::uint32_t address = 0;
+    portENTER_CRITICAL(&status_lock_);
+    snapshot.initialized = initialized_;
+    snapshot.link_up = link_up_;
+    snapshot.has_ip = has_ip_;
+    address = ipv4_addr_;
+    portEXIT_CRITICAL(&status_lock_);
+    // Never allocate a std::string while holding a FreeRTOS spinlock.
+    if (snapshot.link_up && snapshot.has_ip) {
+        esp_ip4_addr_t ip{};
+        ip.addr = address;
+        char buffer[16]{};
+        esp_ip4addr_ntoa(&ip, buffer, sizeof(buffer));
+        snapshot.ipv4 = buffer;
+    } else {
+        snapshot.has_ip = false;
+    }
+    return snapshot;
 }
 
 }  // namespace homeguard::idf
