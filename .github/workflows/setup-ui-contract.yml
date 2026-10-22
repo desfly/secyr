@@ -1,6 +1,7 @@
 name: Setup UI Contract
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
   push:
@@ -10,43 +11,71 @@ permissions:
   contents: read
 
 concurrency:
-  group: setup-ui-${{ github.ref }}
+  group: setup-ui-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   setup-ui:
-    name: Responsive setup + Wi-Fi list
-    runs-on: ubuntu-latest
+    name: Responsive setup + Wi-Fi behavior
+    runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
-      - name: Setup UI source contract
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Setup UI source boundary
         run: python tools/check_setup_ui_contract.py
       - name: JavaScript syntax
         run: node --check web/access-session.js
-      - name: Runtime password-eye smoke — desktop + mobile
+      - name: Runtime setup UI behavior — desktop + mobile
         shell: bash
         run: |
           set -euo pipefail
-          python tools/setup_eye_runtime_smoke.py --web web --port 8771 >/tmp/setup-eye-server.log 2>&1 &
+          diagnostics="${RUNNER_TEMP}/setup-ui-contract"
+          server_log="${RUNNER_TEMP}/setup-ui-server.log"
+          mkdir -p "${diagnostics}"
+          python tools/setup_eye_runtime_smoke.py --web web --port 8771 >"${server_log}" 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          ready=false
           for attempt in {1..30}; do
-            if curl -fsS http://127.0.0.1:8771/api/v1/access/state >/dev/null; then break; fi
+            if curl -fsS http://127.0.0.1:8771/api/v1/access/state >/dev/null; then
+              ready=true
+              break
+            fi
             sleep 0.1
           done
+          if [[ "${ready}" != true ]]; then
+            echo 'Setup UI smoke server did not become ready.' >&2
+            cat "${server_log}" >&2
+            exit 1
+          fi
 
-          google-chrome --headless --no-sandbox --disable-gpu \
+          chrome_bin="$(command -v google-chrome || command -v google-chrome-stable || true)"
+          if [[ -z "${chrome_bin}" ]]; then
+            echo 'Google Chrome is unavailable on the runner.' >&2
+            exit 1
+          fi
+
+          "${chrome_bin}" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --log-level=3 \
             --window-size=1920,1080 --virtual-time-budget=7000 \
-            --dump-dom http://127.0.0.1:8771/ > /tmp/setup-eye-desktop.html
-          grep -q 'data-setup-eye-smoke="done"' /tmp/setup-eye-desktop.html
-          grep -q 'data-setup-eye-count="2"' /tmp/setup-eye-desktop.html
+            --dump-dom http://127.0.0.1:8771/ > "${diagnostics}/desktop.html"
+          python tools/check_setup_ui_runtime_dump.py "${diagnostics}/desktop.html" --viewport desktop
 
-          google-chrome --headless --no-sandbox --disable-gpu \
+          "${chrome_bin}" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --log-level=3 \
             --window-size=390,844 --virtual-time-budget=7000 \
-            --dump-dom http://127.0.0.1:8771/ > /tmp/setup-eye-mobile.html
-          grep -q 'data-setup-eye-smoke="done"' /tmp/setup-eye-mobile.html
-          grep -q 'data-setup-eye-count="2"' /tmp/setup-eye-mobile.html
+            --dump-dom http://127.0.0.1:8771/ > "${diagnostics}/mobile.html"
+          python tools/check_setup_ui_runtime_dump.py "${diagnostics}/mobile.html" --viewport mobile
 
-          echo 'Setup password eye runtime PASS: desktop + mobile; visible and click-toggle verified.'
+          echo 'Setup UI runtime PASS: responsive layout, Wi-Fi selection and password eyes verified.'
+      - name: Upload setup UI diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: setup-ui-contract-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/setup-ui-contract/
+            ${{ runner.temp }}/setup-ui-server.log
+          if-no-files-found: warn
+          retention-days: 7
