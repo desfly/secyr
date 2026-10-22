@@ -3,6 +3,7 @@
 #include "esp_err.h"
 #include "esp_timer.h"
 #include "mqtt_client.h"
+#include "hg_mqtt_command_buffer.hpp"
 
 #include <array>
 #include <atomic>
@@ -56,6 +57,7 @@ private:
     void stop_state_timer();
     void handle_command(const char* data, std::size_t size);
 
+    MqttCommandBuffer command_buffer_;
     esp_mqtt_client_handle_t client_{};
     esp_timer_handle_t heartbeat_timer_{};
     esp_timer_handle_t state_timer_{};

@@ -392,6 +392,7 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
         &CloudLink::mqtt_event_handler, this);
     if (error != ESP_OK) {
         esp_mqtt_client_destroy(client_);
+    command_buffer_.reset();
         client_ = nullptr;
         return error;
     }
@@ -399,6 +400,7 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
     error = esp_mqtt_client_start(client_);
     if (error != ESP_OK) {
         esp_mqtt_client_destroy(client_);
+    command_buffer_.reset();
         client_ = nullptr;
         return error;
     }
@@ -420,6 +422,7 @@ void CloudLink::stop()
     if (connected_) publish_online(false);
     (void)esp_mqtt_client_stop(client_);
     esp_mqtt_client_destroy(client_);
+    command_buffer_.reset();
     client_ = nullptr;
     connected_ = false;
     configured_ = false;
@@ -883,6 +886,7 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
 {
     switch (event->event_id) {
         case MQTT_EVENT_CONNECTED:
+            command_buffer_.reset();
             connected_ = true;
             ++connect_count_;
             publish_online(true);
@@ -893,18 +897,20 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             ESP_LOGI(kTag, "Cloud connected; state=5s heartbeat=60s events=%s", event_topic_.data());
             break;
         case MQTT_EVENT_DISCONNECTED:
+            command_buffer_.reset();
             connected_ = false;
             ++disconnect_count_;
             ESP_LOGW(kTag, "Cloud disconnected");
             break;
         case MQTT_EVENT_DATA: {
-            const std::string topic(event->topic, static_cast<std::size_t>(event->topic_len));
-            if (topic == command_topic_.data()) {
-                handle_command(event->data, static_cast<std::size_t>(event->data_len));
-            }
+            const auto command = command_buffer_.append(command_topic_.data(),
+                event->topic, event->topic_len, event->data, event->data_len,
+                event->total_data_len, event->current_data_offset, event->msg_id);
+            if (command) handle_command(command->data(), command->size());
             break;
         }
         case MQTT_EVENT_ERROR:
+            command_buffer_.reset();
             ESP_LOGE(kTag, "Cloud MQTT error");
             break;
         default:

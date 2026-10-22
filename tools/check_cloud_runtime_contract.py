@@ -60,7 +60,10 @@ require("std::atomic<std::uint32_t> connect_count_" in link_header and "std::ato
         "MQTT reconnect counters must be atomic")
 require('"HG-UNKNOWN"' not in link and "device_id_[0] = '\\0';" in link,
         "unique device identity must fail closed on MAC read error")
-require("handle_command(event->data" in link, "MQTT command payload is not routed")
+require("command_buffer_.append(" in link and
+        "if (command) handle_command(command->data(), command->size());" in link and
+        "handle_command(event->data" not in link,
+        "MQTT commands must be assembled before parsing")
 require("trusted_time_->ready()" in link and "expires_at_ms" in link and "issued_at_ms" in link,
         "MQTT command freshness is not gated by trusted time")
 require('parse_json_u64(body, "keyEpoch", key_epoch)' in link and

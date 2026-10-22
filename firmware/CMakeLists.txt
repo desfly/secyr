@@ -78,3 +78,8 @@ target_include_directories(homeguard_gpio_backend_tests PRIVATE
 target_compile_options(homeguard_gpio_backend_tests PRIVATE -UNDEBUG)
 target_link_libraries(homeguard_gpio_backend_tests PRIVATE homeguard_core Threads::Threads)
 add_test(NAME homeguard_gpio_backend_tests COMMAND homeguard_gpio_backend_tests)
+
+add_executable(homeguard_mqtt_buffer_tests ../tests/test_mqtt_command_buffer.cpp)
+target_include_directories(homeguard_mqtt_buffer_tests PRIVATE esp-idf/main)
+target_compile_options(homeguard_mqtt_buffer_tests PRIVATE -UNDEBUG)
+add_test(NAME homeguard_mqtt_buffer_tests COMMAND homeguard_mqtt_buffer_tests)
