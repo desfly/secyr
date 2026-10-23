@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -138,7 +139,14 @@ class BleRuntimeSession(context: Context) {
         require(client.authenticate(actor, pin)) { "BLE authentication could not start" }
 
         val reply = withTimeout(timeoutMs) {
-            client.sessionReplies().filterNotNull().first()
+            combine(client.sessionReplies(), client.state()) { response, link ->
+                if (link == BleHomeGuardClient.State.OFFLINE ||
+                    link == BleHomeGuardClient.State.ERROR ||
+                    link == BleHomeGuardClient.State.IDLE) {
+                    throw IllegalStateException("BLE link lost during authentication: $link")
+                }
+                response
+            }.filterNotNull().first()
         }
         require(reply.optBoolean("ok", false)) {
             accessFlow.value = BleSessionAccess()
@@ -293,7 +301,19 @@ class BleRuntimeSession(context: Context) {
     }
 
     private suspend fun awaitCommandReply(timeoutMs: Long): JSONObject = try {
-        withTimeout(timeoutMs) { client.commandReplies().filterNotNull().first() }
+        withTimeout(timeoutMs) {
+            // Do not wait for the full command timeout after GATT disconnect.
+            // A command may already have executed: report unknown outcome,
+            // never treat a late/stale reply as success or retry automatically.
+            combine(client.commandReplies(), client.state()) { response, link ->
+                if (link == BleHomeGuardClient.State.OFFLINE ||
+                    link == BleHomeGuardClient.State.ERROR ||
+                    link == BleHomeGuardClient.State.IDLE) {
+                    throw IllegalStateException("BLE link lost before command confirmation: $link")
+                }
+                response
+            }.filterNotNull().first()
+        }
     } catch (error: Throwable) {
         // A queued action may already have executed. Close this session before
         // another action can observe a delayed response from the old command.
