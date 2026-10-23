@@ -180,10 +180,22 @@ class BleHomeGuardClient(private val context: Context) {
             if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
                 stateFlow.value = State.DISCOVERING; g.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                // Invalidate the connection epoch and outstanding request before
+                // exposing OFFLINE to command waiters. Never accept a delayed ACK.
+                commands.clear()
                 rx = null; tx = null; decoder.reset(); sessionActor = null; pendingActor = null
                 synchronized(writeQueue) { writeQueue.clear(); writeInFlight = false }
-                snapshotFlow.value = SystemSnapshot(); stateFlow.value = State.OFFLINE
-            } else if (status != BluetoothGatt.GATT_SUCCESS) stateFlow.value = State.ERROR
+                commandReplyFlow.value = null
+                sessionReplyFlow.value = null
+                provisioningReplyFlow.value = null
+                snapshotFlow.value = SystemSnapshot()
+                stateFlow.value = State.OFFLINE
+            } else if (status != BluetoothGatt.GATT_SUCCESS) {
+                commands.clear()
+                commandReplyFlow.value = null
+                sessionReplyFlow.value = null
+                stateFlow.value = State.ERROR
+            }
         }
 
         @SuppressLint("MissingPermission")
