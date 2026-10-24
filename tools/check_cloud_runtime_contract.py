@@ -239,6 +239,25 @@ require("firmware enforces signed-command verification" in contract.lower() and
         "guarded by ci" in contract.lower(),
         "contract must state the implemented MQTT security baseline and CI enforcement")
 
+# Signed MQTT lock commands must reach the shared MCP23017 writer before
+# reporting success; model-only acknowledgement can lie when I2C is faulty.
+require("g_cloud_link.set_output_backend(&g_gpio_outputs)" in app,
+        "Cloud MQTT lock route is not bound to the MCP23017 relay writer")
+require('void set_output_backend(GpioOutputBackend* output_backend)' in link_header,
+        "CloudLink must accept the shared relay backend")
+cloud_lock_start = link.find('if (command == "output.lock")')
+cloud_lock_end = link.find('hg::PartitionArmState target{}', cloud_lock_start)
+cloud_lock = link[cloud_lock_start:cloud_lock_end]
+require(cloud_lock_start >= 0 and cloud_lock_end > cloud_lock_start and
+        'output_backend_->synchronize_relays(*model_)' in cloud_lock and
+        'output_backend_->force_safe_relays()' in cloud_lock and
+        'publish_response(false, "physical_output_failure")' in cloud_lock,
+        "Cloud MQTT lock must verify driver write and fail closed on I2C error")
+require(cloud_lock.find('output_backend_->synchronize_relays(*model_)') <
+        cloud_lock.find('publish_response(true, "accepted_5s")') and
+        'if (task_ok != pdPASS)' in cloud_lock,
+        "Cloud lock success must follow driver application and timer allocation")
+
 if errors:
     print("Cloud runtime contract FAIL")
     for error in errors:
