@@ -486,6 +486,8 @@ extern "C" void app_main()
     else ESP_LOGI(kTag, "Hardware bootstrap completed");
 
     g_gpio_outputs.bind_expander(g_hardware.io_expander());
+    // Cloud lock ACK must use the same serialized MCP23017 writer as BLE/HTTP.
+    g_cloud_link.set_output_backend(&g_gpio_outputs);
     initialize_physical_outputs();
     start_ble_transport();
 
