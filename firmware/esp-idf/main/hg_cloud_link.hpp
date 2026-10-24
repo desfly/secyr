@@ -16,6 +16,7 @@ namespace hg { class SystemModel; class SystemEventBus; struct SystemEvent; }
 namespace homeguard::idf {
 
 class CloudTrustedTime;
+class GpioOutputBackend;
 
 class CloudLink {
 public:
@@ -23,6 +24,7 @@ public:
     esp_err_t start(const char* broker_uri, const char* username, const char* password);
     void stop();
     void set_command_runtime(hg::SystemModel* model, hg::SystemEventBus* bus, homeguard::AccessControl* access_control, CloudTrustedTime* trusted_time = nullptr);
+    void set_output_backend(GpioOutputBackend* output_backend) { output_backend_ = output_backend; }
 
     [[nodiscard]] const char* device_id() const { return device_id_.data(); }
     [[nodiscard]] bool configured() const { return configured_.load(); }
@@ -72,6 +74,7 @@ private:
     hg::SystemEventBus* bus_{};
     homeguard::AccessControl* access_control_{};
     CloudTrustedTime* trusted_time_{};
+    GpioOutputBackend* output_backend_{};
     bool event_bus_subscribed_{};
     // MQTT event callbacks, ESP timers and HTTP status run on different tasks.
     std::atomic<bool> configured_{false};
