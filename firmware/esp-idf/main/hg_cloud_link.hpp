@@ -3,8 +3,10 @@
 #include "esp_err.h"
 #include "esp_timer.h"
 #include "mqtt_client.h"
+#include "hg_mqtt_command_buffer.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -14,6 +16,7 @@ namespace hg { class SystemModel; class SystemEventBus; struct SystemEvent; }
 namespace homeguard::idf {
 
 class CloudTrustedTime;
+class GpioOutputBackend;
 
 class CloudLink {
 public:
@@ -21,12 +24,13 @@ public:
     esp_err_t start(const char* broker_uri, const char* username, const char* password);
     void stop();
     void set_command_runtime(hg::SystemModel* model, hg::SystemEventBus* bus, homeguard::AccessControl* access_control, CloudTrustedTime* trusted_time = nullptr);
+    void set_output_backend(GpioOutputBackend* output_backend) { output_backend_ = output_backend; }
 
     [[nodiscard]] const char* device_id() const { return device_id_.data(); }
-    [[nodiscard]] bool configured() const { return configured_; }
-    [[nodiscard]] bool connected() const { return connected_; }
-    [[nodiscard]] std::uint32_t connect_count() const { return connect_count_; }
-    [[nodiscard]] std::uint32_t disconnect_count() const { return disconnect_count_; }
+    [[nodiscard]] bool configured() const { return configured_.load(); }
+    [[nodiscard]] bool connected() const { return connected_.load(); }
+    [[nodiscard]] std::uint32_t connect_count() const { return connect_count_.load(); }
+    [[nodiscard]] std::uint32_t disconnect_count() const { return disconnect_count_.load(); }
 
     esp_err_t publish_state(const char* json, int qos = 1, bool retain = true);
     esp_err_t issue_disarm_challenge(const char* request_id);
@@ -55,6 +59,7 @@ private:
     void stop_state_timer();
     void handle_command(const char* data, std::size_t size);
 
+    MqttCommandBuffer command_buffer_;
     esp_mqtt_client_handle_t client_{};
     esp_timer_handle_t heartbeat_timer_{};
     esp_timer_handle_t state_timer_{};
@@ -69,11 +74,13 @@ private:
     hg::SystemEventBus* bus_{};
     homeguard::AccessControl* access_control_{};
     CloudTrustedTime* trusted_time_{};
+    GpioOutputBackend* output_backend_{};
     bool event_bus_subscribed_{};
-    bool configured_{};
-    bool connected_{};
-    std::uint32_t connect_count_{};
-    std::uint32_t disconnect_count_{};
+    // MQTT event callbacks, ESP timers and HTTP status run on different tasks.
+    std::atomic<bool> configured_{false};
+    std::atomic<bool> connected_{false};
+    std::atomic<std::uint32_t> connect_count_{0};
+    std::atomic<std::uint32_t> disconnect_count_{0};
     std::uint64_t heartbeat_sequence_{};
     std::uint64_t state_sequence_{};
 };

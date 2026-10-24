@@ -2,6 +2,7 @@
 #include "hg_cloud_command_verifier.hpp"
 #include "hg_cloud_trust_nvs.hpp"
 #include "hg_cloud_trusted_time.hpp"
+#include "hg_gpio_output_backend.hpp"
 
 #include "esp_check.h"
 #include "esp_crt_bundle.h"
@@ -318,7 +319,10 @@ void CloudLink::make_device_id()
 {
     std::uint8_t mac[6]{};
     if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
-        std::strncpy(device_id_.data(), "HG-UNKNOWN", device_id_.size() - 1);
+        // A shared fallback ID could bind different controllers to one identity.
+        // Fail closed instead of advertising or authenticating HG-UNKNOWN.
+        device_id_[0] = '\0';
+        ESP_LOGE(kTag, "Cannot derive unique device ID from Wi-Fi MAC");
         return;
     }
     std::snprintf(device_id_.data(), device_id_.size(),
@@ -389,6 +393,7 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
         &CloudLink::mqtt_event_handler, this);
     if (error != ESP_OK) {
         esp_mqtt_client_destroy(client_);
+    command_buffer_.reset();
         client_ = nullptr;
         return error;
     }
@@ -396,6 +401,7 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
     error = esp_mqtt_client_start(client_);
     if (error != ESP_OK) {
         esp_mqtt_client_destroy(client_);
+    command_buffer_.reset();
         client_ = nullptr;
         return error;
     }
@@ -417,6 +423,7 @@ void CloudLink::stop()
     if (connected_) publish_online(false);
     (void)esp_mqtt_client_stop(client_);
     esp_mqtt_client_destroy(client_);
+    command_buffer_.reset();
     client_ = nullptr;
     connected_ = false;
     configured_ = false;
@@ -793,6 +800,11 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // runtime synchronization loop is responsible for mirroring output #5 to
     // the direct lock relay.  Keep replay persistence above this side effect.
     if (command == "output.lock") {
+        if (output_backend_ == nullptr) {
+            xSemaphoreGive(replay_mutex);
+            publish_response(false, "output_backend_unavailable");
+            return;
+        }
         // Commit replay admission before changing the lock output. A repeated
         // signed envelope must never trigger another physical pulse.
         if (!persist_command_replay_state(command_counter, request_id)) {
@@ -810,6 +822,16 @@ void CloudLink::handle_command(const char* data, std::size_t size)
             publish_response(false, hg::to_string(result.status));
             return;
         }
+        // A model change is not a relay write. Acknowledge success only after
+        // the MCP23017 writer reports the ON state applied (not contact feedback).
+        if (!output_backend_->synchronize_relays(*model_)) {
+            (void)output_backend_->force_safe_relays();
+            (void)model_->set_output_active(4, false, 0);
+            (void)model_->set_output_active(5, false, 0);
+            xSemaphoreGive(replay_mutex);
+            publish_response(false, "physical_output_failure");
+            return;
+        }
         xSemaphoreGive(replay_mutex);
         const auto task_ok = xTaskCreate(
             [](void* context) {
@@ -817,12 +839,23 @@ void CloudLink::handle_command(const char* data, std::size_t size)
                 vTaskDelay(pdMS_TO_TICKS(5000));
                 if (self != nullptr && self->model_ != nullptr) {
                     (void)self->model_->set_output_active(5, false, 0);
+                    // Restore OFF directly as well as through the 20ms mirror.
+                    if (self->output_backend_ != nullptr &&
+                        !self->output_backend_->synchronize_relays(*self->model_)) {
+                        (void)self->output_backend_->force_safe_relays();
+                        (void)self->model_->set_output_active(4, false, 0);
+                        ESP_LOGE(kTag, "Cloud lock OFF write failed; relay outputs fail-closed");
+                    }
                 }
                 vTaskDelete(nullptr);
             },
             "hg_lock_pulse", 2048, this, 5, nullptr);
         if (task_ok != pdPASS) {
             (void)model_->set_output_active(5, false, 0);
+            if (!output_backend_->synchronize_relays(*model_)) {
+                (void)output_backend_->force_safe_relays();
+                (void)model_->set_output_active(4, false, 0);
+            }
             publish_response(false, "lock_timer_failed");
             return;
         }
@@ -880,6 +913,7 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
 {
     switch (event->event_id) {
         case MQTT_EVENT_CONNECTED:
+            command_buffer_.reset();
             connected_ = true;
             ++connect_count_;
             publish_online(true);
@@ -890,18 +924,20 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             ESP_LOGI(kTag, "Cloud connected; state=5s heartbeat=60s events=%s", event_topic_.data());
             break;
         case MQTT_EVENT_DISCONNECTED:
+            command_buffer_.reset();
             connected_ = false;
             ++disconnect_count_;
             ESP_LOGW(kTag, "Cloud disconnected");
             break;
         case MQTT_EVENT_DATA: {
-            const std::string topic(event->topic, static_cast<std::size_t>(event->topic_len));
-            if (topic == command_topic_.data()) {
-                handle_command(event->data, static_cast<std::size_t>(event->data_len));
-            }
+            const auto command = command_buffer_.append(command_topic_.data(),
+                event->topic, event->topic_len, event->data, event->data_len,
+                event->total_data_len, event->current_data_offset, event->msg_id);
+            if (command) handle_command(command->data(), command->size());
             break;
         }
         case MQTT_EVENT_ERROR:
+            command_buffer_.reset();
             ESP_LOGE(kTag, "Cloud MQTT error");
             break;
         default:

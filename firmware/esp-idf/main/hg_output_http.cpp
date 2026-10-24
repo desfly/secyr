@@ -119,12 +119,15 @@ esp_err_t OutputHttp::handle_command(httpd_req_t* request) {
     const auto result = hg::apply_output_command(
         *model_, *readiness_, {output_id, active, alarm_active, 0});
 
-    // LIGHT/LOCK are applied asynchronously by MCP23017 GPA0/GPA1.
-    // Other outputs still require the commissioned physical backend.
-    if (result.status == hg::OutputCommandStatus::Applied && output_id != 4 && output_id != 5 &&
-        !physical_->synchronize(*model_, *readiness_)) {
-        (void)model_->set_output_active(output_id, false, 0);
+    if (result.status == hg::OutputCommandStatus::Applied && !physical_->synchronize(*model_, *readiness_)) {
+        // force_safe() attempts to de-energize every physical output, not just
+        // the requested one. Invalidate all optimistic model states so the UI
+        // cannot keep showing other outputs as ON after a global safe-off.
+        // This is a commanded safe state, not electrical feedback confirmation.
         (void)physical_->force_safe();
+        for (std::uint16_t id = 1; id <= 5; ++id) {
+            (void)model_->set_output_active(id, false, 0);
+        }
         httpd_resp_set_status(request, "503 Service Unavailable");
         httpd_resp_set_type(request, "application/json");
         return httpd_resp_send(request,

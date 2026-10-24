@@ -23,6 +23,37 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class TelemetrySocketTest {
+    @Test fun staleBleSnapshotExpiresToUnknownWithoutAnyWebSocket() = runBlocking {
+        val telemetry = TelemetrySocket(80)
+        telemetry.acceptFallbackSnapshot(SystemSnapshot(sequence = 9, mode = SystemMode.ARMED_AWAY))
+        assertEquals(SystemMode.ARMED_AWAY, telemetry.snapshots().first().mode)
+        kotlinx.coroutines.withTimeout(2_000) {
+            telemetry.snapshots().first { it.mode == SystemMode.UNKNOWN }
+        }
+        assertEquals(0L, telemetry.snapshots().first().sequence)
+        telemetry.clearFallbackSnapshot()
+    }
+
+    @Test fun selectingAnotherControllerClearsBothBleAndMqttState() = runBlocking {
+        val telemetry = TelemetrySocket()
+        telemetry.selectDevice("HG-ONE")
+        telemetry.acceptMqttMode(SystemMode.ARMED_AWAY)
+        telemetry.acceptFallbackSnapshot(SystemSnapshot(sequence = 9, mode = SystemMode.ALARM))
+        telemetry.selectDevice("HG-TWO")
+        assertEquals(SystemSnapshot(), telemetry.snapshots().first())
+        assertEquals(SystemMode.UNKNOWN, telemetry.snapshots().first().mode)
+        telemetry.acceptMqttMode(SystemMode.ARMED_HOME)
+        telemetry.selectDevice("HG-TWO")
+        assertEquals(SystemMode.ARMED_HOME, telemetry.snapshots().first().mode)
+    }
+
+    @Test fun absentOrInvalidModeIsNeverReportedAsDisarmed() {
+        for (json in listOf("{}", "{\"mode\":9}", "{\"mode\":0.5}", "{\"mode\":\"invalid\"}")) {
+            assertEquals(SystemMode.UNKNOWN, JsonParsers.snapshot(org.json.JSONObject(json)).mode)
+        }
+        assertEquals(SystemMode.DISARMED, JsonParsers.snapshot(org.json.JSONObject("{\"mode\":0}")).mode)
+    }
+
     private fun awaitCondition(condition: () -> Boolean) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
         while (!condition() && System.nanoTime() < deadline) Thread.sleep(10)
