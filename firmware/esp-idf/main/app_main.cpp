@@ -164,7 +164,7 @@ void cloud_start_task(void*)
             // Wi-Fi provisioning or W5500 DHCP may take longer than 30 seconds.
             // Keep waiting instead of permanently disabling MQTT until reboot.
             if (waited_seconds == 30U || (waited_seconds % 300U) == 0U) {
-                ESP_LOGW(kTag, "Cloud MQTT waiting for operational STA/Ethernet IPv4 (%u s)", waited_seconds);
+                ESP_LOGW(kTag, "Cloud MQTT waiting for operational STA/Ethernet IPv4 (%lu s)", static_cast<unsigned long>(waited_seconds));
             }
             vTaskDelay(kPollTicks);
             continue;
