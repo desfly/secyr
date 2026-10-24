@@ -2,6 +2,7 @@
 #include "hg_cloud_command_verifier.hpp"
 #include "hg_cloud_trust_nvs.hpp"
 #include "hg_cloud_trusted_time.hpp"
+#include "hg_gpio_output_backend.hpp"
 
 #include "esp_check.h"
 #include "esp_crt_bundle.h"
@@ -799,6 +800,11 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // runtime synchronization loop is responsible for mirroring output #5 to
     // the direct lock relay.  Keep replay persistence above this side effect.
     if (command == "output.lock") {
+        if (output_backend_ == nullptr) {
+            xSemaphoreGive(replay_mutex);
+            publish_response(false, "output_backend_unavailable");
+            return;
+        }
         // Commit replay admission before changing the lock output. A repeated
         // signed envelope must never trigger another physical pulse.
         if (!persist_command_replay_state(command_counter, request_id)) {
@@ -816,6 +822,16 @@ void CloudLink::handle_command(const char* data, std::size_t size)
             publish_response(false, hg::to_string(result.status));
             return;
         }
+        // A model change is not a relay write. Acknowledge success only after
+        // the MCP23017 writer reports the ON state applied (not contact feedback).
+        if (!output_backend_->synchronize_relays(*model_)) {
+            (void)output_backend_->force_safe_relays();
+            (void)model_->set_output_active(4, false, 0);
+            (void)model_->set_output_active(5, false, 0);
+            xSemaphoreGive(replay_mutex);
+            publish_response(false, "physical_output_failure");
+            return;
+        }
         xSemaphoreGive(replay_mutex);
         const auto task_ok = xTaskCreate(
             [](void* context) {
@@ -823,12 +839,23 @@ void CloudLink::handle_command(const char* data, std::size_t size)
                 vTaskDelay(pdMS_TO_TICKS(5000));
                 if (self != nullptr && self->model_ != nullptr) {
                     (void)self->model_->set_output_active(5, false, 0);
+                    // Restore OFF directly as well as through the 20ms mirror.
+                    if (self->output_backend_ != nullptr &&
+                        !self->output_backend_->synchronize_relays(*self->model_)) {
+                        (void)self->output_backend_->force_safe_relays();
+                        (void)self->model_->set_output_active(4, false, 0);
+                        ESP_LOGE(kTag, "Cloud lock OFF write failed; relay outputs fail-closed");
+                    }
                 }
                 vTaskDelete(nullptr);
             },
             "hg_lock_pulse", 2048, this, 5, nullptr);
         if (task_ok != pdPASS) {
             (void)model_->set_output_active(5, false, 0);
+            if (!output_backend_->synchronize_relays(*model_)) {
+                (void)output_backend_->force_safe_relays();
+                (void)model_->set_output_active(4, false, 0);
+            }
             publish_response(false, "lock_timer_failed");
             return;
         }
