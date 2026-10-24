@@ -135,35 +135,44 @@ void restore_commissioning_state()
     }
 }
 
-void restore_cloud_config();
+// True when the persisted cloud configuration was handled; false when a
+// transient MQTT startup error should be retried after a delay.
+bool restore_cloud_config();
 
 bool operational_ipv4_ready()
 {
     esp_netif_t* netif = nullptr;
     while ((netif = esp_netif_next(netif)) != nullptr) {
+        const char* key = esp_netif_get_ifkey(netif);
+        if (key == nullptr || (std::strstr(key, "WIFI_STA") == nullptr && std::strstr(key, "ETH") == nullptr)) continue;
+        // Do not mistake a stale DHCP lease on a disconnected interface for a usable route.
+        if (!esp_netif_is_netif_up(netif)) continue;
         esp_netif_ip_info_t ip{};
-        if (esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0U) {
-            const char* key = esp_netif_get_ifkey(netif);
-            if (key != nullptr && (std::strstr(key, "WIFI_STA") != nullptr || std::strstr(key, "ETH") != nullptr)) return true;
-        }
+        if (esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0U) return true;
     }
     return false;
 }
 
 void cloud_start_task(void*)
 {
-    constexpr int kPollMs = 100;
-    constexpr int kTimeoutMs = 30000;
-    int waited = 0;
-    while (!operational_ipv4_ready() && waited < kTimeoutMs) {
-        vTaskDelay(pdMS_TO_TICKS(kPollMs));
-        waited += kPollMs;
-    }
-    if (!operational_ipv4_ready()) {
-        ESP_LOGW(kTag, "Cloud MQTT deferred: no operational IPv4 after %d ms", kTimeoutMs);
-    } else {
-        ESP_LOGI(kTag, "Operational IPv4 ready; starting persisted Cloud MQTT");
-        restore_cloud_config();
+    constexpr auto kPollTicks = pdMS_TO_TICKS(1000);
+    constexpr auto kRetryTicks = pdMS_TO_TICKS(5000);
+    std::uint32_t waited_seconds = 0;
+    for (;;) {
+        if (!operational_ipv4_ready()) {
+            ++waited_seconds;
+            // Wi-Fi provisioning or W5500 DHCP may take longer than 30 seconds.
+            // Keep waiting instead of permanently disabling MQTT until reboot.
+            if (waited_seconds == 30U || (waited_seconds % 300U) == 0U) {
+                ESP_LOGW(kTag, "Cloud MQTT waiting for operational STA/Ethernet IPv4 (%u s)", waited_seconds);
+            }
+            vTaskDelay(kPollTicks);
+            continue;
+        }
+        ESP_LOGI(kTag, "Operational IPv4 ready; restoring persisted Cloud MQTT");
+        if (restore_cloud_config()) break;
+        ESP_LOGW(kTag, "Cloud MQTT startup failed transiently; retrying in 5 s");
+        vTaskDelay(kRetryTicks);
     }
     vTaskDelete(nullptr);
 }
@@ -175,27 +184,35 @@ void schedule_cloud_start()
     }
 }
 
-void restore_cloud_config()
+bool restore_cloud_config()
 {
+    // /cloud/config can start MQTT while the boot task is waiting for IPv4.
+    if (g_cloud_link.configured()) return true;
     homeguard::idf::CloudConfig config{};
     const auto error = g_cloud_store.load(config);
     if (error == ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGI(kTag, "Cloud MQTT is not configured");
-        return;
+        return true;
     }
     if (error != ESP_OK) {
         ESP_LOGE(kTag, "Cloud MQTT config rejected: %s", esp_err_to_name(error));
-        return;
+        return true;
     }
     if (!config.enabled) {
         ESP_LOGI(kTag, "Cloud MQTT is disabled by persisted configuration");
         std::fill(config.password.begin(), config.password.end(), '\0');
-        return;
+        return true;
     }
     const auto start_error = g_cloud_link.start(config.broker_uri.c_str(), config.username.c_str(), config.password.c_str());
     std::fill(config.password.begin(), config.password.end(), '\0');
-    if (start_error != ESP_OK) ESP_LOGE(kTag, "Cloud MQTT auto-start failed: %s", esp_err_to_name(start_error));
-    else ESP_LOGI(kTag, "Cloud MQTT auto-started from persisted configuration");
+    if (start_error == ESP_OK) {
+        ESP_LOGI(kTag, "Cloud MQTT auto-started from persisted configuration");
+        return true;
+    }
+    if (start_error == ESP_ERR_INVALID_STATE) return true; // already started by /cloud/config
+    ESP_LOGE(kTag, "Cloud MQTT auto-start failed: %s", esp_err_to_name(start_error));
+    // An invalid persisted URI requires admin reconfiguration, not a busy retry loop.
+    return start_error == ESP_ERR_INVALID_ARG;
 }
 
 void initialize_system_model()
