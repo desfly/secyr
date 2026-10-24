@@ -29,6 +29,18 @@ require("std::string owned_public_key{public_key_pem}" in verifier and
 require('"hg_cloud_nvs.cpp"' in cmake, "cloud NVS source not compiled")
 require("g_cloud_store.load" in app and "restore_cloud_config" in app, "cloud config not restored at boot")
 require("g_cloud_link.start" in app, "persisted cloud config does not auto-start MQTT")
+# Boot must survive delayed DHCP/STA provisioning; MQTT's own client handles
+# reconnects after its first successful start.
+cloud_boot_start = app[app.find("void cloud_start_task(void*)"):app.find("void schedule_cloud_start()")]
+require("for (;;)" in cloud_boot_start and "if (restore_cloud_config()) break;" in cloud_boot_start,
+        "MQTT boot task must wait for late IPv4 and retry transient startup failures")
+require("kTimeoutMs" not in cloud_boot_start and "vTaskDelay(kPollTicks)" in cloud_boot_start,
+        "MQTT boot must not abandon startup after a fixed DHCP timeout")
+require("esp_netif_is_netif_up(netif)" in app,
+        "MQTT boot must not treat a down interface with stale IPv4 as operational")
+require("if (g_cloud_link.configured()) return true;" in app and
+        "return start_error == ESP_ERR_INVALID_ARG;" in app,
+        "MQTT boot must handle concurrent /cloud/config start and distinguish permanent config errors")
 require("set_command_runtime(&g_system_model, &g_system_bus, &g_access_control, &g_cloud_time)" in app, "live command runtime + trusted time not wired")
 require('"/api/v1/cloud/status"' in http, "cloud status endpoint missing")
 require('"/api/v1/cloud/config"' in http, "cloud config endpoint missing")
