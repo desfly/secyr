@@ -46,6 +46,23 @@ void test_interlocks() {
 
     result = hg::apply_output_command(model, blocked, {4, true, true, 4});
     TEST_CHECK(result.status == hg::OutputCommandStatus::RejectedInterlock);
+
+    // A stale or dishonest client can send alarmActive=false. The real
+    // partition alarm must still block ON, across HTTP/BLE/MQTT callers.
+    TEST_CHECK(model.add_partition(1));
+    TEST_CHECK(model.set_partition_arm(1, hg::PartitionArmState::Alarm, 5));
+    result = hg::apply_output_command(model, blocked, {5, true, false, 6});
+    TEST_CHECK(result.status == hg::OutputCommandStatus::RejectedInterlock);
+    result = hg::apply_output_command(model, blocked, {4, true, false, 7});
+    TEST_CHECK(result.status == hg::OutputCommandStatus::RejectedInterlock);
+
+    // OFF remains available during an alarm for fail-safe de-energization.
+    result = hg::apply_output_command(model, blocked, {5, false, false, 8});
+    TEST_CHECK(result.status == hg::OutputCommandStatus::Applied);
+    TEST_CHECK(!model.output(5)->active);
+    TEST_CHECK(model.set_partition_arm(1, hg::PartitionArmState::Disarmed, 9));
+    result = hg::apply_output_command(model, blocked, {5, true, false, 10});
+    TEST_CHECK(result.status == hg::OutputCommandStatus::Applied);
 }
 
 void test_runtime() {
