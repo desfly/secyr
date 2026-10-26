@@ -81,7 +81,7 @@ require("command_subscription_acked_ = false" in connected_case and
         "publish_online(true)" in subscribed_case and
         "command_subscription_acked_ = false" in disconnect_case,
         "MQTT retained online availability must follow SUBACK and clear on reconnect")
-require('"commandSubscriptionAcked"' in http or r'\\"commandSubscriptionAcked\\"' in http,
+require("commandSubscriptionAcked" in http[http.find("esp_err_t CloudHttp::status_get"):http.find("esp_err_t CloudHttp::client_config_get")],
         "Cloud status API must expose separate command subscription acknowledgement")
 require('"subscribing"' in http,
         "Cloud status must not call a connected-but-unsubscribed command path ready")
