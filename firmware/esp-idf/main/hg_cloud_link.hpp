@@ -29,6 +29,8 @@ public:
     [[nodiscard]] const char* device_id() const { return device_id_.data(); }
     [[nodiscard]] bool configured() const { return configured_.load(); }
     [[nodiscard]] bool connected() const { return connected_.load(); }
+    // MQTT transport connection is not proof of an inbound command subscription.
+    [[nodiscard]] bool command_subscription_acked() const { return command_subscription_acked_.load(); }
     [[nodiscard]] std::uint32_t connect_count() const { return connect_count_.load(); }
     [[nodiscard]] std::uint32_t disconnect_count() const { return disconnect_count_.load(); }
 
@@ -79,6 +81,8 @@ private:
     // MQTT event callbacks, ESP timers and HTTP status run on different tasks.
     std::atomic<bool> configured_{false};
     std::atomic<bool> connected_{false};
+    std::atomic<bool> command_subscription_acked_{false};
+    std::atomic<int> command_subscribe_msg_id_{-1};
     std::atomic<std::uint32_t> connect_count_{0};
     std::atomic<std::uint32_t> disconnect_count_{0};
     std::uint64_t heartbeat_sequence_{};
