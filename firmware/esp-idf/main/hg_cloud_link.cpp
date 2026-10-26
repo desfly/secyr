@@ -413,6 +413,8 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
 
 void CloudLink::stop()
 {
+    command_subscription_acked_ = false;
+    command_subscribe_msg_id_ = -1;
     stop_state_timer();
     stop_heartbeat_timer();
     if (client_ == nullptr) {
@@ -912,19 +914,39 @@ void CloudLink::handle_command(const char* data, std::size_t size)
 void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
 {
     switch (event->event_id) {
-        case MQTT_EVENT_CONNECTED:
+        case MQTT_EVENT_CONNECTED: {
             command_buffer_.reset();
+            command_subscription_acked_ = false;
+            command_subscribe_msg_id_ = -1;
             connected_ = true;
             ++connect_count_;
-            publish_online(true);
+            // A TLS/MQTT connection alone does not prove commands can arrive.
+            // Publish retained availability only after the matching SUBACK.
             publish_heartbeat();
             start_heartbeat_timer();
             start_state_timer();
-            (void)esp_mqtt_client_subscribe(client_, command_topic_.data(), 1);
-            ESP_LOGI(kTag, "Cloud connected; state=5s heartbeat=60s events=%s", event_topic_.data());
+            const int subscribe_id = esp_mqtt_client_subscribe(client_, command_topic_.data(), 1);
+            command_subscribe_msg_id_ = subscribe_id;
+            if (subscribe_id < 0) {
+                ESP_LOGE(kTag, "Cloud command subscription request failed: %d", subscribe_id);
+            }
+            ESP_LOGI(kTag, "Cloud transport connected; waiting for command SUBACK; state=5s heartbeat=60s");
+            break;
+        }
+        case MQTT_EVENT_SUBSCRIBED:
+            if (event->msg_id >= 0 && event->msg_id == command_subscribe_msg_id_.load()) {
+                command_subscription_acked_ = true;
+                publish_online(true);
+                ESP_LOGI(kTag, "Cloud command SUBACK received; command subscription acknowledged");
+            }
+            break;
+        case MQTT_EVENT_UNSUBSCRIBED:
+            command_subscription_acked_ = false;
             break;
         case MQTT_EVENT_DISCONNECTED:
             command_buffer_.reset();
+            command_subscription_acked_ = false;
+            command_subscribe_msg_id_ = -1;
             connected_ = false;
             ++disconnect_count_;
             ESP_LOGW(kTag, "Cloud disconnected");
@@ -938,6 +960,7 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
         }
         case MQTT_EVENT_ERROR:
             command_buffer_.reset();
+            command_subscription_acked_ = false;
             ESP_LOGE(kTag, "Cloud MQTT error");
             break;
         default:
