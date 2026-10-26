@@ -934,6 +934,14 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             break;
         }
         case MQTT_EVENT_SUBSCRIBED:
+            // ESP-MQTT can emit SUBSCRIBED for a rejected SUBACK. A matching
+            // message ID alone is not proof the broker granted the subscription.
+            if (event->error_handle != nullptr &&
+                event->error_handle->error_type == MQTT_ERROR_TYPE_SUBSCRIBE_FAILED) {
+                command_subscription_acked_ = false;
+                ESP_LOGE(kTag, "Cloud command subscription rejected by broker");
+                break;
+            }
             if (event->msg_id >= 0 && event->msg_id == command_subscribe_msg_id_.load()) {
                 command_subscription_acked_ = true;
                 publish_online(true);
