@@ -68,6 +68,24 @@ require("cloud_->stop()" in http and "cloud_->start(" in http, "cloud config cha
 require("responses" in link and "response_topic_" in link, "MQTT response topic missing")
 require("std::atomic<bool> connected_" in link_header and "std::atomic<bool> configured_" in link_header,
         "MQTT status flags must be atomic across callback/timer/HTTP tasks")
+require("std::atomic<bool> command_subscription_acked_" in link_header and
+        "std::atomic<int> command_subscribe_msg_id_" in link_header,
+        "MQTT command SUBACK and message ID must be tracked atomically")
+require("MQTT_EVENT_SUBSCRIBED" in link and "event->msg_id == command_subscribe_msg_id_.load()" in link,
+        "MQTT command readiness must require the matching subscription ACK")
+connected_case = link[link.find("case MQTT_EVENT_CONNECTED:"):link.find("case MQTT_EVENT_SUBSCRIBED:")]
+subscribed_case = link[link.find("case MQTT_EVENT_SUBSCRIBED:"):link.find("case MQTT_EVENT_UNSUBSCRIBED:")]
+disconnect_case = link[link.find("case MQTT_EVENT_DISCONNECTED:"):link.find("case MQTT_EVENT_DATA:")]
+require("command_subscription_acked_ = false" in connected_case and
+        "publish_online(true)" not in connected_case and
+        "publish_online(true)" in subscribed_case and
+        "command_subscription_acked_ = false" in disconnect_case,
+        "MQTT retained online availability must follow SUBACK and clear on reconnect")
+require('"commandSubscriptionAcked"' in http or r'\\"commandSubscriptionAcked\\"' in http,
+        "Cloud status API must expose separate command subscription acknowledgement")
+require('"subscribing"' in http,
+        "Cloud status must not call a connected-but-unsubscribed command path ready")
+
 require("std::atomic<std::uint32_t> connect_count_" in link_header and "std::atomic<std::uint32_t> disconnect_count_" in link_header,
         "MQTT reconnect counters must be atomic")
 require('"HG-UNKNOWN"' not in link and "device_id_[0] = '\\0';" in link,
