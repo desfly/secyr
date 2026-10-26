@@ -73,6 +73,9 @@ require("std::atomic<bool> command_subscription_acked_" in link_header and
         "MQTT command SUBACK and message ID must be tracked atomically")
 require("MQTT_EVENT_SUBSCRIBED" in link and "event->msg_id == command_subscribe_msg_id_.load()" in link,
         "MQTT command readiness must require the matching subscription ACK")
+require("MQTT_ERROR_TYPE_SUBSCRIBE_FAILED" in link and
+        "event->error_handle->error_type" in link,
+        "A failed broker SUBACK must not be reported as command subscription ready")
 connected_case = link[link.find("case MQTT_EVENT_CONNECTED:"):link.find("case MQTT_EVENT_SUBSCRIBED:")]
 subscribed_case = link[link.find("case MQTT_EVENT_SUBSCRIBED:"):link.find("case MQTT_EVENT_UNSUBSCRIBED:")]
 disconnect_case = link[link.find("case MQTT_EVENT_DISCONNECTED:"):link.find("case MQTT_EVENT_DATA:")]
