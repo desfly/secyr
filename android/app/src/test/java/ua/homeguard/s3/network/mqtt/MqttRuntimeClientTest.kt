@@ -4,6 +4,7 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.lang.reflect.InvocationTargetException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,6 +60,22 @@ class MqttRuntimeClientTest {
             fail("Mismatched SUBACK must fail")
         } catch (error: InvocationTargetException) {
             assertTrue(error.cause is IllegalStateException)
+        }
+    }
+
+    @Test fun oversizedMqttFrameFailsBeforeAllocatingPayload() {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        val read = client.javaClass.getDeclaredMethod("readPacket", BufferedInputStream::class.java)
+            .apply { isAccessible = true }
+        // MQTT remaining length 65,537; no body follows. A bounded parser
+        // must reject the header, not try to read or allocate its body.
+        val packet = byteArrayOf(0x30, 0x81.toByte(), 0x80.toByte(), 0x04)
+        try {
+            read.invoke(client, BufferedInputStream(ByteArrayInputStream(packet)))
+            fail("Oversized MQTT packet must be rejected")
+        } catch (error: InvocationTargetException) {
+            assertTrue(error.cause is IOException)
+            assertTrue(error.cause?.message?.contains("too large") == true)
         }
     }
 
