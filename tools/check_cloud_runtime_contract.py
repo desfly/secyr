@@ -84,6 +84,35 @@ require("command_subscription_acked_ = false" in connected_case and
         "publish_online(true)" in subscribed_case and
         "command_subscription_acked_ = false" in disconnect_case,
         "MQTT retained online availability must follow SUBACK and clear on reconnect")
+# A live MQTT state/heartbeat is used by Android to declare a device ready.
+# Never publish either before the matching successful command SUBACK; an old
+# retained "online" record could otherwise make Android route unsafe commands
+# to a session that is not subscribed to commands.
+require("publish_heartbeat();" not in connected_case and
+        "start_heartbeat_timer();" not in connected_case and
+        "start_state_timer();" not in connected_case,
+        "pre-SUBACK MQTT connection must not publish live health or start telemetry timers")
+require("if (!command_subscription_acked_.exchange(true))" in subscribed_case and
+        "publish_online(true);" in subscribed_case and
+        "publish_heartbeat();" in subscribed_case and
+        "publish_periodic_state();" in subscribed_case and
+        "start_heartbeat_timer();" in subscribed_case and
+        "start_state_timer();" in subscribed_case and
+        subscribed_case.index("publish_online(true);") < subscribed_case.index("publish_heartbeat();") <
+        subscribed_case.index("publish_periodic_state();") < subscribed_case.index("start_heartbeat_timer();"),
+        "successful matching SUBACK must enable fresh telemetry exactly once")
+heartbeat_body = link[link.find("void CloudLink::publish_heartbeat()"):link.find("void CloudLink::start_heartbeat_timer()")]
+state_body = link[link.find("void CloudLink::publish_periodic_state()"):link.find("void CloudLink::start_state_timer()")]
+require("!command_subscription_acked_" in heartbeat_body and
+        "!command_subscription_acked_" in state_body,
+        "MQTT timer callbacks must not publish health after command subscription is lost")
+require("kHeartbeatPeriodUs = 5ULL * 1000ULL * 1000ULL" in link,
+        "MQTT live heartbeat must refresh within five seconds for Android readiness")
+data_case = link[link.find("case MQTT_EVENT_DATA:"):link.find("case MQTT_EVENT_ERROR:")]
+require("if (!command_subscription_acked_) break;" in data_case and
+        data_case.find("if (!command_subscription_acked_) break;") < data_case.find("command_buffer_.append("),
+        "MQTT command packets must not execute before subscription readiness")
+
 require("commandSubscriptionAcked" in http[http.find("esp_err_t CloudHttp::status_get"):http.find("esp_err_t CloudHttp::client_config_get")],
         "Cloud status API must expose separate command subscription acknowledgement")
 require('"subscribing"' in http,
