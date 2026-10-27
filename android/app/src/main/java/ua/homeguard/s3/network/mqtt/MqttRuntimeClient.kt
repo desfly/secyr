@@ -33,6 +33,12 @@ class MqttCommandOutcomeUnknown(val requestId: String, cause: Throwable? = null)
 
 /** Minimal MQTT 3.1.1 runtime used by HomeGuard Android. */
 class MqttRuntimeClient(private val scope: CoroutineScope) {
+    companion object {
+        // Device telemetry and command replies are small; a broker must never
+        // be able to allocate hundreds of megabytes via MQTT remaining length.
+        private const val MAX_MQTT_PACKET_BYTES = 65_536
+    }
+
     enum class State { DISABLED, CONNECTING, CONNECTED, OFFLINE, ERROR }
 
     data class Config(
@@ -405,6 +411,7 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
             count++
             check(count <= 4) { "Malformed MQTT remaining length" }
         } while ((encoded and 128) != 0)
+        if (remaining > MAX_MQTT_PACKET_BYTES) throw IOException("MQTT packet too large")
         val payload = ByteArray(remaining)
         var offset = 0
         while (offset < remaining) {
