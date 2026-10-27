@@ -36,7 +36,7 @@ struct CloudEventWork {
 };
 QueueHandle_t cloud_event_queue{};
 constexpr const char* kPrefix = "homeguard/v1/devices";
-constexpr std::uint64_t kHeartbeatPeriodUs = 60ULL * 1000ULL * 1000ULL;
+constexpr std::uint64_t kHeartbeatPeriodUs = 5ULL * 1000ULL * 1000ULL;
 constexpr std::uint64_t kStatePeriodUs = 5ULL * 1000ULL * 1000ULL;
 constexpr char kCloudSecurityNamespace[] = "hg-cloud-sec";
 constexpr char kCommandCounterKey[] = "cmd_counter";
@@ -407,7 +407,7 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
     }
 
     configured_ = true;
-    ESP_LOGI(kTag, "Cloud link started in low-traffic mode: device=%s broker=%s heartbeat=60s", device_id_.data(), broker_uri);
+    ESP_LOGI(kTag, "Cloud link started in low-traffic mode: device=%s broker=%s heartbeat=5s", device_id_.data(), broker_uri);
     return ESP_OK;
 }
 
@@ -440,7 +440,7 @@ void CloudLink::publish_online(bool online)
 
 void CloudLink::publish_heartbeat()
 {
-    if (client_ == nullptr || !connected_) return;
+    if (client_ == nullptr || !connected_ || !command_subscription_acked_) return;
     const auto up_seconds = static_cast<unsigned long long>(esp_timer_get_time() / 1000000LL);
     const auto sequence = static_cast<unsigned long long>(++heartbeat_sequence_);
     char payload[96]{};
@@ -483,7 +483,7 @@ void CloudLink::stop_heartbeat_timer()
 
 void CloudLink::publish_periodic_state()
 {
-    if (client_ == nullptr || !connected_ || model_ == nullptr) return;
+    if (client_ == nullptr || !connected_ || !command_subscription_acked_ || model_ == nullptr) return;
     const auto partition = model_->partition_snapshot(1);
     if (!partition) return;
     char payload[128]{};
@@ -921,16 +921,15 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             connected_ = true;
             ++connect_count_;
             // A TLS/MQTT connection alone does not prove commands can arrive.
-            // Publish retained availability only after the matching SUBACK.
-            publish_heartbeat();
-            start_heartbeat_timer();
-            start_state_timer();
+            // No fresh device health is published until the broker confirms
+            // that this session can receive commands. A retained old online
+            // availability must never combine with pre-SUBACK telemetry.
             const int subscribe_id = esp_mqtt_client_subscribe(client_, command_topic_.data(), 1);
             command_subscribe_msg_id_ = subscribe_id;
             if (subscribe_id < 0) {
                 ESP_LOGE(kTag, "Cloud command subscription request failed: %d", subscribe_id);
             }
-            ESP_LOGI(kTag, "Cloud transport connected; waiting for command SUBACK; state=5s heartbeat=60s");
+            ESP_LOGI(kTag, "Cloud transport connected; waiting for command SUBACK; state=5s heartbeat=5s");
             break;
         }
         case MQTT_EVENT_SUBSCRIBED:
@@ -943,9 +942,14 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
                 break;
             }
             if (event->msg_id >= 0 && event->msg_id == command_subscribe_msg_id_.load()) {
-                command_subscription_acked_ = true;
-                publish_online(true);
-                ESP_LOGI(kTag, "Cloud command SUBACK received; command subscription acknowledged");
+                if (!command_subscription_acked_.exchange(true)) {
+                    publish_online(true);
+                    publish_heartbeat();
+                    publish_periodic_state();
+                    start_heartbeat_timer();
+                    start_state_timer();
+                    ESP_LOGI(kTag, "Cloud command SUBACK received; command telemetry active");
+                }
             }
             break;
         case MQTT_EVENT_UNSUBSCRIBED:
@@ -960,6 +964,7 @@ void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
             ESP_LOGW(kTag, "Cloud disconnected");
             break;
         case MQTT_EVENT_DATA: {
+            if (!command_subscription_acked_) break;
             const auto command = command_buffer_.append(command_topic_.data(),
                 event->topic, event->topic_len, event->data, event->data_len,
                 event->total_data_len, event->current_data_offset, event->msg_id);
