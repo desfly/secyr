@@ -108,6 +108,11 @@ require("!command_subscription_acked_" in heartbeat_body and
         "MQTT timer callbacks must not publish health after command subscription is lost")
 require("kHeartbeatPeriodUs = 5ULL * 1000ULL * 1000ULL" in link,
         "MQTT live heartbeat must refresh within five seconds for Android readiness")
+require("esp_mqtt_client_enqueue(client_, heartbeat_topic_.data()," in heartbeat_body and
+        "payload, length, 0, 0, true)" in heartbeat_body and
+        "esp_mqtt_client_publish(client_, heartbeat_topic_" not in heartbeat_body and
+        ".dispatch_method = ESP_TIMER_TASK" in link,
+        "ESP_TIMER_TASK heartbeat callback must enqueue without synchronous MQTT network I/O")
 data_case = link[link.find("case MQTT_EVENT_DATA:"):link.find("case MQTT_EVENT_ERROR:")]
 require("if (!command_subscription_acked_) break;" in data_case and
         data_case.find("if (!command_subscription_acked_) break;") < data_case.find("command_buffer_.append("),
