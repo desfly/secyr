@@ -85,8 +85,11 @@ private:
     std::atomic<int> command_subscribe_msg_id_{-1};
     std::atomic<std::uint32_t> connect_count_{0};
     std::atomic<std::uint32_t> disconnect_count_{0};
-    std::uint64_t heartbeat_sequence_{};
-    std::uint64_t state_sequence_{};
+    // SUBACK callbacks and ESP_TIMER_TASK telemetry callbacks can overlap.
+    // Native 32-bit atomic counters avoid torn updates on Xtensa/MCP runtime.
+    // At a 5-second interval they do not wrap for centuries.
+    std::atomic<std::uint32_t> heartbeat_sequence_{0};
+    std::atomic<std::uint32_t> state_sequence_{0};
 };
 
 }  // namespace homeguard::idf
