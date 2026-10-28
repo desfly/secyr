@@ -125,6 +125,9 @@ require('"subscribing"' in http,
 
 require("std::atomic<std::uint32_t> connect_count_" in link_header and "std::atomic<std::uint32_t> disconnect_count_" in link_header,
         "MQTT reconnect counters must be atomic")
+require("std::atomic<std::uint32_t> heartbeat_sequence_" in link_header and
+        "std::atomic<std::uint32_t> state_sequence_" in link_header,
+        "MQTT timer and SUBACK callbacks must use atomic telemetry sequence counters")
 require('"HG-UNKNOWN"' not in link and "device_id_[0] = '\\0';" in link,
         "unique device identity must fail closed on MAC read error")
 require("command_buffer_.append(" in link and
