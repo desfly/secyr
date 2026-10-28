@@ -447,7 +447,11 @@ void CloudLink::publish_heartbeat()
     const int length = std::snprintf(payload, sizeof(payload),
         "{\"seq\":%llu,\"up\":%llu,\"online\":true}", sequence, up_seconds);
     if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(payload)) return;
-    (void)esp_mqtt_client_publish(client_, heartbeat_topic_.data(), payload, length, 0, 0);
+    // Called from ESP_TIMER_TASK: never block the shared timer dispatcher on
+    // a synchronous network publish. Queue a copy for the MQTT outbox task.
+    const int message_id = esp_mqtt_client_enqueue(client_, heartbeat_topic_.data(),
+        payload, length, 0, 0, true);
+    if (message_id < 0) ESP_LOGW(kTag, "MQTT heartbeat enqueue failed: %d", message_id);
 }
 
 void CloudLink::start_heartbeat_timer()
