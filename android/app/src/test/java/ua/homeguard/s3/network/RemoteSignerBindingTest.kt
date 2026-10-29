@@ -2,6 +2,9 @@ package ua.homeguard.s3.network
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -10,6 +13,7 @@ import ua.homeguard.s3.model.ControlPath
 import ua.homeguard.s3.model.DeviceEndpoint
 import ua.homeguard.s3.network.mqtt.MqttConnectionConfig
 import ua.homeguard.s3.network.mqtt.MqttRuntime
+import ua.homeguard.s3.network.mqtt.MqttRuntimeClient
 
 class RemoteSignerBindingTest {
     @Test fun changingSelectedDeviceCannotUsePreviousSignerCredentials() = runBlocking {
@@ -27,5 +31,40 @@ class RemoteSignerBindingTest {
         runtime.configureMqtt(MqttConnectionConfig(deviceId = "HG-TWO"))
         assertFalse(runtime.transportStatuses().first { it.kind == TransportKind.MQTT }.commandSupported)
         runtime.stop()
+    }
+
+    @Test fun identicalMqttSettingsPreserveConnectionButPasswordChangeRestarts() {
+        val testScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        val runtime = RemoteTransportRuntime(testScope,
+            MutableStateFlow(DeviceEndpoint("HG-ONE", "", "", ControlPath.OFFLINE)), TelemetrySocket())
+        // Loopback port 1 deliberately has no broker. The test checks worker
+        // lifecycle only and never needs Internet or an external MQTT service.
+        val settings = MqttConnectionConfig(
+            brokerUri = "mqtts://127.0.0.1:1", username = "tester",
+            deviceId = "HG-ONE", enabled = true,
+        )
+        try {
+            runtime.configureMqtt(settings, "first-password")
+            val mqttClient = runtime.javaClass.getDeclaredField("mqttClient")
+                .apply { isAccessible = true }.get(runtime) as MqttRuntimeClient
+            val workerField = mqttClient.javaClass.getDeclaredField("worker")
+                .apply { isAccessible = true }
+            val original = workerField.get(mqttClient) as Job
+            assertTrue(original.isActive)
+
+            // DeviceSession.start() emits the persisted settings twice (direct
+            // call and initial StateFlow emission). The second must be a no-op.
+            runtime.configureMqtt(settings, "first-password")
+            assertSame(original, workerField.get(mqttClient))
+            assertTrue(original.isActive)
+
+            // Credentials are part of the effective connection identity.
+            runtime.configureMqtt(settings, "rotated-password")
+            assertNotSame(original, workerField.get(mqttClient))
+            assertFalse(original.isActive)
+        } finally {
+            runtime.stop()
+            testScope.cancel()
+        }
     }
 }
