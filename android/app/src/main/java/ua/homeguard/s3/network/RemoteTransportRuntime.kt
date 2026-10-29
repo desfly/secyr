@@ -33,6 +33,9 @@ class RemoteTransportRuntime(
     private val mqtt = MqttRuntime(scope, mqttClient)
     private var mqttEventsJob: Job? = null
     private var mqttStateJob: Job? = null
+    // Avoid tearing down a live MQTT session on duplicate settings emissions.
+    // Include the credential: a password rotation must still reconnect.
+    private var appliedMqtt: Pair<MqttConnectionConfig, String>? = null
 
     private data class SignerRoute(val deviceId: String, val controller: MqttSignedCommandController)
     @Volatile private var signerRoute: SignerRoute? = null
@@ -94,6 +97,7 @@ class RemoteTransportRuntime(
         cloud.stop()
         clearMqttSigner()
         mqtt.stop()
+        appliedMqtt = null
         mqttEventsJob?.cancel()
         mqttEventsJob = null
         mqttStateJob?.cancel()
@@ -142,9 +146,12 @@ class RemoteTransportRuntime(
         TransportMatrix.chooseTelemetry(transportStatuses())
 
     private fun applyMqttConfig(config: MqttConnectionConfig, credential: String = "") {
+        val requested = if (config.ready) config to credential else null
+        if (appliedMqtt == requested) return
         mqtt.stop()
         telemetry.acceptMqttMode(null)
-        if (!config.ready) return
+        appliedMqtt = requested
+        if (requested == null) return
         mqtt.start(
             MqttRuntimeClient.Config(
                 brokerUri = config.brokerUri,
