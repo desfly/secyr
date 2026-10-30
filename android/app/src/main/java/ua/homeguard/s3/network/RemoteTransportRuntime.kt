@@ -36,6 +36,9 @@ class RemoteTransportRuntime(
     // Avoid tearing down a live MQTT session on duplicate settings emissions.
     // Include the credential: a password rotation must still reconnect.
     private var appliedMqtt: Pair<MqttConnectionConfig, String>? = null
+    // start() must reuse the last supplied credential, not silently replace it
+    // with the empty default after configureMqtt() has already connected.
+    private var mqttCredential: String = ""
 
     private data class SignerRoute(val deviceId: String, val controller: MqttSignedCommandController)
     @Volatile private var signerRoute: SignerRoute? = null
@@ -90,7 +93,7 @@ class RemoteTransportRuntime(
                 }.collect { telemetry.acceptMqttMode(it) }
             }
         }
-        applyMqttConfig(mqttConfig.value)
+        applyMqttConfig(mqttConfig.value, mqttCredential)
     }
 
     fun stop() {
@@ -108,6 +111,7 @@ class RemoteTransportRuntime(
     fun configureMqtt(config: MqttConnectionConfig, credential: String = "") {
         if (signerRoute?.deviceId != config.deviceId) clearMqttSigner()
         mqttConfig.value = config
+        mqttCredential = credential
         applyMqttConfig(config, credential)
     }
 
