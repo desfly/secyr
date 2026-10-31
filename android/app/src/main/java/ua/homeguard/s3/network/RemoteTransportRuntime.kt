@@ -70,6 +70,8 @@ class RemoteTransportRuntime(
         if (mqttEventsJob == null) {
             mqttEventsJob = scope.launch {
                 mqttClient.events().collect { json ->
+                    // Discard in-flight events from the previously selected MQTT device.
+                    if (json.optString("_mqttTransportDeviceId") != mqttConfig.value.deviceId) return@collect
                     val eventName = json.optString("event", "unknown")
                     val source = if (json.has("sourceId")) json.optInt("sourceId", 0) else json.optInt("source", 0)
                     val timestamp = if (json.has("timestampMs")) json.optLong("timestampMs", 0L) else json.optLong("ts", 0L)
