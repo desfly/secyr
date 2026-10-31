@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -212,6 +213,25 @@ class MqttRuntimeClientTest {
         assertEquals(seen, client.lastHeartbeatAtMs().value)
         heartbeat(client, false, "{\"seq\":2,\"up\":51,\"online\":true}")
         assertTrue(client.lastHeartbeatAtMs().value > seen)
+    }
+
+    @Test fun mqttEventsCarryTheirAuthenticatedTopicDevice() = runBlocking {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        val observed = kotlinx.coroutines.CompletableDeferred<JSONObject>()
+        val subscription = launch(start = CoroutineStart.UNDISPATCHED) {
+            observed.complete(client.events().first())
+        }
+        try {
+            val topic = "homeguard/v1/devices/HG-TEST/events".toByteArray()
+            val body = "{\"event\":\"alarm\",\"sequence\":1,\"_mqttTransportDeviceId\":\"HG-OTHER\"}".toByteArray()
+            val payload = byteArrayOf(0, topic.size.toByte()) + topic + body
+            client.javaClass.getDeclaredMethod("handlePublish", MqttRuntimeClient.Config::class.java,
+                Int::class.javaPrimitiveType, ByteArray::class.java).apply { isAccessible = true }
+                .invoke(client, cfg, 0, payload)
+            assertEquals("HG-TEST", kotlinx.coroutines.withTimeout(1_000) { observed.await() }.getString("_mqttTransportDeviceId"))
+        } finally {
+            subscription.cancelAndJoin()
+        }
     }
 
     @Test fun retainedResponseCannotCompletePendingCommand() {
