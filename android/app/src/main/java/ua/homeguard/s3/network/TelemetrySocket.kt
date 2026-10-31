@@ -109,6 +109,8 @@ class TelemetrySocket(private val telemetryTimeoutMs: Long = 15_000L) {
     fun selectDevice(deviceId: String) {
         if (selectedDeviceId == deviceId) return
         selectedDeviceId = deviceId
+        // Alarm/event history belongs to the previous controller, not the new selection.
+        clearEvents()
         clearFallbackSnapshot()
         mqttMode = null
         disconnect()
