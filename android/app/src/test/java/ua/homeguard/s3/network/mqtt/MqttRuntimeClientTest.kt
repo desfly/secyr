@@ -4,6 +4,7 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.lang.reflect.InvocationTargetException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -12,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -59,6 +61,22 @@ class MqttRuntimeClientTest {
             fail("Mismatched SUBACK must fail")
         } catch (error: InvocationTargetException) {
             assertTrue(error.cause is IllegalStateException)
+        }
+    }
+
+    @Test fun oversizedMqttFrameFailsBeforeAllocatingPayload() {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        val read = client.javaClass.getDeclaredMethod("readPacket", BufferedInputStream::class.java)
+            .apply { isAccessible = true }
+        // MQTT remaining length 65,537; no body follows. A bounded parser
+        // must reject the header, not try to read or allocate its body.
+        val packet = byteArrayOf(0x30, 0x81.toByte(), 0x80.toByte(), 0x04)
+        try {
+            read.invoke(client, BufferedInputStream(ByteArrayInputStream(packet)))
+            fail("Oversized MQTT packet must be rejected")
+        } catch (error: InvocationTargetException) {
+            assertTrue(error.cause is IOException)
+            assertTrue(error.cause?.message?.contains("too large") == true)
         }
     }
 
@@ -195,6 +213,25 @@ class MqttRuntimeClientTest {
         assertEquals(seen, client.lastHeartbeatAtMs().value)
         heartbeat(client, false, "{\"seq\":2,\"up\":51,\"online\":true}")
         assertTrue(client.lastHeartbeatAtMs().value > seen)
+    }
+
+    @Test fun mqttEventsCarryTheirAuthenticatedTopicDevice() = runBlocking {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        val observed = kotlinx.coroutines.CompletableDeferred<JSONObject>()
+        val subscription = launch(start = CoroutineStart.UNDISPATCHED) {
+            observed.complete(client.events().first())
+        }
+        try {
+            val topic = "homeguard/v1/devices/HG-TEST/events".toByteArray()
+            val body = "{\"event\":\"alarm\",\"sequence\":1,\"_mqttTransportDeviceId\":\"HG-OTHER\"}".toByteArray()
+            val payload = byteArrayOf(0, topic.size.toByte()) + topic + body
+            client.javaClass.getDeclaredMethod("handlePublish", MqttRuntimeClient.Config::class.java,
+                Int::class.javaPrimitiveType, ByteArray::class.java).apply { isAccessible = true }
+                .invoke(client, cfg, 0, payload)
+            assertEquals("HG-TEST", kotlinx.coroutines.withTimeout(1_000) { observed.await() }.getString("_mqttTransportDeviceId"))
+        } finally {
+            subscription.cancelAndJoin()
+        }
     }
 
     @Test fun retainedResponseCannotCompletePendingCommand() {

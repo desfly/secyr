@@ -7,9 +7,10 @@
 namespace {
 class FakeBackend final : public hg::PhysicalOutputBackend {
 public:
-    bool configure_output(int gpio, bool initial) override { levels[gpio] = initial; return !fail; }
-    bool write_output(int gpio, bool level) override { if (fail) return false; levels[gpio] = level; return true; }
+    bool configure_output(int gpio, bool initial) override { if (fail) return false; levels[gpio] = initial; return true; }
+    bool write_output(int gpio, bool level) override { if (fail || fail_writes) return false; levels[gpio] = level; return true; }
     bool fail{};
+    bool fail_writes{};
     std::map<int, bool> levels;
 };
 
@@ -45,9 +46,31 @@ void test_interlocks() {
 
     result = hg::apply_output_command(model, blocked, {4, true, true, 4});
     TEST_CHECK(result.status == hg::OutputCommandStatus::RejectedInterlock);
+
+    // A stale or dishonest client can send alarmActive=false. The real
+    // partition alarm must still block ON, across HTTP/BLE/MQTT callers.
+    TEST_CHECK(model.add_partition(1));
+    TEST_CHECK(model.set_partition_arm(1, hg::PartitionArmState::Alarm, 5));
+    result = hg::apply_output_command(model, blocked, {5, true, false, 6});
+    TEST_CHECK(result.status == hg::OutputCommandStatus::RejectedInterlock);
+    result = hg::apply_output_command(model, blocked, {4, true, false, 7});
+    TEST_CHECK(result.status == hg::OutputCommandStatus::RejectedInterlock);
+
+    // OFF remains available during an alarm for fail-safe de-energization.
+    result = hg::apply_output_command(model, blocked, {5, false, false, 8});
+    TEST_CHECK(result.status == hg::OutputCommandStatus::Applied);
+    TEST_CHECK(!model.output(5)->active);
+    TEST_CHECK(model.set_partition_arm(1, hg::PartitionArmState::Disarmed, 9));
+    result = hg::apply_output_command(model, blocked, {5, true, false, 10});
+    TEST_CHECK(result.status == hg::OutputCommandStatus::Applied);
 }
 
 void test_runtime() {
+    hg::PhysicalOutputRuntime uninitialized;
+    TEST_CHECK(!uninitialized.force_safe());
+    TEST_CHECK(uninitialized.state().status == hg::PhysicalOutputStatus::BackendError);
+    TEST_CHECK(!uninitialized.state().outputs_enabled);
+
     hg::SystemEventBus bus;
     hg::SystemModel model(bus);
     TEST_CHECK(model.add_output(1, hg::ModelOutputType::Siren));
@@ -72,9 +95,11 @@ void test_runtime() {
     TEST_CHECK(!backend.levels[10]);
     TEST_CHECK(!backend.levels[11]);
     TEST_CHECK(!backend.levels[12]);
-    // LIGHT/LOCK are handled by MCP23017 GPA0/GPA1, not ESP GPIO1/GPIO2.
-    TEST_CHECK(backend.levels.count(1) == 0);
-    TEST_CHECK(backend.levels.count(2) == 0);
+    TEST_CHECK(backend.levels[hg::direct_light_relay_gpio]);
+    TEST_CHECK(backend.levels[hg::direct_lock_relay_gpio]);
+    // Virtual MCP23017 IDs must not silently touch ESP32 GPIO1/GPIO2.
+    TEST_CHECK(backend.levels.find(1) == backend.levels.end());
+    TEST_CHECK(backend.levels.find(2) == backend.levels.end());
 
     hg::BootReadinessReport ready{};
     ready.status = hg::BootReadinessStatus::ReadyForPhysicalOutputs;
@@ -83,10 +108,46 @@ void test_runtime() {
     TEST_CHECK(backend.levels[11]);
     TEST_CHECK(backend.levels[12]);
 
+    // Emergency shutdown must clear both MCP virtual outputs and all
+    // commissioned physical outputs even after they were energized.
+    TEST_CHECK(runtime.force_safe());
+    TEST_CHECK(!backend.levels[hg::direct_light_relay_gpio]);
+    TEST_CHECK(!backend.levels[hg::direct_lock_relay_gpio]);
+    TEST_CHECK(!backend.levels[10]);
+    TEST_CHECK(!backend.levels[11]);
+    TEST_CHECK(!backend.levels[12]);
+    TEST_CHECK(!runtime.state().outputs_enabled);
+
+    // Configuration can succeed while safe-level writes fail during boot.
+    FakeBackend boot_failure;
+    boot_failure.fail_writes = true;
+    hg::PhysicalOutputRuntime blocked_runtime;
+    TEST_CHECK(!blocked_runtime.initialize(boot_failure, hardware, blocked));
+    TEST_CHECK(blocked_runtime.state().status == hg::PhysicalOutputStatus::BackendError);
+
     FakeBackend failing;
     failing.fail = true;
     hg::PhysicalOutputRuntime broken;
     TEST_CHECK(!broken.initialize(failing, hardware, ready));
+    TEST_CHECK(broken.state().status == hg::PhysicalOutputStatus::BackendError);
+
+    // A runtime write failure must never be reported as a successful sync.
+    FakeBackend write_failure;
+    hg::PhysicalOutputRuntime guarded;
+    TEST_CHECK(guarded.initialize(write_failure, hardware, ready));
+    write_failure.fail = true;
+    TEST_CHECK(!guarded.synchronize(model, ready));
+    TEST_CHECK(guarded.state().status == hg::PhysicalOutputStatus::BackendError);
+    TEST_CHECK(!guarded.state().outputs_enabled);
+
+    // Failed fail-closed writes must not mask the backend error as FailClosed.
+    FakeBackend blocked_write_failure;
+    hg::PhysicalOutputRuntime blocked_guarded;
+    TEST_CHECK(blocked_guarded.initialize(blocked_write_failure, hardware, blocked));
+    blocked_write_failure.fail_writes = true;
+    TEST_CHECK(!blocked_guarded.synchronize(model, blocked));
+    TEST_CHECK(blocked_guarded.state().status == hg::PhysicalOutputStatus::BackendError);
+    TEST_CHECK(!blocked_guarded.state().outputs_enabled);
 }
 } // namespace
 

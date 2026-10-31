@@ -10,6 +10,7 @@ def read(name: str) -> str:
 
 app = read("app_main.cpp")
 link = read("hg_cloud_link.cpp")
+link_header = read("hg_cloud_link.hpp")
 http = read("hg_cloud_http.cpp")
 nvs = read("hg_cloud_nvs.cpp")
 trust_nvs = read("hg_cloud_trust_nvs.cpp")
@@ -28,6 +29,18 @@ require("std::string owned_public_key{public_key_pem}" in verifier and
 require('"hg_cloud_nvs.cpp"' in cmake, "cloud NVS source not compiled")
 require("g_cloud_store.load" in app and "restore_cloud_config" in app, "cloud config not restored at boot")
 require("g_cloud_link.start" in app, "persisted cloud config does not auto-start MQTT")
+# Boot must survive delayed DHCP/STA provisioning; MQTT's own client handles
+# reconnects after its first successful start.
+cloud_boot_start = app[app.find("void cloud_start_task(void*)"):app.find("void schedule_cloud_start()")]
+require("for (;;)" in cloud_boot_start and "if (restore_cloud_config()) break;" in cloud_boot_start,
+        "MQTT boot task must wait for late IPv4 and retry transient startup failures")
+require("kTimeoutMs" not in cloud_boot_start and "vTaskDelay(kPollTicks)" in cloud_boot_start,
+        "MQTT boot must not abandon startup after a fixed DHCP timeout")
+require("esp_netif_is_netif_up(netif)" in app,
+        "MQTT boot must not treat a down interface with stale IPv4 as operational")
+require("if (g_cloud_link.configured()) return true;" in app and
+        "return start_error == ESP_ERR_INVALID_ARG;" in app,
+        "MQTT boot must handle concurrent /cloud/config start and distinguish permanent config errors")
 require("set_command_runtime(&g_system_model, &g_system_bus, &g_access_control, &g_cloud_time)" in app, "live command runtime + trusted time not wired")
 require('"/api/v1/cloud/status"' in http, "cloud status endpoint missing")
 require('"/api/v1/cloud/config"' in http, "cloud config endpoint missing")
@@ -53,7 +66,74 @@ require("trust.version <= current.version" in trust_nvs and "ESP_ERR_INVALID_STA
         "Cloud Command Trust store does not reject version rollback")
 require("cloud_->stop()" in http and "cloud_->start(" in http, "cloud config change does not restart MQTT")
 require("responses" in link and "response_topic_" in link, "MQTT response topic missing")
-require("handle_command(event->data" in link, "MQTT command payload is not routed")
+require("std::atomic<bool> connected_" in link_header and "std::atomic<bool> configured_" in link_header,
+        "MQTT status flags must be atomic across callback/timer/HTTP tasks")
+require("std::atomic<bool> command_subscription_acked_" in link_header and
+        "std::atomic<int> command_subscribe_msg_id_" in link_header,
+        "MQTT command SUBACK and message ID must be tracked atomically")
+require("MQTT_EVENT_SUBSCRIBED" in link and "event->msg_id == command_subscribe_msg_id_.load()" in link,
+        "MQTT command readiness must require the matching subscription ACK")
+require("MQTT_ERROR_TYPE_SUBSCRIBE_FAILED" in link and
+        "event->error_handle->error_type" in link,
+        "A failed broker SUBACK must not be reported as command subscription ready")
+connected_case = link[link.find("case MQTT_EVENT_CONNECTED:"):link.find("case MQTT_EVENT_SUBSCRIBED:")]
+subscribed_case = link[link.find("case MQTT_EVENT_SUBSCRIBED:"):link.find("case MQTT_EVENT_UNSUBSCRIBED:")]
+disconnect_case = link[link.find("case MQTT_EVENT_DISCONNECTED:"):link.find("case MQTT_EVENT_DATA:")]
+require("command_subscription_acked_ = false" in connected_case and
+        "publish_online(true)" not in connected_case and
+        "publish_online(true)" in subscribed_case and
+        "command_subscription_acked_ = false" in disconnect_case,
+        "MQTT retained online availability must follow SUBACK and clear on reconnect")
+# A live MQTT state/heartbeat is used by Android to declare a device ready.
+# Never publish either before the matching successful command SUBACK; an old
+# retained "online" record could otherwise make Android route unsafe commands
+# to a session that is not subscribed to commands.
+require("publish_heartbeat();" not in connected_case and
+        "start_heartbeat_timer();" not in connected_case and
+        "start_state_timer();" not in connected_case,
+        "pre-SUBACK MQTT connection must not publish live health or start telemetry timers")
+require("if (!command_subscription_acked_.exchange(true))" in subscribed_case and
+        "publish_online(true);" in subscribed_case and
+        "publish_heartbeat();" in subscribed_case and
+        "publish_periodic_state();" in subscribed_case and
+        "start_heartbeat_timer();" in subscribed_case and
+        "start_state_timer();" in subscribed_case and
+        subscribed_case.index("publish_online(true);") < subscribed_case.index("publish_heartbeat();") <
+        subscribed_case.index("publish_periodic_state();") < subscribed_case.index("start_heartbeat_timer();"),
+        "successful matching SUBACK must enable fresh telemetry exactly once")
+heartbeat_body = link[link.find("void CloudLink::publish_heartbeat()"):link.find("void CloudLink::start_heartbeat_timer()")]
+state_body = link[link.find("void CloudLink::publish_periodic_state()"):link.find("void CloudLink::start_state_timer()")]
+require("!command_subscription_acked_" in heartbeat_body and
+        "!command_subscription_acked_" in state_body,
+        "MQTT timer callbacks must not publish health after command subscription is lost")
+require("kHeartbeatPeriodUs = 5ULL * 1000ULL * 1000ULL" in link,
+        "MQTT live heartbeat must refresh within five seconds for Android readiness")
+require("esp_mqtt_client_enqueue(client_, heartbeat_topic_.data()," in heartbeat_body and
+        "payload, length, 0, 0, true)" in heartbeat_body and
+        "esp_mqtt_client_publish(client_, heartbeat_topic_" not in heartbeat_body and
+        ".dispatch_method = ESP_TIMER_TASK" in link,
+        "ESP_TIMER_TASK heartbeat callback must enqueue without synchronous MQTT network I/O")
+data_case = link[link.find("case MQTT_EVENT_DATA:"):link.find("case MQTT_EVENT_ERROR:")]
+require("if (!command_subscription_acked_) break;" in data_case and
+        data_case.find("if (!command_subscription_acked_) break;") < data_case.find("command_buffer_.append("),
+        "MQTT command packets must not execute before subscription readiness")
+
+require("commandSubscriptionAcked" in http[http.find("esp_err_t CloudHttp::status_get"):http.find("esp_err_t CloudHttp::client_config_get")],
+        "Cloud status API must expose separate command subscription acknowledgement")
+require('"subscribing"' in http,
+        "Cloud status must not call a connected-but-unsubscribed command path ready")
+
+require("std::atomic<std::uint32_t> connect_count_" in link_header and "std::atomic<std::uint32_t> disconnect_count_" in link_header,
+        "MQTT reconnect counters must be atomic")
+require("std::atomic<std::uint32_t> heartbeat_sequence_" in link_header and
+        "std::atomic<std::uint32_t> state_sequence_" in link_header,
+        "MQTT timer and SUBACK callbacks must use atomic telemetry sequence counters")
+require('"HG-UNKNOWN"' not in link and "device_id_[0] = '\\0';" in link,
+        "unique device identity must fail closed on MAC read error")
+require("command_buffer_.append(" in link and
+        "if (command) handle_command(command->data(), command->size());" in link and
+        "handle_command(event->data" not in link,
+        "MQTT commands must be assembled before parsing")
 require("trusted_time_->ready()" in link and "expires_at_ms" in link and "issued_at_ms" in link,
         "MQTT command freshness is not gated by trusted time")
 require('parse_json_u64(body, "keyEpoch", key_epoch)' in link and
@@ -216,6 +296,25 @@ require("Factory identity" in contract and "MQTT credentials" in contract and "C
 require("firmware enforces signed-command verification" in contract.lower() and
         "guarded by ci" in contract.lower(),
         "contract must state the implemented MQTT security baseline and CI enforcement")
+
+# Signed MQTT lock commands must reach the shared MCP23017 writer before
+# reporting success; model-only acknowledgement can lie when I2C is faulty.
+require("g_cloud_link.set_output_backend(&g_gpio_outputs)" in app,
+        "Cloud MQTT lock route is not bound to the MCP23017 relay writer")
+require('void set_output_backend(GpioOutputBackend* output_backend)' in link_header,
+        "CloudLink must accept the shared relay backend")
+cloud_lock_start = link.find('if (command == "output.lock")')
+cloud_lock_end = link.find('hg::PartitionArmState target{}', cloud_lock_start)
+cloud_lock = link[cloud_lock_start:cloud_lock_end]
+require(cloud_lock_start >= 0 and cloud_lock_end > cloud_lock_start and
+        'output_backend_->synchronize_relays(*model_)' in cloud_lock and
+        'output_backend_->force_safe_relays()' in cloud_lock and
+        'publish_response(false, "physical_output_failure")' in cloud_lock,
+        "Cloud MQTT lock must verify driver write and fail closed on I2C error")
+require(cloud_lock.find('output_backend_->synchronize_relays(*model_)') <
+        cloud_lock.find('publish_response(true, "accepted_5s")') and
+        'if (task_ok != pdPASS)' in cloud_lock,
+        "Cloud lock success must follow driver application and timer allocation")
 
 if errors:
     print("Cloud runtime contract FAIL")

@@ -69,3 +69,17 @@ add_test(NAME homeguard_event_bus_tests COMMAND homeguard_event_bus_tests)
 add_executable(homeguard_bounded_write_tests ../tests/test_bounded_write.cpp)
 target_link_libraries(homeguard_bounded_write_tests PRIVATE homeguard_core)
 add_test(NAME homeguard_bounded_write_tests COMMAND homeguard_bounded_write_tests)
+
+add_executable(homeguard_gpio_backend_tests
+    ../tests/test_gpio_output_backend.cpp
+    esp-idf/main/hg_gpio_output_backend.cpp)
+target_include_directories(homeguard_gpio_backend_tests PRIVATE
+    ../tests/esp-idf-mock/include esp-idf/main)
+target_compile_options(homeguard_gpio_backend_tests PRIVATE -UNDEBUG)
+target_link_libraries(homeguard_gpio_backend_tests PRIVATE homeguard_core Threads::Threads)
+add_test(NAME homeguard_gpio_backend_tests COMMAND homeguard_gpio_backend_tests)
+
+add_executable(homeguard_mqtt_buffer_tests ../tests/test_mqtt_command_buffer.cpp)
+target_include_directories(homeguard_mqtt_buffer_tests PRIVATE esp-idf/main)
+target_compile_options(homeguard_mqtt_buffer_tests PRIVATE -UNDEBUG)
+add_test(NAME homeguard_mqtt_buffer_tests COMMAND homeguard_mqtt_buffer_tests)

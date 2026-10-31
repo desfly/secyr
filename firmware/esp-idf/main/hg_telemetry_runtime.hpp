@@ -13,11 +13,13 @@ class SystemEventBus;
 }
 
 class WebsocketTelemetry;
+class DeviceDiscoveryService;
 
 namespace homeguard::idf {
 
 class HardwareBootstrap;
 class BleTransport;
+class GpioOutputBackend;
 
 class TelemetryRuntime {
 public:
@@ -26,7 +28,9 @@ public:
         WebsocketTelemetry* websocket,
         hg::SystemModel* system_model,
         hg::SystemEventBus* system_bus,
-        BleTransport* ble_transport = nullptr);
+        BleTransport* ble_transport = nullptr,
+        GpioOutputBackend* output_backend = nullptr,
+        DeviceDiscoveryService* discovery = nullptr);
 
     [[nodiscard]] bool mcp_outputs_healthy() const noexcept { return mcp_outputs_healthy_; }
     [[nodiscard]] std::uint8_t mcp_outputs_applied() const noexcept { return mcp_outputs_applied_; }
@@ -50,6 +54,8 @@ private:
     hg::SystemModel* system_model_{nullptr};
     hg::SystemEventBus* system_bus_{nullptr};
     BleTransport* ble_transport_{nullptr};
+    GpioOutputBackend* output_backend_{nullptr};
+    DeviceDiscoveryService* discovery_{nullptr};
     hg::TelemetryBuilder builder_{};
     hg::HealthMonitor health_{};
 

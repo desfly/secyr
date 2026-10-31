@@ -13,6 +13,7 @@ import org.json.JSONObject
 import ua.homeguard.s3.model.SystemEventRecord
 import ua.homeguard.s3.model.SystemSnapshot
 import ua.homeguard.s3.model.SystemMode
+import ua.homeguard.s3.model.Transport
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.ScheduledFuture
@@ -39,9 +40,13 @@ class TelemetrySocket(private val telemetryTimeoutMs: Long = 15_000L) {
 
     fun lastReceivedAtMs(): StateFlow<Long> = receivedAtMs.asStateFlow()
     private var fallbackSnapshot: SystemSnapshot? = null
+    private var fallbackTimeout: ScheduledFuture<*>? = null
+    private var fallbackVersion = 0L
+    private var selectedDeviceId = ""
     private var mqttMode: SystemMode? = null
 
-    private fun fallbackState(): SystemSnapshot = fallbackSnapshot ?: SystemSnapshot(mode = mqttMode ?: SystemMode.DISARMED)
+    private fun fallbackState(): SystemSnapshot = fallbackSnapshot ?: SystemSnapshot(mode = mqttMode ?: SystemMode.UNKNOWN,
+        transport = if (mqttMode != null) Transport.MQTT else Transport.NONE)
 
     /** Compact MQTT state carries no zone or sensor measurements. */
     @Synchronized
@@ -76,6 +81,13 @@ class TelemetrySocket(private val telemetryTimeoutMs: Long = 15_000L) {
     @Synchronized
     fun acceptFallbackSnapshot(snapshot: SystemSnapshot) {
         fallbackSnapshot = snapshot
+        val version = ++fallbackVersion
+        fallbackTimeout?.cancel(false)
+        fallbackTimeout = watchdog.schedule({
+            synchronized(this) {
+                if (fallbackVersion == version) clearFallbackSnapshot()
+            }
+        }, telemetryTimeoutMs, TimeUnit.MILLISECONDS)
         if (connectionState.value != TelemetryConnectionState.CONNECTED) {
             state.value = snapshot
         }
@@ -84,10 +96,24 @@ class TelemetrySocket(private val telemetryTimeoutMs: Long = 15_000L) {
     /** Drop fallback data when its authenticated transport/session is gone. */
     @Synchronized
     fun clearFallbackSnapshot() {
+        ++fallbackVersion
+        fallbackTimeout?.cancel(false)
+        fallbackTimeout = null
         fallbackSnapshot = null
         if (connectionState.value != TelemetryConnectionState.CONNECTED) {
             state.value = fallbackState()
         }
+    }
+
+    @Synchronized
+    fun selectDevice(deviceId: String) {
+        if (selectedDeviceId == deviceId) return
+        selectedDeviceId = deviceId
+        // Alarm/event history belongs to the previous controller, not the new selection.
+        clearEvents()
+        clearFallbackSnapshot()
+        mqttMode = null
+        disconnect()
     }
 
     @Synchronized

@@ -33,6 +33,12 @@ class RemoteTransportRuntime(
     private val mqtt = MqttRuntime(scope, mqttClient)
     private var mqttEventsJob: Job? = null
     private var mqttStateJob: Job? = null
+    // Avoid tearing down a live MQTT session on duplicate settings emissions.
+    // Include the credential: a password rotation must still reconnect.
+    private var appliedMqtt: Pair<MqttConnectionConfig, String>? = null
+    // start() must reuse the last supplied credential, not silently replace it
+    // with the empty default after configureMqtt() has already connected.
+    private var mqttCredential: String = ""
 
     private data class SignerRoute(val deviceId: String, val controller: MqttSignedCommandController)
     @Volatile private var signerRoute: SignerRoute? = null
@@ -64,6 +70,8 @@ class RemoteTransportRuntime(
         if (mqttEventsJob == null) {
             mqttEventsJob = scope.launch {
                 mqttClient.events().collect { json ->
+                    // Discard in-flight events from the previously selected MQTT device.
+                    if (json.optString("_mqttTransportDeviceId") != mqttConfig.value.deviceId) return@collect
                     val eventName = json.optString("event", "unknown")
                     val source = if (json.has("sourceId")) json.optInt("sourceId", 0) else json.optInt("source", 0)
                     val timestamp = if (json.has("timestampMs")) json.optLong("timestampMs", 0L) else json.optLong("ts", 0L)
@@ -87,13 +95,14 @@ class RemoteTransportRuntime(
                 }.collect { telemetry.acceptMqttMode(it) }
             }
         }
-        applyMqttConfig(mqttConfig.value)
+        applyMqttConfig(mqttConfig.value, mqttCredential)
     }
 
     fun stop() {
         cloud.stop()
         clearMqttSigner()
         mqtt.stop()
+        appliedMqtt = null
         mqttEventsJob?.cancel()
         mqttEventsJob = null
         mqttStateJob?.cancel()
@@ -104,6 +113,7 @@ class RemoteTransportRuntime(
     fun configureMqtt(config: MqttConnectionConfig, credential: String = "") {
         if (signerRoute?.deviceId != config.deviceId) clearMqttSigner()
         mqttConfig.value = config
+        mqttCredential = credential
         applyMqttConfig(config, credential)
     }
 
@@ -142,9 +152,12 @@ class RemoteTransportRuntime(
         TransportMatrix.chooseTelemetry(transportStatuses())
 
     private fun applyMqttConfig(config: MqttConnectionConfig, credential: String = "") {
+        val requested = if (config.ready) config to credential else null
+        if (appliedMqtt == requested) return
         mqtt.stop()
         telemetry.acceptMqttMode(null)
-        if (!config.ready) return
+        appliedMqtt = requested
+        if (requested == null) return
         mqtt.start(
             MqttRuntimeClient.Config(
                 brokerUri = config.brokerUri,
