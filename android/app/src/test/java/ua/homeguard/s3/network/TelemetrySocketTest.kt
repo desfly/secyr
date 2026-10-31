@@ -47,6 +47,17 @@ class TelemetrySocketTest {
         assertEquals(SystemMode.ARMED_HOME, telemetry.snapshots().first().mode)
     }
 
+    @Test fun selectingAnotherControllerDropsPreviousAlarmHistory() = runBlocking {
+        val telemetry = TelemetrySocket()
+        telemetry.selectDevice("HG-ONE")
+        telemetry.acceptExternalEvent(ua.homeguard.s3.model.SystemEventRecord(
+            sequence = 42, timestampMs = 1000, event = "alarm", sourceId = 3, value = 1,
+        ))
+        assertEquals(1, telemetry.events().first().size)
+        telemetry.selectDevice("HG-TWO")
+        assertTrue("Previous controller alarms must not leak into the new device", telemetry.events().first().isEmpty())
+    }
+
     @Test fun absentOrInvalidModeIsNeverReportedAsDisarmed() {
         for (json in listOf("{}", "{\"mode\":9}", "{\"mode\":0.5}", "{\"mode\":\"invalid\"}")) {
             assertEquals(SystemMode.UNKNOWN, JsonParsers.snapshot(org.json.JSONObject(json)).mode)
