@@ -234,6 +234,29 @@ class MqttRuntimeClientTest {
         }
     }
 
+    @Test fun retainedMqttAlarmIsNotReplayedAsNewEvent() = runBlocking {
+        val client = client(BufferedOutputStream(ByteArrayOutputStream()))
+        val observed = kotlinx.coroutines.CompletableDeferred<JSONObject>()
+        val subscription = launch(start = CoroutineStart.UNDISPATCHED) {
+            observed.complete(client.events().first())
+        }
+        try {
+            val topic = "homeguard/v1/devices/HG-TEST/events".toByteArray()
+            val handle = client.javaClass.getDeclaredMethod("handlePublish",
+                MqttRuntimeClient.Config::class.java, Int::class.javaPrimitiveType,
+                ByteArray::class.java).apply { isAccessible = true }
+            fun frame(sequence: Int): ByteArray =
+                byteArrayOf(0, topic.size.toByte()) + topic +
+                    "{\"event\":\"alarm\",\"sequence\":$sequence}".toByteArray()
+            handle.invoke(client, cfg, 1, frame(1))
+            assertFalse("Retained alarm must not be presented as live", observed.isCompleted)
+            handle.invoke(client, cfg, 0, frame(2))
+            assertEquals(2, kotlinx.coroutines.withTimeout(1_000) { observed.await() }.getInt("sequence"))
+        } finally {
+            subscription.cancelAndJoin()
+        }
+    }
+
     @Test fun retainedResponseCannotCompletePendingCommand() {
         val client = client(BufferedOutputStream(ByteArrayOutputStream()))
         val waiter = kotlinx.coroutines.CompletableDeferred<JSONObject>()
