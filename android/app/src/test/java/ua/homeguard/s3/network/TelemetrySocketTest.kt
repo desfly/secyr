@@ -6,6 +6,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import ua.homeguard.s3.model.SystemMode
 import ua.homeguard.s3.model.SystemSnapshot
@@ -56,6 +60,28 @@ class TelemetrySocketTest {
         assertEquals(1, telemetry.events().first().size)
         telemetry.selectDevice("HG-TWO")
         assertTrue("Previous controller alarms must not leak into the new device", telemetry.events().first().isEmpty())
+    }
+
+    @Test fun duplicateAlarmSequenceDoesNotNotifyTwiceAcrossTransports() = runBlocking {
+        val telemetry = TelemetrySocket()
+        val observed = mutableListOf<ua.homeguard.s3.model.SystemEventRecord>()
+        val observer = launch(start = CoroutineStart.UNDISPATCHED) {
+            telemetry.liveEvents().collect { observed.add(it) }
+        }
+        try {
+            val alarm = ua.homeguard.s3.model.SystemEventRecord(
+                sequence = 42, timestampMs = 1000, event = "alarm", sourceId = 3, value = 1,
+            )
+            telemetry.acceptExternalEvent(alarm)
+            telemetry.acceptExternalEvent(alarm.copy(timestampMs = 1001))
+            assertEquals(1, telemetry.events().first().size)
+            assertEquals("Duplicate QoS1/WSS delivery must not notify again", 1, observed.size)
+            telemetry.selectDevice("HG-TWO")
+            telemetry.acceptExternalEvent(alarm)
+            assertEquals("A new controller must have its own event history", 2, observed.size)
+        } finally {
+            observer.cancelAndJoin()
+        }
     }
 
     @Test fun absentOrInvalidModeIsNeverReportedAsDisarmed() {
