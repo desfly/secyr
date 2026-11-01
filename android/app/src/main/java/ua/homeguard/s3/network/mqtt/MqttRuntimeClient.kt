@@ -290,11 +290,15 @@ class MqttRuntimeClient(private val scope: CoroutineScope) {
                 if (previous != null && uptime.toLong() >= previous.uptimeSeconds && sequence.toLong() <= previous.sequence) return
                 deviceState.value = DeviceState(sequence.toLong(), uptime.toLong(), mode, System.currentTimeMillis())
             }
-            topic(cfg, "events") -> runCatching { JSONObject(body) }.getOrNull()?.let { json ->
+            topic(cfg, "events") -> {
+                // Retained events are historical broker data, not new alarms.
+                if ((flags and 0x01) != 0) return
+                runCatching { JSONObject(body) }.getOrNull()?.let { json ->
                 // Bind queued events to the authenticated MQTT topic/device that delivered them.
                 // A delayed emission must not appear on a newly selected controller.
                 json.put("_mqttTransportDeviceId", cfg.deviceId)
                 events.tryEmit(json)
+                }
             }
             topic(cfg, "responses") -> {
                 if ((flags and 0x01) != 0) return
