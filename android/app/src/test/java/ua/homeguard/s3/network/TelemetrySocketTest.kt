@@ -73,11 +73,14 @@ class TelemetrySocketTest {
                 sequence = 42, timestampMs = 1000, event = "alarm", sourceId = 3, value = 1,
             )
             telemetry.acceptExternalEvent(alarm)
+            kotlinx.coroutines.yield() // SharedFlow collector resumes asynchronously.
             telemetry.acceptExternalEvent(alarm.copy(timestampMs = 1001))
+            kotlinx.coroutines.yield()
             assertEquals(1, telemetry.events().first().size)
             assertEquals("Duplicate QoS1/WSS delivery must not notify again", 1, observed.size)
             telemetry.selectDevice("HG-TWO")
             telemetry.acceptExternalEvent(alarm)
+            kotlinx.coroutines.yield()
             assertEquals("A new controller must have its own event history", 2, observed.size)
         } finally {
             observer.cancelAndJoin()
