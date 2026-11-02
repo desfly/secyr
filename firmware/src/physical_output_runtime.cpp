@@ -19,6 +19,17 @@ bool PhysicalOutputRuntime::initialize(
     hardware_ = &hardware;
     state_ = {};
 
+    // LIGHT/LOCK use virtual output IDs routed to MCP23017 GPA0/GPA1.
+    // ESP32 GPIO1 and GPIO2 remain unassigned.
+    const int direct_gpios[] = {direct_light_relay_gpio, direct_lock_relay_gpio};
+    for (const int gpio : direct_gpios) {
+        if (!backend_->configure_output(gpio, false)) {
+            ++state_.failures;
+            state_.status = PhysicalOutputStatus::BackendError;
+            return false;
+        }
+    }
+
     // Siren/valves remain protected by the verified commissioning record.
     if (!hardware_verification_allows_outputs(hardware)) {
         state_.status = PhysicalOutputStatus::InvalidHardware;
@@ -37,11 +48,12 @@ bool PhysicalOutputRuntime::initialize(
     }
 
     if (!readiness.outputs_allowed()) {
-        write_safe(hardware.pins.siren);
-        write_safe(hardware.pins.valve1);
-        write_safe(hardware.pins.valve2);
-        state_.status = PhysicalOutputStatus::FailClosed;
-        return true;
+        bool safe = true;
+        safe = write_safe(hardware.pins.siren) && safe;
+        safe = write_safe(hardware.pins.valve1) && safe;
+        safe = write_safe(hardware.pins.valve2) && safe;
+        state_.status = safe ? PhysicalOutputStatus::FailClosed : PhysicalOutputStatus::BackendError;
+        return safe;
     }
 
     state_.outputs_enabled = true;
@@ -72,8 +84,13 @@ bool PhysicalOutputRuntime::write_logical(int gpio, bool active) {
 }
 
 bool PhysicalOutputRuntime::force_safe() {
-    if (hardware_ == nullptr) return false;
-    bool ok = true;
+    if (hardware_ == nullptr || backend_ == nullptr) {
+        state_.status = PhysicalOutputStatus::BackendError;
+        state_.outputs_enabled = false;
+        return false;
+    }
+    bool ok = backend_->force_safe_relays();
+    if (!ok) ++state_.failures;
     ok = write_safe(hardware_->pins.siren) && ok;
     ok = write_safe(hardware_->pins.valve1) && ok;
     ok = write_safe(hardware_->pins.valve2) && ok;
@@ -85,18 +102,27 @@ bool PhysicalOutputRuntime::force_safe() {
 bool PhysicalOutputRuntime::synchronize(const SystemModel& model, const BootReadinessReport& readiness) {
     if (backend_ == nullptr || hardware_ == nullptr) return false;
 
-    // Outputs 4 (light) and 5 (lock) are driven exclusively by MCP23017
-    // GPA0/GPA1 in TelemetryRuntime. GPIO1/GPIO2 remain unconfigured and free.
-    bool ok = true;
+    // Light/lock outputs follow the model through MCP23017 GPA0/GPA1.
+    // GPIO1 and GPIO2 must remain free.
+    bool ok = backend_->synchronize_relays(model);
+    if (!ok) {
+        ++state_.failures;
+        force_safe();
+        return false;
+    }
 
+    // The remaining physical outputs stay fail-closed until commissioning is
+    // valid. Keep the MCP23017 light/lock outputs independently controlled.
     if (!readiness.outputs_allowed() || !hardware_verification_allows_outputs(*hardware_)) {
         ok = write_safe(hardware_->pins.siren) && ok;
         ok = write_safe(hardware_->pins.valve1) && ok;
         ok = write_safe(hardware_->pins.valve2) && ok;
         state_.outputs_enabled = false;
-        state_.status = hardware_verification_allows_outputs(*hardware_)
-            ? PhysicalOutputStatus::FailClosed
-            : PhysicalOutputStatus::InvalidHardware;
+        state_.status = !ok
+            ? PhysicalOutputStatus::BackendError
+            : (hardware_verification_allows_outputs(*hardware_)
+                ? PhysicalOutputStatus::FailClosed
+                : PhysicalOutputStatus::InvalidHardware);
         return ok;
     }
 

@@ -12,12 +12,18 @@ OutputCommandResult apply_output_command(
         return {OutputCommandStatus::InvalidOutput, OutputInterlockDecision::InvalidOutput, false};
     }
 
+    // Never trust a transport-supplied alarmActive flag as the sole interlock.
+    // HTTP/BLE/MQTT clients may send false or hold stale state while the
+    // security zone task has already promoted partition 1 to ALARM.
+    const auto* partition = model.partition(1);
+    const bool alarm_active = command.alarm_active ||
+        (partition != nullptr && partition->arm_state == PartitionArmState::Alarm);
     const auto interlock = evaluate_output_interlock(
         model,
         OutputInterlockRequest{
             command.output_id,
             command.active,
-            command.alarm_active,
+            alarm_active,
             &readiness,
         });
 

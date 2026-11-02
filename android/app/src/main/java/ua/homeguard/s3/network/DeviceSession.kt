@@ -69,9 +69,14 @@ class DeviceSession(
         }
         job = scope.launch {
             combine(endpointProvider, settings.settings) { endpoint, appSettings ->
-                when (endpoint.path) {
-                    ControlPath.CLOUD -> SessionTarget(endpoint, appSettings.apiToken, false)
-                    ControlPath.OFFLINE -> SessionTarget(endpoint, "", false)
+                when {
+                    endpoint.deviceId != appSettings.deviceId -> SessionTarget(
+                        endpoint = endpoint.copy(deviceId = appSettings.deviceId,
+                            apiBaseUrl = "", websocketUrl = "", path = ControlPath.OFFLINE),
+                        token = "", oneShotTicket = false,
+                    )
+                    endpoint.path == ControlPath.CLOUD -> SessionTarget(endpoint, appSettings.apiToken, false)
+                    endpoint.path == ControlPath.OFFLINE -> SessionTarget(endpoint, "", false)
                     else -> SessionTarget(
                         endpoint = endpoint,
                         token = appSettings.telemetryToken.ifBlank { appSettings.apiToken },
@@ -79,6 +84,7 @@ class DeviceSession(
                     )
                 }
             }.distinctUntilChanged().collect { target: SessionTarget ->
+                telemetry.selectDevice(target.endpoint.deviceId)
                 val previous = activeTarget
                 activeTarget = target
                 reconnectJob?.cancel()
@@ -122,13 +128,14 @@ class DeviceSession(
 
         bleTelemetryJob = scope.launch {
             ble.snapshots().collect { snapshot ->
-                if (ble.isReady()) telemetry.acceptFallbackSnapshot(snapshot)
+                if (ble.isReadyFor(settings.settings.value.deviceId)) telemetry.acceptFallbackSnapshot(snapshot)
+                else telemetry.clearFallbackSnapshot()
             }
         }
 
         bleStateJob = scope.launch {
             ble.state().collect { state ->
-                if (state == BleHomeGuardClient.State.READY) {
+                if (state == BleHomeGuardClient.State.READY && ble.isReadyFor(settings.settings.value.deviceId)) {
                     val snapshot = ble.snapshots().value
                     if (snapshot.zones.isNotEmpty()) telemetry.acceptFallbackSnapshot(snapshot)
                 } else {
@@ -164,6 +171,7 @@ class DeviceSession(
     private fun applyPersistedMqtt() {
         val appSettings = settings.settings.value
         val deviceId = appSettings.deviceId
+        if (!ble.isReadyFor(deviceId)) telemetry.clearFallbackSnapshot()
         remoteTransports.configureMqtt(
             MqttConnectionConfig(
                 brokerUri = appSettings.mqttBrokerUri,

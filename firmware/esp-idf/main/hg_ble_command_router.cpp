@@ -214,7 +214,13 @@ bool BleCommandRouter::prepare_provisioning_session(std::uint64_t current_ms)
 void BleCommandRouter::send(std::uint8_t type, const std::string& json) const
 {
     if (transport_ == nullptr || !transport_->connected()) return;
-    const auto error = transport_->send_message(type, json);
+    std::string response = json;
+    if ((type == kCommandReplyType || type == kErrorType) && !command_request_id_.empty() &&
+        !response.empty() && response.back() == '}') {
+        response.pop_back();
+        response += ",\"requestId\":\"" + json_escape(command_request_id_) + "\"}";
+    }
+    const auto error = transport_->send_message(type, response);
     if (error != ESP_OK) ESP_LOGW(kTag, "BLE reply failed: %s", esp_err_to_name(error));
 }
 
@@ -405,6 +411,13 @@ void BleCommandRouter::handle_hello(const std::string& json)
 
 void BleCommandRouter::handle_command(const std::string& json)
 {
+    command_request_id_.clear();
+    (void)http_util::parse_json_string(json, "requestId", command_request_id_);
+    if (command_request_id_.size() > 128U) {
+        command_request_id_.clear();
+        send_error("invalid_request_id");
+        return;
+    }
     if (!session_valid()) {
         actor_.clear();
         authenticated_epoch_ = 0;
@@ -510,10 +523,12 @@ void BleCommandRouter::handle_command(const std::string& json)
 
         const auto result = hg::apply_output_command(
             *model_, *readiness_, {output_id, active, alarm_active, 0});
-        if (result.status == hg::OutputCommandStatus::Applied && output_id != 4 && output_id != 5 &&
+        if (result.status == hg::OutputCommandStatus::Applied &&
             !physical_->synchronize(*model_, *readiness_)) {
-            (void)model_->set_output_active(output_id, false, 0);
             (void)physical_->force_safe();
+            for (std::uint16_t id = 1; id <= 5; ++id) {
+                (void)model_->set_output_active(id, false, 0);
+            }
             send(kCommandReplyType, "{\"ok\":false,\"reason\":\"physical_output_failure\",\"active\":false}");
             return;
         }

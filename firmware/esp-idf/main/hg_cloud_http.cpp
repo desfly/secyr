@@ -136,11 +136,14 @@ esp_err_t CloudHttp::status_get(httpd_req_t* request)
 
     const bool configured = self->cloud_->configured();
     const bool connected = self->cloud_->connected();
-    const char* state = connected ? "connected" : (configured ? "connecting" : "disabled");
+    const bool command_subscription_acked = self->cloud_->command_subscription_acked();
+    const char* state = connected ? (command_subscription_acked ? "connected" : "subscribing")
+                                  : (configured ? "connecting" : "disabled");
     const std::string body =
         std::string{"{\"ok\":true,\"state\":\""} + state +
         "\",\"configured\":" + (configured ? "true" : "false") +
         ",\"connected\":" + (connected ? "true" : "false") +
+        ",\"commandSubscriptionAcked\":" + (command_subscription_acked ? "true" : "false") +
         ",\"deviceId\":\"" + self->cloud_->device_id() +
         "\",\"connectCount\":" + std::to_string(self->cloud_->connect_count()) +
         ",\"disconnectCount\":" + std::to_string(self->cloud_->disconnect_count()) + "}";

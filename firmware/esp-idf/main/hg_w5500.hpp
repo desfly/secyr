@@ -5,6 +5,7 @@
 #include "esp_err.h"
 #include <cstdint>
 #include "esp_event.h"
+#include "freertos/FreeRTOS.h"
 
 #include <string>
 
@@ -22,7 +23,7 @@ public:
     esp_err_t initialize();
     esp_err_t start();
     esp_err_t stop();
-    const W5500Status& status() const noexcept;
+    W5500Status status() const;
 
 private:
     static void on_eth_event(
@@ -39,7 +40,13 @@ private:
 
     esp_eth_handle_t eth_{nullptr};
     esp_netif_t* netif_{nullptr};
-    W5500Status status_{};
+    // Event handlers and telemetry exchange POD state under this spinlock.
+    // Build the IPv4 std::string only after leaving the critical section.
+    mutable portMUX_TYPE status_lock_ = portMUX_INITIALIZER_UNLOCKED;
+    bool initialized_{false};
+    bool link_up_{false};
+    bool has_ip_{false};
+    std::uint32_t ipv4_addr_{0};
 };
 
 }  // namespace homeguard::idf

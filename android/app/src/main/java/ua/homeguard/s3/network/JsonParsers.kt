@@ -147,14 +147,15 @@ internal object JsonParsers {
     private fun systemMode(json: JSONObject): SystemMode {
         val raw = json.opt("mode")
         return when (raw) {
-            is Number -> when (raw.toInt()) {
-                1 -> SystemMode.ARMED_HOME
-                2 -> SystemMode.ARMED_AWAY
-                3 -> SystemMode.ALARM
-                4 -> SystemMode.MAINTENANCE
-                else -> SystemMode.DISARMED
+            is Number -> when (raw.toString().toLongOrNull()) {
+                0L -> SystemMode.DISARMED
+                1L -> SystemMode.ARMED_HOME
+                2L -> SystemMode.ARMED_AWAY
+                3L -> SystemMode.ALARM
+                4L -> SystemMode.MAINTENANCE
+                else -> SystemMode.UNKNOWN
             }
-            else -> enumValue(raw?.toString().orEmpty(), SystemMode.DISARMED)
+            else -> enumValue(raw?.toString().orEmpty(), SystemMode.UNKNOWN)
         }
     }
 

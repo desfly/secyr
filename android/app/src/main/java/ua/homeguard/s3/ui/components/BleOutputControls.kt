@@ -34,6 +34,11 @@ fun BleOutputControlsRuntime() {
     val context = LocalContext.current
     val ble = remember(context) { BleRuntimeRegistry.get(context.applicationContext) }
     val access by ble.access().collectAsState()
+    val settings = remember(context) { ua.homeguard.s3.network.MonitoringRuntime.get(context).settings }
+    val selected by settings.settings.collectAsState()
+    val connection by ble.state().collectAsState()
+    val ready = connection == ua.homeguard.s3.network.ble.BleHomeGuardClient.State.READY &&
+        ble.isReadyFor(selected.deviceId, access.actor)
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf("Готово") }
     var remoteName by remember { mutableStateOf("Брелок 1") }
@@ -66,6 +71,7 @@ fun BleOutputControlsRuntime() {
                     JSONObject()
                         .put("name", name)
                         .put("permissions", ALL_KEYFOB_PERMISSIONS),
+                    expectedDeviceId = selected.deviceId, expectedActor = access.actor,
                 )
             }
             result.onSuccess { reply ->
@@ -84,19 +90,19 @@ fun BleOutputControlsRuntime() {
 
     fun cancelKeyfobPairing() {
         run("Pairing скасовано") {
-            ble.sendCommand("remote.pair_cancel")
+            ble.sendCommand("remote.pair_cancel", expectedDeviceId = selected.deviceId, expectedActor = access.actor)
         }
         pairingActive = false
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         BleOutputControls(
-            enabled = access.authenticated,
-            valvesEnabled = access.authenticated && access.valves,
-            onLightChange = { active -> run(if (active) "Світло ON" else "Світло OFF") { ble.setLight(active) } },
-            onValve1Change = { active -> run(if (active) "Кран 1 ON" else "Кран 1 OFF") { ble.setValve1(active) } },
-            onValve2Change = { active -> run(if (active) "Кран 2 ON" else "Кран 2 OFF") { ble.setValve2(active) } },
-            onLockPulse = { run("Замок 5 с") { ble.pulseLock() } },
+            enabled = ready,
+            valvesEnabled = ready && access.valves,
+            onLightChange = { active -> run(if (active) "Світло ON" else "Світло OFF") { ble.setLight(active, expectedDeviceId = selected.deviceId, expectedActor = access.actor) } },
+            onValve1Change = { active -> run(if (active) "Кран 1 ON" else "Кран 1 OFF") { ble.setValve1(active, expectedDeviceId = selected.deviceId, expectedActor = access.actor) } },
+            onValve2Change = { active -> run(if (active) "Кран 2 ON" else "Кран 2 OFF") { ble.setValve2(active, expectedDeviceId = selected.deviceId, expectedActor = access.actor) } },
+            onLockPulse = { run("Замок 5 с") { ble.pulseLock(expectedDeviceId = selected.deviceId, expectedActor = access.actor) } },
         )
 
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -112,20 +118,20 @@ fun BleOutputControlsRuntime() {
                 OutlinedTextField(
                     value = remoteName,
                     onValueChange = { remoteName = it.take(23) },
-                    enabled = access.authenticated && access.accessManage && !pairingActive,
+                    enabled = ready && access.accessManage && !pairingActive,
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     label = { Text("Назва брелка") },
                 )
                 if (pairingActive) {
                     Button(
-                        enabled = access.authenticated && access.accessManage,
+                        enabled = ready && access.accessManage,
                         onClick = ::cancelKeyfobPairing,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Скасувати pairing") }
                 } else {
                     Button(
-                        enabled = access.authenticated && access.accessManage && remoteName.isNotBlank(),
+                        enabled = ready && access.accessManage && remoteName.isNotBlank(),
                         onClick = ::beginKeyfobPairing,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Додати BLE-брелок · 30 с") }

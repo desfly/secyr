@@ -2,6 +2,7 @@
 #include "hg_cloud_command_verifier.hpp"
 #include "hg_cloud_trust_nvs.hpp"
 #include "hg_cloud_trusted_time.hpp"
+#include "hg_gpio_output_backend.hpp"
 
 #include "esp_check.h"
 #include "esp_crt_bundle.h"
@@ -35,7 +36,7 @@ struct CloudEventWork {
 };
 QueueHandle_t cloud_event_queue{};
 constexpr const char* kPrefix = "homeguard/v1/devices";
-constexpr std::uint64_t kHeartbeatPeriodUs = 60ULL * 1000ULL * 1000ULL;
+constexpr std::uint64_t kHeartbeatPeriodUs = 5ULL * 1000ULL * 1000ULL;
 constexpr std::uint64_t kStatePeriodUs = 5ULL * 1000ULL * 1000ULL;
 constexpr char kCloudSecurityNamespace[] = "hg-cloud-sec";
 constexpr char kCommandCounterKey[] = "cmd_counter";
@@ -318,7 +319,10 @@ void CloudLink::make_device_id()
 {
     std::uint8_t mac[6]{};
     if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
-        std::strncpy(device_id_.data(), "HG-UNKNOWN", device_id_.size() - 1);
+        // A shared fallback ID could bind different controllers to one identity.
+        // Fail closed instead of advertising or authenticating HG-UNKNOWN.
+        device_id_[0] = '\0';
+        ESP_LOGE(kTag, "Cannot derive unique device ID from Wi-Fi MAC");
         return;
     }
     std::snprintf(device_id_.data(), device_id_.size(),
@@ -389,6 +393,7 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
         &CloudLink::mqtt_event_handler, this);
     if (error != ESP_OK) {
         esp_mqtt_client_destroy(client_);
+    command_buffer_.reset();
         client_ = nullptr;
         return error;
     }
@@ -396,17 +401,20 @@ esp_err_t CloudLink::start(const char* broker_uri, const char* username, const c
     error = esp_mqtt_client_start(client_);
     if (error != ESP_OK) {
         esp_mqtt_client_destroy(client_);
+    command_buffer_.reset();
         client_ = nullptr;
         return error;
     }
 
     configured_ = true;
-    ESP_LOGI(kTag, "Cloud link started in low-traffic mode: device=%s broker=%s heartbeat=60s", device_id_.data(), broker_uri);
+    ESP_LOGI(kTag, "Cloud link started in low-traffic mode: device=%s broker=%s heartbeat=5s", device_id_.data(), broker_uri);
     return ESP_OK;
 }
 
 void CloudLink::stop()
 {
+    command_subscription_acked_ = false;
+    command_subscribe_msg_id_ = -1;
     stop_state_timer();
     stop_heartbeat_timer();
     if (client_ == nullptr) {
@@ -417,6 +425,7 @@ void CloudLink::stop()
     if (connected_) publish_online(false);
     (void)esp_mqtt_client_stop(client_);
     esp_mqtt_client_destroy(client_);
+    command_buffer_.reset();
     client_ = nullptr;
     connected_ = false;
     configured_ = false;
@@ -431,14 +440,18 @@ void CloudLink::publish_online(bool online)
 
 void CloudLink::publish_heartbeat()
 {
-    if (client_ == nullptr || !connected_) return;
+    if (client_ == nullptr || !connected_ || !command_subscription_acked_) return;
     const auto up_seconds = static_cast<unsigned long long>(esp_timer_get_time() / 1000000LL);
     const auto sequence = static_cast<unsigned long long>(++heartbeat_sequence_);
     char payload[96]{};
     const int length = std::snprintf(payload, sizeof(payload),
         "{\"seq\":%llu,\"up\":%llu,\"online\":true}", sequence, up_seconds);
     if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(payload)) return;
-    (void)esp_mqtt_client_publish(client_, heartbeat_topic_.data(), payload, length, 0, 0);
+    // Called from ESP_TIMER_TASK: never block the shared timer dispatcher on
+    // a synchronous network publish. Queue a copy for the MQTT outbox task.
+    const int message_id = esp_mqtt_client_enqueue(client_, heartbeat_topic_.data(),
+        payload, length, 0, 0, true);
+    if (message_id < 0) ESP_LOGW(kTag, "MQTT heartbeat enqueue failed: %d", message_id);
 }
 
 void CloudLink::start_heartbeat_timer()
@@ -474,7 +487,7 @@ void CloudLink::stop_heartbeat_timer()
 
 void CloudLink::publish_periodic_state()
 {
-    if (client_ == nullptr || !connected_ || model_ == nullptr) return;
+    if (client_ == nullptr || !connected_ || !command_subscription_acked_ || model_ == nullptr) return;
     const auto partition = model_->partition_snapshot(1);
     if (!partition) return;
     char payload[128]{};
@@ -793,6 +806,11 @@ void CloudLink::handle_command(const char* data, std::size_t size)
     // runtime synchronization loop is responsible for mirroring output #5 to
     // the direct lock relay.  Keep replay persistence above this side effect.
     if (command == "output.lock") {
+        if (output_backend_ == nullptr) {
+            xSemaphoreGive(replay_mutex);
+            publish_response(false, "output_backend_unavailable");
+            return;
+        }
         // Commit replay admission before changing the lock output. A repeated
         // signed envelope must never trigger another physical pulse.
         if (!persist_command_replay_state(command_counter, request_id)) {
@@ -810,6 +828,16 @@ void CloudLink::handle_command(const char* data, std::size_t size)
             publish_response(false, hg::to_string(result.status));
             return;
         }
+        // A model change is not a relay write. Acknowledge success only after
+        // the MCP23017 writer reports the ON state applied (not contact feedback).
+        if (!output_backend_->synchronize_relays(*model_)) {
+            (void)output_backend_->force_safe_relays();
+            (void)model_->set_output_active(4, false, 0);
+            (void)model_->set_output_active(5, false, 0);
+            xSemaphoreGive(replay_mutex);
+            publish_response(false, "physical_output_failure");
+            return;
+        }
         xSemaphoreGive(replay_mutex);
         const auto task_ok = xTaskCreate(
             [](void* context) {
@@ -817,12 +845,23 @@ void CloudLink::handle_command(const char* data, std::size_t size)
                 vTaskDelay(pdMS_TO_TICKS(5000));
                 if (self != nullptr && self->model_ != nullptr) {
                     (void)self->model_->set_output_active(5, false, 0);
+                    // Restore OFF directly as well as through the 20ms mirror.
+                    if (self->output_backend_ != nullptr &&
+                        !self->output_backend_->synchronize_relays(*self->model_)) {
+                        (void)self->output_backend_->force_safe_relays();
+                        (void)self->model_->set_output_active(4, false, 0);
+                        ESP_LOGE(kTag, "Cloud lock OFF write failed; relay outputs fail-closed");
+                    }
                 }
                 vTaskDelete(nullptr);
             },
             "hg_lock_pulse", 2048, this, 5, nullptr);
         if (task_ok != pdPASS) {
             (void)model_->set_output_active(5, false, 0);
+            if (!output_backend_->synchronize_relays(*model_)) {
+                (void)output_backend_->force_safe_relays();
+                (void)model_->set_output_active(4, false, 0);
+            }
             publish_response(false, "lock_timer_failed");
             return;
         }
@@ -879,29 +918,66 @@ void CloudLink::handle_command(const char* data, std::size_t size)
 void CloudLink::on_mqtt_event(esp_mqtt_event_handle_t event)
 {
     switch (event->event_id) {
-        case MQTT_EVENT_CONNECTED:
+        case MQTT_EVENT_CONNECTED: {
+            command_buffer_.reset();
+            command_subscription_acked_ = false;
+            command_subscribe_msg_id_ = -1;
             connected_ = true;
             ++connect_count_;
-            publish_online(true);
-            publish_heartbeat();
-            start_heartbeat_timer();
-            start_state_timer();
-            (void)esp_mqtt_client_subscribe(client_, command_topic_.data(), 1);
-            ESP_LOGI(kTag, "Cloud connected; state=5s heartbeat=60s events=%s", event_topic_.data());
+            // A TLS/MQTT connection alone does not prove commands can arrive.
+            // No fresh device health is published until the broker confirms
+            // that this session can receive commands. A retained old online
+            // availability must never combine with pre-SUBACK telemetry.
+            const int subscribe_id = esp_mqtt_client_subscribe(client_, command_topic_.data(), 1);
+            command_subscribe_msg_id_ = subscribe_id;
+            if (subscribe_id < 0) {
+                ESP_LOGE(kTag, "Cloud command subscription request failed: %d", subscribe_id);
+            }
+            ESP_LOGI(kTag, "Cloud transport connected; waiting for command SUBACK; state=5s heartbeat=5s");
+            break;
+        }
+        case MQTT_EVENT_SUBSCRIBED:
+            // ESP-MQTT can emit SUBSCRIBED for a rejected SUBACK. A matching
+            // message ID alone is not proof the broker granted the subscription.
+            if (event->error_handle != nullptr &&
+                event->error_handle->error_type == MQTT_ERROR_TYPE_SUBSCRIBE_FAILED) {
+                command_subscription_acked_ = false;
+                ESP_LOGE(kTag, "Cloud command subscription rejected by broker");
+                break;
+            }
+            if (event->msg_id >= 0 && event->msg_id == command_subscribe_msg_id_.load()) {
+                if (!command_subscription_acked_.exchange(true)) {
+                    publish_online(true);
+                    publish_heartbeat();
+                    publish_periodic_state();
+                    start_heartbeat_timer();
+                    start_state_timer();
+                    ESP_LOGI(kTag, "Cloud command SUBACK received; command telemetry active");
+                }
+            }
+            break;
+        case MQTT_EVENT_UNSUBSCRIBED:
+            command_subscription_acked_ = false;
             break;
         case MQTT_EVENT_DISCONNECTED:
+            command_buffer_.reset();
+            command_subscription_acked_ = false;
+            command_subscribe_msg_id_ = -1;
             connected_ = false;
             ++disconnect_count_;
             ESP_LOGW(kTag, "Cloud disconnected");
             break;
         case MQTT_EVENT_DATA: {
-            const std::string topic(event->topic, static_cast<std::size_t>(event->topic_len));
-            if (topic == command_topic_.data()) {
-                handle_command(event->data, static_cast<std::size_t>(event->data_len));
-            }
+            if (!command_subscription_acked_) break;
+            const auto command = command_buffer_.append(command_topic_.data(),
+                event->topic, event->topic_len, event->data, event->data_len,
+                event->total_data_len, event->current_data_offset, event->msg_id);
+            if (command) handle_command(command->data(), command->size());
             break;
         }
         case MQTT_EVENT_ERROR:
+            command_buffer_.reset();
+            command_subscription_acked_ = false;
             ESP_LOGE(kTag, "Cloud MQTT error");
             break;
         default:

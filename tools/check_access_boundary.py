@@ -152,9 +152,22 @@ require(MAIN / "hg_output_http.cpp", [
     "request_auth::authenticated_actor(request, *access_control_, actor)",
     "access_control_->authorize_session(actor, command)",
     "physical_->force_safe()",
-    "model_->set_output_active(output_id, false, 0)",
     "physical_output_failure",
+    "for (std::uint16_t id = 1; id <= 5; ++id)",
+    "model_->set_output_active(id, false, 0)",
 ])
+# Both HTTP and BLE must invalidate all optimistic output states after a
+# global safe-off. Checking the whole failure branch prevents a stale
+# single-output rollback from silently passing this security audit.
+for filename in ("hg_output_http.cpp", "hg_ble_command_router.cpp"):
+    source = (MAIN / filename).read_text(encoding="utf-8")
+    failure = source.find('physical_output_failure')
+    safe = source.rfind("physical_->force_safe()", 0, failure)
+    loop = source.find("for (std::uint16_t id = 1; id <= 5; ++id)", safe, failure)
+    clear = source.find("model_->set_output_active(id, false, 0)", loop, failure)
+    if min(failure, safe, loop, clear) < 0 or not (safe < loop < clear < failure):
+        errors.append(f"{filename} must clear all five model outputs after global physical safe-off")
+
 require(MAIN / "hg_cloud_http.cpp", [
     "request_auth::authenticated_actor(request, *access_control_, actor)",
     'access_control_->authorize_session(actor, "cloud.configure")',

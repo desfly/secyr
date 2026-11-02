@@ -259,12 +259,13 @@ esp_err_t HardwareBootstrap::initialize()
         }
     }
 
-    const auto rs485_error =
-        rs485_.initialize(9600);
-    status_.rs485 = module_status(
-        rs485_error,
-        "RS-485 UART1 9600 8N1 half-duplex",
-        "RS-485 initialization failed");
+    // RS485 transceiver is not fitted on this HomeGuard-S3 installation.
+    // Do not claim UART pins or initialize the absent peripheral.
+    status_.rs485 = {
+        HardwareModuleState::Missing,
+        "RS485 not installed (disabled by hardware configuration)",
+        0,
+    };
 
     return ESP_OK;
 }

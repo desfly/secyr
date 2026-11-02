@@ -147,7 +147,7 @@ fun DeviceListScreen(
                     StatusLine("Адреса", device.baseUrl.ifBlank { "—" })
                     StatusLine("LAN", if (discoveredDevice != null) "доступний" else "не знайдено")
                     StatusLine("Discovery", discoveredDevice?.source?.name ?: "—")
-                    StatusLine("Transport", discoveredDevice?.transport?.name ?: if (active && snapshot.sequence > 0) snapshot.transport.name else "—")
+                    StatusLine("Transport", discoveredDevice?.transport?.name ?: if (active && snapshot.mode != ua.homeguard.s3.model.SystemMode.UNKNOWN) snapshot.transport.name else "—")
                     StatusLine("HTTPS", if (discoveredDevice?.secure == true || device.baseUrl.startsWith("https://", true)) "так" else "ні")
                     StatusLine("Авторизація", if (device.authorized) "активна" else "втрачена")
                 }
@@ -191,7 +191,7 @@ fun DeviceListScreen(
                     ControllerIdentity.sameController(device.deviceId, device.baseUrl, candidate.deviceId, candidate.baseUrl)
                 }
                 val active = device.deviceId.trim().equals(activeDeviceId.trim(), ignoreCase = true)
-                val online = discoveredOnline || (active && snapshot.sequence > 0)
+                val online = discoveredOnline || (active && snapshot.mode != ua.homeguard.s3.model.SystemMode.UNKNOWN)
                 val expanded = expandedId == device.deviceId
                 val titleColor = if (device.authorized) Color.Unspecified else MaterialTheme.colorScheme.error
 
@@ -210,8 +210,8 @@ fun DeviceListScreen(
                         // session/reboot state.
                         // Do not let transient/empty snapshots flip the security action.
                         // Only a valid active-controller snapshot is authoritative.
-                        val hasAuthoritativeSecurityState = active && snapshot.sequence > 0
-                        val armed = hasAuthoritativeSecurityState && snapshot.mode.name != "DISARMED"
+                        val hasAuthoritativeSecurityState = active && snapshot.mode != ua.homeguard.s3.model.SystemMode.UNKNOWN
+                        val armed = hasAuthoritativeSecurityState && snapshot.mode.name in setOf("ARMED_HOME", "ARMED_AWAY", "ALARM")
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -236,7 +236,7 @@ fun DeviceListScreen(
                                 val abnormalTemperatures = snapshot.temperatures.count { !it.state.equals("ok", true) && !it.state.equals("normal", true) && !it.state.equals("unknown", true) }
                                 val abnormalPower = snapshot.powerChannels.count { !it.state.equals("ok", true) && !it.state.equals("normal", true) && !it.state.equals("unknown", true) }
                                 val alarmActive = problemZones.isNotEmpty() || snapshot.health.name.contains("alarm", true) || snapshot.health.name.contains("critical", true)
-                                StatusLine("Охорона", snapshot.mode.name)
+                                StatusLine("Охорона", if (snapshot.mode == ua.homeguard.s3.model.SystemMode.UNKNOWN) "Невідомо" else snapshot.mode.name)
                                 StatusLine("Система", snapshot.health.name)
                                 StatusLine("Зв’язок", if (online) snapshot.transport.name else "OFFLINE")
                                 StatusLine("Тривога", if (alarmActive) "АКТИВНА" else "немає")
@@ -319,10 +319,18 @@ private fun SafeBruceImage(
 
 @Composable
 private fun DeviceStatePicons(online: Boolean, authorized: Boolean, active: Boolean, snapshot: SystemSnapshot) {
-    val systemOk = active && snapshot.sequence > 0 && !snapshot.health.name.contains("alarm", true) && !snapshot.health.name.contains("critical", true)
+    val systemOk = active && snapshot.health == ua.homeguard.s3.model.HealthState.OK
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(if (online) "📶 online" else "📵 offline", color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-        Text(if (authorized) "🛡 знято" else "🔒 доступ втрачено", color = if (authorized) Color.Unspecified else MaterialTheme.colorScheme.error)
+        val security = if (!active) "невідомо" else when (snapshot.mode) {
+            ua.homeguard.s3.model.SystemMode.DISARMED -> "знято"
+            ua.homeguard.s3.model.SystemMode.ARMED_HOME -> "вдома"
+            ua.homeguard.s3.model.SystemMode.ARMED_AWAY -> "охорона"
+            ua.homeguard.s3.model.SystemMode.ALARM -> "тривога"
+            ua.homeguard.s3.model.SystemMode.MAINTENANCE -> "сервіс"
+            else -> "невідомо"
+        }
+        Text(if (authorized) "🛡 $security" else "🔒 доступ втрачено", color = if (authorized) Color.Unspecified else MaterialTheme.colorScheme.error)
         if (active) Text(if (systemOk) "✓ норма" else "⚠ ${snapshot.health.name}", color = if (systemOk) Color.Unspecified else MaterialTheme.colorScheme.error)
     }
 }
